@@ -590,7 +590,7 @@ bool HistoryMessage::allowsEdit(TimeId now) const {
 	}();
 	const auto messageTooOld = (messageToMyself || canPinInMegagroup)
 		? false
-		: (now >= date() + Global::EditTimeLimit());
+		: (now - date() >= Global::EditTimeLimit());
 	if (id < 0 || messageTooOld) {
 		return false;
 	}
@@ -732,6 +732,8 @@ void HistoryMessage::refreshSentMedia(const MTPMessageMedia *media) {
 	refreshMedia(media);
 	if (wasGrouped) {
 		Auth().data().groups().refreshMessage(this);
+	} else {
+		Auth().data().requestItemViewRefresh(this);
 	}
 }
 
