@@ -247,6 +247,12 @@ void Instance::showInfoPanel(not_null<Call*> call) {
 	}
 }
 
+void Instance::showInfoPanel() {
+	if (_currentCall && _currentCallPanel) {
+		_currentCallPanel->showAndActivate();
+	}
+}
+
 bool Instance::isQuitPrevent() {
 	if (!_currentCall || _currentCall->isIncomingWaiting()) {
 		return false;

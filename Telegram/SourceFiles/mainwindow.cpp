@@ -41,6 +41,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "window/window_main_menu.h"
 #include "auth_session.h"
 #include "window/window_controller.h"
+#include "calls/calls_instance.h"
 
 namespace {
 
@@ -718,9 +719,10 @@ void MainWindow::activate() {
 	updateIsActive(Global::OnlineFocusTimeout());
 	if (wasHidden) {
 		if (_main) {
-			_main->windowShown();
+			_main->windowShown();			
+			Auth().calls().showInfoPanel();
 		}
-	}
+	}	
 }
 
 void MainWindow::noIntro(Intro::Widget *was) {

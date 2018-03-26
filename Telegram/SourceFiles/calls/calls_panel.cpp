@@ -239,6 +239,7 @@ Panel::Panel(not_null<Call*> call)
 , _mute(this, st::callMuteToggle)
 , _name(this, st::callName)
 , _status(this, st::callStatus) {
+	setParent((QWidget*)App::main());
 	_decline->setDuration(st::callPanelDuration);
 	_cancel->setDuration(st::callPanelDuration);
 
@@ -251,10 +252,12 @@ Panel::Panel(not_null<Call*> call)
 
 void Panel::showAndActivate() {
 	toggleOpacityAnimation(true);
+	/*
 	raise();
 	setWindowState(windowState() | Qt::WindowActive);
 	activateWindow();
 	setFocus();
+	*/
 }
 
 void Panel::replaceCall(not_null<Call*> call) {
@@ -346,10 +349,13 @@ void Panel::reinitControls() {
 }
 
 void Panel::initLayout() {
-	setWindowFlags(Qt::WindowFlags(Qt::FramelessWindowHint) | Qt::WindowStaysOnTopHint | Qt::BypassWindowManagerHint | Qt::NoDropShadowWindowHint | Qt::Dialog);
+	setWindowFlags(Qt::WindowFlags(Qt::FramelessWindowHint) | Qt::NoDropShadowWindowHint | Qt::Dialog | Qt::WindowDoesNotAcceptFocus);
+//	if(parentWidget())
+//    setWindowModality(Qt::ApplicationModal);
 	setAttribute(Qt::WA_MacAlwaysShowToolWindow);
 	setAttribute(Qt::WA_NoSystemBackground, true);
 	setAttribute(Qt::WA_TranslucentBackground, true);
+	setAttribute(Qt::WA_ShowWithoutActivating);
 
 	initGeometry();
 
@@ -371,7 +377,6 @@ void Panel::toggleOpacityAnimation(bool visible) {
 	if (!_call || _visible == visible) {
 		return;
 	}
-
 	_visible = visible;
 	if (_useTransparency) {
 		if (_animationCache.isNull()) {
@@ -385,9 +390,23 @@ void Panel::toggleOpacityAnimation(bool visible) {
 			_visible ? 1. : 0.,
 			st::callPanelDuration,
 			_visible ? anim::easeOutCirc : anim::easeInCirc);
-	}
+	}	
+
 	if (isHidden() && _visible) {
 		show();
+		if (visible)
+		{
+			QWidget * m = (QWidget*)App::main();
+			if (!m || !m->isVisible()) // no main window
+			{
+				_visible = false;
+				hide();
+			}
+			else
+			{
+				QApplication::alert(m);
+			}
+		}
 	}
 }
 
