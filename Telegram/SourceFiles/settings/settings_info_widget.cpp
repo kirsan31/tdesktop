@@ -217,7 +217,8 @@ int InfoWidget::LabeledWidget::resizeGetHeight(int newWidth) {
 	int availableWidth = newWidth - textLeft;
 	bool doesNotFit = (textWidth > availableWidth);
 	accumulate_min(textWidth, availableWidth);
-	accumulate_min(textWidth, st::msgMaxWidth);
+	if (!Adaptive::ChatWide())
+		accumulate_min(textWidth, st::msgMaxWidth);
 	if (textWidth < 0) {
 		textWidth = 0;
 	}

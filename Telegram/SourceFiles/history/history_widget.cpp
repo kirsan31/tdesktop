@@ -558,7 +558,13 @@ HistoryWidget::HistoryWidget(
 
 	connect(&_updateEditTimeLeftDisplay, SIGNAL(timeout()), this, SLOT(updateField()));
 
-	subscribe(Adaptive::Changed(), [this] { update(); });
+	subscribe(Adaptive::Changed(), [this] { 
+		if (_history) {
+			_history->setHasPendingResizedItems();
+		}
+		updateHistoryGeometry(false, false, { ScrollChangeAdd, App::main() ? App::main()->contentScrollAddToY() : 0 });
+		update();
+	});
 	Auth().data().itemRemoved(
 	) | rpl::start_with_next(
 		[this](auto item) { itemRemoved(item); },

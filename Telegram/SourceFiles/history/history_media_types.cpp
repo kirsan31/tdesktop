@@ -251,7 +251,7 @@ QSize HistoryPhoto::countOptimalSize() {
 	if (!tw || !th) {
 		tw = th = 1;
 	}
-	if (tw > st::maxMediaSize) {
+	if (!Adaptive::ChatWide() && tw > st::maxMediaSize) {
 		th = (st::maxMediaSize * th) / tw;
 		tw = st::maxMediaSize;
 	}
@@ -279,7 +279,7 @@ QSize HistoryPhoto::countOptimalSize() {
 
 QSize HistoryPhoto::countCurrentSize(int newWidth) {
 	int tw = convertScale(_data->full->width()), th = convertScale(_data->full->height());
-	if (tw > st::maxMediaSize) {
+	if (!Adaptive::ChatWide() && tw > st::maxMediaSize) {
 		th = (st::maxMediaSize * th) / tw;
 		tw = st::maxMediaSize;
 	}
@@ -1261,7 +1261,12 @@ QSize HistoryDocument::countOptimalSize() {
 
 	if (auto named = Get<HistoryDocumentNamed>()) {
 		accumulate_max(maxWidth, tleft + named->_namew + tright);
-		accumulate_min(maxWidth, st::msgMaxWidth);
+		if (Adaptive::ChatWide() && captioned) {
+			accumulate_max(maxWidth, captioned->_caption.maxWidth());
+		}
+		else {
+			accumulate_min(maxWidth, st::msgMaxWidth);
+		}
 	}
 
 	auto minHeight = 0;
@@ -3061,7 +3066,8 @@ QSize HistoryContact::countOptimalSize() {
 	}
 
 	accumulate_max(maxWidth, tleft + _name.maxWidth() + tright);
-	accumulate_min(maxWidth, st::msgMaxWidth);
+	if (!Adaptive::ChatWide())
+		accumulate_min(maxWidth, st::msgMaxWidth);
 	auto minHeight = 0;
 	if (_userId) {
 		minHeight = st::msgFileThumbPadding.top() + st::msgFileThumbSize + st::msgFileThumbPadding.bottom();
@@ -4672,7 +4678,7 @@ HistoryLocation::HistoryLocation(
 QSize HistoryLocation::countOptimalSize() {
 	auto tw = fullWidth();
 	auto th = fullHeight();
-	if (tw > st::maxMediaSize) {
+	if (!Adaptive::ChatWide() && tw > st::maxMediaSize) {
 		th = (st::maxMediaSize * th) / tw;
 		tw = st::maxMediaSize;
 	}
@@ -4702,7 +4708,7 @@ QSize HistoryLocation::countCurrentSize(int newWidth) {
 
 	auto tw = fullWidth();
 	auto th = fullHeight();
-	if (tw > st::maxMediaSize) {
+	if (!Adaptive::ChatWide() && tw > st::maxMediaSize) {
 		th = (st::maxMediaSize * th) / tw;
 		tw = st::maxMediaSize;
 	}
