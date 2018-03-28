@@ -350,8 +350,6 @@ void Panel::reinitControls() {
 
 void Panel::initLayout() {
 	setWindowFlags(Qt::WindowFlags(Qt::FramelessWindowHint) | Qt::NoDropShadowWindowHint | Qt::Dialog | Qt::WindowDoesNotAcceptFocus);
-//	if(parentWidget())
-//    setWindowModality(Qt::ApplicationModal);
 	setAttribute(Qt::WA_MacAlwaysShowToolWindow);
 	setAttribute(Qt::WA_NoSystemBackground, true);
 	setAttribute(Qt::WA_TranslucentBackground, true);
@@ -394,6 +392,8 @@ void Panel::toggleOpacityAnimation(bool visible) {
 
 	if (isHidden() && _visible) {
 		show();
+		// very very horrible but can't understand why simple "not to show panel" when no main window not working - panel then will showing with wrong size	
+		// simple show + hide do the job - sorry for this :(
 		if (visible)
 		{
 			QWidget * m = (QWidget*)App::main();
@@ -402,9 +402,9 @@ void Panel::toggleOpacityAnimation(bool visible) {
 				_visible = false;
 				hide();
 			}
-			else
+			else if(m)
 			{
-				QApplication::alert(m);
+				QApplication::alert(m); // signal in taskBar about call
 			}
 		}
 	}
