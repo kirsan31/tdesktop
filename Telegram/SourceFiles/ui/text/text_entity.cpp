@@ -2201,10 +2201,6 @@ void PrepareForSending(TextWithEntities &result, int32 flags) {
 		ParseEntities(result, flags);
 	}
 
-	ReplaceStringWithChar(qstr("--"), QChar(8212), result, true);
-	ReplaceStringWithChar(qstr("<<"), QChar(171), result);
-	ReplaceStringWithChar(qstr(">>"), QChar(187), result);
-
 	if (cReplaceEmojis()) {
 		Ui::Emoji::ReplaceInText(result);
 	}
