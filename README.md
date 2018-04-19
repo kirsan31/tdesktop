@@ -1,8 +1,9 @@
 # [Telegram Desktop][telegram_desktop] – Edited Version
 
-Fast and dirty attempt to address this TDesktop issues:  
+Fast attempt to address this TDesktop issues:  
 [3382]  
 [2060]  
+[522]
 
 **Tested only on Windows7 x64!!!**  
 Due to lack of time and desire to deeply understand the TDesktop code, my corrections may be look ugly!  
@@ -57,6 +58,7 @@ The source code is published under GPLv3 with OpenSSL exception, the license is 
 [//]: # (LINKS)
 [3382]: https://github.com/telegramdesktop/tdesktop/issues/3382
 [2060]: https://github.com/telegramdesktop/tdesktop/issues/2060
+[522]: https://github.com/telegramdesktop/tdesktop/issues/522
 [telegram]: https://telegram.org
 [telegram_desktop]: https://desktop.telegram.org
 [telegram_api]: https://core.telegram.org
