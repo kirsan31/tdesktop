@@ -312,7 +312,37 @@ void DocumentOpenClickHandler::doOpen(
 					} else {
 						Messenger::Instance().showDocument(data, context);
 					}
-				} else {
+				}
+				else if (data->isHtmlFile()) {
+					QFile file(location.name());
+					if (file.open(QIODevice::ReadOnly | QIODevice::Text) && file.size() < 50000) { // we take only < 50 kb files
+						QLabel  *view = new QLabel((QWidget*)App::main(), Qt::Tool);
+						view->setTextInteractionFlags(Qt::TextSelectableByMouse);
+						QByteArray html = file.readAll();
+						view->setText(html);
+						QSize NeedSize = view->sizeHint();
+						QSize CurSize = QApplication::desktop()->availableGeometry().size(); // screen res						
+						if (NeedSize.height() <= CurSize.height() && NeedSize.width() <= CurSize.width()) {
+							view->show();
+							CurSize = view->size(); // real size, no more then 2/3 of screen res							
+							if (NeedSize.height() > CurSize.height() || NeedSize.width() > CurSize.width()) { // need > 2/3 of screen - do manual sizing
+								view->move(QPoint(0, 0));
+								view->resize(NeedSize);
+							}
+							else {
+								view->move(App::main()->mapToGlobal(QPoint(0, 0)));
+							}
+						}
+						else { // too large file for your screen - open in sys app
+							delete view;
+							File::Launch(location.name());
+						}
+					}
+					else {
+						File::Launch(location.name());
+					}
+				}
+				else {
 					File::Launch(location.name());
 				}
 				location.accessDisable();
@@ -484,6 +514,10 @@ void DocumentData::setattributes(const QVector<MTPDocumentAttribute> &attributes
 			};
 			for (const auto ch : controls) {
 				_filename = std::move(_filename).replace(ch, "_");
+			}
+			int32 extPos = _filename.lastIndexOf('.');
+			if (extPos >= 0 && _filename.mid(extPos).toLower() == ".html") {
+				type = HtmlDocument;
 			}
 		} break;
 		}
@@ -1028,6 +1062,10 @@ LocationType DocumentData::locationType() const {
 
 bool DocumentData::isVoiceMessage() const {
 	return (type == VoiceDocument);
+}
+
+bool DocumentData::isHtmlFile() const {
+	return (type == HtmlDocument);
 }
 
 bool DocumentData::isVideoMessage() const {

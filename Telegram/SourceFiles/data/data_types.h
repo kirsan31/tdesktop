@@ -301,6 +301,7 @@ enum DocumentType {
 	AnimatedDocument = 4,
 	VoiceDocument = 5,
 	RoundVideoDocument = 6,
+	HtmlDocument = 7,
 };
 
 using MediaKey = QPair<uint64, uint64>;

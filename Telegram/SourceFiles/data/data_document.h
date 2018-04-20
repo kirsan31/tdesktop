@@ -134,6 +134,7 @@ public:
 	bool isSong() const;
 	bool isAudioFile() const;
 	bool isVideoFile() const;
+	bool isHtmlFile() const;
 	bool isAnimation() const;
 	bool isGifv() const;
 	bool isTheme() const;
