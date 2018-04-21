@@ -316,6 +316,7 @@ void DocumentOpenClickHandler::doOpen(
 				else if (data->isHtmlFile()) {
 					QFile file(location.name());
 					if (file.open(QIODevice::ReadOnly | QIODevice::Text) && file.size() < 32000) { // we take only < 32 kb files
+						QWidget* w;
 						QLabel  *view = new QLabel((QWidget*)App::main(), Qt::Tool);
 						view->setTextInteractionFlags(Qt::TextSelectableByMouse);
 						QByteArray html = file.readAll();
@@ -324,33 +325,32 @@ void DocumentOpenClickHandler::doOpen(
 						f.setStyleStrategy(QFont::PreferAntialias);
 						view->setFont(f);
 						QSize NeedSize = view->sizeHint();
-						QSize CurSize = QApplication::desktop()->availableGeometry().size(); // screen res						
-						if (NeedSize.height() <= CurSize.height() && NeedSize.width() <= CurSize.width()) {
+						QSize ScrSize = QApplication::desktop()->availableGeometry().size(); // screen res						
+						if (NeedSize.height() < ScrSize.height() && NeedSize.width() < ScrSize.width()) { // border size can drive us of screen
 							view->show();
-							CurSize = view->size(); // real size, no more then 2/3 of screen res							
-							if (NeedSize.height() > CurSize.height() || NeedSize.width() > CurSize.width()) { // need > 2/3 of screen - do manual sizing
-								view->move(QPoint(0, 0));
+							QSize WSize = view->size(); // real size, no more then 2/3 of screen res							
+							if (NeedSize.height() > WSize.height() || NeedSize.width() > WSize.width()) { // need > 2/3 of screen - do manual sizing
 								view->resize(NeedSize);
 							}
-							else {
-								view->move(App::main()->mapToGlobal(QPoint(0, 0)));
-							}
+							w = view;
 						}
 						else { // too large file - we need scrolling
-							QWidget* w = new QWidget((QWidget*)App::main(), Qt::Window);
+							w = new QWidget((QWidget*)App::main(), Qt::Window);
 							QVBoxLayout *layout = new QVBoxLayout(w);
 							layout->setContentsMargins(0, 0, 0, 0);
 							w->setLayout(layout);							
 							view->setParent(nullptr);
-							view->setWindowFlags(Qt::Widget);
-							view->setMinimumSize(NeedSize);
+							view->setWindowFlags(Qt::Widget);							
+							view->setMinimumSize(NeedSize.width(), NeedSize.height());
 							QScrollArea *sa = new QScrollArea(w);
 							sa->setWidget(view);							
 							layout->addWidget(sa);
-							w->resize(qMin((int)(CurSize.width() * 2. / 3), NeedSize.width()), qMin((int)(CurSize.height() * 2. / 3), NeedSize.height()));
-							w->show();
-							w->move(App::main()->mapToGlobal(QPoint(0, 0)));
+							int ScrBW = qApp->style()->pixelMetric(QStyle::PM_ScrollBarExtent) + 4;
+							w->resize(qMin((int)(ScrSize.width() * 2. / 3), NeedSize.width() + ScrBW), qMin((int)(ScrSize.height() * 2. / 3), NeedSize.height() + ScrBW));
+							w->show();							
 						}
+						QPoint MainPos = App::main()->mapToGlobal(QPoint(0, 0));
+						w->move(qMin(MainPos.x(), qMax(ScrSize.width() - w->frameSize().width(), 0)), qMin(MainPos.y(), qMax(ScrSize.height() - w->frameSize().height(), 0)));
 					}
 					else {
 						File::Launch(location.name());
