@@ -315,11 +315,14 @@ void DocumentOpenClickHandler::doOpen(
 				}
 				else if (data->isHtmlFile()) {
 					QFile file(location.name());
-					if (file.open(QIODevice::ReadOnly | QIODevice::Text) && file.size() < 50000) { // we take only < 50 kb files
+					if (file.open(QIODevice::ReadOnly | QIODevice::Text) && file.size() < 32000) { // we take only < 32 kb files
 						QLabel  *view = new QLabel((QWidget*)App::main(), Qt::Tool);
 						view->setTextInteractionFlags(Qt::TextSelectableByMouse);
 						QByteArray html = file.readAll();
 						view->setText(html);
+						QFont f = view->font();
+						f.setStyleStrategy(QFont::PreferAntialias);
+						view->setFont(f);
 						QSize NeedSize = view->sizeHint();
 						QSize CurSize = QApplication::desktop()->availableGeometry().size(); // screen res						
 						if (NeedSize.height() <= CurSize.height() && NeedSize.width() <= CurSize.width()) {
@@ -333,9 +336,20 @@ void DocumentOpenClickHandler::doOpen(
 								view->move(App::main()->mapToGlobal(QPoint(0, 0)));
 							}
 						}
-						else { // too large file for your screen - open in sys app
-							delete view;
-							File::Launch(location.name());
+						else { // too large file - we need scrolling
+							QWidget* w = new QWidget((QWidget*)App::main(), Qt::Window);
+							QVBoxLayout *layout = new QVBoxLayout(w);
+							layout->setContentsMargins(0, 0, 0, 0);
+							w->setLayout(layout);							
+							view->setParent(nullptr);
+							view->setWindowFlags(Qt::Widget);
+							view->setMinimumSize(NeedSize);
+							QScrollArea *sa = new QScrollArea(w);
+							sa->setWidget(view);							
+							layout->addWidget(sa);
+							w->resize(qMin((int)(CurSize.width() * 2. / 3), NeedSize.width()), qMin((int)(CurSize.height() * 2. / 3), NeedSize.height()));
+							w->show();
+							w->move(App::main()->mapToGlobal(QPoint(0, 0)));
 						}
 					}
 					else {
