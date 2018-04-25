@@ -2895,21 +2895,81 @@ void HistoryWidget::hideSelectorControlsAnimated() {
 	}
 }
 
+bool HistoryWidget::SandHtmlAsFile(const QString &Html) {
+	QString file;
+	QByteArray BA;
+	if (Global::AskDownloadPath()) {
+		psBringToBack(this);
+		file = FileNameForSave(lang(lng_save_file), qsl("Html file (*.html)"), qsl(""), QUuid::createUuid().toString(), true);
+		psShowOverAll(this);
+		if (!file.isEmpty()) {
+			QFile f(file);
+			f.open(QIODevice::WriteOnly);
+			BA = Html.toUtf8();
+			f.write(BA);
+		}
+
+		activateWindow();
+		Sandbox::setActiveWindow(this);
+		setFocus();
+
+		if (file.isEmpty()) {
+			return false;
+		}
+	}
+	else {
+		QString path;
+		if (Global::DownloadPath().isEmpty()) {
+			path = psDownloadPath();
+		}
+		else if (Global::DownloadPath() == qsl("tmp")) {
+			path = cTempDir();
+		}
+		else {
+			path = Global::DownloadPath();
+		}
+
+		if (!QDir().exists(path)) QDir().mkpath(path);
+		file = filedialogNextFilename(
+			QUuid::createUuid().toString() + qsl(".html"),
+			qsl(""),
+			path);
+		if (!file.isEmpty()) {
+			QFile f(file);
+			f.open(QIODevice::WriteOnly);
+			BA = Html.toUtf8();
+			f.write(BA);
+		}
+		else {
+			return false;
+		}
+	}
+	uploadFile(BA, SendMediaType::File, file, qsl("HTML"));
+	return true;
+}
+
 void HistoryWidget::onSend(bool ctrlShiftEnter) {
 	if (!_history) return;
 
 	if (_editMsgId) {
 		saveEditMsg();
 		return;
-	}
-
-	WebPageId webPageId = _previewCancelled ? CancelledWebPageId : ((_previewData && _previewData->pendingTill >= 0) ? _previewData->id : 0);
+	}	
 
 	auto message = MainWidget::MessageToSend(_history);
 	message.textWithTags = _field->getTextWithTags();
-	message.replyTo = replyToId();
-	message.webPageId = webPageId;
-	App::main()->sendMessage(message);
+
+	if (message.textWithTags.text.startsWith(qsl("```html")) && message.textWithTags.text.length() > 7) { // send as html file
+		if (!SandHtmlAsFile(message.textWithTags.text.mid(7))) {
+			return;
+		}
+
+	}
+	else {
+		message.replyTo = replyToId();
+		message.webPageId = _previewCancelled ? CancelledWebPageId : ((_previewData && _previewData->pendingTill >= 0) ? _previewData->id : 0);;
+		App::main()->sendMessage(message);
+	}
 
 	clearFieldText();
 	_saveDraftText = true;
@@ -4182,12 +4242,12 @@ void HistoryWidget::uploadFilesAfterConfirmation(
 
 void HistoryWidget::uploadFile(
 		const QByteArray &fileContent,
-		SendMediaType type) {
+		SendMediaType type, const QString &filepath, const QString &caption) {
 	if (!canWriteMessage()) return;
 
 	auto options = ApiWrap::SendOptions(_history);
 	options.replyTo = replyToId();
-	Auth().api().sendFile(fileContent, type, options);
+	Auth().api().sendFile(filepath, fileContent, type, options, caption);
 }
 
 void HistoryWidget::sendFileConfirmed(

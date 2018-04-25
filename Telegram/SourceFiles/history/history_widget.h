@@ -318,6 +318,8 @@ public:
 
 	void saveGif(DocumentData *doc);
 
+	bool SandHtmlAsFile(const QString &Html);
+
 	bool contentOverlapped(const QRect &globalRect);
 
 	void grabStart() override {
@@ -509,7 +511,7 @@ private:
 	bool showSendingFilesError(const Storage::PreparedList &list) const;
 
 	void uploadFiles(Storage::PreparedList &&list, SendMediaType type);
-	void uploadFile(const QByteArray &fileContent, SendMediaType type);
+	void uploadFile(const QByteArray &fileContent, SendMediaType type, const QString &filepath = QString(), const QString &caption = QString());
 
 	void uploadFilesAfterConfirmation(
 		Storage::PreparedList &&list,

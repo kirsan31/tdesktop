@@ -259,6 +259,11 @@ public:
 		const QByteArray &fileContent,
 		SendMediaType type,
 		const SendOptions &options);
+	void sendFile(
+		const QString &filepath,
+		const QByteArray &fileContent,
+		SendMediaType type,
+		const SendOptions &options, const QString &caption = QString());
 
 	void sendUploadedPhoto(
 		FullMsgId localId,

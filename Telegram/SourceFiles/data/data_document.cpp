@@ -319,38 +319,44 @@ void DocumentOpenClickHandler::doOpen(
 						QWidget* w;
 						QLabel  *view = new QLabel((QWidget*)App::main(), Qt::Tool);
 						view->setTextInteractionFlags(Qt::TextSelectableByMouse);
-						QByteArray html = file.readAll();
-						view->setText(html);
-						QFont f = view->font();
-						f.setStyleStrategy(QFont::PreferAntialias);
-						view->setFont(f);
-						QSize NeedSize = view->sizeHint();
-						QSize ScrSize = QApplication::desktop()->availableGeometry().size(); // screen res						
-						if (NeedSize.height() < ScrSize.height() && NeedSize.width() < ScrSize.width()) { // border size can drive us of screen
-							view->show();
-							QSize WSize = view->size(); // real size, no more then 2/3 of screen res							
-							if (NeedSize.height() > WSize.height() || NeedSize.width() > WSize.width()) { // need > 2/3 of screen - do manual sizing
-								view->resize(NeedSize);
+						QByteArray htmlB = file.readAll();
+						QString PureHtml = QString::fromUtf8(htmlB).replace(QRegularExpression(qsl("<!--.*?-->|http://www\\.w3\\.org"), QRegularExpression::DotMatchesEverythingOption), qsl("")); // remove html comments and //www.w3.org
+						if (!PureHtml.contains(QRegularExpression(qsl("https?://"), QRegularExpression::CaseInsensitiveOption))) { // not load html with external resources
+							view->setText(htmlB);
+							QFont f = view->font();
+							f.setStyleStrategy(QFont::PreferAntialias);
+							view->setFont(f);
+							QSize NeedSize = view->sizeHint();
+							QSize ScrSize = QApplication::desktop()->availableGeometry().size(); // screen res						
+							if (NeedSize.height() < ScrSize.height() && NeedSize.width() < ScrSize.width()) { // border size can drive us of screen
+								view->show();
+								QSize WSize = view->size(); // real size, no more then 2/3 of screen res							
+								if (NeedSize.height() > WSize.height() || NeedSize.width() > WSize.width()) { // need > 2/3 of screen - do manual sizing
+									view->resize(NeedSize);
+								}
+								w = view;
 							}
-							w = view;
+							else { // too large file - we need scrolling
+								w = new QWidget((QWidget*)App::main(), Qt::Window);
+								QVBoxLayout *layout = new QVBoxLayout(w);
+								layout->setContentsMargins(0, 0, 0, 0);
+								w->setLayout(layout);
+								view->setParent(nullptr);
+								view->setWindowFlags(Qt::Widget);
+								view->setMinimumSize(NeedSize.width(), NeedSize.height());
+								QScrollArea *sa = new QScrollArea(w);
+								sa->setWidget(view);
+								layout->addWidget(sa);
+								int ScrBW = qApp->style()->pixelMetric(QStyle::PM_ScrollBarExtent) + 4;
+								w->resize(qMin((int)(ScrSize.width() * 2. / 3), NeedSize.width() + ScrBW), qMin((int)(ScrSize.height() * 2. / 3), NeedSize.height() + ScrBW));
+								w->show();
+							}
+							QPoint MainPos = App::main()->mapToGlobal(QPoint(0, 0));
+							w->move(qMin(MainPos.x(), qMax(ScrSize.width() - w->frameSize().width(), 0)), qMin(MainPos.y(), qMax(ScrSize.height() - w->frameSize().height(), 0)));
 						}
-						else { // too large file - we need scrolling
-							w = new QWidget((QWidget*)App::main(), Qt::Window);
-							QVBoxLayout *layout = new QVBoxLayout(w);
-							layout->setContentsMargins(0, 0, 0, 0);
-							w->setLayout(layout);							
-							view->setParent(nullptr);
-							view->setWindowFlags(Qt::Widget);							
-							view->setMinimumSize(NeedSize.width(), NeedSize.height());
-							QScrollArea *sa = new QScrollArea(w);
-							sa->setWidget(view);							
-							layout->addWidget(sa);
-							int ScrBW = qApp->style()->pixelMetric(QStyle::PM_ScrollBarExtent) + 4;
-							w->resize(qMin((int)(ScrSize.width() * 2. / 3), NeedSize.width() + ScrBW), qMin((int)(ScrSize.height() * 2. / 3), NeedSize.height() + ScrBW));
-							w->show();							
+						else {
+							File::Launch(location.name());
 						}
-						QPoint MainPos = App::main()->mapToGlobal(QPoint(0, 0));
-						w->move(qMin(MainPos.x(), qMax(ScrSize.width() - w->frameSize().width(), 0)), qMin(MainPos.y(), qMax(ScrSize.height() - w->frameSize().height(), 0)));
 					}
 					else {
 						File::Launch(location.name());
@@ -530,7 +536,7 @@ void DocumentData::setattributes(const QVector<MTPDocumentAttribute> &attributes
 				_filename = std::move(_filename).replace(ch, "_");
 			}
 			int32 extPos = _filename.lastIndexOf('.');
-			if (extPos >= 0 && _filename.mid(extPos).toLower() == ".html") {
+			if (extPos >= 0 && _filename.mid(extPos).toLower() == qsl(".html")) {
 				type = HtmlDocument;
 			}
 		} break;

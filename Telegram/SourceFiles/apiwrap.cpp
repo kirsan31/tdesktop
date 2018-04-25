@@ -3674,6 +3674,20 @@ void ApiWrap::sendFile(
 		caption));
 }
 
+void ApiWrap::sendFile(const QString &filepath,
+	const QByteArray &fileContent,
+	SendMediaType type,
+	const SendOptions &options, const QString &caption) {
+	auto to = FileLoadTaskOptions(options);
+	_fileLoader->addTask(std::make_unique<FileLoadTask>(
+		filepath,
+		fileContent,
+		nullptr,
+		type,
+		to,
+		caption));
+}
+
 void ApiWrap::sendUploadedPhoto(
 		FullMsgId localId,
 		const MTPInputFile &file,
