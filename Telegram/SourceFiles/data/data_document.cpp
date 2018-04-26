@@ -313,7 +313,7 @@ void DocumentOpenClickHandler::doOpen(
 						Messenger::Instance().showDocument(data, context);
 					}
 				}
-				else if (data->isHtmlFile()) {
+				else if (data->isHtmlFile() && !QGuiApplication::keyboardModifiers().testFlag(Qt::ControlModifier)) { // if Ctrl+Clicked - use system app
 					QFile file(location.name());
 					if (file.open(QIODevice::ReadOnly | QIODevice::Text) && file.size() < 32000) { // we take only < 32 kb files
 						QWidget* w;
@@ -328,7 +328,7 @@ void DocumentOpenClickHandler::doOpen(
 							view->setFont(f);
 							QSize NeedSize = view->sizeHint();
 							QSize ScrSize = QApplication::desktop()->availableGeometry().size(); // screen res						
-							if (NeedSize.height() < ScrSize.height() && NeedSize.width() < ScrSize.width()) { // border size can drive us of screen
+							if (NeedSize.height() < ScrSize.height() && NeedSize.width() < ScrSize.width()) { // border size can drive us a little of screen!
 								view->show();
 								QSize WSize = view->size(); // real size, no more then 2/3 of screen res							
 								if (NeedSize.height() > WSize.height() || NeedSize.width() > WSize.width()) { // need > 2/3 of screen - do manual sizing
@@ -351,8 +351,8 @@ void DocumentOpenClickHandler::doOpen(
 								w->resize(qMin((int)(ScrSize.width() * 2. / 3), NeedSize.width() + ScrBW), qMin((int)(ScrSize.height() * 2. / 3), NeedSize.height() + ScrBW));
 								w->show();
 							}
-							QPoint MainPos = App::main()->mapToGlobal(QPoint(0, 0));
-							w->move(qMin(MainPos.x(), qMax(ScrSize.width() - w->frameSize().width(), 0)), qMin(MainPos.y(), qMax(ScrSize.height() - w->frameSize().height(), 0)));
+							QPoint MainCentr = App::main()->mapToGlobal(App::main()->rect().center() - w->rect().center());
+							w->move(qMin(qMax(MainCentr.x(), 0), qMax(ScrSize.width() - w->frameSize().width(), 0)), qMin(qMax(MainCentr.y(), 0), qMax(ScrSize.height() - w->frameSize().height(), 0)));
 						}
 						else {
 							File::Launch(location.name());
