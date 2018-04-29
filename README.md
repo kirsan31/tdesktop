@@ -1,12 +1,14 @@
-# [Telegram Desktop][telegram_desktop] – Edited Version
+# [Telegram Desktop][telegram_desktop] – Mod
 
-Fast attempt to address this TDesktop issues:  
-[3382]  
-[2060]  
-[522]
+Attempt to address this TDesktop issues:  
+[Change the Always on Top behavior of the Call Popup]  
+[Auto resizing message block]  
+[removed -- to −, >> to », << to «]  
+Workaround for [Automatically Syntax-Highlight]
+
 
 **Tested only on Windows7 x64!!!**  
-Due to lack of time and desire to deeply understand the TDesktop code, my corrections may be look ugly!  
+Due to lack of time and desire to deeply understand the TDesktop code, some of my corrections may be look ... :)  
 
 ### Original text:
 This is the complete source code and the build instructions for the alpha version of the official desktop client for the [Telegram][telegram] messenger, based on the [Telegram API][telegram_api] and the [MTProto][telegram_proto] secure protocol.
@@ -56,9 +58,10 @@ The source code is published under GPLv3 with OpenSSL exception, the license is 
 * [GYP/CMake on GNU/Linux][cmake]
 
 [//]: # (LINKS)
-[3382]: https://github.com/telegramdesktop/tdesktop/issues/3382
-[2060]: https://github.com/telegramdesktop/tdesktop/issues/2060
-[522]: https://github.com/telegramdesktop/tdesktop/issues/522
+[Change the Always on Top behavior of the Call Popup]: https://github.com/telegramdesktop/tdesktop/issues/3382
+[Auto resizing message block]: https://github.com/telegramdesktop/tdesktop/issues/2060
+[removed -- to −, >> to », << to «]: https://github.com/telegramdesktop/tdesktop/issues/522
+[Automatically Syntax-Highlight]: https://github.com/telegramdesktop/tdesktop/issues/250
 [telegram]: https://telegram.org
 [telegram_desktop]: https://desktop.telegram.org
 [telegram_api]: https://core.telegram.org
