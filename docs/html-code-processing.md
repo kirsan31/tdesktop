@@ -1,9 +1,9 @@
 1. **Internal html viewer.**
 Ability to view small (< 32 kb) html files without external resources in internal viewer. 
-QLabel control is using. [Supported HTML Subset](https://doc.qt.io/qt-5/richtext-html-subset.html). To pen in external (system) viewer use ctrl+click on file.  
+QLabel control is using. [Supported HTML Subset](https://doc.qt.io/qt-5/richtext-html-subset.html). To open in external (system) viewer use ctrl+click on file.  
 2. **Sending html as file.**
 Ability to send html code as file, so recipient can view it as rendered html. For this, type:  
-` ```html` _your html code here_  
+` ```html` _your html code_  
 Than, send it.
 
 This 2 additions + some external tools allow you to send chunks of code to each other with syntax highlighting.  
