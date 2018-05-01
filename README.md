@@ -4,7 +4,7 @@ Attempt to address this TDesktop issues:
 [Change the Always on Top behavior of the Call Popup]  
 [Auto resizing message block]  
 [removed -- to −, >> to », << to «]  
-Workaround for [Automatically Syntax-Highlight]
+Workaround for [Automatically Syntax-Highlight]. More [here](docs/html-code-processing.md). 
 
 
 **Tested only on Windows7 x64!!!**  
