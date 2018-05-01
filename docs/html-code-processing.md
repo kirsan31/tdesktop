@@ -11,4 +11,4 @@ Some of tools, that alow you to obtain syntax highlighting with html:
 - Visual studio plugin [Copy As Html](https://marketplace.visualstudio.com/items?itemName=VisualStudioPlatformTeam.CopyAsHtml).
 - NppExport Notepad++ plugin (not compatible with QLabel - external view only :( ).
 - Many on-line web services...  
-![Alt text](docs/assets/html.gif?raw=true "sending code with syntax highlighting")
+![Example](assets/html.gif?raw=true "sending code with syntax highlighting")
