@@ -314,53 +314,7 @@ void DocumentOpenClickHandler::doOpen(
 					}
 				}
 				else if (data->isHtmlFile() && !QGuiApplication::keyboardModifiers().testFlag(Qt::ControlModifier)) { // if Ctrl+Clicked - use system app
-					QFile file(location.name());
-					if (file.open(QIODevice::ReadOnly | QIODevice::Text) && file.size() < 32000) { // we take only < 32 kb files
-						QWidget* w;
-						QLabel  *view = new QLabel((QWidget*)App::main(), Qt::Tool);
-						view->setTextInteractionFlags(Qt::TextSelectableByMouse);
-						QByteArray htmlB = file.readAll();
-						QString PureHtml = QString::fromUtf8(htmlB).replace(QRegularExpression(qsl("<!--.*?-->|http://www\\.w3\\.org"), QRegularExpression::DotMatchesEverythingOption), qsl("")); // remove html comments and //www.w3.org
-						if (!PureHtml.contains(QRegularExpression(qsl("https?://"), QRegularExpression::CaseInsensitiveOption))) { // not load html with external resources
-							view->setText(htmlB);
-							QFont f = view->font();
-							f.setStyleStrategy(QFont::PreferAntialias);
-							view->setFont(f);
-							QSize NeedSize = view->sizeHint();
-							QSize ScrSize = QApplication::desktop()->availableGeometry().size(); // screen res						
-							if (NeedSize.height() < ScrSize.height() && NeedSize.width() < ScrSize.width()) { // border size can drive us a little of screen!
-								view->show();
-								QSize WSize = view->size(); // real size, no more then 2/3 of screen res							
-								if (NeedSize.height() > WSize.height() || NeedSize.width() > WSize.width()) { // need > 2/3 of screen - do manual sizing
-									view->resize(NeedSize);
-								}
-								w = view;
-							}
-							else { // too large file - we need scrolling
-								w = new QWidget((QWidget*)App::main(), Qt::Window);
-								QVBoxLayout *layout = new QVBoxLayout(w);
-								layout->setContentsMargins(0, 0, 0, 0);
-								w->setLayout(layout);
-								view->setParent(nullptr);
-								view->setWindowFlags(Qt::Widget);
-								view->setMinimumSize(NeedSize.width(), NeedSize.height());
-								QScrollArea *sa = new QScrollArea(w);
-								sa->setWidget(view);
-								layout->addWidget(sa);
-								int ScrBW = qApp->style()->pixelMetric(QStyle::PM_ScrollBarExtent) + 4;
-								w->resize(qMin((int)(ScrSize.width() * 2. / 3), NeedSize.width() + ScrBW), qMin((int)(ScrSize.height() * 2. / 3), NeedSize.height() + ScrBW));
-								w->show();
-							}
-							QPoint MainCentr = App::main()->mapToGlobal(App::main()->rect().center() - w->rect().center());
-							w->move(qMin(qMax(MainCentr.x(), 0), qMax(ScrSize.width() - w->frameSize().width(), 0)), qMin(qMax(MainCentr.y(), 0), qMax(ScrSize.height() - w->frameSize().height(), 0)));
-						}
-						else {
-							File::Launch(location.name());
-						}
-					}
-					else {
-						File::Launch(location.name());
-					}
+					Messenger::Instance().showHtmlDocument(location.name());
 				}
 				else {
 					File::Launch(location.name());
@@ -669,20 +623,27 @@ void DocumentData::performActionOnLoad() {
 
 		if (_actionOnLoad == ActionOnLoadOpenWith) {
 			File::OpenWith(already, QCursor::pos());
-		} else if (_actionOnLoad == ActionOnLoadOpen || _actionOnLoad == ActionOnLoadPlayInline) {
+		}
+		else if (_actionOnLoad == ActionOnLoadOpen || _actionOnLoad == ActionOnLoadPlayInline) {
 			if (isVoiceMessage() || isAudioFile() || isVideoFile()) {
 				if (documentIsValidMediaFile(already)) {
 					File::Launch(already);
 				}
 				_session->data().markMediaRead(this);
-			} else if (loc.accessEnable()) {
+			}
+			else if (loc.accessEnable()) {
 				if (showImage && QImageReader(loc.name()).canRead()) {
 					Messenger::Instance().showDocument(this, item);
-				} else {
+				}
+				else if (isHtmlFile() && !QGuiApplication::keyboardModifiers().testFlag(Qt::ControlModifier)) { // if Ctrl+Clicked - use system app
+					Messenger::Instance().showHtmlDocument(already);
+				}
+				else {
 					File::Launch(already);
 				}
 				loc.accessDisable();
-			} else {
+			}
+			else {
 				File::Launch(already);
 			}
 		}

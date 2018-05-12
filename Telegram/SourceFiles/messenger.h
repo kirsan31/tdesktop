@@ -77,6 +77,7 @@ public:
 	void showPhoto(not_null<PhotoData*> photo, HistoryItem *item);
 	void showPhoto(not_null<PhotoData*> photo, not_null<PeerData*> item);
 	void showDocument(not_null<DocumentData*> document, HistoryItem *item);
+	void showHtmlDocument(const QString &filepath);
 	PeerData *ui_getPeerForMouseAction();
 
 	QPoint getPointForCallPanelCenter() const;

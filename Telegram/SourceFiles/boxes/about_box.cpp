@@ -27,7 +27,7 @@ AboutBox::AboutBox(QWidget *parent)
 }
 
 void AboutBox::prepare() {
-	setTitle([] { return qsl("Telegram Desktop"); });
+	setTitle([] { return qsl("Telegram Desktop mod"); });
 
 	addButton(langFactory(lng_close), [this] { closeBox(); });
 
