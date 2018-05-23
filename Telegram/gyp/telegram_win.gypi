@@ -45,34 +45,56 @@
       'Debug': {
         'include_dirs': [
           '<(libs_loc)/openssl/Debug/include',
-        ],
+        ],              
         'library_dirs': [
           '<(libs_loc)/openssl/Debug/lib',
           '<(libs_loc)/lzma/C/Util/LzmaLib/Debug',
           '<(libs_loc)/opus/win32/VS2015/Win32/Debug',
           '<(libs_loc)/openal-soft/build/Debug',
           '<(libs_loc)/zlib/contrib/vstudio/vc14/x86/ZlibStatDebug',
-          '<(libs_loc)/breakpad/src/out/Debug/obj/client',
+          '<(libs_loc)/breakpad/src/out/Debug/obj/client',          
         ],
+        'conditions': [[ '"<(tdesktop_enable_sonnet_spellcheck)" == "1"', {
+          'library_dirs': [
+            '<(libs_loc)/sonnet/lib/Debug',
+          ],
+        }]],         
       },
       'Release': {
         'include_dirs': [
           '<(libs_loc)/openssl/Release/include',
-        ],
+        ], 
         'library_dirs': [
           '<(libs_loc)/openssl/Release/lib',
           '<(libs_loc)/lzma/C/Util/LzmaLib/Release',
           '<(libs_loc)/opus/win32/VS2015/Win32/Release',
           '<(libs_loc)/openal-soft/build/Release',
           '<(libs_loc)/zlib/contrib/vstudio/vc14/x86/ZlibStatReleaseWithoutAsm',
-          '<(libs_loc)/breakpad/src/out/Release/obj/client',
+          '<(libs_loc)/breakpad/src/out/Release/obj/client',          
         ],
+        'conditions': [[ '"<(tdesktop_enable_sonnet_spellcheck)" == "1"', {
+          'library_dirs': [
+            '<(libs_loc)/sonnet/lib/Release',
+          ],
+        }]],           
       },
     },
   }], [ 'build_uwp', {
     'defines': [
       'TDESKTOP_DISABLE_AUTOUPDATE',
       'OS_WIN_STORE',
+    ]
+  }], [ '"<(tdesktop_enable_sonnet_spellcheck)" == "1"', {
+    'include_dirs': [
+      '<(libs_loc)/sonnet/include',
+    ],
+    'libraries': [
+      '-lKF5SonnetCore',
+      '-lKF5SonnetUi',
+      '-lsonnet_hunspell',
+    ],    
+    'defines': [
+      'TDESKTOP_ENABLE_SONNET_SPELLCHECK',
     ]
   }]],
 }

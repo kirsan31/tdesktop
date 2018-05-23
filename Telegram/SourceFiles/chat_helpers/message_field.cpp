@@ -13,6 +13,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "window/window_controller.h"
 #include "mainwindow.h"
 #include "auth_session.h"
+#ifdef TDESKTOP_ENABLE_SONNET_SPELLCHECK
+#include <spellcheckdecorator.h>
+#endif
 
 namespace {
 
@@ -115,6 +118,9 @@ MessageField::MessageField(QWidget *parent, not_null<Window::Controller*> contro
 	setMaxHeight(st::historyComposeFieldMaxHeight);
 
 	setTagMimeProcessor(std::make_unique<FieldTagMimeProcessor>());
+#ifdef TDESKTOP_ENABLE_SONNET_SPELLCHECK
+    Sonnet::SpellCheckDecorator *SpellCheckDecorator = new Sonnet::SpellCheckDecorator(this);
+#endif        
 }
 
 bool MessageField::hasSendText() const {
