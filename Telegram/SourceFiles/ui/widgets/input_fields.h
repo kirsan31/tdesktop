@@ -9,6 +9,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "ui/rp_widget.h"
 #include "styles/style_widgets.h"
+#ifdef TDESKTOP_ENABLE_SONNET_SPELLCHECK
+#include <spellcheckdecorator.h>
+#endif
 
 class UserData;
 
@@ -206,6 +209,10 @@ private:
 	QPoint _touchStart;
 
 	bool _correcting = false;
+
+#ifdef TDESKTOP_ENABLE_SONNET_SPELLCHECK
+	Sonnet::SpellCheckDecorator *_SpellCheckDecorator;
+#endif 
 
 	struct LinkRange {
 		int start;

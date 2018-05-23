@@ -14,6 +14,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "lang/lang_keys.h"
 #include "numbers.h"
 #include "messenger.h"
+#ifdef TDESKTOP_ENABLE_SONNET_SPELLCHECK
+#include <highlighter.h>
+#endif
 
 namespace Ui {
 namespace {
@@ -168,6 +171,9 @@ FlatTextarea::FlatTextarea(QWidget *parent, const style::FlatTextarea &st, base:
 	if (!_lastTextWithTags.text.isEmpty()) {
 		setTextWithTags(_lastTextWithTags, ClearUndoHistory);
 	}
+#ifdef TDESKTOP_ENABLE_SONNET_SPELLCHECK
+	_SpellCheckDecorator = new Sonnet::SpellCheckDecorator(this);
+#endif  
 }
 
 void FlatTextarea::updatePalette() {
@@ -1449,6 +1455,15 @@ void FlatTextarea::dropEvent(QDropEvent *e) {
 
 void FlatTextarea::contextMenuEvent(QContextMenuEvent *e) {
 	if (auto menu = createStandardContextMenu()) {
+#ifdef TDESKTOP_ENABLE_SONNET_SPELLCHECK
+		auto h = _SpellCheckDecorator->highlighter();
+		if (h) {
+			menu->addSeparator();
+			menu->addAction(h->isActive() ? qsl("Disable spell checking") : qsl("Enable spell checking"), [=] {
+				h->setActive(!h->isActive());
+			});
+		}
+#endif 
 		(new Ui::PopupMenu(nullptr, menu))->popup(e->globalPos());
 	}
 }
