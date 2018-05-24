@@ -11,6 +11,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/qthelp_regex.h"
 #include "styles/style_history.h"
 #include "window/window_controller.h"
+#include "emoji_suggestions_data.h"
+#include "chat_helpers/emoji_suggestions_helper.h"
 #include "mainwindow.h"
 #include "auth_session.h"
 
@@ -114,7 +116,29 @@ MessageField::MessageField(QWidget *parent, not_null<Window::Controller*> contro
 	setMinHeight(st::historySendSize.height() - 2 * st::historySendPadding);
 	setMaxHeight(st::historyComposeFieldMaxHeight);
 
-	setTagMimeProcessor(std::make_unique<FieldTagMimeProcessor>());      
+	setTagMimeProcessor(std::make_unique<FieldTagMimeProcessor>());
+
+	addInstantReplace(
+		":shrug:",
+		QChar(175) + QString("\\_(") + QChar(12484) + ")_/" + QChar(175));
+	addInstantReplace(":o ", QString(1, QChar(0xD83D)) + QChar(0xDE28));
+	addInstantReplace("xD ", QString(1, QChar(0xD83D)) + QChar(0xDE06));
+	const auto &replacements = Ui::Emoji::internal::GetAllReplacements();
+	for (const auto &one : replacements) {
+		const auto with = Ui::Emoji::QStringFromUTF16(one.emoji);
+		const auto what = Ui::Emoji::QStringFromUTF16(one.replacement);
+		addInstantReplace(what, with);
+	}
+	const auto &pairs = Ui::Emoji::internal::GetReplacementPairs();
+	for (const auto &[what, index] : pairs) {
+		const auto emoji = Ui::Emoji::internal::ByIndex(index);
+		Assert(emoji != nullptr);
+		addInstantReplace(what, emoji->text());
+	}
+	enableInstantReplaces(Global::ReplaceEmoji());
+	subscribe(Global::RefReplaceEmojiChanged(), [=] {
+		enableInstantReplaces(Global::ReplaceEmoji());
+	});
 }
 
 bool MessageField::hasSendText() const {

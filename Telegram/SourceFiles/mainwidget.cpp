@@ -24,6 +24,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/widgets/shadow.h"
 #include "window/section_memento.h"
 #include "window/section_widget.h"
+#include "window/window_connecting_widget.h"
 #include "ui/widgets/dropdown_menu.h"
 #include "ui/focus_persister.h"
 #include "ui/resize_area.h"
@@ -56,6 +57,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "boxes/mute_settings_box.h"
 #include "boxes/peer_list_controllers.h"
 #include "boxes/download_path_box.h"
+#include "boxes/connection_box.h"
 #include "storage/localstorage.h"
 #include "shortcuts.h"
 #include "media/media_audio.h"
@@ -74,6 +76,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "window/themes/window_theme.h"
 #include "mtproto/dc_options.h"
 #include "core/file_utilities.h"
+#include "core/update_checker.h"
 #include "calls/calls_instance.h"
 #include "calls/calls_top_bar.h"
 #include "auth_session.h"
@@ -213,6 +216,7 @@ MainWidget::MainWidget(
 
 	_ptsWaiter.setRequesting(true);
 	updateScrollColors();
+	setupConnectingWidget();
 
 	connect(_dialogs, SIGNAL(cancelled()), this, SLOT(dialogsCancelled()));
 	connect(this, SIGNAL(dialogsUpdated()), _dialogs, SLOT(onListScroll()));
@@ -323,8 +327,16 @@ MainWidget::MainWidget(
 	orderWidgets();
 
 #ifndef TDESKTOP_DISABLE_AUTOUPDATE
-	Sandbox::startUpdateCheck();
+	Core::UpdateChecker checker;
+	checker.start();
 #endif // !TDESKTOP_DISABLE_AUTOUPDATE
+}
+
+void MainWidget::setupConnectingWidget() {
+	using namespace rpl::mappers;
+	_connecting = Window::ConnectingWidget::CreateDefaultWidget(
+		this,
+		Window::AdaptiveIsOneColumn() | rpl::map(!_1));
 }
 
 void MainWidget::checkCurrentFloatPlayer() {
@@ -704,7 +716,7 @@ void MainWidget::finishForwarding(not_null<History*> history) {
 }
 
 void MainWidget::updateMutedIn(TimeMs delay) {
-	accumulate_max(delay, 24 * 3600 * 1000LL);
+	accumulate_min(delay, 24 * 3600 * 1000LL);
 	if (!_updateMutedTimer.isActive()
 		|| _updateMutedTimer.remainingTime() > delay) {
 		_updateMutedTimer.start(delay);
@@ -2565,6 +2577,7 @@ void MainWidget::orderWidgets() {
 	if (_thirdColumnResizeArea) {
 		_thirdColumnResizeArea->raise();
 	}
+	_connecting->raise();
 	_playerPlaylist->raise();
 	_playerPanel->raise();
 	for (auto &instance : _playerFloats) {
@@ -3705,8 +3718,11 @@ void MainWidget::start(const MTPUser *self) {
 	if (!self) {
 		MTP::send(MTPusers_GetFullUser(MTP_inputUserSelf()), rpcDone(&MainWidget::startWithSelf));
 		return;
-	}
-	if (!Auth().validateSelf(*self)) {
+	} else if (!Auth().validateSelf(*self)) {
+		constexpr auto kRequestUserAgainTimeout = TimeMs(10000);
+		App::CallDelayed(kRequestUserAgainTimeout, this, [=] {
+			MTP::send(MTPusers_GetFullUser(MTP_inputUserSelf()), rpcDone(&MainWidget::startWithSelf));
+		});
 		return;
 	}
 
@@ -5080,11 +5096,9 @@ void MainWidget::feedUpdate(const MTPUpdate &update) {
 		auto &d = update.c_updateChannel();
 		if (const auto channel = App::channelLoaded(d.vchannel_id.v)) {
 			channel->inviter = UserId(0);
-			if (!channel->amIn()) {
-				if (const auto history = App::historyLoaded(channel->id)) {
-					history->updateChatListExistence();
-				}
-			} else if (!channel->amCreator() && App::history(channel->id)) {
+			if (channel->amIn()
+				&& !channel->amCreator()
+				&& App::history(channel->id)) {
 				_updatedChannels.insert(channel, true);
 				Auth().api().requestSelfParticipant(channel);
 			}

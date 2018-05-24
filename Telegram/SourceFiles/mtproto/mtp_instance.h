@@ -46,6 +46,8 @@ public:
 	Instance(const Instance &other) = delete;
 	Instance &operator=(const Instance &other) = delete;
 
+	void resolveProxyDomain(const QString &host);
+	void setGoodProxyDomain(const QString &host, const QString &ip);
 	void suggestMainDcId(DcId mainDcId);
 	void setMainDcId(DcId mainDcId);
 	DcId mainDcId() const;
@@ -135,7 +137,9 @@ public:
 	void scheduleKeyDestroy(ShiftedDcId shiftedDcId);
 
 	void requestConfig();
+	void requestConfigIfOld();
 	void requestCDNConfig();
+	void setUserPhone(const QString &phone);
 
 	~Instance();
 
@@ -147,6 +151,10 @@ signals:
 	void cdnConfigLoaded();
 	void keyDestroyed(qint32 shiftedDcId);
 	void allKeysDestroyed();
+	void proxyDomainResolved(
+		QString host,
+		QStringList ips,
+		qint64 expireAt);
 
 private slots:
 	void onKeyDestroyed(qint32 shiftedDcId);

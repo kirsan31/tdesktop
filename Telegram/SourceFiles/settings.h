@@ -100,7 +100,6 @@ DeclareSetting(bool, WriteProtected);
 DeclareSetting(int32, LastUpdateCheck);
 DeclareSetting(bool, NoStartUpdate);
 DeclareSetting(bool, StartToSettings);
-DeclareSetting(bool, ReplaceEmojis);
 DeclareReadSetting(bool, ManyInstance);
 
 DeclareSetting(QByteArray, LocalSalt);
@@ -194,7 +193,6 @@ DeclareReadSetting(DBIPlatform, Platform);
 DeclareReadSetting(QString, PlatformString);
 DeclareReadSetting(bool, IsElCapitan);
 DeclareReadSetting(bool, IsSnowLeopard);
-DeclareReadSetting(QUrl, UpdateURL);
 
 DeclareSetting(int, OtherOnline);
 

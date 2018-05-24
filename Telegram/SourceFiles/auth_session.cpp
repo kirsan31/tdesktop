@@ -285,6 +285,11 @@ AuthSession::AuthSession(UserId userId)
 		_shouldLockAt = 0;
 		notifications().updateAll();
 	});
+	subscribe(Global::RefConnectionTypeChanged(), [=] {
+		_api->refreshProxyPromotion();
+	});
+	_api->refreshProxyPromotion();
+
 	Window::Theme::Background()->start();
 }
 
@@ -304,7 +309,10 @@ base::Observable<void> &AuthSession::downloaderTaskFinished() {
 }
 
 bool AuthSession::validateSelf(const MTPUser &user) {
-	if (user.type() != mtpc_user || !user.c_user().is_self() || user.c_user().vid.v != userId()) {
+	if (user.type() != mtpc_user || !user.c_user().is_self()) {
+		LOG(("API Error: bad self user received."));
+		return false;
+	} else if (user.c_user().vid.v != userId()) {
 		LOG(("Auth Error: wrong self user received."));
 		App::logOutDelayed();
 		return false;
@@ -314,6 +322,7 @@ bool AuthSession::validateSelf(const MTPUser &user) {
 
 void AuthSession::saveSettingsDelayed(TimeMs delay) {
 	Expects(this == &Auth());
+
 	_saveDataTimer.callOnce(delay);
 }
 

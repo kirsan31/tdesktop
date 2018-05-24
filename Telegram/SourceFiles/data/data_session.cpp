@@ -83,10 +83,14 @@ void Session::setupChannelLeavingViewer() {
 		return update.peer->asChannel();
 	}) | rpl::filter([](ChannelData *channel) {
 		return (channel != nullptr)
-			&& !(channel->amIn())
-			&& (channel->feed() != nullptr);
+			&& !(channel->amIn());
 	}) | rpl::start_with_next([=](not_null<ChannelData*> channel) {
 		channel->clearFeed();
+		if (const auto history = App::historyLoaded(channel->id)) {
+			history->removeJoinedMessage();
+			history->updateChatListExistence();
+			history->updateChatListSortPosition();
+		}
 	}, _lifetime);
 }
 
@@ -1590,6 +1594,34 @@ void Session::setMimeForwardIds(MessageIdsList &&list) {
 
 MessageIdsList Session::takeMimeForwardIds() {
 	return std::move(_mimeForwardIds);
+}
+
+void Session::setProxyPromoted(PeerData *promoted) {
+	if (_proxyPromoted != promoted) {
+		if (const auto history = App::historyLoaded(_proxyPromoted)) {
+			history->cacheProxyPromoted(false);
+		}
+		const auto old = std::exchange(_proxyPromoted, promoted);
+		if (_proxyPromoted) {
+			const auto history = App::history(_proxyPromoted);
+			history->cacheProxyPromoted(true);
+			if (!history->lastMessageKnown()) {
+				_session->api().requestDialogEntry(history);
+			}
+			Notify::peerUpdatedDelayed(
+				_proxyPromoted,
+				Notify::PeerUpdate::Flag::ChannelPromotedChanged);
+		}
+		if (old) {
+			Notify::peerUpdatedDelayed(
+				old,
+				Notify::PeerUpdate::Flag::ChannelPromotedChanged);
+		}
+	}
+}
+
+PeerData *Session::proxyPromoted() const {
+	return _proxyPromoted;
 }
 
 } // namespace Data

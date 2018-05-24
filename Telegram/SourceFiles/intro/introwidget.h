@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #pragma once
 
 #include "mtproto/sender.h"
+#include "ui/rp_widget.h"
 
 namespace Ui {
 class IconButton;
@@ -20,9 +21,13 @@ template <typename Widget>
 class FadeWrap;
 } // namespace Ui
 
+namespace Window {
+class ConnectingWidget;
+} // namespace Window
+
 namespace Intro {
 
-class Widget : public TWidget, private MTP::Sender, private base::Subscriber {
+class Widget : public Ui::RpWidget, private MTP::Sender, private base::Subscriber {
 	Q_OBJECT
 
 public:
@@ -201,6 +206,7 @@ public:
 	};
 
 private:
+	void setupConnectingWidget();
 	void refreshLang();
 	void animationCallback();
 	void createLanguageLink();
@@ -247,6 +253,8 @@ private:
 	object_ptr<Ui::RoundButton> _next;
 	object_ptr<Ui::FadeWrap<Ui::LinkButton>> _changeLanguage = { nullptr };
 	object_ptr<Ui::FadeWrap<Ui::RoundButton>> _resetAccount = { nullptr };
+
+	base::unique_qptr<Window::ConnectingWidget> _connecting;
 
 	mtpRequestId _resetRequest = 0;
 

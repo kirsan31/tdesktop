@@ -512,6 +512,12 @@ HistoryWidget::HistoryWidget(
 			data->text());
 	});
 	_emojiSuggestions.create(this, _field.data());
+	_emojiSuggestions->setReplaceCallback([=](
+			int from,
+			int till,
+			const QString &replacement) {
+		_field->commmitInstantReplacement(from, till, replacement);
+	});
 	updateFieldSubmitSettings();
 
 	_field->hide();
@@ -611,7 +617,8 @@ HistoryWidget::HistoryWidget(
 		| UpdateFlag::MembersChanged
 		| UpdateFlag::UserOnlineChanged
 		| UpdateFlag::NotificationsEnabled
-		| UpdateFlag::ChannelAmIn;
+		| UpdateFlag::ChannelAmIn
+		| UpdateFlag::ChannelPromotedChanged;
 	subscribe(Notify::PeerUpdated(), Notify::PeerUpdatedHandler(changes, [this](const Notify::PeerUpdate &update) {
 		if (update.peer == _peer) {
 			if (update.flags & UpdateFlag::ChannelRightsChanged) {
@@ -645,6 +652,13 @@ HistoryWidget::HistoryWidget(
 					updateControlsGeometry();
 					this->update();
 				}
+			}
+			if (update.flags & UpdateFlag::ChannelPromotedChanged) {
+				refreshAboutProxyPromotion();
+				updateHistoryGeometry();
+				updateControlsVisibility();
+				updateControlsGeometry();
+				this->update();
 			}
 			if (update.flags & (UpdateFlag::UserIsBlocked
 				| UpdateFlag::AdminsChanged
@@ -1558,7 +1572,9 @@ void HistoryWidget::calcNextReplyReturn() {
 			_replyReturn = App::histItemById(_channel, _replyReturns.back());
 		}
 	}
-	if (!_replyReturn) updateControlsVisibility();
+	if (!_replyReturn) {
+		updateControlsVisibility();
+	}
 }
 
 void HistoryWidget::fastShowAtEnd(not_null<History*> history) {
@@ -1659,11 +1675,13 @@ void HistoryWidget::showHistory(const PeerId &peerId, MsgId showAtMsgId, bool re
 				}
 
 				clearDelayedShowAt();
-				if (_replyReturn) {
+				while (_replyReturn) {
 					if (_replyReturn->history() == _history && _replyReturn->id == showAtMsgId) {
 						calcNextReplyReturn();
 					} else if (_replyReturn->history() == _migrated && -_replyReturn->id == showAtMsgId) {
 						calcNextReplyReturn();
+					} else {
+						break;
 					}
 				}
 
@@ -1727,11 +1745,14 @@ void HistoryWidget::showHistory(const PeerId &peerId, MsgId showAtMsgId, bool re
 		_membersDropdown.destroy();
 		_scrollToAnimation.finish();
 		_history = _migrated = nullptr;
+		_list = nullptr;
 		_peer = nullptr;
 		_channel = NoChannel;
 		_canSendMessages = false;
 		_silent.destroy();
 		updateBotKeyboard();
+	} else {
+		Assert(_list == nullptr);
 	}
 
 	App::clearMousedItems();
@@ -1746,7 +1767,6 @@ void HistoryWidget::showHistory(const PeerId &peerId, MsgId showAtMsgId, bool re
 
 	_membersDropdownShowTimer.stop();
 	_scroll->takeWidget<HistoryInner>().destroy();
-	_list = nullptr;
 
 	clearInlineBot();
 
@@ -2073,6 +2093,7 @@ void HistoryWidget::updateControlsVisibility() {
 	if (_reportSpamPanel) {
 		_reportSpamPanel->show();
 	}
+	refreshAboutProxyPromotion();
 	if (!editingMessage() && (isBlocked() || isJoinChannel() || isMuteUnmute() || isBotStart())) {
 		if (isBlocked()) {
 			_joinChannel->hide();
@@ -2232,6 +2253,24 @@ void HistoryWidget::updateControlsVisibility() {
 	}
 	//checkTabbedSelectorToggleTooltip();
 	updateMouseTracking();
+}
+
+void HistoryWidget::refreshAboutProxyPromotion() {
+	if (_history->useProxyPromotion()) {
+		if (!_aboutProxyPromotion) {
+			_aboutProxyPromotion = object_ptr<Ui::PaddingWrap<Ui::FlatLabel>>(
+				this,
+				object_ptr<Ui::FlatLabel>(
+					this,
+					lang(lng_proxy_sponsor_about),
+					Ui::FlatLabel::InitType::Simple,
+					st::historyAboutProxy),
+				st::historyAboutProxyPadding);
+		}
+		_aboutProxyPromotion->show();
+	} else {
+		_aboutProxyPromotion.destroy();
+	}
 }
 
 void HistoryWidget::updateMouseTracking() {
@@ -2431,11 +2470,15 @@ void HistoryWidget::messagesReceived(PeerData *peer, const MTPmessages_Messages 
 				return;
 			}
 		}
-		if (_replyReturn) {
-			if (_replyReturn->history() == _history && _replyReturn->id == _delayedShowAtMsgId) {
+		while (_replyReturn) {
+			if (_replyReturn->history() == _history
+				&& _replyReturn->id == _delayedShowAtMsgId) {
 				calcNextReplyReturn();
-			} else if (_replyReturn->history() == _migrated && -_replyReturn->id == _delayedShowAtMsgId) {
+			} else if (_replyReturn->history() == _migrated
+				&& -_replyReturn->id == _delayedShowAtMsgId) {
 				calcNextReplyReturn();
+			} else {
+				break;
 			}
 		}
 
@@ -3955,6 +3998,12 @@ void HistoryWidget::moveFieldControls() {
 	_unblock->setGeometry(fullWidthButtonRect);
 	_joinChannel->setGeometry(fullWidthButtonRect);
 	_muteUnmute->setGeometry(fullWidthButtonRect);
+
+	if (_aboutProxyPromotion) {
+		_aboutProxyPromotion->moveToLeft(
+			0,
+			fullWidthButtonRect.y() - _aboutProxyPromotion->height());
+	}
 }
 
 void HistoryWidget::updateTabbedSelectorToggleTooltipGeometry() {
@@ -4675,7 +4724,7 @@ void HistoryWidget::itemRemoved(not_null<const HistoryItem*> item) {
 			cancelReply();
 		}
 	}
-	if (item == _replyReturn) {
+	while (item == _replyReturn) {
 		calcNextReplyReturn();
 	}
 	if (_pinnedBar && item->id == _pinnedBar->msgId) {
@@ -4773,6 +4822,10 @@ void HistoryWidget::updateHistoryGeometry(bool initial, bool loadedDown, const S
 	auto newScrollHeight = height() - _topBar->height();
 	if (!editingMessage() && (isBlocked() || isBotStart() || isJoinChannel() || isMuteUnmute())) {
 		newScrollHeight -= _unblock->height();
+		if (_aboutProxyPromotion) {
+			_aboutProxyPromotion->resizeToWidth(width());
+			newScrollHeight -= _aboutProxyPromotion->height();
+		}
 	} else {
 		if (editingMessage() || _canSendMessages) {
 			newScrollHeight -= (_field->height() + 2 * st::historySendPadding);
@@ -6706,6 +6759,9 @@ void HistoryWidget::paintEvent(QPaintEvent *e) {
 			}
 		} else if (isRestrictedWrite()) {
 			drawRestrictedWrite(p);
+		}
+		if (_aboutProxyPromotion) {
+			p.fillRect(_aboutProxyPromotion->geometry(), st::historyReplyBg);
 		}
 		if (_pinnedBar && !_pinnedBar->cancel->isHidden()) {
 			drawPinnedBar(p);
