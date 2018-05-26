@@ -430,10 +430,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_proxy_about" = "Proxy servers may be helpful in accessing Telegram if there is no connection in a specific region.";
 "lng_proxy_add" = "Add proxy";
 "lng_proxy_share" = "Share";
-"lng_proxy_online" = "online";
+"lng_proxy_online" = "connected";
 "lng_proxy_checking" = "checking";
 "lng_proxy_connecting" = "connecting";
-"lng_proxy_available" = "available (ping: {ping}ms)";
+"lng_proxy_available" = "available, {ping} ms ping";
 "lng_proxy_unavailable" = "not available";
 "lng_proxy_edit" = "Edit proxy";
 "lng_proxy_menu_edit" = "Edit";
@@ -1255,6 +1255,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_new_version_minor" = "— Bug fixes and other minor improvements";
 
 "lng_menu_insert_unicode" = "Insert Unicode control character";
+"lng_menu_formatting" = "Formatting";
+"lng_menu_formatting_bold" = "Bold";
+"lng_menu_formatting_italic" = "Italic";
+"lng_menu_formatting_monospace" = "Monospace";
+//"lng_menu_formatting_link" = "Create link";
+"lng_menu_formatting_clear" = "Plain text";
 
 "lng_full_name" = "{first_name} {last_name}";
 

@@ -74,6 +74,27 @@ std::map<int, const char*> AlphaLogs() {
 		"in Settings.\n"
 
 		"\xE2\x80\x94 Some critical bug fixes."
+	},
+	{
+		1002022,
+		"\xE2\x80\x94 Use markdown in media captions "
+		"(**bold**, __italic__, `tag` and ```code```).\n"
+
+		"\xE2\x80\x94 Use emoji replacement in media captions, "
+		"group and channel titles and descriptions (:like: etc.)\n"
+
+		"\xE2\x80\x94 Markdown replacement now happens immediately "
+		"after typing (instead of after sending) and can be "
+		"rolled back using Backspace or Ctrl/Cmd + Z. "
+		"Replacement no longer happens when pasting text."
+	},
+	{
+		1002023,
+		"\xE2\x80\x94 Apply formatting from input field context menu.\n"
+
+		"\xE2\x80\x94 Apply formatting by hotkeys.\n"
+
+		"\xE2\x80\x94 Bug fixes and other minor improvements."
 	}
 	};
 }

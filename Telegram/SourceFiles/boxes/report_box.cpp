@@ -82,9 +82,13 @@ void ReportBox::resizeEvent(QResizeEvent *e) {
 void ReportBox::reasonChanged(Reason reason) {
 	if (reason == Reason::Other) {
 		if (!_reasonOtherText) {
-			_reasonOtherText.create(this, st::profileReportReasonOther, langFactory(lng_report_reason_description));
+			_reasonOtherText.create(
+				this,
+				st::profileReportReasonOther,
+				Ui::InputField::Mode::MultiLine,
+				langFactory(lng_report_reason_description));
 			_reasonOtherText->show();
-			_reasonOtherText->setCtrlEnterSubmit(Ui::CtrlEnterSubmit::Both);
+			_reasonOtherText->setSubmitSettings(Ui::InputField::SubmitSettings::Both);
 			_reasonOtherText->setMaxLength(MaxPhotoCaption);
 			_reasonOtherText->resize(width() - (st::boxPadding.left() + st::boxOptionListPadding.left() + st::boxPadding.right()), _reasonOtherText->height());
 

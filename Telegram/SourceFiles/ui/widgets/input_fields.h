@@ -17,242 +17,24 @@ class UserData;
 
 namespace Ui {
 
-static UserData * const LookingUpInlineBot = SharedMemoryLocation<UserData, 0>();
+class PopupMenu;
 
-class FlatTextarea : public TWidgetHelper<QTextEdit>, protected base::Subscriber {
-	Q_OBJECT
+void InsertEmojiAtCursor(QTextCursor cursor, EmojiPtr emoji);
 
-public:
-	using TagList = TextWithTags::Tags;
-
-	static QByteArray serializeTagsList(const TagList &tags);
-	static TagList deserializeTagsList(QByteArray data, int textLength);
-	static QString tagsMimeType();
-
-	FlatTextarea(QWidget *parent, const style::FlatTextarea &st, base::lambda<QString()> placeholderFactory = base::lambda<QString()>(), const QString &val = QString(), const TagList &tags = TagList());
-
-	void setMaxLength(int maxLength);
-	void setMinHeight(int minHeight);
-	void setMaxHeight(int maxHeight);
-
-	void enableInstantReplaces(bool enabled);
-	void addInstantReplace(const QString &what, const QString &with);
-	void commmitInstantReplacement(
-		int from,
-		int till,
-		const QString &with,
-		base::optional<QString> checkOriginal = base::none);
-
-	void setPlaceholder(base::lambda<QString()> placeholderFactory, int afterSymbols = 0);
-	void updatePlaceholder();
-	void finishPlaceholder();
-
-	QRect getTextRect() const;
-	int fakeMargin() const;
-
-	QSize sizeHint() const override;
-	QSize minimumSizeHint() const override;
-
-	EmojiPtr getSingleEmoji() const;
-	QString getMentionHashtagBotCommandPart(bool &start) const;
-
-	// Get the current inline bot and request string for it.
-	// The *outInlineBot can be filled by LookingUpInlineBot shared ptr.
-	// In that case the caller should lookup the bot by *outInlineBotUsername.
-	QString getInlineBotQuery(UserData **outInlineBot, QString *outInlineBotUsername) const;
-
-	void removeSingleEmoji();
-	bool hasText() const;
-
-	bool isUndoAvailable() const;
-	bool isRedoAvailable() const;
-
-	void parseLinks();
-	QStringList linksList() const;
-
-	void insertFromMimeData(const QMimeData *source) override;
-
-	QMimeData *createMimeDataFromSelection() const override;
-
-	enum class SubmitSettings {
-		None,
-		Enter,
-		CtrlEnter,
-		Both,
-	};
-	void setSubmitSettings(SubmitSettings settings);
-
-	const TextWithTags &getTextWithTags() const {
-		return _lastTextWithTags;
-	}
-	TextWithTags getTextWithTagsPart(int start, int end = -1);
-	void insertTag(const QString &text, QString tagId = QString());
-
-	bool isEmpty() const {
-		return _lastTextWithTags.text.isEmpty();
-	}
-
-	enum UndoHistoryAction {
-		AddToUndoHistory,
-		MergeWithUndoHistory,
-		ClearUndoHistory
-	};
-	void setTextWithTags(const TextWithTags &textWithTags, UndoHistoryAction undoHistoryAction = AddToUndoHistory);
-
-	// If you need to make some preparations of tags before putting them to QMimeData
-	// (and then to clipboard or to drag-n-drop object), here is a strategy for that.
-	class TagMimeProcessor {
-	public:
-		virtual QString mimeTagFromTag(const QString &tagId) = 0;
-		virtual QString tagFromMimeTag(const QString &mimeTag) = 0;
-		virtual ~TagMimeProcessor() {
-		}
-	};
-	void setTagMimeProcessor(std::unique_ptr<TagMimeProcessor> &&processor);
-
-public slots:
-	void onTouchTimer();
-
-	void onDocumentContentsChange(int position, int charsRemoved, int charsAdded);
-	void onDocumentContentsChanged();
-
-	void onUndoAvailable(bool avail);
-	void onRedoAvailable(bool avail);
-
-signals:
-	void resized();
-	void changed();
-	void submitted(bool ctrlShiftEnter);
-	void cancelled();
-	void tabbed();
-	void spacedReturnedPasted();
-	void linksChanged();
-
-protected:
-	bool viewportEvent(QEvent *e) override;
-	void touchEvent(QTouchEvent *e);
-	void paintEvent(QPaintEvent *e) override;
-	void focusInEvent(QFocusEvent *e) override;
-	void focusOutEvent(QFocusEvent *e) override;
-	void keyPressEvent(QKeyEvent *e) override;
-	void resizeEvent(QResizeEvent *e) override;
-	void mousePressEvent(QMouseEvent *e) override;
-	void dropEvent(QDropEvent *e) override;
-	void contextMenuEvent(QContextMenuEvent *e) override;
-
-	virtual void correctValue(
-		const QString &was,
-		QString &now,
-		TagList &nowTags) {
-	}
-
-	void insertEmoji(EmojiPtr emoji, QTextCursor c);
-
-	QVariant loadResource(int type, const QUrl &name) override;
-
-	void checkContentHeight();
-
-private:
-	struct InstantReplaceNode {
+struct InstantReplaces {
+	struct Node {
 		QString text;
-		std::map<QChar, InstantReplaceNode> tail;
+		std::map<QChar, Node> tail;
 	};
-	void updatePalette();
-	void refreshPlaceholder();
 
-	// "start" and "end" are in coordinates of text where emoji are replaced
-	// by ObjectReplacementCharacter. If "end" = -1 means get text till the end.
-	QString getTextPart(int start, int end, TagList *outTagsList, bool *outTagsChanged = nullptr) const;
+	void add(const QString &what, const QString &with);
 
-	void getSingleEmojiFragment(QString &text, QTextFragment &fragment) const;
+	static const InstantReplaces &Default();
 
-	// After any characters added we must postprocess them. This includes:
-	// 1. Replacing font family to semibold for ~ characters, if we used Open Sans 13px.
-	// 2. Replacing font family from semibold for all non-~ characters, if we used ...
-	// 3. Replacing emoji code sequences by ObjectReplacementCharacters with emoji pics.
-	// 4. Interrupting tags in which the text was inserted by any char except a letter.
-	// 5. Applying tags from "_insertedTags" in case we pasted text with tags, not just text.
-	// Rule 4 applies only if we inserted chars not in the middle of a tag (but at the end).
-	void processFormatting(int changedPosition, int changedEnd);
-
-	void processInstantReplaces(const QString &text);
-	void applyInstantReplace(const QString &what, const QString &with);
-	bool revertInstantReplace();
-
-	bool heightAutoupdated();
-
-	int placeholderSkipWidth() const;
-
-	int _minHeight = -1; // < 0 - no autosize
-	int _maxHeight = -1;
-	int _maxLength = -1;
-	SubmitSettings _submitSettings = SubmitSettings::Enter;
-
-	QString _placeholder;
-	base::lambda<QString()> _placeholderFactory;
-	int _placeholderAfterSymbols = 0;
-	bool _focused = false;
-	bool _placeholderVisible = true;
-	Animation _a_placeholderFocused;
-	Animation _a_placeholderVisible;
-
-	TextWithTags _lastTextWithTags;
-
-	// Tags list which we should apply while setText() call or insert from mime data.
-	TagList _insertedTags;
-	bool _insertedTagsAreFromMime;
-
-	// Override insert position and charsAdded from complex text editing
-	// (like drag-n-drop in the same text edit field).
-	int _realInsertPosition = -1;
-	int _realCharsAdded = 0;
-
-	std::unique_ptr<TagMimeProcessor> _tagMimeProcessor;
-
-	const style::FlatTextarea &_st;
-
-	bool _undoAvailable = false;
-	bool _redoAvailable = false;
-	bool _inDrop = false;
-	bool _inHeightCheck = false;
-
-	int _fakeMargin = 0;
-
-	QTimer _touchTimer;
-	bool _touchPress = false;
-	bool _touchRightButton = false;
-	bool _touchMove = false;
-	QPoint _touchStart;
-
-	bool _correcting = false;
-
-#ifdef TDESKTOP_ENABLE_SONNET_SPELLCHECK
-	Sonnet::SpellCheckDecorator *_SpellCheckDecorator;
-#endif 
-
-	struct LinkRange {
-		int start;
-		int length;
-	};
-	friend bool operator==(const LinkRange &a, const LinkRange &b);
-	friend bool operator!=(const LinkRange &a, const LinkRange &b);
-	using LinkRanges = QVector<LinkRange>;
-	LinkRanges _links;
-
-	QTextCharFormat _defaultCharFormat;
-
-	int _instantReplaceMaxLength = 0;
-	InstantReplaceNode _reverseInstantReplaces;
-	bool _instantReplacesEnabled = true;
+	int maxLength = 0;
+	Node reverseMap;
 
 };
-
-inline bool operator==(const FlatTextarea::LinkRange &a, const FlatTextarea::LinkRange &b) {
-	return (a.start == b.start) && (a.length == b.length);
-}
-inline bool operator!=(const FlatTextarea::LinkRange &a, const FlatTextarea::LinkRange &b) {
-	return !(a == b);
-}
 
 class FlatInput : public TWidgetHelper<QLineEdit>, private base::Subscriber {
 	Q_OBJECT
@@ -335,32 +117,103 @@ private:
 	QPoint _touchStart;
 };
 
-enum class CtrlEnterSubmit {
-	Enter,
-	CtrlEnter,
-	Both,
-};
-
-class InputArea : public RpWidget, private base::Subscriber {
+class InputField : public RpWidget, private base::Subscriber {
 	Q_OBJECT
 
 public:
-	InputArea(
+	enum class Mode {
+		SingleLine,
+		MultiLine,
+	};
+	using TagList = TextWithTags::Tags;
+
+	struct PossibleTag {
+		int start = 0;
+		int length = 0;
+		QString tag;
+	};
+	static const QString kTagBold;
+	static const QString kTagItalic;
+	static const QString kTagCode;
+	static const QString kTagPre;
+
+	InputField(
 		QWidget *parent,
 		const style::InputField &st,
-		base::lambda<QString()> placeholderFactory = base::lambda<QString()>(),
-		const QString &val = QString());
+		base::lambda<QString()> placeholderFactory,
+		const QString &value = QString());
+	InputField(
+		QWidget *parent,
+		const style::InputField &st,
+		Mode mode,
+		base::lambda<QString()> placeholderFactory,
+		const QString &value);
+	InputField(
+		QWidget *parent,
+		const style::InputField &st,
+		Mode mode = Mode::SingleLine,
+		base::lambda<QString()> placeholderFactory = nullptr,
+		const TextWithTags &value = TextWithTags());
 
 	void showError();
 
-	void setMaxLength(int maxLength) {
-		_maxLength = maxLength;
+	void setMaxLength(int maxLength);
+	void setMinHeight(int minHeight);
+	void setMaxHeight(int maxHeight);
+
+	const TextWithTags &getTextWithTags() const {
+		return _lastTextWithTags;
 	}
+	TextWithTags getTextWithTagsPart(int start, int end = -1) const;
+	void insertTag(const QString &text, QString tagId = QString());
+	bool empty() const {
+		return _lastTextWithTags.text.isEmpty();
+	}
+	enum class HistoryAction {
+		NewEntry,
+		MergeEntry,
+		Clear,
+	};
+	void setTextWithTags(
+		const TextWithTags &textWithTags,
+		HistoryAction historyAction = HistoryAction::NewEntry);
+
+	// If you need to make some preparations of tags before putting them to QMimeData
+	// (and then to clipboard or to drag-n-drop object), here is a strategy for that.
+	class TagMimeProcessor {
+	public:
+		virtual QString mimeTagFromTag(const QString &tagId) = 0;
+		virtual QString tagFromMimeTag(const QString &mimeTag) = 0;
+		virtual ~TagMimeProcessor() {
+		}
+	};
+	void setTagMimeProcessor(std::unique_ptr<TagMimeProcessor> &&processor);
+
+	void setAdditionalMargin(int margin);
+
+	void setInstantReplaces(const InstantReplaces &replaces);
+	void setInstantReplacesEnabled(rpl::producer<bool> enabled);
+	void setMarkdownReplacesEnabled(rpl::producer<bool> enabled);
+	void commitInstantReplacement(
+		int from,
+		int till,
+		const QString &with,
+		base::optional<QString> checkOriginal = base::none);
+	bool commitMarkdownReplacement(
+		int from,
+		int till,
+		const QString &tag,
+		const QString &edge = QString());
+	void toggleSelectionMarkdown(const QString &tag);
+	void clearSelectionMarkdown();
 
 	const QString &getLastText() const {
-		return _oldtext;
+		return _lastTextWithTags.text;
 	}
-	void setPlaceholder(base::lambda<QString()> placeholderFactory);
+	void setPlaceholder(
+		base::lambda<QString()> placeholderFactory,
+		int afterSymbols = 0);
+	void setPlaceholderHidden(bool forcePlaceholderHidden);
 	void setDisplayFocused(bool focused);
 	void finishAnimating();
 	void setFocusFast() {
@@ -371,38 +224,34 @@ public:
 	QSize sizeHint() const override;
 	QSize minimumSizeHint() const override;
 
-	QString getText(int start = 0, int end = -1) const;
 	bool hasText() const;
+	void selectAll();
 
 	bool isUndoAvailable() const;
 	bool isRedoAvailable() const;
 
+	enum class SubmitSettings {
+		None,
+		Enter,
+		CtrlEnter,
+		Both,
+	};
+	void setSubmitSettings(SubmitSettings settings);
 	void customUpDown(bool isCustom);
-	void setCtrlEnterSubmit(CtrlEnterSubmit ctrlEnterSubmit);
+	void customTab(bool isCustom);
 
-	void setTextCursor(const QTextCursor &cursor) {
-		return _inner->setTextCursor(cursor);
-	}
-	QTextCursor textCursor() const {
-		return _inner->textCursor();
-	}
-	void setText(const QString &text) {
-		_inner->setText(text);
-		startPlaceholderAnimation();
-	}
-	void clear() {
-		_inner->clear();
-		startPlaceholderAnimation();
-	}
-	bool hasFocus() const {
-		return _inner->hasFocus();
-	}
-	void setFocus() {
-		_inner->setFocus();
-	}
-	void clearFocus() {
-		_inner->clearFocus();
-	}
+	not_null<QTextDocument*> document();
+	not_null<const QTextDocument*> document() const;
+	void setTextCursor(const QTextCursor &cursor);
+	void setCursorPosition(int position);
+	QTextCursor textCursor() const;
+	void setText(const QString &text);
+	void clear();
+	bool hasFocus() const;
+	void setFocus();
+	void clearFocus();
+	not_null<QTextEdit*> rawTextEdit();
+	not_null<const QTextEdit*> rawTextEdit() const;
 
 	enum class MimeAction {
 		Check,
@@ -415,11 +264,14 @@ public:
 		_mimeDataHook = std::move(hook);
 	}
 
+	const rpl::variable<int> &scrollTop() const;
+	int scrollTopMax() const;
+	void scrollTo(int top);
+
 private slots:
 	void onTouchTimer();
 
 	void onDocumentContentsChange(int position, int charsRemoved, int charsAdded);
-	void onDocumentContentsChanged();
 
 	void onUndoAvailable(bool avail);
 	void onRedoAvailable(bool avail);
@@ -431,7 +283,6 @@ signals:
 	void submitted(bool ctrlShiftEnter);
 	void cancelled();
 	void tabbed();
-
 	void focused();
 	void blurred();
 	void resized();
@@ -440,15 +291,6 @@ protected:
 	void startPlaceholderAnimation();
 	void startBorderAnimation();
 
-	void insertEmoji(EmojiPtr emoji, QTextCursor c);
-	TWidget *tparent() {
-		return qobject_cast<TWidget*>(parentWidget());
-	}
-	const TWidget *tparent() const {
-		return qobject_cast<const TWidget*>(parentWidget());
-	}
-
-	void touchEvent(QTouchEvent *e);
 	void paintEvent(QPaintEvent *e) override;
 	void focusInEvent(QFocusEvent *e) override;
 	void mousePressEvent(QMouseEvent *e) override;
@@ -456,62 +298,110 @@ protected:
 	void resizeEvent(QResizeEvent *e) override;
 
 private:
-	class Inner : public QTextEdit {
-	public:
-		Inner(InputArea *parent);
-
-		QVariant loadResource(int type, const QUrl &name) override;
-
-	protected:
-		bool viewportEvent(QEvent *e) override;
-		void focusInEvent(QFocusEvent *e) override;
-		void focusOutEvent(QFocusEvent *e) override;
-		void keyPressEvent(QKeyEvent *e) override;
-		void contextMenuEvent(QContextMenuEvent *e) override;
-
-		bool canInsertFromMimeData(const QMimeData *source) const override;
-		void insertFromMimeData(const QMimeData *source) override;
-		QMimeData *createMimeDataFromSelection() const override;
-
-	private:
-		InputArea *f() const {
-			return static_cast<InputArea*>(parentWidget());
-		}
-		friend class InputArea;
-
-	};
+	class Inner;
 	friend class Inner;
+
+	void handleContentsChanged();
+	bool viewportEventInner(QEvent *e);
+	QVariant loadResource(int type, const QUrl &name);
+	void handleTouchEvent(QTouchEvent *e);
 
 	void updatePalette();
 	void refreshPlaceholder();
+	int placeholderSkipWidth() const;
 
 	bool heightAutoupdated();
 	void checkContentHeight();
 	void setErrorShown(bool error);
 
-	void focusInInner(bool focusByMouse);
-	void focusOutInner();
+	void focusInEventInner(QFocusEvent *e);
+	void focusOutEventInner(QFocusEvent *e);
 	void setFocused(bool focused);
+	void keyPressEventInner(QKeyEvent *e);
+	void contextMenuEventInner(QContextMenuEvent *e);
+	void dropEventInner(QDropEvent *e);
+	void inputMethodEventInner(QInputMethodEvent *e);
 
-	void processDocumentContentsChange(int position, int charsAdded);
+	QMimeData *createMimeDataFromSelectionInner() const;
+	bool canInsertFromMimeDataInner(const QMimeData *source) const;
+	void insertFromMimeDataInner(const QMimeData *source);
+
+	// "start" and "end" are in coordinates of text where emoji are replaced
+	// by ObjectReplacementCharacter. If "end" = -1 means get text till the end.
+	QString getTextPart(
+		int start,
+		int end,
+		TagList &outTagsList,
+		bool &outTagsChanged,
+		std::vector<PossibleTag> *outPossibleTags = nullptr) const;
+
+	// After any characters added we must postprocess them. This includes:
+	// 1. Replacing font family to semibold for ~ characters, if we used Open Sans 13px.
+	// 2. Replacing font family from semibold for all non-~ characters, if we used ...
+	// 3. Replacing emoji code sequences by ObjectReplacementCharacters with emoji pics.
+	// 4. Interrupting tags in which the text was inserted by any char except a letter.
+	// 5. Applying tags from "_insertedTags" in case we pasted text with tags, not just text.
+	// Rule 4 applies only if we inserted chars not in the middle of a tag (but at the end).
+	void processFormatting(int changedPosition, int changedEnd);
+
+	void chopByMaxLength(int insertPosition, int insertLength);
+
+	bool processMarkdownReplaces(const QString &appended);
+	bool processMarkdownReplace(const QString &tag);
+	void addMarkdownActions(not_null<QMenu*> menu);
+	void addMarkdownMenuAction(
+		not_null<QMenu*> menu,
+		not_null<QAction*> action);
+	bool handleMarkdownKey(QKeyEvent *e);
+
+	// We don't want accidentally detach InstantReplaces map.
+	// So we access it only by const reference from this method.
+	const InstantReplaces &instantReplaces() const;
+	void processInstantReplaces(const QString &appended);
+	void applyInstantReplace(const QString &what, const QString &with);
+
+	bool revertFormatReplace();
 
 	const style::InputField &_st;
 
+	Mode _mode = Mode::SingleLine;
 	int _maxLength = -1;
+	int _minHeight = -1;
+	int _maxHeight = -1;
+	bool _forcePlaceholderHidden = false;
+	bool _reverseMarkdownReplacement = false;
 
 	object_ptr<Inner> _inner;
 
-	QString _oldtext;
+	TextWithTags _lastTextWithTags;
+	std::vector<PossibleTag> _textAreaPossibleTags;
+	QString _lastPreEditText;
 
-	CtrlEnterSubmit _ctrlEnterSubmit = CtrlEnterSubmit::CtrlEnter;
+	// Tags list which we should apply while setText() call or insert from mime data.
+	TagList _insertedTags;
+	bool _insertedTagsAreFromMime;
+
+	// Override insert position and charsAdded from complex text editing
+	// (like drag-n-drop in the same text edit field).
+	int _realInsertPosition = -1;
+	int _realCharsAdded = 0;
+
+	std::unique_ptr<TagMimeProcessor> _tagMimeProcessor;
+
+	SubmitSettings _submitSettings = SubmitSettings::Enter;
+	bool _markdownEnabled = false;
 	bool _undoAvailable = false;
 	bool _redoAvailable = false;
+	bool _inDrop = false;
 	bool _inHeightCheck = false;
+	int _additionalMargin = 0;
 
 	bool _customUpDown = false;
+	bool _customTab = false;
 
 	QString _placeholder;
 	base::lambda<QString()> _placeholderFactory;
+	int _placeholderAfterSymbols = 0;
 	Animation _a_placeholderShifted;
 	bool _placeholderShifted = false;
 	QPainterPath _placeholderPath;
@@ -532,194 +422,22 @@ private:
 	bool _touchRightButton = false;
 	bool _touchMove = false;
 	QPoint _touchStart;
+
+#ifdef TDESKTOP_ENABLE_SONNET_SPELLCHECK
+	Sonnet::SpellCheckDecorator *_SpellCheckDecorator;
+#endif 
 
 	bool _correcting = false;
 	MimeDataHook _mimeDataHook;
+	base::unique_qptr<Ui::PopupMenu> _contextMenu;
 
-};
+	QTextCharFormat _defaultCharFormat;
 
-class InputField : public RpWidget, private base::Subscriber {
-	Q_OBJECT
+	rpl::variable<int> _scrollTop;
 
-public:
-	InputField(QWidget *parent, const style::InputField &st, base::lambda<QString()> placeholderFactory = base::lambda<QString()>(), const QString &val = QString());
+	InstantReplaces _mutableInstantReplaces;
+	bool _instantReplacesEnabled = true;
 
-	void setMaxLength(int maxLength) {
-		_maxLength = maxLength;
-	}
-
-	void showError();
-
-	const QString &getLastText() const {
-		return _oldtext;
-	}
-	void setPlaceholder(base::lambda<QString()> placeholderFactory);
-	void setPlaceholderHidden(bool forcePlaceholderHidden);
-	void setDisplayFocused(bool focused);
-	void finishAnimating();
-	void setFocusFast() {
-		setDisplayFocused(true);
-		setFocus();
-	}
-
-	QSize sizeHint() const override;
-	QSize minimumSizeHint() const override;
-
-	QString getText(int start = 0, int end = -1) const;
-	bool hasText() const;
-
-	bool isUndoAvailable() const;
-	bool isRedoAvailable() const;
-
-	void customUpDown(bool isCustom);
-
-	void setTextCursor(const QTextCursor &cursor) {
-		return _inner->setTextCursor(cursor);
-	}
-	QTextCursor textCursor() const {
-		return _inner->textCursor();
-	}
-	void setText(const QString &text) {
-		_inner->setText(text);
-		startPlaceholderAnimation();
-	}
-	void clear() {
-		_inner->clear();
-		startPlaceholderAnimation();
-	}
-	bool hasFocus() const {
-		return _inner->hasFocus();
-	}
-	void setFocus() {
-		_inner->setFocus();
-		auto cursor = _inner->textCursor();
-		cursor.movePosition(QTextCursor::End);
-		_inner->setTextCursor(cursor);
-	}
-	void clearFocus() {
-		_inner->clearFocus();
-	}
-	void setCursorPosition(int pos) {
-		auto cursor = _inner->textCursor();
-		cursor.setPosition(pos);
-		_inner->setTextCursor(cursor);
-	}
-
-public slots:
-	void selectAll();
-
-private slots:
-	void onTouchTimer();
-
-	void onDocumentContentsChange(int position, int charsRemoved, int charsAdded);
-	void onDocumentContentsChanged();
-
-	void onUndoAvailable(bool avail);
-	void onRedoAvailable(bool avail);
-
-	void onFocusInner();
-
-signals:
-	void changed();
-	void submitted(bool ctrlShiftEnter);
-	void cancelled();
-	void tabbed();
-
-	void focused();
-	void blurred();
-
-protected:
-	void startPlaceholderAnimation();
-	void startBorderAnimation();
-
-	void insertEmoji(EmojiPtr emoji, QTextCursor c);
-	TWidget *tparent() {
-		return qobject_cast<TWidget*>(parentWidget());
-	}
-	const TWidget *tparent() const {
-		return qobject_cast<const TWidget*>(parentWidget());
-	}
-
-	void touchEvent(QTouchEvent *e);
-	void paintEvent(QPaintEvent *e) override;
-	void focusInEvent(QFocusEvent *e) override;
-	void mousePressEvent(QMouseEvent *e) override;
-	void contextMenuEvent(QContextMenuEvent *e) override;
-	void resizeEvent(QResizeEvent *e) override;
-
-private:
-	class Inner : public QTextEdit {
-	public:
-		Inner(InputField *parent);
-
-		QVariant loadResource(int type, const QUrl &name) override;
-
-	protected:
-		bool viewportEvent(QEvent *e) override;
-		void focusInEvent(QFocusEvent *e) override;
-		void focusOutEvent(QFocusEvent *e) override;
-		void keyPressEvent(QKeyEvent *e) override;
-		void contextMenuEvent(QContextMenuEvent *e) override;
-
-		QMimeData *createMimeDataFromSelection() const override;
-
-	private:
-		InputField *f() const {
-			return static_cast<InputField*>(parentWidget());
-		}
-		friend class InputField;
-
-	};
-	friend class Inner;
-
-	void updatePalette();
-	void refreshPlaceholder();
-	void setErrorShown(bool error);
-
-	void focusInInner(bool focusByMouse);
-	void focusOutInner();
-	void setFocused(bool focused);
-
-	void processDocumentContentsChange(int position, int charsAdded);
-
-	const style::InputField &_st;
-
-	std::unique_ptr<Inner> _inner;
-
-	int _maxLength = -1;
-	bool _forcePlaceholderHidden = false;
-
-	QString _oldtext;
-
-	bool _undoAvailable = false;
-	bool _redoAvailable = false;
-
-	bool _customUpDown = true;
-
-	QString _placeholder;
-	base::lambda<QString()> _placeholderFactory;
-	Animation _a_placeholderShifted;
-	bool _placeholderShifted = false;
-	QPainterPath _placeholderPath;
-
-	Animation _a_borderShown;
-	int _borderAnimationStart = 0;
-	Animation _a_borderOpacity;
-	bool _borderVisible = false;
-
-	Animation _a_focused;
-	Animation _a_error;
-
-	bool _focused = false;
-	bool _error = false;
-
-	QTimer _touchTimer;
-	bool _touchPress = false;
-	bool _touchRightButton = false;
-	bool _touchMove = false;
-	QPoint _touchStart;
-
-	bool _correcting = false;
 };
 
 class MaskedInputField

@@ -38,6 +38,7 @@ namespace {
 
 constexpr auto kUsernameCheckTimeout = TimeMs(200);
 constexpr auto kMinUsernameLength = 5;
+constexpr auto kMaxGroupChannelTitle = 255; // See also add_contact_box.
 constexpr auto kMaxChannelDescription = 255; // See also add_contact_box.
 
 class Controller
@@ -71,7 +72,7 @@ private:
 	};
 	struct Controls {
 		Ui::InputField *title = nullptr;
-		Ui::InputArea *description = nullptr;
+		Ui::InputField *description = nullptr;
 		Ui::UserpicButton *photo = nullptr;
 		rpl::lifetime initialPhotoImageWaiting;
 
@@ -299,6 +300,10 @@ object_ptr<Ui::RpWidget> Controller::createTitleEdit() {
 				: lng_dlg_new_channel_name),
 			_peer->name),
 		st::editPeerTitleMargins);
+	result->entity()->setMaxLength(kMaxGroupChannelTitle);
+	result->entity()->setInstantReplaces(Ui::InstantReplaces::Default());
+	result->entity()->setInstantReplacesEnabled(
+		Global::ReplaceEmojiValue());
 
 	QObject::connect(
 		result->entity(),
@@ -317,19 +322,23 @@ object_ptr<Ui::RpWidget> Controller::createDescriptionEdit() {
 		return nullptr;
 	}
 
-	auto result = object_ptr<Ui::PaddingWrap<Ui::InputArea>>(
+	auto result = object_ptr<Ui::PaddingWrap<Ui::InputField>>(
 		_wrap,
-		object_ptr<Ui::InputArea>(
+		object_ptr<Ui::InputField>(
 			_wrap,
 			st::editPeerDescription,
+			Ui::InputField::Mode::MultiLine,
 			langFactory(lng_create_group_description),
 			channel->about()),
 		st::editPeerDescriptionMargins);
 	result->entity()->setMaxLength(kMaxChannelDescription);
+	result->entity()->setInstantReplaces(Ui::InstantReplaces::Default());
+	result->entity()->setInstantReplacesEnabled(
+		Global::ReplaceEmojiValue());
 
 	QObject::connect(
 		result->entity(),
-		&Ui::InputArea::submitted,
+		&Ui::InputField::submitted,
 		[this] { submitDescription(); });
 
 	_controls.description = result->entity();

@@ -760,13 +760,20 @@ void Notification::showReplyField() {
 	_background->setGeometry(0, st::notifyMinHeight, width(), st::notifySendReply.height + st::notifyBorderWidth);
 	_background->show();
 
-	_replyArea.create(this, st::notifyReplyArea, langFactory(lng_message_ph), QString());
+	_replyArea.create(
+		this,
+		st::notifyReplyArea,
+		Ui::InputField::Mode::MultiLine,
+		langFactory(lng_message_ph));
 	_replyArea->resize(width() - st::notifySendReply.width - 2 * st::notifyBorderWidth, st::notifySendReply.height);
 	_replyArea->moveToLeft(st::notifyBorderWidth, st::notifyMinHeight);
 	_replyArea->show();
 	_replyArea->setFocus();
 	_replyArea->setMaxLength(MaxMessageSize);
-	_replyArea->setCtrlEnterSubmit(Ui::CtrlEnterSubmit::Both);
+	_replyArea->setSubmitSettings(Ui::InputField::SubmitSettings::Both);
+	_replyArea->setInstantReplaces(Ui::InstantReplaces::Default());
+	_replyArea->setInstantReplacesEnabled(Global::ReplaceEmojiValue());
+	_replyArea->setMarkdownReplacesEnabled(rpl::single(true));
 
 	// Catch mouse press event to activate the window.
 	QCoreApplication::instance()->installEventFilter(this);
@@ -790,7 +797,10 @@ void Notification::sendReply() {
 
 	auto peerId = _history->peer->id;
 	auto msgId = _item ? _item->id : ShowAtUnreadMsgId;
-	manager()->notificationReplied(peerId, msgId, _replyArea->getLastText());
+	manager()->notificationReplied(
+		peerId,
+		msgId,
+		_replyArea->getTextWithTags());
 
 	manager()->startAllHiding();
 }
