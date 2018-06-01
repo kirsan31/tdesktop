@@ -557,6 +557,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_profile_actions_section" = "Actions";
 "lng_profile_bot_settings" = "Bot Settings";
 "lng_profile_bot_help" = "Bot Help";
+"lng_profile_bot_privacy" = "Bot Privacy Policy";
 "lng_profile_invite_link_section" = "Invite link";
 "lng_profile_create_public_link" = "Create public link";
 "lng_profile_edit_public_link" = "Edit public link";
@@ -1259,8 +1260,14 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_menu_formatting_bold" = "Bold";
 "lng_menu_formatting_italic" = "Italic";
 "lng_menu_formatting_monospace" = "Monospace";
-//"lng_menu_formatting_link" = "Create link";
+"lng_menu_formatting_link_create" = "Create link";
+"lng_menu_formatting_link_edit" = "Edit link";
 "lng_menu_formatting_clear" = "Plain text";
+"lng_formatting_link_create_title" = "Create link";
+"lng_formatting_link_edit_title" = "Create link";
+"lng_formatting_link_text" = "Text";
+"lng_formatting_link_url" = "URL";
+"lng_formatting_link_create" = "Create";
 
 "lng_full_name" = "{first_name} {last_name}";
 
@@ -1485,6 +1492,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_info_feed_title" = "Feed Info";
 "lng_info_feed_is_default" = "Group new channels";
 "lng_info_feed_channels" = "Channels";
+
+"lng_terms_signup" = "By signing up,\nyou agree to the {link}.";
+"lng_terms_signup_link" = "Terms of Service";
+"lng_terms_header" = "Terms of Service";
+"lng_terms_agree" = "Agree & Continue";
 
 // Wnd specific
 

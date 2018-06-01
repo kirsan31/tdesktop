@@ -1534,7 +1534,8 @@ MTPVector<MTPMessageEntity> EntitiesToMTP(const EntitiesInText &entities, Conver
 			&& entity.type() != EntityInTextItalic
 			&& entity.type() != EntityInTextCode
 			&& entity.type() != EntityInTextPre
-			&& entity.type() != EntityInTextMentionName) {
+			&& entity.type() != EntityInTextMentionName
+			&& entity.type() != EntityInTextCustomUrl) {
 			continue;
 		}
 
@@ -1578,7 +1579,7 @@ TextWithEntities ParseEntities(const QString &text, int32 flags) {
 	return result;
 }
 
-// Some code is duplicated in flattextarea.cpp!
+// Some code is duplicated in message_field.cpp!
 void ParseEntities(TextWithEntities &result, int32 flags, bool rich) {
 	constexpr auto kNotFound = std::numeric_limits<int>::max();
 

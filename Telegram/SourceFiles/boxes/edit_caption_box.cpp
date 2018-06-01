@@ -25,8 +25,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 EditCaptionBox::EditCaptionBox(
 	QWidget*,
+	not_null<Window::Controller*> controller,
 	not_null<HistoryItem*> item)
-: _msgId(item->fullId()) {
+: _controller(controller)
+, _msgId(item->fullId()) {
 	Expects(item->media() != nullptr);
 	Expects(item->media()->allowsEditCaption());
 
@@ -146,6 +148,8 @@ EditCaptionBox::EditCaptionBox(
 	_field->setInstantReplaces(Ui::InstantReplaces::Default());
 	_field->setInstantReplacesEnabled(Global::ReplaceEmojiValue());
 	_field->setMarkdownReplacesEnabled(rpl::single(true));
+	_field->setEditLinkCallback(
+		DefaultEditLinkCallback(_controller, _field));
 }
 
 void EditCaptionBox::prepareGifPreview(DocumentData *document) {
@@ -190,13 +194,9 @@ void EditCaptionBox::prepare() {
 	addButton(langFactory(lng_cancel), [this] { closeBox(); });
 
 	updateBoxSize();
-	connect(_field, &Ui::InputField::submitted, this, [this] { save(); });
-	connect(_field, &Ui::InputField::cancelled, this, [this] {
-		closeBox();
-	});
-	connect(_field, &Ui::InputField::resized, this, [this] {
-		captionResized();
-	});
+	connect(_field, &Ui::InputField::submitted, [=] { save(); });
+	connect(_field, &Ui::InputField::cancelled, [=] { closeBox(); });
+	connect(_field, &Ui::InputField::resized, [=] { captionResized(); });
 
 	auto cursor = _field->textCursor();
 	cursor.movePosition(QTextCursor::End);
@@ -345,7 +345,7 @@ void EditCaptionBox::save() {
 	if (_previewCancelled) {
 		flags |= MTPmessages_EditMessage::Flag::f_no_webpage;
 	}
-	const auto textWithTags = _field->getTextWithTags();
+	const auto textWithTags = _field->getTextWithAppliedMarkdown();
 	auto sending = TextWithEntities{
 		textWithTags.text,
 		ConvertTextTagsToEntities(textWithTags.tags)
@@ -368,6 +368,7 @@ void EditCaptionBox::save() {
 			item->history()->peer->input,
 			MTP_int(item->id),
 			MTP_string(sending.text),
+			MTPInputMedia(),
 			MTPnullMarkup,
 			sentEntities,
 			MTP_inputGeoPointEmpty()),

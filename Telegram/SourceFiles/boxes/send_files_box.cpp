@@ -1319,10 +1319,12 @@ void SendFilesBox::AlbumPreview::mouseReleaseEvent(QMouseEvent *e) {
 
 SendFilesBox::SendFilesBox(
 	QWidget*,
+	not_null<Window::Controller*> controller,
 	Storage::PreparedList &&list,
 	const TextWithTags &caption,
 	CompressConfirm compressed)
-: _list(std::move(list))
+: _controller(controller)
+, _list(std::move(list))
 , _compressConfirmInitial(compressed)
 , _compressConfirm(compressed)
 , _caption(
@@ -1556,17 +1558,18 @@ void SendFilesBox::applyAlbumOrder() {
 void SendFilesBox::setupCaption() {
 	_caption->setMaxLength(MaxPhotoCaption);
 	_caption->setSubmitSettings(Ui::InputField::SubmitSettings::Both);
-	connect(_caption, &Ui::InputField::resized, this, [this] {
+	connect(_caption, &Ui::InputField::resized, [=] {
 		captionResized();
 	});
-	connect(_caption, &Ui::InputField::submitted, this, [this](
-			bool ctrlShiftEnter) {
+	connect(_caption, &Ui::InputField::submitted, [=](
+			Qt::KeyboardModifiers modifiers) {
+		const auto ctrlShiftEnter = modifiers.testFlag(Qt::ShiftModifier)
+			&& (modifiers.testFlag(Qt::ControlModifier)
+				|| modifiers.testFlag(Qt::MetaModifier));
 		send(ctrlShiftEnter);
 	});
-	connect(_caption, &Ui::InputField::cancelled, this, [this] {
-		closeBox();
-	});
-	_caption->setMimeDataHook([this](
+	connect(_caption, &Ui::InputField::cancelled, [=] { closeBox(); });
+	_caption->setMimeDataHook([=](
 			not_null<const QMimeData*> data,
 			Ui::InputField::MimeAction action) {
 		if (action == Ui::InputField::MimeAction::Check) {
@@ -1579,6 +1582,8 @@ void SendFilesBox::setupCaption() {
 	_caption->setInstantReplaces(Ui::InstantReplaces::Default());
 	_caption->setInstantReplacesEnabled(Global::ReplaceEmojiValue());
 	_caption->setMarkdownReplacesEnabled(rpl::single(true));
+	_caption->setEditLinkCallback(
+		DefaultEditLinkCallback(_controller, _caption));
 }
 
 void SendFilesBox::captionResized() {
@@ -1790,7 +1795,7 @@ void SendFilesBox::send(bool ctrlShiftEnter) {
 	_confirmed = true;
 	if (_confirmedCallback) {
 		auto caption = _caption
-			? _caption->getTextWithTags()
+			? _caption->getTextWithAppliedMarkdown()
 			: TextWithTags();
 		_confirmedCallback(
 			std::move(_list),
