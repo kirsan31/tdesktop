@@ -18,6 +18,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "messenger.h"
 #ifdef TDESKTOP_ENABLE_SONNET_SPELLCHECK
 #include <highlighter.h>
+#include <spellcheckdecorator.h>
 #endif
 
 namespace Ui {
@@ -702,7 +703,7 @@ class InputField::Inner final : public QTextEdit {
 public:
 	Inner(not_null<InputField*> parent) : QTextEdit(parent) {
 #ifdef TDESKTOP_ENABLE_SONNET_SPELLCHECK
-		parent->_SpellCheckDecorator = new Sonnet::SpellCheckDecorator(this);
+		_SpellCheckDecorator = std::make_unique<Sonnet::SpellCheckDecorator>(this);
 #endif 
 	}
 
@@ -747,6 +748,9 @@ private:
 	not_null<InputField*> outer() const {
 		return static_cast<InputField*>(parentWidget());
 	}
+#ifdef TDESKTOP_ENABLE_SONNET_SPELLCHECK
+	std::unique_ptr<Sonnet::SpellCheckDecorator> _SpellCheckDecorator;
+#endif 
 	friend class InputField;
 
 };
@@ -3073,7 +3077,7 @@ void InputField::contextMenuEventInner(QContextMenuEvent *e) {
 	if (const auto menu = _inner->createStandardContextMenu()) {
 		addMarkdownActions(menu, e);
 #ifdef TDESKTOP_ENABLE_SONNET_SPELLCHECK
-		auto h = _SpellCheckDecorator->highlighter();
+		auto h = _inner->_SpellCheckDecorator->highlighter();
 		if (h) {
 			menu->addSeparator();
 			menu->addAction(h->isActive() ? qsl("Disable spell checking") : qsl("Enable spell checking"), [=] {

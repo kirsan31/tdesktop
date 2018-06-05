@@ -9,9 +9,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "ui/rp_widget.h"
 #include "styles/style_widgets.h"
-#ifdef TDESKTOP_ENABLE_SONNET_SPELLCHECK
-#include <spellcheckdecorator.h>
-#endif
 
 class UserData;
 
@@ -465,10 +462,6 @@ private:
 	bool _touchRightButton = false;
 	bool _touchMove = false;
 	QPoint _touchStart;
-
-#ifdef TDESKTOP_ENABLE_SONNET_SPELLCHECK
-	Sonnet::SpellCheckDecorator *_SpellCheckDecorator;
-#endif 
 
 	bool _correcting = false;
 	MimeDataHook _mimeDataHook;
