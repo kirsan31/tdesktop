@@ -302,17 +302,17 @@ void MainWindow::showSpecialLayer(
 
 	if (layer) {
 		ensureLayerCreated();
-		_layerBg->showSpecialLayer(std::move(layer), animated);
-	} else if (_layerBg) {
-		_layerBg->hideSpecialLayer(animated);
+		_layer->showSpecialLayer(std::move(layer), animated);
+	} else if (_layer) {
+		_layer->hideSpecialLayer(animated);
 	}
 }
 
 bool MainWindow::showSectionInExistingLayer(
 		not_null<Window::SectionMemento*> memento,
 		const Window::SectionShow &params) {
-	if (_layerBg) {
-		return _layerBg->showSectionInternal(memento, params);
+	if (_layer) {
+		return _layer->showSectionInternal(memento, params);
 	}
 	return false;
 }
@@ -323,12 +323,16 @@ void MainWindow::showMainMenu() {
 	if (isHidden()) showFromTray();
 
 	ensureLayerCreated();
-	_layerBg->showMainMenu(anim::type::normal);
+	_layer->showMainMenu(controller(), anim::type::normal);
 }
 
 void MainWindow::ensureLayerCreated() {
-	if (!_layerBg) {
-		_layerBg.create(bodyWidget(), controller());
+	if (!_layer) {
+		_layer.create(bodyWidget());
+		_layer->hideFinishEvents(
+		) | rpl::start_with_next([=, pointer = _layer.data()] {
+			layerHidden(pointer);
+		}, _layer->lifetime());
 		if (controller()) {
 			controller()->enableGifPauseReason(Window::GifPauseReason::Layer);
 		}
@@ -336,8 +340,8 @@ void MainWindow::ensureLayerCreated() {
 }
 
 void MainWindow::destroyLayerDelayed() {
-	if (_layerBg) {
-		_layerBg.destroyDelayed();
+	if (_layer) {
+		_layer.destroyDelayed();
 		if (controller()) {
 			controller()->disableGifPauseReason(Window::GifPauseReason::Layer);
 		}
@@ -345,8 +349,8 @@ void MainWindow::destroyLayerDelayed() {
 }
 
 void MainWindow::ui_hideSettingsAndLayer(anim::type animated) {
-	if (_layerBg) {
-		_layerBg->hideAll(animated);
+	if (_layer) {
+		_layer->hideAll(animated);
 		if (animated == anim::type::instant) {
 			destroyLayerDelayed();
 		}
@@ -367,21 +371,13 @@ void MainWindow::ui_showBox(
 		anim::type animated) {
 	if (box) {
 		ensureLayerCreated();
-		if (options & LayerOption::KeepOther) {
-			if (options & LayerOption::ShowAfterOther) {
-				_layerBg->prependBox(std::move(box), animated);
-			} else {
-				_layerBg->appendBox(std::move(box), animated);
-			}
-		} else {
-			_layerBg->showBox(std::move(box), animated);
-		}
+		_layer->showBox(std::move(box), options, animated);
 	} else {
-		if (_layerBg) {
-			_layerBg->hideTopLayer(animated);
+		if (_layer) {
+			_layer->hideTopLayer(animated);
 			if ((animated == anim::type::instant)
-				&& _layerBg
-				&& !_layerBg->layerShown()) {
+				&& _layer
+				&& !_layer->layerShown()) {
 				destroyLayerDelayed();
 			}
 		}
@@ -390,7 +386,7 @@ void MainWindow::ui_showBox(
 }
 
 bool MainWindow::ui_isLayerShown() {
-	return _layerBg != nullptr;
+	return _layer != nullptr;
 }
 
 void MainWindow::ui_showMediaPreview(DocumentData *document) {
@@ -477,15 +473,15 @@ void MainWindow::checkHistoryActivation() {
 
 bool MainWindow::contentOverlapped(const QRect &globalRect) {
 	if (_main && _main->contentOverlapped(globalRect)) return true;
-	if (_layerBg && _layerBg->contentOverlapped(globalRect)) return true;
+	if (_layer && _layer->contentOverlapped(globalRect)) return true;
 	return false;
 }
 
 void MainWindow::setInnerFocus() {
 	if (_testingThemeWarning) {
 		_testingThemeWarning->setFocus();
-	} else if (_layerBg && _layerBg->canSetFocus()) {
-		_layerBg->setInnerFocus();
+	} else if (_layer && _layer->canSetFocus()) {
+		_layer->setInnerFocus();
 	} else if (_passcode) {
 		_passcode->setInnerFocus();
 	} else if (_main) {
@@ -498,7 +494,9 @@ void MainWindow::setInnerFocus() {
 bool MainWindow::eventFilter(QObject *object, QEvent *e) {
 	switch (e->type()) {
 	case QEvent::KeyPress: {
-		if (cDebug() && e->type() == QEvent::KeyPress && object == windowHandle()) {
+		if (Logs::DebugEnabled()
+			&& (e->type() == QEvent::KeyPress)
+			&& object == windowHandle()) {
 			auto key = static_cast<QKeyEvent*>(e)->key();
 			FeedLangTestingKey(key);
 		}
@@ -611,11 +609,15 @@ void MainWindow::onShowNewChannel() {
 }
 
 void MainWindow::onLogout() {
-	if (isHidden()) showFromTray();
+	if (isHidden()) {
+		showFromTray();
+	}
 
-	Ui::show(Box<ConfirmBox>(lang(lng_sure_logout), lang(lng_settings_logout), st::attentionBoxButton, [] {
-		App::logOut();
-	}));
+	Ui::show(Box<ConfirmBox>(
+		lang(lng_sure_logout),
+		lang(lng_settings_logout),
+		st::attentionBoxButton,
+		[] { Messenger::Instance().logOut(); }));
 }
 
 void MainWindow::quitFromTray() {
@@ -643,34 +645,25 @@ void MainWindow::noIntro(Intro::Widget *was) {
 	}
 }
 
-void MainWindow::noLayerStack(Window::LayerStackWidget *was) {
-	if (was == _layerBg) {
-		_layerBg = nullptr;
-		if (controller()) {
-			controller()->disableGifPauseReason(
-				Window::GifPauseReason::Layer);
-		}
+void MainWindow::layerHidden(not_null<Window::LayerStackWidget*> layer) {
+	if (_layer != layer) {
+		return;
 	}
-}
-
-void MainWindow::layerFinishedHide(Window::LayerStackWidget *was) {
-	if (was == _layerBg) {
-		auto resetFocus = Ui::InFocusChain(was);
-		if (resetFocus) setFocus();
-		destroyLayerDelayed();
-		if (resetFocus) setInnerFocus();
-		InvokeQueued(this, [this] {
-			checkHistoryActivation();
-		});
-	}
+	auto resetFocus = Ui::InFocusChain(layer);
+	if (resetFocus) setFocus();
+	destroyLayerDelayed();
+	if (resetFocus) setInnerFocus();
+	InvokeQueued(this, [this] {
+		checkHistoryActivation();
+	});
 }
 
 bool MainWindow::takeThirdSectionFromLayer() {
-	return _layerBg ? _layerBg->takeToThirdSection() : false;
+	return _layer ? _layer->takeToThirdSection() : false;
 }
 
 void MainWindow::fixOrder() {
-	if (_layerBg) _layerBg->raise();
+	if (_layer) _layer->raise();
 	if (_mediaPreview) _mediaPreview->raise();
 	if (_testingThemeWarning) _testingThemeWarning->raise();
 }
@@ -761,7 +754,7 @@ void MainWindow::updateControlsGeometry() {
 	if (_passcode) _passcode->setGeometry(body);
 	if (_main) _main->setGeometry(body);
 	if (_intro) _intro->setGeometry(body);
-	if (_layerBg) _layerBg->setGeometry(body);
+	if (_layer) _layer->setGeometry(body);
 	if (_mediaPreview) _mediaPreview->setGeometry(body);
 	if (_testingThemeWarning) _testingThemeWarning->setGeometry(body);
 

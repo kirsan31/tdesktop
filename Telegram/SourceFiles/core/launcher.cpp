@@ -19,9 +19,15 @@ std::unique_ptr<Launcher> Launcher::Create(int argc, char *argv[]) {
 	return std::make_unique<Platform::Launcher>(argc, argv);
 }
 
-Launcher::Launcher(int argc, char *argv[])
+Launcher::Launcher(
+	int argc,
+	char *argv[],
+	const QString &deviceModel,
+	const QString &systemVersion)
 : _argc(argc)
-, _argv(argv) {
+, _argv(argv)
+, _deviceModel(deviceModel)
+, _systemVersion(systemVersion) {
 }
 
 void Launcher::init() {
@@ -94,6 +100,10 @@ QString Launcher::argumentsString() const {
 	return _arguments.join(' ');
 }
 
+bool Launcher::customWorkingDir() const {
+	return _customWorkingDir;
+}
+
 void Launcher::prepareSettings() {
 #ifdef Q_OS_MAC
 #ifndef OS_MAC_OLD
@@ -152,6 +162,14 @@ void Launcher::prepareSettings() {
 	processArguments();
 }
 
+QString Launcher::deviceModel() const {
+	return _deviceModel;
+}
+
+QString Launcher::systemVersion() const {
+	return _systemVersion;
+}
+
 void Launcher::processArguments() {
 		enum class KeyFormat {
 		NoValues,
@@ -197,7 +215,7 @@ void Launcher::processArguments() {
 	}
 
 	gTestMode = parseResult.contains("-testmode");
-	gDebug = parseResult.contains("-debug");
+	Logs::SetDebugEnabled(parseResult.contains("-debug"));
 	gManyInstance = parseResult.contains("-many");
 	gKeyFile = parseResult.value("-key", QStringList()).join(QString());
 	gLaunchMode = parseResult.contains("-autostart") ? LaunchModeAutoStart

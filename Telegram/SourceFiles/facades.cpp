@@ -31,7 +31,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 namespace App {
 namespace internal {
 
-void CallDelayed(int duration, base::lambda_once<void()> &&lambda) {
+void CallDelayed(int duration, FnMut<void()> &&lambda) {
 	Messenger::Instance().callDelayed(duration, std::move(lambda));
 }
 
@@ -180,12 +180,6 @@ void showSettings() {
 void activateClickHandler(ClickHandlerPtr handler, Qt::MouseButton button) {
 	crl::on_main(wnd(), [handler, button] {
 		handler->onClick(button);
-	});
-}
-
-void logOutDelayed() {
-	InvokeQueued(QCoreApplication::instance(), [] {
-		App::logOut();
 	});
 }
 
@@ -416,8 +410,9 @@ void WorkingDirReady() {
 	if (QFile(cWorkingDir() + qsl("tdata/withtestmode")).exists()) {
 		cSetTestMode(true);
 	}
-	if (!cDebug() && QFile(cWorkingDir() + qsl("tdata/withdebug")).exists()) {
-		cSetDebug(true);
+	if (!Logs::DebugEnabled()
+		&& QFile(cWorkingDir() + qsl("tdata/withdebug")).exists()) {
+		Logs::SetDebugEnabled(true);
 	}
 	if (cBetaVersion()) {
 		cSetAlphaVersion(false);

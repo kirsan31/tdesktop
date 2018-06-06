@@ -54,8 +54,6 @@ enum {
 
 	AVBlockSize = 4096, // 4Kb for ffmpeg blocksize
 
-	SaveWindowPositionTimeout = 1000, // 1 sec
-
 	AutoSearchTimeout = 900, // 0.9 secs
 	SearchPerPage = 50,
 	SearchManyPerPage = 100,
@@ -221,25 +219,6 @@ static const char *ApiHash = "344583e45741c457fe1862106095a5eb";
 #else
 static const char *BetaPrivateKey = "";
 #endif
-
-inline const char *cApiDeviceModel() {
-#ifdef Q_OS_WIN
-	return "PC";
-#elif defined Q_OS_MAC
-	return "Mac";
-#elif defined Q_OS_LINUX
-	return "PC";
-#endif
-}
-inline const char *cApiSystemVersion() {
-#ifdef Q_OS_WIN
-	return "Windows";
-#elif defined Q_OS_MAC
-	return "OS X";
-#elif defined Q_OS_LINUX
-	return "Linux";
-#endif
-}
 
 extern QString gKeyFile;
 inline const QString &cDataFile() {

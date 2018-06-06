@@ -47,7 +47,6 @@ private slots:
 private:
 	void updateSignupGeometry();
 	void countryChanged();
-	void toggleTerms();
 
 	//void phoneCheckDone(const MTPauth_CheckedPhone &result);
 	void phoneSubmitDone(const MTPauth_SentCode &result);
@@ -58,7 +57,7 @@ private:
 	QString fullNumber() const;
 	void stopCheck();
 
-	void showPhoneError(base::lambda<QString()> textFactory);
+	void showPhoneError(Fn<QString()> textFactory);
 	void hidePhoneError();
 	//void showSignup();
 
@@ -67,7 +66,6 @@ private:
 	object_ptr<CountryInput> _country;
 	object_ptr<Ui::CountryCodeInput> _code;
 	object_ptr<Ui::PhonePartInput> _phone;
-	bool _termsAccepted = false;
 
 	object_ptr<Ui::FadeWrap<Ui::FlatLabel>> _signup = { nullptr };
 
