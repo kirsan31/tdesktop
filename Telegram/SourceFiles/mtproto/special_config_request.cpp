@@ -11,7 +11,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "mtproto/dc_options.h"
 #include "mtproto/auth_key.h"
 #include "base/openssl_help.h"
+
+extern "C" {
 #include <openssl/aes.h>
+} // extern "C"
 
 namespace MTP {
 namespace {
@@ -147,13 +150,20 @@ ServiceWebRequest &ServiceWebRequest::operator=(ServiceWebRequest &&other) {
 
 void ServiceWebRequest::destroy() {
 	if (const auto value = base::take(reply)) {
-		value->deleteLater();
+		value->disconnect(
+			value,
+			&QNetworkReply::finished,
+			nullptr,
+			nullptr);
 		value->abort();
+		value->deleteLater();
 	}
 }
 
 ServiceWebRequest::~ServiceWebRequest() {
-	destroy();
+	if (reply) {
+		reply->deleteLater();
+	}
 }
 
 SpecialConfigRequest::SpecialConfigRequest(

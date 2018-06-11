@@ -1692,12 +1692,9 @@ void Session::applyNotifySetting(
 			App::enumerateChatsChannels([&](not_null<PeerData*> peer) {
 				if (!peer->notifySettingsUnknown()
 					&& ((!peer->notifyMuteUntil()
-						&& _defaultUserNotifySettings.muteUntil())
+						&& _defaultChatNotifySettings.muteUntil())
 						|| (!peer->notifySilentPosts()
-							&& _defaultUserNotifySettings.silentPosts()))) {
-					if (!peer->notifyMuteUntil()) {
-						int a = 0;
-					}
+							&& _defaultChatNotifySettings.silentPosts()))) {
 					updateNotifySettingsLocal(peer);
 				}
 			});
@@ -1744,7 +1741,7 @@ bool Session::notifyIsMuted(
 	if (const auto until = settings.muteUntil()) {
 		return resultFromUntil(*until);
 	}
-	return false;
+	return true;
 }
 
 bool Session::notifySilentPosts(not_null<const PeerData*> peer) const {

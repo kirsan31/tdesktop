@@ -46,8 +46,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "application.h"
 #include "mainwidget.h"
 #include "mainwindow.h"
-#include "passcodewidget.h"
-#include "mainwindow.h"
 #include "storage/localimageloader.h"
 #include "storage/localstorage.h"
 #include "storage/file_upload.h"
@@ -55,6 +53,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "media/media_audio.h"
 #include "media/media_audio_capture.h"
 #include "media/player/media_player_instance.h"
+#include "messenger.h"
 #include "apiwrap.h"
 #include "history/view/history_view_top_bar_widget.h"
 #include "observer_peer.h"
@@ -92,6 +91,9 @@ constexpr auto kShowMembersDropdownTimeoutMs = 300;
 constexpr auto kDisplayEditTimeWarningMs = 300 * 1000;
 constexpr auto kFullDayInMs = 86400 * 1000;
 constexpr auto kCancelTypingActionTimeout = TimeMs(5000);
+constexpr auto kSaveDraftTimeout = 1000;
+constexpr auto kSaveDraftAnywayTimeout = 5000;
+constexpr auto kSaveCloudDraftIdleTimeout = 14000;
 
 ApiWrap::RequestMessageDataCallback replyEditMessageDataCallback() {
 	return [](ChannelData *channel, MsgId msgId) {
@@ -1193,9 +1195,9 @@ void HistoryWidget::onDraftSave(bool delayed) {
 		auto ms = getms();
 		if (!_saveDraftStart) {
 			_saveDraftStart = ms;
-			return _saveDraftTimer.start(SaveDraftTimeout);
-		} else if (ms - _saveDraftStart < SaveDraftAnywayTimeout) {
-			return _saveDraftTimer.start(SaveDraftTimeout);
+			return _saveDraftTimer.start(kSaveDraftTimeout);
+		} else if (ms - _saveDraftStart < kSaveDraftAnywayTimeout) {
+			return _saveDraftTimer.start(kSaveDraftTimeout);
 		}
 	}
 	writeDrafts(nullptr, nullptr);
@@ -1276,7 +1278,7 @@ void HistoryWidget::writeDrafts(Data::Draft **localDraft, Data::Draft **editDraf
 	}
 
 	if (!_editMsgId && !_inlineBot) {
-		_saveCloudDraftTimer.start(SaveCloudDraftIdleTimeout);
+		_saveCloudDraftTimer.start(kSaveCloudDraftIdleTimeout);
 	}
 }
 
@@ -6531,8 +6533,13 @@ void HistoryWidget::updateTopBarSelection() {
 	_topBar->showSelected(selectedState);
 	updateControlsVisibility();
 	updateHistoryGeometry();
-	if (!Ui::isLayerShown() && !App::passcoded()) {
-		if (_nonEmptySelection || (_list && _list->wasSelectedText()) || _recording || isBotStart() || isBlocked() || !_canSendMessages) {
+	if (!Ui::isLayerShown() && !Messenger::Instance().locked()) {
+		if (_nonEmptySelection
+			|| (_list && _list->wasSelectedText())
+			|| _recording
+			|| isBotStart()
+			|| isBlocked()
+			|| !_canSendMessages) {
 			_list->setFocus();
 		} else {
 			_field->setFocus();

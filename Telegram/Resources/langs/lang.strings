@@ -23,6 +23,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_quit_from_tray" = "Quit Telegram";
 "lng_tray_icon_text" = "Telegram is still running here,\nyou can change this from settings page.\nIf this icon disappears from tray menu,\nyou can drag it here from hidden icons.";
 
+// For lng_month_year or plain month name.
 "lng_month1" = "January";
 "lng_month2" = "February";
 "lng_month3" = "March";
@@ -35,6 +36,20 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_month10" = "October";
 "lng_month11" = "November";
 "lng_month12" = "December";
+
+// For lng_month_day and lng_month_day_year.
+"lng_month_day1" = "January";
+"lng_month_day2" = "February";
+"lng_month_day3" = "March";
+"lng_month_day4" = "April";
+"lng_month_day5" = "May";
+"lng_month_day6" = "June";
+"lng_month_day7" = "July";
+"lng_month_day8" = "August";
+"lng_month_day9" = "September";
+"lng_month_day10" = "October";
+"lng_month_day11" = "November";
+"lng_month_day12" = "December";
 
 "lng_month1_small" = "Jan";
 "lng_month2_small" = "Feb";
@@ -1509,6 +1524,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_terms_agree" = "Agree & Continue";
 "lng_terms_decline" = "Decline";
 "lng_terms_signup_sorry" = "We're very sorry, but this means you can't sign up for Telegram.\n\nUnlike others, we don't use your data for ad targeting or other commercial purposes. Telegram only stores the information it needs to function as a feature-rich cloud service. You can adjust how we use your data in Privacy & Security settings.\n\nBut if you're generally not OK with Telegram's modest needs, it won't be possible for us to provide this service.";
+"lng_terms_update_sorry" = "We're very sorry, but this means we must part ways here. Unlike others, we don't use your data for ad targeting or other commercial purposes. Telegram only stores the information it needs to function as a feature-rich cloud service. You can adjust how we use your data in Privacy & Security settings.\n\nBut if you're generally not OK with Telegram's modest needs, it won't be possible for us to provide this service. You can deactivate your account now — or look around some more and deactivate it later if you feel you're not happy with the way we use your data. How does that sound?";
+"lng_terms_decline_and_delete" = "Decline & Delete";
+"lng_terms_back" = "Back";
+"lng_terms_delete_warning" = "Warning, this will irreversibly delete your Telegram account along with all the data you store in the Telegram cloud.\n\nWe will provide a tool to download your data before June, 23 – so you may want to wait a little before deleting.";
+"lng_terms_delete_now" = "Delete now";
+"lng_terms_agree_to_proceed" = "Please agree and proceed to {bot}.";
 
 "lng_date_input_day" = "Day";
 "lng_date_input_month" = "Month";
@@ -1546,7 +1567,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_passport_address_agreement" = "Tenancy agreement";
 "lng_passport_address_agreement_upload" = "Upload a scan of your tenancy agreement";
 "lng_passport_address_registration" = "Passport registration";
-"lng_passport_address_registration_upload" = "Upload a scan of your passport registration";
+"lng_passport_address_registration_upload" = "Upload a scan of your passport registration page";
 "lng_passport_address_temporary" = "Temporary registration";
 "lng_passport_address_temporary_upload" = "Upload a scan of your temporary registration";
 "lng_passport_address_about" = "To confirm your address, please upload a scan or photo of the selected document (all pages).";
@@ -1573,12 +1594,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_passport_upload_selfie" = "Upload selfie";
 "lng_passport_front_side_title" = "Front side";
 "lng_passport_front_side_name" = "Scan";
-"lng_passport_front_side_description" = "Upload front side of your document.";
-"lng_passport_upload_front_side" = "Upload front side scan";
+"lng_passport_front_side_description" = "Upload the front side of your document.";
+"lng_passport_upload_front_side" = "Upload a scan of the front side";
 "lng_passport_reverse_side_title" = "Reverse side";
 "lng_passport_reverse_side_name" = "Scan";
-"lng_passport_reverse_side_description" = "Upload reverse side of your document.";
-"lng_passport_upload_reverse_side" = "Upload reverse side scan";
+"lng_passport_reverse_side_description" = "Upload the reverse side of your document.";
+"lng_passport_upload_reverse_side" = "Upload a scan of the reverse side";
 "lng_passport_personal_details" = "Personal details";
 "lng_passport_personal_details_enter" = "Enter your personal details";
 "lng_passport_choose_image" = "Choose scan image";
@@ -1622,15 +1643,15 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_passport_delete_email_sure" = "Are you sure you want to delete your email address?";
 "lng_passport_delete_phone" = "Delete phone number";
 "lng_passport_delete_phone_sure" = "Are you sure you want to delete your phone number?";
-"lng_passport_success" = "Authorization successfull!";
+"lng_passport_success" = "Authorization successful!";
 "lng_passport_stop_sure" = "Are you sure you want to stop this authorization?";
 "lng_passport_stop" = "Stop";
 "lng_passport_restart_sure" = "An unexpected error has occurred. Perhaps some changes were made from a different Telegram application. Would you like to restart this authorization?";
 "lng_passport_restart" = "Restart";
-"lng_passport_error_too_large" = "This file is too large.";
-"lng_passport_error_bad_size" = "This image has bad dimensions.";
+"lng_passport_error_too_large" = "Sorry, this file is too large.";
+"lng_passport_error_bad_size" = "Sorry, this image has wrong dimensions.";
 "lng_passport_error_cant_read" = "Can't read this file. Please choose an image.";
-"lng_passport_bad_name" = "Use latin characters only.";
+"lng_passport_bad_name" = "Please use latin characters only.";
 
 // Wnd specific
 

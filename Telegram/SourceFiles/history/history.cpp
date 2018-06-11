@@ -51,6 +51,7 @@ constexpr auto kStatusShowClientsideChooseContact = 6000;
 constexpr auto kStatusShowClientsidePlayGame = 10000;
 constexpr auto kSetMyActionForMs = 10000;
 constexpr auto kNewBlockEachMessage = 50;
+constexpr auto kSkipCloudDraftsFor = TimeId(3);
 
 void checkForSwitchInlineButton(HistoryItem *item) {
 	if (item->out() || !item->hasSwitchInlineButton()) {
@@ -98,8 +99,10 @@ not_null<History*> Histories::findOrInsert(PeerId peerId) {
 }
 
 void Histories::clear() {
+	for (const auto &[peerId, history] : _map) {
+		history->unloadBlocks();
+	}
 	App::historyClearMsgs();
-
 	_map.clear();
 
 	_unreadFull = _unreadMuted = 0;
@@ -403,6 +406,24 @@ Data::Draft *History::createCloudDraft(Data::Draft *fromDraft) {
 	updateChatListSortPosition();
 
 	return cloudDraft();
+}
+
+bool History::skipCloudDraft(const QString &text, TimeId date) const {
+	if (_lastSentDraftText && *_lastSentDraftText == text) {
+		return true;
+	} else if (date <= _lastSentDraftTime + kSkipCloudDraftsFor) {
+		return true;
+	}
+	return false;
+}
+
+void History::setSentDraftText(const QString &text) {
+	_lastSentDraftText = text;
+}
+
+void History::clearSentDraftText() {
+	_lastSentDraftText = base::none;
+	accumulate_max(_lastSentDraftTime, unixtime());
 }
 
 void History::setEditDraft(std::unique_ptr<Data::Draft> &&draft) {
@@ -2197,6 +2218,7 @@ void History::applyDialog(const MTPDdialog &data) {
 	Auth().data().applyNotifySetting(
 		MTP_notifyPeer(data.vpeer),
 		data.vnotify_settings);
+
 	if (data.has_draft() && data.vdraft.type() == mtpc_draftMessage) {
 		Data::applyPeerCloudDraft(peer->id, data.vdraft.c_draftMessage());
 	}

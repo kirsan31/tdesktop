@@ -67,7 +67,7 @@ EditDocumentScheme GetDocumentScheme(
 		if (value.isEmpty() || value.size() > kMaxNameSize) {
 			return QString();
 		} else if (!QRegularExpression(
-			"^[a-zA-Z\\- ]+$"
+			"^[a-zA-Z0-9\\.,/&\\-' ]+$"
 		).match(value).hasMatch()) {
 			return lang(lng_passport_bad_name);
 		}
@@ -539,7 +539,9 @@ void PanelController::uploadSpecialScan(
 		QByteArray &&content) {
 	Expects(_editScope != nullptr);
 	Expects(_editDocument != nullptr);
-	Expects(_editScope->selfieRequired);
+	Expects(_editDocument->requiresSpecialScan(
+		type,
+		_editScope->selfieRequired));
 
 	_form->uploadSpecialScan(_editDocument, type, std::move(content));
 }
@@ -547,7 +549,9 @@ void PanelController::uploadSpecialScan(
 void PanelController::deleteSpecialScan(SpecialFile type) {
 	Expects(_editScope != nullptr);
 	Expects(_editDocument != nullptr);
-	Expects(_editScope->selfieRequired);
+	Expects(_editDocument->requiresSpecialScan(
+		type,
+		_editScope->selfieRequired));
 
 	_form->deleteSpecialScan(_editDocument, type);
 }
@@ -555,7 +559,9 @@ void PanelController::deleteSpecialScan(SpecialFile type) {
 void PanelController::restoreSpecialScan(SpecialFile type) {
 	Expects(_editScope != nullptr);
 	Expects(_editDocument != nullptr);
-	Expects(_editScope->selfieRequired);
+	Expects(_editDocument->requiresSpecialScan(
+		type,
+		_editScope->selfieRequired));
 
 	_form->restoreSpecialScan(_editDocument, type);
 }

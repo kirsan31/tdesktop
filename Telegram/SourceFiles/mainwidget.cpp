@@ -872,7 +872,7 @@ void MainWidget::noHider(HistoryHider *destroyed) {
 }
 
 void MainWidget::hiderLayer(object_ptr<HistoryHider> h) {
-	if (App::passcoded()) {
+	if (Messenger::Instance().locked()) {
 		return;
 	}
 
@@ -2082,7 +2082,7 @@ void MainWidget::ui_showPeerHistory(
 
 	auto animatedShow = [&] {
 		if (_a_show.animating()
-			|| App::passcoded()
+			|| Messenger::Instance().locked()
 			|| (params.animated == anim::type::instant)) {
 			return false;
 		}
@@ -2411,7 +2411,7 @@ void MainWidget::showNewSection(
 
 	auto animatedShow = [&] {
 		if (_a_show.animating()
-			|| App::passcoded()
+			|| Messenger::Instance().locked()
 			|| (params.animated == anim::type::instant)
 			|| memento.instant()) {
 			return false;
@@ -3701,6 +3701,9 @@ void MainWidget::mtpPing() {
 }
 
 void MainWidget::start(const MTPUser *self) {
+	Auth().api().requestNotifySettings(MTP_inputNotifyUsers());
+	Auth().api().requestNotifySettings(MTP_inputNotifyChats());
+
 	if (!self) {
 		MTP::send(MTPusers_GetFullUser(MTP_inputUserSelf()), rpcDone(&MainWidget::startWithSelf));
 		return;
@@ -3714,7 +3717,7 @@ void MainWidget::start(const MTPUser *self) {
 
 	Local::readSavedPeers();
 	cSetOtherOnline(0);
-	if (auto user = App::feedUsers(MTP_vector<MTPUser>(1, *self))) {
+	if (const auto user = App::feedUsers(MTP_vector<MTPUser>(1, *self))) {
 		user->loadUserpic();
 	}
 
