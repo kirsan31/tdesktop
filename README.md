@@ -4,7 +4,8 @@ Attempt to address this TDesktop issues:
 [Change the Always on Top behavior of the Call Popup]  
 [Auto resizing message block]  
 [removed -- to −, >> to », << to «]  
-Workaround for [Automatically Syntax-Highlight]. More [here](docs/html-code-processing.md). 
+Workaround for [Automatically Syntax-Highlight]. More [here](docs/html-code-processing.md).  
+Spell checking with Sonnet on Win (using Hunspell).
 
 
 **Tested only on Windows7 x64!!!**  
@@ -50,6 +51,8 @@ The source code is published under GPLv3 with OpenSSL exception, the license is 
 * Open Sans font ([Apache License 2.0](http://www.apache.org/licenses/LICENSE-2.0.html))
 * Emoji alpha codes ([MIT License](https://github.com/emojione/emojione/blob/master/extras/alpha-codes/LICENSE.md))
 * Catch test framework ([Boost License](https://github.com/philsquared/Catch/blob/master/LICENSE.txt))
+* Sonnet ([LGPL](https://github.com/KDE/sonnet/blob/master/COPYING.LIB))
+* Hunspell ([MPL+LGPL](https://github.com/hunspell/hunspell/blob/master/license.hunspell))
 
 ## Build instructions
 
