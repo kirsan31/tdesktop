@@ -84,6 +84,7 @@ factories = '';
 flagOperators = '';
 methods = '';
 inlineMethods = '';
+visitorMethods = '';
 textSerializeInit = '';
 textSerializeMethods = '';
 forwards = '';
@@ -577,6 +578,7 @@ for restype in typesList:
   switchLines = '';
   friendDecl = '';
   getters = '';
+  visitor = '';
   reader = '';
   writer = '';
   sizeList = [];
@@ -594,9 +596,14 @@ for restype in typesList:
     trivialConditions = data[7];
 
     dataText = '';
-    dataText += '\nclass MTPD' + name + ' : public MTP::internal::TypeData {\n'; # data class
+    if (len(prms) > len(trivialConditions)):
+      withData = 1;
+      dataText += '\nclass MTPD' + name + ' : public MTP::internal::TypeData {\n'; # data class
+    else:
+      dataText += '\nclass MTPD' + name + ' {\n'; # empty data class for visitors
     dataText += 'public:\n';
-
+    dataText += '\ttemplate <typename Other>\n';
+    dataText += '\tstatic constexpr bool Is() { return std::is_same_v<std::decay_t<Other>, MTPD' + name + '>; };\n\n';
     sizeList = [];
     creatorParams = [];
     creatorParamsList = [];
@@ -626,16 +633,18 @@ for restype in typesList:
             dataText += '\tbool has_' + paramName + '() const { return v' + hasFlags + '.v & Flag::f_' + paramName + '; }\n';
         dataText += '\n';
 
-    dataText += '\tMTPD' + name + '() = default;\n'; # default constructor
-    switchLines += '\t\tcase mtpc_' + name + ': '; # for by-type-id type constructor
-    if (len(prms) > len(trivialConditions)):
-      switchLines += 'setData(new MTPD' + name + '()); ';
-      withData = 1;
+    switchLines += '\tcase mtpc_' + name + ': '; # for by-type-id type constructor
+    getters += '\tconst MTPD' + name + ' &c_' + name + '() const;\n'; # const getter
+    visitor += '\tcase mtpc_' + name + ': return base::match_method(c_' + name + '(), std::forward<Method>(method), std::forward<Methods>(methods)...);\n';
 
-      getters += '\tconst MTPD' + name + ' &c_' + name + '() const;\n'; # const getter
+    forwards += 'class MTPD' + name + ';\n'; # data class forward declaration
+    if (len(prms) > len(trivialConditions)):
+      dataText += '\tMTPD' + name + '() = default;\n'; # default constructor
+      switchLines += 'setData(new MTPD' + name + '()); ';
+
       constructsBodies += 'const MTPD' + name + ' &MTP' + restype + '::c_' + name + '() const {\n';
       if (withType):
-        constructsBodies += '\tAssert(_type == mtpc_' + name + ');\n';
+        constructsBodies += '\tExpects(_type == mtpc_' + name + ');\n\n';
       constructsBodies += '\treturn queryData<MTPD' + name + '>();\n';
       constructsBodies += '}\n';
 
@@ -662,8 +671,8 @@ for restype in typesList:
         creatorParamsList.append('_' + paramName);
         prmsInit.append('v' + paramName + '(_' + paramName + ')');
         if (withType):
-          readText += '\t\t';
-          writeText += '\t\t';
+          readText += '\t';
+          writeText += '\t';
         if (paramName in conditions):
           readText += '\tif (v->has_' + paramName + '()) { v->v' + paramName + '.read(from, end); } else { v->v' + paramName + ' = MTP' + paramType + '(); }\n';
           writeText += '\tif (v.has_' + paramName + '()) v.v' + paramName + '.write(to);\n';
@@ -672,8 +681,6 @@ for restype in typesList:
           readText += '\tv->v' + paramName + '.read(from, end);\n';
           writeText += '\tv.v' + paramName + '.write(to);\n';
           sizeList.append('v.v' + paramName + '.innerLength()');
-
-      forwards += 'class MTPD' + name + ';\n'; # data class forward declaration
 
       dataText += ', '.join(prmsStr) + ');\n';
 
@@ -685,20 +692,26 @@ for restype in typesList:
           continue;
         paramType = prms[paramName];
         dataText += '\tMTP' + paramType + ' v' + paramName + ';\n';
-      sizeCases += '\t\tcase mtpc_' + name + ': {\n';
-      sizeCases += '\t\t\tconst MTPD' + name + ' &v(c_' + name + '());\n';
-      sizeCases += '\t\t\treturn ' + ' + '.join(sizeList) + ';\n';
-      sizeCases += '\t\t}\n';
+      sizeCases += '\tcase mtpc_' + name + ': {\n';
+      sizeCases += '\t\tconst MTPD' + name + ' &v(c_' + name + '());\n';
+      sizeCases += '\t\treturn ' + ' + '.join(sizeList) + ';\n';
+      sizeCases += '\t}\n';
       sizeFast = '\tconst MTPD' + name + ' &v(c_' + name + '());\n\treturn ' + ' + '.join(sizeList) + ';\n';
       newFast = 'new MTPD' + name + '()';
     else:
+      constructsBodies += 'const MTPD' + name + ' &MTP' + restype + '::c_' + name + '() const {\n';
+      if (withType):
+        constructsBodies += '\tExpects(_type == mtpc_' + name + ');\n\n';
+      constructsBodies += '\tstatic const MTPD' + name + ' result;\n';
+      constructsBodies += '\treturn result;\n';
+      constructsBodies += '}\n';
+
       sizeFast = '\treturn 0;\n';
 
     switchLines += 'break;\n';
     dataText += '};\n'; # class ending
 
-    if (len(prms) > len(trivialConditions)):
-      dataTexts += dataText; # add data class
+    dataTexts += dataText; # add data class
 
     if (not friendDecl):
       friendDecl += '\tfriend class MTP::internal::TypeCreator;\n';
@@ -717,18 +730,18 @@ for restype in typesList:
     creatorsBodies += '}\n';
 
     if (withType):
-      reader += '\t\tcase mtpc_' + name + ': _type = cons; '; # read switch line
+      reader += '\tcase mtpc_' + name + ': _type = cons; '; # read switch line
       if (len(prms) > len(trivialConditions)):
         reader += '{\n';
-        reader += '\t\t\tauto v = new MTPD' + name + '();\n';
-        reader += '\t\t\tsetData(v);\n';
+        reader += '\t\tauto v = new MTPD' + name + '();\n';
+        reader += '\t\tsetData(v);\n';
         reader += readText;
-        reader += '\t\t} break;\n';
+        reader += '\t} break;\n';
 
-        writer += '\t\tcase mtpc_' + name + ': {\n'; # write switch line
-        writer += '\t\t\tauto &v = c_' + name + '();\n';
+        writer += '\tcase mtpc_' + name + ': {\n'; # write switch line
+        writer += '\t\tauto &v = c_' + name + '();\n';
         writer += writeText;
-        writer += '\t\t} break;\n';
+        writer += '\t} break;\n';
       else:
         reader += 'break;\n';
     else:
@@ -737,7 +750,7 @@ for restype in typesList:
         reader += '\tsetData(v);\n';
         reader += readText;
 
-        writer += '\tauto &v = c_' + name + '();\n';
+        writer += '\tconst auto &v = c_' + name + '();\n';
         writer += writeText;
 
   forwards += '\n';
@@ -754,8 +767,20 @@ for restype in typesList:
   else:
     typesText += ' = default;\n';
 
-  if (withData):
-    typesText += getters;
+  typesText += getters;
+  typesText += '\n';
+  typesText += '\ttemplate <typename Method, typename ...Methods>\n';
+  typesText += '\tdecltype(auto) match(Method &&method, Methods &&...methods) const;\n';
+  visitorMethods += 'template <typename Method, typename ...Methods>\n';
+  visitorMethods += 'decltype(auto) MTP' + restype + '::match(Method &&method, Methods &&...methods) const {\n';
+  if (withType):
+    visitorMethods += '\tswitch (_type) {\n';
+    visitorMethods += visitor;
+    visitorMethods += '\t}\n';
+    visitorMethods += '\tUnexpected("Type in MTP' + restype + '::match.");\n';
+  else:
+    visitorMethods += '\treturn base::match_method(c_' + v[0][0] + '(), std::forward<Method>(method), std::forward<Methods>(methods)...);\n';
+  visitorMethods += '}\n\n';
 
   typesText += '\n\tuint32 innerLength() const;\n'; # size method
   methods += '\nuint32 MTP' + restype + '::innerLength() const {\n';
@@ -771,7 +796,7 @@ for restype in typesList:
   typesText += '\tmtpTypeId type() const;\n'; # type id method
   methods += 'mtpTypeId MTP' + restype + '::type() const {\n';
   if (withType):
-    methods += '\tAssert(_type != 0);\n';
+    methods += '\tExpects(_type != 0);\n\n';
     methods += '\treturn _type;\n';
   else:
     methods += '\treturn mtpc_' + v[0][0] + ';\n';
@@ -788,7 +813,7 @@ for restype in typesList:
   if (withType):
     methods += '\tswitch (cons) {\n'
     methods += reader;
-    methods += '\t\tdefault: throw mtpErrorUnexpected(cons, "MTP' + restype + '");\n';
+    methods += '\tdefault: throw mtpErrorUnexpected(cons, "MTP' + restype + '");\n';
     methods += '\t}\n';
   else:
     methods += reader;
@@ -814,12 +839,12 @@ for restype in typesList:
     methods += ' {\n';
     methods += '\tswitch (type) {\n'; # type id check
     methods += switchLines;
-    methods += '\t\tdefault: throw mtpErrorBadTypeId(type, "MTP' + restype + '");\n\t}\n';
+    methods += '\tdefault: throw mtpErrorBadTypeId(type, "MTP' + restype + '");\n\t}\n';
     methods += '}\n'; # by-type-id constructor end
 
   if (withData):
     typesText += constructsText;
-    methods += constructsBodies;
+  methods += constructsBodies;
 
   if (friendDecl):
     typesText += '\n' + friendDecl;
@@ -953,6 +978,8 @@ enum {\n\
 ' + funcsText + '\n\
 // Template methods definition\n\
 ' + inlineMethods + '\n\
+// Visitor definition\n\
+' + visitorMethods + '\n\
 // Flag operators definition\n\
 ' + flagOperators + '\n\
 // Factory methods declaration\n\

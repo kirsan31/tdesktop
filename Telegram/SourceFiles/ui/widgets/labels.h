@@ -47,9 +47,12 @@ private:
 
 };
 
-class LabelSimple : public TWidget {
+class LabelSimple : public RpWidget {
 public:
-	LabelSimple(QWidget *parent, const style::LabelSimple &st = st::defaultLabelSimple, const QString &value = QString());
+	LabelSimple(
+		QWidget *parent,
+		const style::LabelSimple &st = st::defaultLabelSimple,
+		const QString &value = QString());
 
 	// This method also resizes the label.
 	void setText(const QString &newText, bool *outTextChanged = nullptr);
@@ -109,8 +112,8 @@ public:
 
 	void setLink(uint16 lnkIndex, const ClickHandlerPtr &lnk);
 
-	using ClickHandlerHook = Fn<bool(const ClickHandlerPtr&, Qt::MouseButton)>;
-	void setClickHandlerHook(ClickHandlerHook &&hook);
+	using ClickHandlerFilter = Fn<bool(const ClickHandlerPtr&, Qt::MouseButton)>;
+	void setClickHandlerFilter(ClickHandlerFilter &&filter);
 
 	// ClickHandlerHost interface
 	void clickHandlerActiveChanged(const ClickHandlerPtr &action, bool active) override;
@@ -204,7 +207,7 @@ private:
 	QString _contextCopyText;
 	ExpandLinksMode _contextExpandLinksMode = ExpandLinksAll;
 
-	ClickHandlerHook _clickHandlerHook;
+	ClickHandlerFilter _clickHandlerFilter;
 
 	// text selection and context menu by touch support (at least Windows Surface tablets)
 	bool _touchSelect = false;

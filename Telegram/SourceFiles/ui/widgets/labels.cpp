@@ -86,7 +86,11 @@ void CrossFadeAnimation::paintLine(Painter &p, const Line &line, float64 positio
 	}
 }
 
-LabelSimple::LabelSimple(QWidget *parent, const style::LabelSimple &st, const QString &value) : TWidget(parent)
+LabelSimple::LabelSimple(
+	QWidget *parent,
+	const style::LabelSimple &st,
+	const QString &value)
+: RpWidget(parent)
 , _st(st) {
 	setText(value);
 }
@@ -268,8 +272,8 @@ void FlatLabel::setLink(uint16 lnkIndex, const ClickHandlerPtr &lnk) {
 	_text.setLink(lnkIndex, lnk);
 }
 
-void FlatLabel::setClickHandlerHook(ClickHandlerHook &&hook) {
-	_clickHandlerHook = std::move(hook);
+void FlatLabel::setClickHandlerFilter(ClickHandlerFilter &&filter) {
+	_clickHandlerFilter = std::move(filter);
 }
 
 void FlatLabel::mouseMoveEvent(QMouseEvent *e) {
@@ -354,7 +358,8 @@ Text::StateResult FlatLabel::dragActionFinish(const QPoint &p, Qt::MouseButton b
 	_selectionType = TextSelectType::Letters;
 
 	if (activated) {
-		if (!_clickHandlerHook || _clickHandlerHook(activated, button)) {
+		if (!_clickHandlerFilter
+			|| _clickHandlerFilter(activated, button)) {
 			App::activateClickHandler(activated, button);
 		}
 	}

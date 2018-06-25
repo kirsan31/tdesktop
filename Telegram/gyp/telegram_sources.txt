@@ -8,6 +8,7 @@
 <(src_loc)/base/flat_set.h
 <(src_loc)/base/functors.h
 <(src_loc)/base/index_based_iterator.h
+<(src_loc)/base/match_method.h
 <(src_loc)/base/observer.cpp
 <(src_loc)/base/observer.h
 <(src_loc)/base/ordered_set.h
@@ -154,6 +155,8 @@
 <(src_loc)/core/launcher.h
 <(src_loc)/core/main_queue_processor.cpp
 <(src_loc)/core/main_queue_processor.h
+<(src_loc)/core/mime_type.cpp
+<(src_loc)/core/mime_type.h
 <(src_loc)/core/single_timer.cpp
 <(src_loc)/core/single_timer.h
 <(src_loc)/core/tl_help.h
@@ -222,6 +225,16 @@
 <(src_loc)/dialogs/dialogs_search_from_controllers.h
 <(src_loc)/dialogs/dialogs_widget.cpp
 <(src_loc)/dialogs/dialogs_widget.h
+<(src_loc)/export/view/export_view_content.cpp
+<(src_loc)/export/view/export_view_content.h
+<(src_loc)/export/view/export_view_panel_controller.cpp
+<(src_loc)/export/view/export_view_panel_controller.h
+<(src_loc)/export/view/export_view_progress.cpp
+<(src_loc)/export/view/export_view_progress.h
+<(src_loc)/export/view/export_view_settings.cpp
+<(src_loc)/export/view/export_view_settings.h
+<(src_loc)/export/view/export_view_top_bar.cpp
+<(src_loc)/export/view/export_view_top_bar.h
 <(src_loc)/history/admin_log/history_admin_log_filter.cpp
 <(src_loc)/history/admin_log/history_admin_log_filter.h
 <(src_loc)/history/admin_log/history_admin_log_inner.cpp
@@ -417,6 +430,8 @@
 <(src_loc)/media/media_clip_reader.h
 <(src_loc)/mtproto/auth_key.cpp
 <(src_loc)/mtproto/auth_key.h
+<(src_loc)/mtproto/concurrent_sender.cpp
+<(src_loc)/mtproto/concurrent_sender.h
 <(src_loc)/mtproto/config_loader.cpp
 <(src_loc)/mtproto/config_loader.h
 <(src_loc)/mtproto/connection.cpp
@@ -720,8 +735,6 @@
 <(src_loc)/window/notifications_manager_default.h
 <(src_loc)/window/notifications_utilities.cpp
 <(src_loc)/window/notifications_utilities.h
-<(src_loc)/window/player_wrap_widget.cpp
-<(src_loc)/window/player_wrap_widget.h
 <(src_loc)/window/section_memento.h
 <(src_loc)/window/section_widget.cpp
 <(src_loc)/window/section_widget.h
@@ -738,6 +751,7 @@
 <(src_loc)/window/window_slide_animation.cpp
 <(src_loc)/window/window_slide_animation.h
 <(src_loc)/window/window_title.h
+<(src_loc)/window/window_top_bar_wrap.h
 <(src_loc)/window/themes/window_theme.cpp
 <(src_loc)/window/themes/window_theme.h
 <(src_loc)/window/themes/window_theme_editor.cpp
@@ -780,8 +794,6 @@
 <(src_loc)/settings.h
 <(src_loc)/shortcuts.cpp
 <(src_loc)/shortcuts.h
-<(src_loc)/stdafx.cpp
-<(src_loc)/stdafx.h
 <(emoji_suggestions_loc)/emoji_suggestions.cpp
 <(emoji_suggestions_loc)/emoji_suggestions.h
 
