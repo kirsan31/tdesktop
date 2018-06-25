@@ -37,6 +37,8 @@ SeparatePanel::SeparatePanel()
 void SeparatePanel::setTitle(rpl::producer<QString> title) {
 	_title.create(this, std::move(title), st::separatePanelTitle);
 	_title->setAttribute(Qt::WA_TransparentForMouseEvents);
+	_title->show();
+	updateTitleGeometry(width());
 }
 
 void SeparatePanel::initControls() {
@@ -45,10 +47,7 @@ void SeparatePanel::initControls() {
 		_back->moveToLeft(_padding.left(), _padding.top());
 		_close->moveToRight(_padding.right(), _padding.top());
 		if (_title) {
-			_title->resizeToWidth(width
-				- _padding.left() - _back->width()
-				- _padding.right() - _close->width());
-			updateTitlePosition();
+			updateTitleGeometry(width);
 		}
 	}, lifetime());
 
@@ -62,6 +61,13 @@ void SeparatePanel::initControls() {
 	}, _back->lifetime());
 	_back->hide(anim::type::instant);
 	_titleLeft.finish();
+}
+
+void SeparatePanel::updateTitleGeometry(int newWidth) {
+	_title->resizeToWidth(newWidth
+		- _padding.left() - _back->width()
+		- _padding.right() - _close->width());
+	updateTitlePosition();
 }
 
 void SeparatePanel::updateTitlePosition() {
@@ -85,16 +91,28 @@ rpl::producer<> SeparatePanel::backRequests() const {
 }
 
 rpl::producer<> SeparatePanel::closeRequests() const {
-	return _close->clicks();
+	return rpl::merge(
+		_close->clicks(),
+		_userCloseRequests.events());
 }
 
-rpl::producer<> SeparatePanel::destroyRequests() const {
-	return _destroyRequests.events();
+rpl::producer<> SeparatePanel::closeEvents() const {
+	return _closeEvents.events();
 }
 
 void SeparatePanel::setBackAllowed(bool allowed) {
 	if (allowed != _back->toggled()) {
 		_back->toggle(allowed, anim::type::normal);
+	}
+}
+
+void SeparatePanel::setHideOnDeactivate(bool hideOnDeactivate) {
+	_hideOnDeactivate = hideOnDeactivate;
+	if (!_hideOnDeactivate) {
+		showAndActivate();
+	} else if (!isActiveWindow()) {
+		LOG(("Export Info: Panel Hide On Inactive Change."));
+		hideGetDuration();
 	}
 }
 
@@ -111,6 +129,14 @@ void SeparatePanel::keyPressEvent(QKeyEvent *e) {
 		_synteticBackRequests.fire({});
 	}
 	return RpWidget::keyPressEvent(e);
+}
+
+bool SeparatePanel::eventHook(QEvent *e) {
+	if (e->type() == QEvent::WindowDeactivate && _hideOnDeactivate) {
+		LOG(("Export Info: Panel Hide On Inactive Window."));
+		hideGetDuration();
+	}
+	return RpWidget::eventHook(e);
 }
 
 void SeparatePanel::initLayout() {
@@ -191,7 +217,7 @@ void SeparatePanel::finishAnimating() {
 		showControls();
 		_inner->setFocus();
 	} else {
-		destroyDelayed();
+		finishClose();
 	}
 }
 
@@ -202,15 +228,21 @@ void SeparatePanel::showControls() {
 	}
 }
 
-void SeparatePanel::destroyDelayed() {
+void SeparatePanel::finishClose() {
 	hide();
-	_destroyRequests.fire({});
+	crl::on_main(this, [=] {
+		if (isHidden() && !_visible && !_opacityAnimation.animating()) {
+			LOG(("Export Info: Panel Closed."));
+			_closeEvents.fire({});
+		}
+	});
 }
 
-int SeparatePanel::hideAndDestroyGetDuration() {
+int SeparatePanel::hideGetDuration() {
+	LOG(("Export Info: Panel Hide Requested."));
 	toggleOpacityAnimation(false);
 	if (_animationCache.isNull()) {
-		destroyDelayed();
+		finishClose();
 		return 0;
 	}
 	return st::callPanelDuration;
@@ -485,7 +517,8 @@ void SeparatePanel::paintOpaqueBorder(Painter &p) const {
 }
 
 void SeparatePanel::closeEvent(QCloseEvent *e) {
-	// #TODO passport
+	e->ignore();
+	_userCloseRequests.fire({});
 }
 
 void SeparatePanel::mousePressEvent(QMouseEvent *e) {
@@ -499,7 +532,9 @@ void SeparatePanel::mousePressEvent(QMouseEvent *e) {
 			_dragging = true;
 			_dragStartMousePosition = e->globalPos();
 			_dragStartMyPosition = QPoint(x(), y());
-		} else if (!rect().contains(e->pos())) {
+		} else if (!rect().contains(e->pos()) && _hideOnDeactivate) {
+			LOG(("Export Info: Panel Hide On Click."));
+			hideGetDuration();
 		}
 	}
 }
