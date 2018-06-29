@@ -579,6 +579,7 @@ enum {
 	dbiStickersFavedLimit = 0x50,
 	dbiSuggestStickersByEmoji = 0x51,
 	dbiSuggestEmoji = 0x52,
+	dbiTxtDomainString = 0x53,
 
 	dbiEncryptedWithSalt = 333,
 	dbiEncrypted = 444,
@@ -1157,6 +1158,14 @@ bool _readSetting(quint32 blockId, QDataStream &stream, int version, ReadSetting
 			return dbiwmWindowAndTray;
 		};
 		Global::RefWorkMode().set(newMode());
+	} break;
+
+	case dbiTxtDomainString: {
+		QString v;
+		stream >> v;
+		if (!_checkStreamStatus(stream)) return false;
+
+		Global::SetTxtDomainString(v);
 	} break;
 
 	case dbiConnectionTypeOld: {
@@ -2474,6 +2483,7 @@ void writeSettings() {
 	quint32 size = 12 * (sizeof(quint32) + sizeof(qint32));
 	size += sizeof(quint32) + Serialize::bytearraySize(dcOptionsSerialized);
 	size += sizeof(quint32) + Serialize::stringSize(cLoggedPhoneNumber());
+	size += sizeof(quint32) + Serialize::stringSize(Global::TxtDomainString());
 
 	auto &proxies = Global::RefProxiesList();
 	const auto &proxy = Global::SelectedProxy();
@@ -2512,6 +2522,7 @@ void writeSettings() {
 	data.stream << quint32(dbiScale) << qint32(cConfigScale());
 	data.stream << quint32(dbiDcOptions) << dcOptionsSerialized;
 	data.stream << quint32(dbiLoggedPhoneNumber) << cLoggedPhoneNumber();
+	data.stream << quint32(dbiTxtDomainString) << Global::TxtDomainString();
 
 	data.stream << quint32(dbiConnectionType) << qint32(dbictProxiesList);
 	data.stream << qint32(proxies.size());
@@ -4611,6 +4622,94 @@ void readRecentHashtagsAndBots() {
 			}
 		}
 		cSetRecentInlineBots(bots);
+	}
+}
+
+void incrementRecentHashtag(RecentHashtagPack &recent, const QString &tag) {
+	auto i = recent.begin(), e = recent.end();
+	for (; i != e; ++i) {
+		if (i->first == tag) {
+			++i->second;
+			if (qAbs(i->second) > 0x4000) {
+				for (auto j = recent.begin(); j != e; ++j) {
+					if (j->second > 1) {
+						j->second /= 2;
+					} else if (j->second > 0) {
+						j->second = 1;
+					}
+				}
+			}
+			for (; i != recent.begin(); --i) {
+				if (qAbs((i - 1)->second) > qAbs(i->second)) {
+					break;
+				}
+				qSwap(*i, *(i - 1));
+			}
+			break;
+		}
+	}
+	if (i == e) {
+		while (recent.size() >= 64) recent.pop_back();
+		recent.push_back(qMakePair(tag, 1));
+		for (i = recent.end() - 1; i != recent.begin(); --i) {
+			if ((i - 1)->second > i->second) {
+				break;
+			}
+			qSwap(*i, *(i - 1));
+		}
+	}
+}
+
+base::optional<RecentHashtagPack> saveRecentHashtags(
+		Fn<RecentHashtagPack()> getPack,
+		const QString &text) {
+	auto found = false;
+	auto m = QRegularExpressionMatch();
+	auto recent = getPack();
+	for (auto i = 0, next = 0; (m = TextUtilities::RegExpHashtag().match(text, i)).hasMatch(); i = next) {
+		i = m.capturedStart();
+		next = m.capturedEnd();
+		if (m.hasMatch()) {
+			if (!m.capturedRef(1).isEmpty()) {
+				++i;
+			}
+			if (!m.capturedRef(2).isEmpty()) {
+				--next;
+			}
+		}
+		const auto tag = text.mid(i + 1, next - i - 1);
+		if (TextUtilities::RegExpHashtagExclude().match(tag).hasMatch()) {
+			continue;
+		}
+		if (!found
+			&& cRecentWriteHashtags().isEmpty()
+			&& cRecentSearchHashtags().isEmpty()) {
+			Local::readRecentHashtagsAndBots();
+			recent = getPack();
+		}
+		found = true;
+		incrementRecentHashtag(recent, tag);
+	}
+	return found ? base::make_optional(recent) : base::none;
+}
+
+void saveRecentSentHashtags(const QString &text) {
+	const auto result = saveRecentHashtags(
+		[] { return cRecentWriteHashtags(); },
+		text);
+	if (result) {
+		cSetRecentWriteHashtags(*result);
+		Local::writeRecentHashtagsAndBots();
+	}
+}
+
+void saveRecentSearchHashtags(const QString &text) {
+	const auto result = saveRecentHashtags(
+		[] { return cRecentSearchHashtags(); },
+		text);
+	if (result) {
+		cSetRecentSearchHashtags(*result);
+		Local::writeRecentHashtagsAndBots();
 	}
 }
 

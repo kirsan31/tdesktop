@@ -77,6 +77,18 @@ struct Image {
 	File file;
 };
 
+struct ContactInfo {
+	int32 userId = 0;
+	Utf8String firstName;
+	Utf8String lastName;
+	Utf8String phoneNumber;
+	TimeId date = 0;
+
+	Utf8String name() const;
+};
+
+ContactInfo ParseContactInfo(const MTPUser &data);
+
 struct Photo {
 	uint64 id = 0;
 	TimeId date = 0;
@@ -106,6 +118,11 @@ struct Document {
 	bool isVoiceMessage = false;
 	bool isVideoFile = false;
 	bool isAudioFile = false;
+};
+
+struct SharedContact {
+	ContactInfo info;
+	File vcard;
 };
 
 struct GeoPoint {
@@ -144,19 +161,6 @@ struct UserpicsSlice {
 UserpicsSlice ParseUserpicsSlice(
 	const MTPVector<MTPPhoto> &data,
 	int baseIndex);
-
-struct ContactInfo {
-	int32 userId = 0;
-	Utf8String firstName;
-	Utf8String lastName;
-	Utf8String phoneNumber;
-	TimeId date = 0;
-
-	Utf8String name() const;
-};
-
-ContactInfo ParseContactInfo(const MTPUser &data);
-ContactInfo ParseContactInfo(const MTPDmessageMediaContact &data);
 
 struct User {
 	ContactInfo info;
@@ -264,7 +268,7 @@ struct Media {
 	base::optional_variant<
 		Photo,
 		Document,
-		ContactInfo,
+		SharedContact,
 		GeoPoint,
 		Venue,
 		Game,
@@ -281,6 +285,7 @@ struct ParseMediaContext {
 	int audios = 0;
 	int videos = 0;
 	int files = 0;
+	int contacts = 0;
 	int32 botId = 0;
 };
 
@@ -446,6 +451,7 @@ struct Message {
 	TimeId edited = 0;
 	int32 fromId = 0;
 	PeerId forwardedFromId = 0;
+	PeerId savedFromChatId = 0;
 	Utf8String signature;
 	int32 viaBotId = 0;
 	int32 replyToMsgId = 0;

@@ -222,21 +222,6 @@ public:
 	Dialogs::IndexedList *dialogsList();
 	Dialogs::IndexedList *contactsNoDialogsList();
 
-	struct MessageToSend {
-		MessageToSend(not_null<History*> history) : history(history) {
-		}
-
-		not_null<History*> history;
-		TextWithTags textWithTags;
-		MsgId replyTo = 0;
-		WebPageId webPageId = 0;
-		bool clearDraft = true;
-	};
-	void sendMessage(const MessageToSend &message);
-	void saveRecentHashtags(const QString &text);
-
-	void unreadCountChanged(not_null<History*> history);
-
 	// While HistoryInner is not HistoryView::ListWidget.
 	TimeMs highlightStartTime(not_null<const HistoryItem*> item) const;
 	bool historyInSelectionMode() const;

@@ -641,6 +641,7 @@ HistoryWidget::HistoryWidget(
 	using UpdateFlag = Notify::PeerUpdate::Flag;
 	auto changes = UpdateFlag::ChannelRightsChanged
 		| UpdateFlag::UnreadMentionsChanged
+		| UpdateFlag::UnreadViewChanged
 		| UpdateFlag::MigrationChanged
 		| UpdateFlag::RestrictionReasonChanged
 		| UpdateFlag::ChannelPinnedChanged
@@ -658,6 +659,9 @@ HistoryWidget::HistoryWidget(
 			}
 			if (update.flags & UpdateFlag::UnreadMentionsChanged) {
 				updateUnreadMentionsVisibility();
+			}
+			if (update.flags & UpdateFlag::UnreadViewChanged) {
+				unreadCountUpdated();
 			}
 			if (update.flags & UpdateFlag::MigrationChanged) {
 				if (auto channel = _peer->migrateTo()) {
@@ -1030,6 +1034,9 @@ void HistoryWidget::onHashtagOrBotCommandInsert(
 }
 
 void HistoryWidget::updateInlineBotQuery() {
+	if (!_history) {
+		return;
+	}
 	const auto query = ParseInlineBotQuery(_field);
 	if (_inlineBotUsername != query.username) {
 		_inlineBotUsername = query.username;
@@ -1127,20 +1134,22 @@ void HistoryWidget::setReportSpamStatus(DBIPeerReportSpamStatus status) {
 }
 
 void HistoryWidget::updateStickersByEmoji() {
-	int len = 0;
-	if (!_editMsgId) {
-		auto &text = _field->getTextWithTags().text;
-		if (auto emoji = Ui::Emoji::Find(text, &len)) {
-			if (text.size() > len) {
-				len = 0;
-			} else {
-				_fieldAutocomplete->showStickers(emoji);
+	if (!_history) {
+		return;
+	}
+	const auto emoji = [&] {
+		if (!_editMsgId) {
+			const auto &text = _field->getTextWithTags().text;
+			auto length = 0;
+			if (const auto emoji = Ui::Emoji::Find(text, &length)) {
+				if (text.size() <= length) {
+					return emoji;
+				}
 			}
 		}
-	}
-	if (!len) {
-		_fieldAutocomplete->showStickers(nullptr);
-	}
+		return EmojiPtr(nullptr);
+	}();
+	_fieldAutocomplete->showStickers(emoji);
 }
 
 void HistoryWidget::onTextChange() {
@@ -1913,7 +1922,19 @@ void HistoryWidget::showHistory(const PeerId &peerId, MsgId showAtMsgId, bool re
 				}
 			}
 		}
-		unreadCountChanged(_history); // set _historyDown badge.
+		if (_history->chatListUnreadMark()) {
+			Auth().api().changeDialogUnreadMark(_history, false);
+			if (_migrated) {
+				Auth().api().changeDialogUnreadMark(_migrated, false);
+			}
+
+			// Must be done before unreadCountUpdated(), or we auto-close.
+			_history->setUnreadMark(false);
+			if (_migrated) {
+				_migrated->setUnreadMark(false);
+			}
+		}
+		unreadCountUpdated(); // set _historyDown badge.
 	} else {
 		_topBar->setActiveChat(Dialogs::Key());
 		updateTopBarSelection();
@@ -2366,8 +2387,15 @@ void HistoryWidget::historyToDown(History *history) {
 	}
 }
 
-void HistoryWidget::unreadCountChanged(not_null<History*> history) {
-	if (history == _history || history == _migrated) {
+void HistoryWidget::unreadCountUpdated() {
+	if (_history->chatListUnreadMark()) {
+		crl::on_main(this, [=, history = _history] {
+			if (history == _history) {
+				controller()->showBackFromStack();
+				emit cancelled();
+			}
+		});
+	} else {
 		updateHistoryDownVisibility();
 		_historyDown->setUnreadCount(_history->chatListUnreadCount());
 	}
@@ -2376,7 +2404,9 @@ void HistoryWidget::unreadCountChanged(not_null<History*> history) {
 bool HistoryWidget::messagesFailed(const RPCError &error, mtpRequestId requestId) {
 	if (MTP::isDefaultHandledError(error)) return false;
 
-	if (error.type() == qstr("CHANNEL_PRIVATE") || error.type() == qstr("CHANNEL_PUBLIC_GROUP_NA") || error.type() == qstr("USER_BANNED_IN_CHANNEL")) {
+	if (error.type() == qstr("CHANNEL_PRIVATE")
+		|| error.type() == qstr("CHANNEL_PUBLIC_GROUP_NA")
+		|| error.type() == qstr("USER_BANNED_IN_CHANNEL")) {
 		auto was = _peer;
 		controller()->showBackFromStack();
 		Ui::show(Box<InformBox>(lang((was && was->isMegagroup()) ? lng_group_not_accessible : lng_channel_not_accessible)));
@@ -3062,14 +3092,19 @@ void HistoryWidget::send() {
 		if (!SandHtmlAsFile(txt.mid(7))) {
 			return;
 		}
-
 	}
 	else {
-		auto message = MainWidget::MessageToSend(_history);
+		WebPageId webPageId = _previewCancelled
+			? CancelledWebPageId
+			: ((_previewData && _previewData->pendingTill >= 0)
+				? _previewData->id
+				: 0);
+
+		auto message = ApiWrap::MessageToSend(_history);
 		message.textWithTags = _field->getTextWithAppliedMarkdown();
 		message.replyTo = replyToId();
-		message.webPageId = _previewCancelled ? CancelledWebPageId : ((_previewData && _previewData->pendingTill >= 0) ? _previewData->id : 0);
-		App::main()->sendMessage(message);
+		message.webPageId = webPageId;
+		Auth().api().sendMessage(std::move(message));
 	}
 	clearFieldText();
 	_saveDraftText = true;
@@ -3457,14 +3492,14 @@ void HistoryWidget::sendBotCommand(PeerData *peer, UserData *bot, const QString 
 		toSend += '@' + username;
 	}
 
-	auto message = MainWidget::MessageToSend(_history);
+	auto message = ApiWrap::MessageToSend(_history);
 	message.textWithTags = { toSend, TextWithTags::Tags() };
 	message.replyTo = replyTo
 		? ((!_peer->isUser()/* && (botStatus == 0 || botStatus == 2)*/)
 			? replyTo
 			: replyToId())
 		: 0;
-	App::main()->sendMessage(message);
+	Auth().api().sendMessage(std::move(message));
 	if (replyTo) {
 		if (_replyToId == replyTo) {
 			cancelReply();
@@ -5457,7 +5492,10 @@ void HistoryWidget::onPhotoSend(PhotoData *photo) {
 void HistoryWidget::onInlineResultSend(
 		InlineBots::Result *result,
 		UserData *bot) {
-	if (!_peer || !_peer->canWrite() || !result) {
+	Expects(result != nullptr);
+	Expects(bot != nullptr);
+
+	if (!_peer || !_peer->canWrite()) {
 		return;
 	}
 
@@ -5471,77 +5509,15 @@ void HistoryWidget::onInlineResultSend(
 	options.clearDraft = true;
 	options.replyTo = replyToId();
 	options.generateLocal = true;
-	Auth().api().sendAction(options);
-
-	uint64 randomId = rand_value<uint64>();
-	FullMsgId newId(_channel, clientMsgId());
-
-	auto flags = NewMessageFlags(_peer) | MTPDmessage::Flag::f_media;
-	auto sendFlags = MTPmessages_SendInlineBotResult::Flag::f_clear_draft | 0;
-	if (options.replyTo) {
-		flags |= MTPDmessage::Flag::f_reply_to_msg_id;
-		sendFlags |= MTPmessages_SendInlineBotResult::Flag::f_reply_to_msg_id;
-	}
-	bool channelPost = _peer->isChannel() && !_peer->isMegagroup();
-	bool silentPost = channelPost && Auth().data().notifySilentPosts(_peer);
-	if (channelPost) {
-		flags |= MTPDmessage::Flag::f_views;
-		flags |= MTPDmessage::Flag::f_post;
-	}
-	if (!channelPost) {
-		flags |= MTPDmessage::Flag::f_from_id;
-	} else if (_peer->asChannel()->addsSignature()) {
-		flags |= MTPDmessage::Flag::f_post_author;
-	}
-	if (silentPost) {
-		sendFlags |= MTPmessages_SendInlineBotResult::Flag::f_silent;
-	}
-	if (bot) {
-		flags |= MTPDmessage::Flag::f_via_bot_id;
-	}
-
-	auto messageFromId = channelPost ? 0 : Auth().userId();
-	auto messagePostAuthor = channelPost
-		? App::peerName(Auth().user())
-		: QString();
-	MTPint messageDate = MTP_int(unixtime());
-	UserId messageViaBotId = bot ? peerToUser(bot->id) : 0;
-	MsgId messageId = newId.msg;
-
-	result->addToHistory(
-		_history,
-		flags,
-		messageId,
-		messageFromId,
-		messageDate,
-		messageViaBotId,
-		options.replyTo,
-		messagePostAuthor);
-
-	_history->sendRequestId = MTP::send(
-		MTPmessages_SendInlineBotResult(
-			MTP_flags(sendFlags),
-			_peer->input,
-			MTP_int(options.replyTo),
-			MTP_long(randomId),
-			MTP_long(result->getQueryId()),
-			MTP_string(result->getId())),
-		App::main()->rpcDone(&MainWidget::sentUpdatesReceived),
-		App::main()->rpcFail(&MainWidget::sendMessageFail),
-		0,
-		0,
-		_history->sendRequestId);
-	App::main()->finishForwarding(_history);
-
-	App::historyRegRandom(randomId, newId);
+	Auth().api().sendInlineResult(bot, result, options);
 
 	clearFieldText();
 	_saveDraftText = true;
 	_saveDraftStart = getms();
 	onDraftSave();
 
-	RecentInlineBots &bots(cRefRecentInlineBots());
-	int32 index = bots.indexOf(bot);
+	auto &bots = cRefRecentInlineBots();
+	const auto index = bots.indexOf(bot);
 	if (index) {
 		if (index > 0) {
 			bots.removeAt(index);
@@ -5586,7 +5562,7 @@ void HistoryWidget::updatePinnedBar(bool force) {
 	if (_pinnedBar->msg) {
 		_pinnedBar->text.setText(
 			st::messageTextStyle,
-			TextUtilities::Clean(_pinnedBar->msg->notificationText()),
+			_pinnedBar->msg->inReplyText(),
 			Ui::DialogTextOptions());
 		update();
 	} else if (force) {
@@ -6872,8 +6848,10 @@ void HistoryWidget::drawPinnedBar(Painter &p) {
 		p.setFont(st::msgServiceNameFont);
 		p.drawText(left, top + st::msgServiceNameFont->ascent, lang(lng_pinned_message));
 
-		p.setPen(!_pinnedBar->msg->toHistoryMessage() ? st::historyComposeAreaFgService : st::historyComposeAreaFg);
+		p.setPen(st::historyComposeAreaFg);
+		p.setTextPalette(st::historyComposeAreaPalette);
 		_pinnedBar->text.drawElided(p, left, top + st::msgServiceNameFont->height, width() - left - _pinnedBar->cancel->width() - st::msgReplyPadding.right());
+		p.restoreTextPalette();
 	} else {
 		p.setFont(st::msgDateFont);
 		p.setPen(st::historyComposeAreaFgService);

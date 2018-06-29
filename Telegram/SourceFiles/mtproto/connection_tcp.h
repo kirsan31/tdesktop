@@ -24,7 +24,7 @@ public:
 
 	TimeMs pingTime() const override;
 	TimeMs fullConnectTimeout() const override;
-	void sendData(mtpBuffer &buffer) override;
+	void sendData(mtpBuffer &&buffer) override;
 	void disconnectFromServer() override;
 	void connectToServer(
 		const QString &address,
@@ -32,11 +32,14 @@ public:
 		const bytes::vector &protocolSecret,
 		int16 protocolDcId) override;
 	bool isConnected() const override;
+	bool requiresExtendedPadding() const override;
 
 	int32 debugState() const override;
 
 	QString transport() const override;
 	QString tag() const override;
+
+	~TcpConnection();
 
 private:
 	enum class Status {
@@ -49,20 +52,20 @@ private:
 	void socketRead();
 	void writeConnectionStart();
 
-	void socketPacket(const char *packet, uint32 length);
+	void socketPacket(bytes::const_span bytes);
 
 	void socketConnected();
 	void socketDisconnected();
 	void socketError(QAbstractSocket::SocketError e);
 
-	mtpBuffer handleResponse(const char *packet, uint32 length);
+	mtpBuffer parsePacket(bytes::const_span bytes);
 	static void handleError(QAbstractSocket::SocketError e, QTcpSocket &sock);
 	static uint32 fourCharsToUInt(char ch1, char ch2, char ch3, char ch4) {
 		char ch[4] = { ch1, ch2, ch3, ch4 };
 		return *reinterpret_cast<uint32*>(ch);
 	}
 
-	void sendBuffer(mtpBuffer &buffer);
+	void sendBuffer(mtpBuffer &&buffer);
 
 	QTcpSocket _socket;
 	uint32 _packetIndex = 0; // sent packet number
@@ -78,8 +81,9 @@ private:
 	CTRState _sendState;
 	uchar _receiveKey[CTRState::KeySize];
 	CTRState _receiveState;
+	class Protocol;
+	std::unique_ptr<Protocol> _protocol;
 	int16 _protocolDcId = 0;
-	bytes::vector _protocolSecret;
 
 	Status _status = Status::Waiting;
 	MTPint128 _checkNonce;

@@ -35,9 +35,6 @@ public:
 protected:
 	void prepare() override;
 
-private:
-	bool _cleared = false;
-
 };
 
 SuggestBox::SuggestBox(QWidget*) {
@@ -46,16 +43,7 @@ SuggestBox::SuggestBox(QWidget*) {
 void SuggestBox::prepare() {
 	setTitle(langFactory(lng_export_suggest_title));
 
-	const auto clear = [=] {
-		if (_cleared) {
-			return;
-		}
-		_cleared = true;
-		ClearSuggestStart();
-	};
-
 	addButton(langFactory(lng_box_ok), [=] {
-		clear();
 		closeBox();
 		Auth().data().startExport();
 	});
@@ -79,8 +67,6 @@ void SuggestBox::prepare() {
 	) | rpl::start_with_next([=](int height) {
 		setDimensions(st::boxWidth, height + st::boxPadding.bottom());
 	}, content->lifetime());
-
-	boxClosing() | rpl::start_with_next(clear, lifetime());
 }
 
 Environment PrepareEnvironment() {
@@ -101,11 +87,14 @@ Environment PrepareEnvironment() {
 
 } // namespace
 
-void SuggestStart() {
-	Ui::show(Box<SuggestBox>(), LayerOption::KeepOther);
+QPointer<BoxContent> SuggestStart() {
+	ClearSuggestStart();
+	return Ui::show(Box<SuggestBox>(), LayerOption::KeepOther).data();
 }
 
 void ClearSuggestStart() {
+	Auth().data().clearExportSuggestion();
+
 	auto settings = Local::ReadExportSettings();
 	if (settings.availableAt) {
 		settings.availableAt = 0;

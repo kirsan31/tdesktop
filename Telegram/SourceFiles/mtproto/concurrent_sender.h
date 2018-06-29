@@ -61,7 +61,7 @@ class ConcurrentSender : public base::has_weak_ptr {
 	protected:
 		RequestBuilder(
 			not_null<ConcurrentSender*> sender,
-			mtpRequest &&serialized) noexcept;
+			SecureRequest &&serialized) noexcept;
 
 		void setToDC(ShiftedDcId dcId) noexcept;
 		void setCanWait(TimeMs ms) noexcept;
@@ -74,7 +74,7 @@ class ConcurrentSender : public base::has_weak_ptr {
 
 	private:
 		not_null<ConcurrentSender*> _sender;
-		mtpRequest _serialized;
+		SecureRequest _serialized;
 		ShiftedDcId _dcId = 0;
 		TimeMs _canWait = 0;
 
@@ -109,21 +109,19 @@ public:
 #ifndef MTP_SENDER_USE_GENERIC_HANDLERS
 		// Allow code completion to show response type.
 		[[nodiscard]] SpecificRequestBuilder &done(FnMut<void()> &&handler);
-		[[nodiscard]] SpecificRequestBuilder &done(FnMut<void(
-			mtpRequestId)> &&handler);
-		[[nodiscard]] SpecificRequestBuilder &done(FnMut<void(
-			mtpRequestId,
-			Response &&)> &&handler);
+		[[nodiscard]] SpecificRequestBuilder &done(
+			FnMut<void(mtpRequestId)> &&handler);
+		[[nodiscard]] SpecificRequestBuilder &done(
+			FnMut<void(mtpRequestId, Response &&)> &&handler);
 		[[nodiscard]] SpecificRequestBuilder &done(FnMut<void(
 			Response &&)> &&handler);
 		[[nodiscard]] SpecificRequestBuilder &fail(FnMut<void()> &&handler);
-		[[nodiscard]] SpecificRequestBuilder &fail(FnMut<void(
-			mtpRequestId)> &&handler);
-		[[nodiscard]] SpecificRequestBuilder &fail(FnMut<void(
-			mtpRequestId,
-			RPCError &&)> &&handler);
-		[[nodiscard]] SpecificRequestBuilder &fail(FnMut<void(
-			RPCError &&)> &&handler);
+		[[nodiscard]] SpecificRequestBuilder &fail(
+			FnMut<void(mtpRequestId)> &&handler);
+		[[nodiscard]] SpecificRequestBuilder &fail(
+			FnMut<void(mtpRequestId, RPCError &&)> &&handler);
+		[[nodiscard]] SpecificRequestBuilder &fail(
+			FnMut<void(RPCError &&)> &&handler);
 #else // !MTP_SENDER_USE_GENERIC_HANDLERS
 		template <typename Handler>
 		[[nodiscard]] SpecificRequestBuilder &done(Handler &&handler);
@@ -224,7 +222,7 @@ template <typename Request>
 ConcurrentSender::SpecificRequestBuilder<Request>::SpecificRequestBuilder(
 	not_null<ConcurrentSender*> sender,
 	Request &&request
-) noexcept : RequestBuilder(sender, mtpRequestData::serialize(request)) {
+) noexcept : RequestBuilder(sender, SecureRequest::Serialize(request)) {
 }
 
 template <typename Request>

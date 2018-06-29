@@ -364,6 +364,26 @@ Document ParseDocument(
 	return result;
 }
 
+SharedContact ParseSharedContact(
+		ParseMediaContext &context,
+		const MTPDmessageMediaContact &data,
+		const QString &suggestedFolder) {
+	auto result = SharedContact();
+	result.info.userId = data.vuser_id.v;
+	result.info.firstName = ParseString(data.vfirst_name);
+	result.info.lastName = ParseString(data.vlast_name);
+	result.info.phoneNumber = ParseString(data.vphone_number);
+	if (!data.vvcard.v.isEmpty()) {
+		result.vcard.content = data.vvcard.v;
+		result.vcard.size = data.vvcard.v.size();
+		result.vcard.suggestedPath = suggestedFolder
+			+ "contacts/contact_"
+			+ QString::number(++context.contacts)
+			+ ".vcard";
+	}
+	return result;
+}
+
 GeoPoint ParseGeoPoint(const MTPGeoPoint &data) {
 	auto result = GeoPoint();
 	data.match([&](const MTPDgeoPoint &data) {
@@ -436,15 +456,6 @@ ContactInfo ParseContactInfo(const MTPUser &data) {
 	}, [&](const MTPDuserEmpty &data) {
 		result.userId = data.vid.v;
 	});
-	return result;
-}
-
-ContactInfo ParseContactInfo(const MTPDmessageMediaContact &data) {
-	auto result = ContactInfo();
-	result.userId = data.vuser_id.v;
-	result.firstName = ParseString(data.vfirst_name);
-	result.lastName = ParseString(data.vlast_name);
-	result.phoneNumber = ParseString(data.vphone_number);
 	return result;
 }
 
@@ -617,6 +628,8 @@ File &Media::file() {
 		return data.image.file;
 	}, [](Document &data) -> File& {
 		return data.file;
+	}, [](SharedContact &data) -> File& {
+		return data.vcard;
 	}, [](auto&) -> File& {
 		static File result;
 		return result;
@@ -628,6 +641,8 @@ const File &Media::file() const {
 		return data.image.file;
 	}, [](const Document &data) -> const File& {
 		return data.file;
+	}, [](const SharedContact &data) -> const File& {
+		return data.vcard;
 	}, [](const auto &) -> const File& {
 		static const File result;
 		return result;
@@ -654,7 +669,7 @@ Media ParseMedia(
 	}, [&](const MTPDmessageMediaGeo &data) {
 		result.content = ParseGeoPoint(data.vgeo);
 	}, [&](const MTPDmessageMediaContact &data) {
-		result.content = ParseContactInfo(data);
+		result.content = ParseSharedContact(context, data, folder);
 	}, [&](const MTPDmessageMediaUnsupported &data) {
 		result.content = UnsupportedMedia();
 	}, [&](const MTPDmessageMediaDocument &data) {
@@ -858,10 +873,15 @@ Message ParseMessage(
 			[](const MTPDmessageFwdHeader &data) {
 				if (data.has_channel_id()) {
 					return ChatPeerId(data.vchannel_id.v);
-				} else if (data.has_saved_from_peer()) {
-					return ParsePeerId(data.vsaved_from_peer);
 				} else if (data.has_from_id()) {
 					return UserPeerId(data.vfrom_id.v);
+				}
+				return PeerId(0);
+			});
+			result.savedFromChatId = data.vfwd_from.match(
+			[](const MTPDmessageFwdHeader &data) {
+				if (data.has_saved_from_peer()) {
+					return ParsePeerId(data.vsaved_from_peer);
 				}
 				return PeerId(0);
 			});
@@ -878,8 +898,8 @@ Message ParseMessage(
 		if (data.has_media()) {
 			context.botId = (result.viaBotId
 				? result.viaBotId
-				: result.forwardedFromId
-				? result.forwardedFromId
+				: IsUserPeerId(result.forwardedFromId)
+				? BarePeerId(result.forwardedFromId)
 				: result.fromId);
 			result.media = ParseMedia(
 				context,
@@ -995,6 +1015,8 @@ std::vector<int> SortedContactsIndices(const ContactsList &data) {
 bool AppendTopPeers(ContactsList &to, const MTPcontacts_TopPeers &data) {
 	return data.match([](const MTPDcontacts_topPeersNotModified &data) {
 		return false;
+	}, [](const MTPDcontacts_topPeersDisabled &data) {
+		return true;
 	}, [&](const MTPDcontacts_topPeers &data) {
 		const auto peers = ParsePeersLists(data.vusers, data.vchats);
 		const auto append = [&](
@@ -1128,7 +1150,9 @@ DialogInfo::Type DialogTypeFromUser(const User &user) {
 DialogsInfo ParseDialogsInfo(const MTPmessages_Dialogs &data) {
 	auto result = DialogsInfo();
 	const auto folder = QString();
-	data.match([&](const auto &data) { // MTPDmessages_dialogs &data) {
+	data.match([](const MTPDmessages_dialogsNotModified &data) {
+		Unexpected("dialogsNotModified in ParseDialogsInfo.");
+	}, [&](const auto &data) { // MTPDmessages_dialogs &data) {
 		const auto peers = ParsePeersLists(data.vusers, data.vchats);
 		const auto messages = ParseMessagesList(data.vmessages, folder);
 		result.list.reserve(result.list.size() + data.vdialogs.v.size());

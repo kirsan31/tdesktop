@@ -468,6 +468,9 @@ QByteArray SerializeMessage(
 				"forwarded_from",
 				wrapPeerName(message.forwardedFromId));
 		}
+		if (message.savedFromChatId) {
+			pushBare("saved_from", wrapPeerName(message.savedFromChatId));
+		}
 		pushReplyToMsgId();
 		if (message.viaBotId) {
 			const auto username = FormatUsername(
@@ -513,15 +516,18 @@ QByteArray SerializeMessage(
 			push("height", data.height);
 		}
 		pushTTL();
-	}, [&](const ContactInfo &data) {
+	}, [&](const SharedContact &data) {
 		pushBare("contact_information", SerializeObject(context, {
-			{ "first_name", SerializeString(data.firstName) },
-			{ "last_name", SerializeString(data.lastName) },
+			{ "first_name", SerializeString(data.info.firstName) },
+			{ "last_name", SerializeString(data.info.lastName) },
 			{
 				"phone_number",
-				SerializeString(FormatPhoneNumber(data.phoneNumber))
-			},
+				SerializeString(FormatPhoneNumber(data.info.phoneNumber))
+			}
 		}));
+		if (!data.vcard.content.isEmpty()) {
+			pushPath(data.vcard, "contact_vcard");
+		}
 	}, [&](const GeoPoint &data) {
 		pushBare(
 			"location_information",
