@@ -139,7 +139,7 @@ struct ApiWrap::UserpicsProcess {
 	base::optional<Data::UserpicsSlice> slice;
 	uint64 maxId = 0;
 	bool lastSlice = false;
-	int fileIndex = -1;
+	int fileIndex = 0;
 };
 
 struct ApiWrap::OtherDataProcess {
@@ -210,7 +210,7 @@ struct ApiWrap::ChatProcess {
 	Data::ParseMediaContext context;
 	base::optional<Data::MessagesSlice> slice;
 	bool lastSlice = false;
-	int fileIndex = -1;
+	int fileIndex = 0;
 };
 
 
@@ -536,8 +536,8 @@ void ApiWrap::requestLeftChannelsCount() {
 		Expects(_startProcess != nullptr);
 		Expects(_leftChannelsProcess != nullptr);
 
-		_startProcess->info.leftChannelsCount
-			= _leftChannelsProcess->fullCount;
+		_startProcess->info.dialogsCount
+			+= _leftChannelsProcess->fullCount;
 		sendNextStartRequest();
 	});
 }
@@ -569,7 +569,6 @@ void ApiWrap::requestLeftChannelsSlice() {
 
 		if (_leftChannelsProcess->finished) {
 			const auto process = base::take(_leftChannelsProcess);
-			Data::FinalizeLeftChannelsInfo(process->info, *_settings);
 			process->done(std::move(process->info));
 		} else {
 			requestLeftChannelsSlice();
@@ -727,7 +726,7 @@ void ApiWrap::loadUserpicsFiles(Data::UserpicsSlice &&slice) {
 		_userpicsProcess->lastSlice = true;
 	}
 	_userpicsProcess->slice = std::move(slice);
-	_userpicsProcess->fileIndex = -1;
+	_userpicsProcess->fileIndex = 0;
 	loadNextUserpic();
 }
 
@@ -735,14 +734,11 @@ void ApiWrap::loadNextUserpic() {
 	Expects(_userpicsProcess != nullptr);
 	Expects(_userpicsProcess->slice.has_value());
 
-	auto &list = _userpicsProcess->slice->list;
-	while (true) {
-		const auto index = ++_userpicsProcess->fileIndex;
-		if (index >= list.size()) {
-			break;
-		}
+	for (auto &list = _userpicsProcess->slice->list
+		; _userpicsProcess->fileIndex < list.size()
+		; ++_userpicsProcess->fileIndex) {
 		const auto ready = processFileLoad(
-			list[index].image.file,
+			list[_userpicsProcess->fileIndex].image.file,
 			[=](FileProgress value) { return loadUserpicProgress(value); },
 			[=](const QString &path) { loadUserpicDone(path); });
 		if (!ready) {
@@ -990,10 +986,10 @@ void ApiWrap::requestDialogsSlice() {
 		});
 
 		auto info = Data::ParseDialogsInfo(result);
-		_dialogsProcess->processedCount += info.list.size();
-		const auto last = info.list.empty()
+		_dialogsProcess->processedCount += info.chats.size();
+		const auto last = info.chats.empty()
 			? Data::DialogInfo()
-			: info.list.back();
+			: info.chats.back();
 		appendDialogsSlice(std::move(info));
 
 		if (!_dialogsProcess->progress(_dialogsProcess->processedCount)) {
@@ -1010,7 +1006,7 @@ void ApiWrap::requestDialogsSlice() {
 			_dialogsProcess->offsetDate = 0;
 			_dialogsProcess->offsetPeer = MTP_inputPeerEmpty();
 		} else {
-			finishDialogsList();
+			requestLeftChannelsIfNeeded();
 			return;
 		}
 		requestDialogsSlice();
@@ -1023,18 +1019,34 @@ void ApiWrap::appendDialogsSlice(Data::DialogsInfo &&info) {
 
 	appendChatsSlice(
 		*_dialogsProcess,
-		std::move(info),
+		_dialogsProcess->info.chats,
+		std::move(info.chats),
 		_dialogsProcess->splitIndexPlusOne - 1);
+}
+
+void ApiWrap::requestLeftChannelsIfNeeded() {
+	if (_settings->types & Settings::Type::GroupsChannelsMask) {
+		requestLeftChannelsList([=](int count) {
+			Expects(_dialogsProcess != nullptr);
+
+			return _dialogsProcess->progress(
+				_dialogsProcess->processedCount + count);
+		}, [=](Data::DialogsInfo &&result) {
+			Expects(_dialogsProcess != nullptr);
+
+			_dialogsProcess->info.left = std::move(result.left);
+			finishDialogsList();
+		});
+	} else {
+		finishDialogsList();
+	}
 }
 
 void ApiWrap::finishDialogsList() {
 	Expects(_dialogsProcess != nullptr);
 
 	const auto process = base::take(_dialogsProcess);
-
-	ranges::reverse(process->info.list);
 	Data::FinalizeDialogsInfo(process->info, *_settings);
-
 	process->done(std::move(process->info));
 }
 
@@ -1070,7 +1082,7 @@ void ApiWrap::requestLeftChannelsSliceGeneric(FnMut<void()> done) {
 		});
 
 		if (process->progress) {
-			if (!process->progress(process->info.list.size())) {
+			if (!process->progress(process->info.left.size())) {
 				return;
 			}
 		}
@@ -1085,32 +1097,33 @@ void ApiWrap::appendLeftChannelsSlice(Data::DialogsInfo &&info) {
 
 	appendChatsSlice(
 		*_leftChannelsProcess,
-		std::move(info),
+		_leftChannelsProcess->info.left,
+		std::move(info.left),
 		_splits.size() - 1);
 }
 
 void ApiWrap::appendChatsSlice(
-		ChatsProcess &to,
-		Data::DialogsInfo &&info,
+		ChatsProcess &process,
+		std::vector<Data::DialogInfo> &to,
+		std::vector<Data::DialogInfo> &&from,
 		int splitIndex) {
 	Expects(_settings != nullptr);
 
 	const auto types = _settings->types;
 	auto filtered = ranges::view::all(
-		info.list
+		from
 	) | ranges::view::filter([&](const Data::DialogInfo &info) {
 		return (types & SettingsFromDialogsType(info.type)) != 0;
 	});
-	auto &list = to.info.list;
-	list.reserve(list.size() + info.list.size());
+	to.reserve(to.size() + from.size());
 	for (auto &info : filtered) {
-		const auto nextIndex = list.size();
-		const auto [i, ok] = to.indexByPeer.emplace(info.peerId, nextIndex);
+		const auto nextIndex = to.size();
+		const auto [i, ok] = process.indexByPeer.emplace(info.peerId, nextIndex);
 		if (ok) {
-			list.push_back(std::move(info));
+			to.push_back(std::move(info));
 		}
-		list[i->second].splits.push_back(splitIndex);
-		list[i->second].messagesCountPerSplit.push_back(0);
+		to[i->second].splits.push_back(splitIndex);
+		to[i->second].messagesCountPerSplit.push_back(0);
 	}
 }
 
@@ -1213,7 +1226,7 @@ void ApiWrap::loadMessagesFiles(Data::MessagesSlice &&slice) {
 		_chatProcess->lastSlice = true;
 	}
 	_chatProcess->slice = std::move(slice);
-	_chatProcess->fileIndex = -1;
+	_chatProcess->fileIndex = 0;
 
 	loadNextMessageFile();
 }
@@ -1222,21 +1235,29 @@ void ApiWrap::loadNextMessageFile() {
 	Expects(_chatProcess != nullptr);
 	Expects(_chatProcess->slice.has_value());
 
-	auto &list = _chatProcess->slice->list;
-	while (true) {
-		const auto index = ++_chatProcess->fileIndex;
-		if (index >= list.size()) {
-			break;
-		}
+	for (auto &list = _chatProcess->slice->list
+		; _chatProcess->fileIndex < list.size()
+		; ++_chatProcess->fileIndex) {
 		const auto fileProgress = [=](FileProgress value) {
 			return loadMessageFileProgress(value);
 		};
 		const auto ready = processFileLoad(
-			list[index].file(),
+			list[_chatProcess->fileIndex].file(),
 			fileProgress,
 			[=](const QString &path) { loadMessageFileDone(path); },
-			&list[index]);
+			&list[_chatProcess->fileIndex]);
 		if (!ready) {
+			return;
+		}
+		const auto thumbProgress = [=](FileProgress value) {
+			return loadMessageThumbProgress(value);
+		};
+		const auto thumbReady = processFileLoad(
+			list[_chatProcess->fileIndex].thumb().file,
+			thumbProgress,
+			[=](const QString &path) { loadMessageThumbDone(path); },
+			&list[_chatProcess->fileIndex]);
+		if (!thumbReady) {
 			return;
 		}
 	}
@@ -1296,6 +1317,25 @@ void ApiWrap::loadMessageFileDone(const QString &relativePath) {
 	loadNextMessageFile();
 }
 
+bool ApiWrap::loadMessageThumbProgress(FileProgress progress) {
+	return loadMessageFileProgress(progress);
+}
+
+void ApiWrap::loadMessageThumbDone(const QString &relativePath) {
+	Expects(_chatProcess != nullptr);
+	Expects(_chatProcess->slice.has_value());
+	Expects((_chatProcess->fileIndex >= 0)
+		&& (_chatProcess->fileIndex < _chatProcess->slice->list.size()));
+
+	const auto index = _chatProcess->fileIndex;
+	auto &file = _chatProcess->slice->list[index].thumb().file;
+	file.relativePath = relativePath;
+	if (relativePath.isEmpty()) {
+		file.skipReason = Data::File::SkipReason::Unavailable;
+	}
+	loadNextMessageFile();
+}
+
 void ApiWrap::finishMessages() {
 	Expects(_chatProcess != nullptr);
 	Expects(!_chatProcess->slice.has_value());
@@ -1311,7 +1351,8 @@ bool ApiWrap::processFileLoad(
 		Data::Message *message) {
 	using SkipReason = Data::File::SkipReason;
 
-	if (!file.relativePath.isEmpty()) {
+	if (!file.relativePath.isEmpty()
+		|| file.skipReason != SkipReason::None) {
 		return true;
 	} else if (!file.location && file.content.isEmpty()) {
 		file.skipReason = SkipReason::Unavailable;
@@ -1340,10 +1381,12 @@ bool ApiWrap::processFileLoad(
 		return Type::Photo;
 	}) : Type(0);
 
+	const auto limit = _settings->media.sizeLimit;
 	if ((_settings->media.types & type) != type) {
 		file.skipReason = SkipReason::FileType;
 		return true;
-	} else if (file.size >= _settings->media.sizeLimit) {
+	} else if ((message ? message->file().size : file.size) >= limit) {
+		// Don't load thumbs for large files that we skip.
 		file.skipReason = SkipReason::FileSize;
 		return true;
 	}

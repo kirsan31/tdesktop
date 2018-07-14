@@ -14,6 +14,31 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 namespace Export {
 namespace Output {
+namespace details {
+
+class HtmlContext {
+public:
+	[[nodiscard]] QByteArray pushTag(
+		const QByteArray &tag,
+		std::map<QByteArray, QByteArray> &&attributes = {});
+	[[nodiscard]] QByteArray popTag();
+	[[nodiscard]] QByteArray indent() const;
+	[[nodiscard]] bool empty() const;
+
+private:
+	struct Tag {
+		QByteArray name;
+		bool block = true;
+	};
+	std::vector<Tag> _tags;
+
+};
+
+struct UserpicData;
+class PeersMap;
+struct MediaData;
+
+} // namespace details
 
 class HtmlWriter : public AbstractWriter {
 public:
@@ -46,12 +71,6 @@ public:
 	Result writeDialogEnd() override;
 	Result writeDialogsEnd() override;
 
-	Result writeLeftChannelsStart(const Data::DialogsInfo &data) override;
-	Result writeLeftChannelStart(const Data::DialogInfo &data) override;
-	Result writeLeftChannelSlice(const Data::MessagesSlice &data) override;
-	Result writeLeftChannelEnd() override;
-	Result writeLeftChannelsEnd() override;
-
 	Result finish() override;
 
 	QString mainFilePath() override;
@@ -59,50 +78,82 @@ public:
 	~HtmlWriter();
 
 private:
+	using Context = details::HtmlContext;
+	using UserpicData = details::UserpicData;
+	using MediaData = details::MediaData;
 	class Wrap;
+	struct MessageInfo;
+	enum class DialogsMode {
+		None,
+		Chats,
+		Left,
+	};
 
-	Result copyFile(
+	[[nodiscard]] Result copyFile(
 		const QString &source,
 		const QString &relativePath) const;
 
-	QString mainFileRelativePath() const;
-	QString pathWithRelativePath(const QString &path) const;
-	std::unique_ptr<Wrap> fileWithRelativePath(const QString &path) const;
-	QString messagesFile(int index) const;
+	[[nodiscard]] QString mainFileRelativePath() const;
+	[[nodiscard]] QString pathWithRelativePath(const QString &path) const;
+	[[nodiscard]] std::unique_ptr<Wrap> fileWithRelativePath(
+		const QString &path) const;
+	[[nodiscard]] QString messagesFile(int index) const;
 
-	Result writeSavedContacts(const Data::ContactsList &data);
-	Result writeFrequentContacts(const Data::ContactsList &data);
+	[[nodiscard]] Result writeSavedContacts(const Data::ContactsList &data);
+	[[nodiscard]] Result writeFrequentContacts(const Data::ContactsList &data);
 
-	Result writeSessions(const Data::SessionsList &data);
-	Result writeWebSessions(const Data::SessionsList &data);
+	[[nodiscard]] Result writeSessions(const Data::SessionsList &data);
+	[[nodiscard]] Result writeWebSessions(const Data::SessionsList &data);
 
-	Result writeChatsStart(
-		const Data::DialogsInfo &data,
-		const QByteArray &listName,
-		const QByteArray &about,
-		const QString &fileName);
-	Result writeChatStart(const Data::DialogInfo &data);
-	Result writeChatSlice(const Data::MessagesSlice &data);
-	Result writeChatEnd();
-	Result writeChatsEnd();
-	Result switchToNextChatFile(int index);
+	[[nodiscard]] Result validateDialogsMode(bool isLeftChannel);
+	[[nodiscard]] Result writeDialogOpening(int index);
+	[[nodiscard]] Result switchToNextChatFile(int index);
+
+	void pushSection(
+		int priority,
+		const QByteArray &label,
+		const QByteArray &type,
+		int count,
+		const QString &path);
+	[[nodiscard]] Result writeSections();
+
+	[[nodiscard]] Result writeDefaultPersonal(
+		const Data::PersonalInfo &data);
+	[[nodiscard]] Result writeDelayedPersonal(const QString &userpicPath);
+	[[nodiscard]] Result writePreparedPersonal(
+		const Data::PersonalInfo &data,
+		const QString &userpicPath);
+	void pushUserpicsSection();
+
+	[[nodiscard]] QString userpicsFilePath() const;
 
 	Settings _settings;
 	Environment _environment;
 	Stats *_stats = nullptr;
 
+	struct SavedSection;
+	std::vector<SavedSection> _savedSections;
+
 	std::unique_ptr<Wrap> _summary;
+	bool _summaryNeedDivider = false;
+	bool _haveSections = false;
+
+	int _selfColorIndex = 0;
+	std::unique_ptr<Data::PersonalInfo> _delayedPersonalInfo;
 
 	int _userpicsCount = 0;
 	std::unique_ptr<Wrap> _userpics;
 
-	int _dialogsCount = 0;
-	int _dialogIndex = 0;
+	QString _dialogsRelativePath;
 	Data::DialogInfo _dialog;
+	DialogsMode _dialogsMode = DialogsMode::None;
 
 	int _messagesCount = 0;
+	std::unique_ptr<MessageInfo> _lastMessageInfo;
+	int _dateMessageId = 0;
 	std::unique_ptr<Wrap> _chats;
 	std::unique_ptr<Wrap> _chat;
+	bool _chatFileEmpty = false;
 
 };
 

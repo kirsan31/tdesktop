@@ -430,10 +430,11 @@ private:
 	int newlinePosition(const QString &text, int offset) const {
 		const auto length = text.size();
 		if (offset < length) {
-			auto ch = text.data() + offset;
-			for (const auto e = ch + length; ch != e; ++ch) {
+			const auto begin = text.data();
+			const auto end = begin + length;
+			for (auto ch = begin + offset; ch != end; ++ch) {
 				if (IsNewline(*ch)) {
-					return (ch - text.data());
+					return (ch - begin);
 				}
 			}
 		}
@@ -1997,7 +1998,6 @@ void InputField::processFormatting(int insertPosition, int insertEnd) {
 
 					if (ch + 1 < textEnd && ch->isHighSurrogate() && (ch + 1)->isLowSurrogate()) {
 						++ch;
-						++fragmentPosition;
 					}
 				}
 				if (action.type != ActionType::Invalid) {

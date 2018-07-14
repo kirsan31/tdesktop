@@ -19,6 +19,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/toast/toast.h"
 #include "ui/rp_widget.h"
 #include "ui/countryinput.h"
+#include "core/update_checker.h"
 #include "layout.h"
 #include "styles/style_boxes.h"
 
@@ -362,9 +363,8 @@ PanelController::PanelController(not_null<FormController*> form)
 , _scopes(ComputeScopes(_form)) {
 	_form->secretReadyEvents(
 	) | rpl::start_with_next([=] {
-		if (_panel) {
-			_panel->showForm();
-		}
+		ensurePanelCreated();
+		_panel->showForm();
 	}, lifetime());
 
 	_form->verificationNeeded(
@@ -435,7 +435,7 @@ void PanelController::submitForm() {
 	}
 }
 
-void PanelController::submitPassword(const QString &password) {
+void PanelController::submitPassword(const QByteArray &password) {
 	_form->submitPassword(password);
 }
 
@@ -467,7 +467,10 @@ void PanelController::setupPassword() {
 	Expects(_panel != nullptr);
 
 	const auto &settings = _form->passwordSettings();
-	Assert(settings.salt.empty());
+	if (!settings.salt.empty()) {
+		showAskPassword();
+		return;
+	}
 
 	constexpr auto kRandomPart = 8;
 	auto newPasswordSalt = QByteArray(
@@ -494,9 +497,22 @@ void PanelController::setupPassword() {
 		notEmptyPassport,
 		hint,
 		newSecureSecretSalt));
-	box->connect(box, &PasscodeBox::reloadPassword, [=] {
+	box->newPasswordSet(
+	) | rpl::filter([=](const QByteArray &password) {
+		return !password.isEmpty();
+	}) | rpl::start_with_next([=](const QByteArray &password) {
+		_form->reloadAndSubmitPassword(password);
+	}, box->lifetime());
+
+	rpl::merge(
+		box->passwordReloadNeeded(),
+		box->newPasswordSet(
+		) | rpl::filter([=](const QByteArray &password) {
+			return password.isEmpty();
+		}) | rpl::map([] { return rpl::empty_value(); })
+	) | rpl::start_with_next([=] {
 		_form->reloadPassword();
-	});
+	}, box->lifetime());
 }
 
 void PanelController::cancelPasswordSubmit() {
@@ -797,6 +813,24 @@ void PanelController::showCriticalError(const QString &error) {
 	_panel->showCriticalError(error);
 }
 
+void PanelController::showUpdateAppBox() {
+	ensurePanelCreated();
+
+	const auto box = std::make_shared<QPointer<BoxContent>>();
+	const auto callback = [=] {
+		_form->cancelSure();
+		Core::UpdateApplication();
+	};
+	*box = show(
+		Box<ConfirmBox>(
+			lang(lng_passport_app_out_of_date),
+			lang(lng_menu_update),
+			callback,
+			[=] { _form->cancelSure(); }),
+		LayerOption::KeepOther,
+		anim::type::instant);
+}
+
 void PanelController::ensurePanelCreated() {
 	if (!_panel) {
 		_panel = std::make_unique<Panel>(this);
@@ -812,6 +846,15 @@ int PanelController::findNonEmptyDocumentIndex(const Scope &scope) const {
 		});
 	if (i != end(documents)) {
 		return (i - begin(documents));
+	}
+	// If we have a document where only selfie is not filled - return it.
+	const auto j = ranges::find_if(
+		documents,
+		[&](not_null<const Value*> document) {
+			return document->scansAreFilled(false);
+		});
+	if (j != end(documents)) {
+		return (j - begin(documents));
 	}
 	return -1;
 }
@@ -902,20 +945,24 @@ void PanelController::editWithUpload(int index, int documentIndex) {
 	Expects(documentIndex >= 0
 		&& documentIndex < _scopes[index].documents.size());
 
+	const auto &document = _scopes[index].documents[documentIndex];
+	const auto requiresSpecialScan = document->requiresSpecialScan(
+		SpecialFile::FrontSide,
+		false);
+	const auto allowMany = !requiresSpecialScan;
 	const auto widget = _panel->widget();
 	EditScans::ChooseScan(widget.get(), [=](QByteArray &&content) {
-		base::take(_scopeDocumentTypeBox);
-		editScope(index, documentIndex);
-		if (_scopes[index].documents[documentIndex]->requiresSpecialScan(
-				SpecialFile::FrontSide,
-				false)) {
+		if (!_editScope || !_editDocument) {
+			editScope(index, documentIndex);
+		}
+		if (requiresSpecialScan) {
 			uploadSpecialScan(SpecialFile::FrontSide, std::move(content));
 		} else {
 			uploadScan(std::move(content));
 		}
 	}, [=](ReadScanError error) {
 		readScanError(error);
-	});
+	}, allowMany);
 }
 
 void PanelController::readScanError(ReadScanError error) {
@@ -1041,6 +1088,13 @@ void PanelController::processValueSaveFinished(
 	}
 }
 
+bool PanelController::uploadingScopeScan() const {
+	Expects(_editValue != nullptr);
+
+	return _form->uploadingScan(_editValue)
+		|| (_editDocument && _form->uploadingScan(_editDocument));
+}
+
 bool PanelController::savingScope() const {
 	Expects(_editValue != nullptr);
 
@@ -1155,7 +1209,10 @@ void PanelController::saveScope(ValueMap &&data, ValueMap &&filesData) {
 	Expects(_panel != nullptr);
 	Expects(_editValue != nullptr);
 
-	if (savingScope()) {
+	if (uploadingScopeScan()) {
+		showToast(lang(lng_passport_wait_upload));
+		return;
+	} else if (savingScope()) {
 		return;
 	}
 

@@ -11,6 +11,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/optional.h"
 #include "base/variant.h"
 
+#include <QtCore/QSize>
 #include <QtCore/QString>
 #include <QtCore/QByteArray>
 
@@ -26,6 +27,11 @@ using PeerId = uint64;
 PeerId UserPeerId(int32 userId);
 PeerId ChatPeerId(int32 chatId);
 int32 BarePeerId(PeerId peerId);
+bool IsChatPeerId(PeerId peerId);
+bool IsUserPeerId(PeerId peerId);
+int PeerColorIndex(int32 bareId);
+int ApplicationColorIndex(int applicationId);
+int DomainApplicationId(const Utf8String &data);
 
 Utf8String ParseString(const MTPstring &data);
 
@@ -77,6 +83,21 @@ struct Image {
 	File file;
 };
 
+std::pair<QString, QSize> WriteImageThumb(
+	const QString &basePath,
+	const QString &largePath,
+	Fn<QSize(QSize)> convertSize,
+	base::optional<QByteArray> format = base::none,
+	base::optional<int> quality = base::none,
+	const QString &postfix = "_thumb");
+
+QString WriteImageThumb(
+	const QString &basePath,
+	const QString &largePath,
+	int width,
+	int height,
+	const QString &postfix = "_thumb");
+
 struct ContactInfo {
 	int32 userId = 0;
 	Utf8String firstName;
@@ -88,6 +109,7 @@ struct ContactInfo {
 };
 
 ContactInfo ParseContactInfo(const MTPUser &data);
+int ContactColorIndex(const ContactInfo &data);
 
 struct Photo {
 	uint64 id = 0;
@@ -101,6 +123,7 @@ struct Document {
 	TimeId date = 0;
 
 	File file;
+	Image thumb;
 
 	Utf8String name;
 	Utf8String mime;
@@ -230,6 +253,7 @@ std::vector<int> SortedContactsIndices(const ContactsList &data);
 bool AppendTopPeers(ContactsList &to, const MTPcontacts_TopPeers &data);
 
 struct Session {
+	int applicationId = 0;
 	Utf8String platform;
 	Utf8String deviceModel;
 	Utf8String systemVersion;
@@ -278,6 +302,8 @@ struct Media {
 
 	File &file();
 	const File &file() const;
+	Image &thumb();
+	const Image &thumb() const;
 };
 
 struct ParseMediaContext {
@@ -450,7 +476,9 @@ struct Message {
 	TimeId date = 0;
 	TimeId edited = 0;
 	int32 fromId = 0;
+	PeerId toId = 0;
 	PeerId forwardedFromId = 0;
+	TimeId forwardedDate = 0;
 	PeerId savedFromChatId = 0;
 	Utf8String signature;
 	int32 viaBotId = 0;
@@ -458,9 +486,12 @@ struct Message {
 	std::vector<TextPart> text;
 	Media media;
 	ServiceAction action;
+	bool out = false;
 
 	File &file();
 	const File &file() const;
+	Image &thumb();
+	const Image &thumb() const;
 };
 
 Message ParseMessage(
@@ -485,17 +516,19 @@ struct DialogInfo {
 	};
 	Type type = Type::Unknown;
 	Utf8String name;
+	Utf8String lastName;
 
 	MTPInputPeer input = MTP_inputPeerEmpty();
 	int32 topMessageId = 0;
 	TimeId topMessageDate = 0;
-	PeerId peerId;
+	PeerId peerId = 0;
 
 	// User messages splits which contained that dialog.
 	std::vector<int> splits;
 
 	// Filled after the whole dialogs list is accumulated.
 	bool onlyMyMessages = false;
+	bool isLeftChannel = false;
 	QString relativePath;
 
 	// Filled when requesting dialog messages.
@@ -503,7 +536,11 @@ struct DialogInfo {
 };
 
 struct DialogsInfo {
-	std::vector<DialogInfo> list;
+	DialogInfo *item(int index);
+	const DialogInfo *item(int index) const;
+
+	std::vector<DialogInfo> chats;
+	std::vector<DialogInfo> left;
 };
 
 DialogInfo::Type DialogTypeFromChat(const Chat &chat);
@@ -511,7 +548,6 @@ DialogInfo::Type DialogTypeFromChat(const Chat &chat);
 DialogsInfo ParseDialogsInfo(const MTPmessages_Dialogs &data);
 DialogsInfo ParseLeftChannelsInfo(const MTPmessages_Chats &data);
 void FinalizeDialogsInfo(DialogsInfo &info, const Settings &settings);
-void FinalizeLeftChannelsInfo(DialogsInfo &info, const Settings &settings);
 
 struct MessagesSlice {
 	std::vector<Message> list;
@@ -526,14 +562,14 @@ MessagesSlice ParseMessagesSlice(
 	const QString &mediaFolder);
 
 Utf8String FormatPhoneNumber(const Utf8String &phoneNumber);
-
 Utf8String FormatDateTime(
 	TimeId date,
 	QChar dateSeparator = QChar('.'),
 	QChar timeSeparator = QChar(':'),
 	QChar separator = QChar(' '));
-
 Utf8String FormatMoneyAmount(uint64 amount, const Utf8String &currency);
+Utf8String FormatFileSize(int64 size);
+Utf8String FormatDuration(int64 seconds);
 
 } // namespace Data
 } // namespace Export

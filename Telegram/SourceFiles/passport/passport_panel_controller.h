@@ -68,7 +68,7 @@ public:
 	not_null<UserData*> bot() const;
 	QString privacyPolicyUrl() const;
 	void submitForm();
-	void submitPassword(const QString &password);
+	void submitPassword(const QByteArray &password);
 	void recoverPassword();
 	rpl::producer<QString> passwordError() const;
 	QString passwordHint() const;
@@ -97,6 +97,7 @@ public:
 	void showAskPassword() override;
 	void showNoPassword() override;
 	void showCriticalError(const QString &error) override;
+	void showUpdateAppBox() override;
 
 	void fillRows(
 		Fn<void(
@@ -144,6 +145,7 @@ private:
 	void processVerificationNeeded(not_null<const Value*> value);
 
 	bool savingScope() const;
+	bool uploadingScopeScan() const;
 	bool hasValueDocument() const;
 	bool hasValueFields() const;
 	ScanInfo collectScanInfo(const EditFile &file) const;
