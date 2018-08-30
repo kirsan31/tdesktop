@@ -13,7 +13,18 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "auth_session.h"
 #include "messenger.h"
 
-PhotoData::PhotoData(const PhotoId &id, const uint64 &access, int32 date, const ImagePtr &thumb, const ImagePtr &medium, const ImagePtr &full)
+PhotoData::PhotoData(const PhotoId &id)
+: id(id) {
+}
+
+PhotoData::PhotoData(
+	const PhotoId &id,
+	const uint64 &access,
+	const QByteArray &fileReference,
+	TimeId date,
+	const ImagePtr &thumb,
+	const ImagePtr &medium,
+	const ImagePtr &full)
 : id(id)
 , access(access)
 , date(date)
@@ -22,16 +33,18 @@ PhotoData::PhotoData(const PhotoId &id, const uint64 &access, int32 date, const 
 , full(full) {
 }
 
-void PhotoData::automaticLoad(const HistoryItem *item) {
-	full->automaticLoad(item);
+void PhotoData::automaticLoad(
+		Data::FileOrigin origin,
+		const HistoryItem *item) {
+	full->automaticLoad(origin, item);
 }
 
 void PhotoData::automaticLoadSettingsChanged() {
 	full->automaticLoadSettingsChanged();
 }
 
-void PhotoData::download() {
-	full->loadEvenCancelled();
+void PhotoData::download(Data::FileOrigin origin) {
+	full->loadEvenCancelled(origin);
 	Auth().data().notifyPhotoLayoutChanged(this);
 }
 
@@ -96,18 +109,25 @@ void PhotoData::forget() {
 	full->forget();
 }
 
-ImagePtr PhotoData::makeReplyPreview() {
+ImagePtr PhotoData::makeReplyPreview(Data::FileOrigin origin) {
 	if (replyPreview->isNull() && !thumb->isNull()) {
 		if (thumb->loaded()) {
 			int w = thumb->width(), h = thumb->height();
 			if (w <= 0) w = 1;
 			if (h <= 0) h = 1;
-			replyPreview = ImagePtr(w > h ? thumb->pix(w * st::msgReplyBarSize.height() / h, st::msgReplyBarSize.height()) : thumb->pix(st::msgReplyBarSize.height()), "PNG");
+			replyPreview = ImagePtr(w > h ? thumb->pix(origin, w * st::msgReplyBarSize.height() / h, st::msgReplyBarSize.height()) : thumb->pix(origin, st::msgReplyBarSize.height()), "PNG");
 		} else {
-			thumb->load();
+			thumb->load(origin);
 		}
 	}
 	return replyPreview;
+}
+
+MTPInputPhoto PhotoData::mtpInput() const {
+	return MTP_inputPhoto(
+		MTP_long(id),
+		MTP_long(access),
+		MTP_bytes(fileReference));
 }
 
 void PhotoOpenClickHandler::onClickImpl() const {
@@ -118,7 +138,7 @@ void PhotoSaveClickHandler::onClickImpl() const {
 	auto data = photo();
 	if (!data->date) return;
 
-	data->download();
+	data->download(context());
 }
 
 void PhotoCancelClickHandler::onClickImpl() const {

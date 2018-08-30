@@ -19,14 +19,19 @@ namespace Lang {
 namespace {
 
 constexpr auto kDefaultLanguage = str_const("en");
+constexpr auto kCloudLangPackName = str_const("tdesktop");
 constexpr auto kLangValuesLimit = 20000;
 
 class ValueParser {
 public:
-	ValueParser(const QByteArray &key, LangKey keyIndex, const QByteArray &value);
+	ValueParser(
+		const QByteArray &key,
+		LangKey keyIndex,
+		const QByteArray &value);
 
 	QString takeResult() {
 		Expects(!_failed);
+
 		return std::move(_result);
 	}
 
@@ -164,6 +169,10 @@ QString DefaultLanguageId() {
 	return str_const_toString(kDefaultLanguage);
 }
 
+QString CloudLangPackName() {
+	return str_const_toString(kCloudLangPackName);
+}
+
 void Instance::switchToId(const QString &id) {
 	reset();
 	_id = id;
@@ -226,6 +235,10 @@ QString Instance::cloudLangCode() const {
 		return DefaultLanguageId();
 	}
 	return id();
+}
+
+QString Instance::langPackName() const {
+	return isCustom() ? QString() : CloudLangPackName();
 }
 
 QByteArray Instance::serialize() const {
@@ -420,7 +433,8 @@ void Instance::applyDifference(const MTPDlangPackDifference &difference) {
 	_updated.notify();
 }
 
-std::map<LangKey, QString> Instance::ParseStrings(const MTPVector<MTPLangPackString> &strings) {
+std::map<LangKey, QString> Instance::ParseStrings(
+		const MTPVector<MTPLangPackString> &strings) {
 	auto result = std::map<LangKey, QString>();
 	for (auto &mtpString : strings.v) {
 		HandleString(mtpString, [&result](auto &&key, auto &&value) {
@@ -436,10 +450,16 @@ std::map<LangKey, QString> Instance::ParseStrings(const MTPVector<MTPLangPackStr
 }
 
 template <typename Result>
-LangKey Instance::ParseKeyValue(const QByteArray &key, const QByteArray &value, Result &result) {
+LangKey Instance::ParseKeyValue(
+		const QByteArray &key,
+		const QByteArray &value,
+		Result &result) {
 	auto keyIndex = GetKeyIndex(QLatin1String(key));
 	if (keyIndex == kLangKeysCount) {
-		LOG(("Lang Error: Unknown key '%1'").arg(QString::fromLatin1(key)));
+		if (!key.startsWith("cloud_")) {
+			LOG(("Lang Warning: Unknown key '%1'"
+				).arg(QString::fromLatin1(key)));
+		}
 		return kLangKeysCount;
 	}
 
@@ -449,6 +469,13 @@ LangKey Instance::ParseKeyValue(const QByteArray &key, const QByteArray &value, 
 		return keyIndex;
 	}
 	return kLangKeysCount;
+}
+
+QString Instance::getNonDefaultValue(const QByteArray &key) const {
+	const auto i = _nonDefaultValues.find(key);
+	return (i != end(_nonDefaultValues))
+		? QString::fromUtf8(i->second)
+		: QString();
 }
 
 void Instance::applyValue(const QByteArray &key, const QByteArray &value) {
@@ -462,7 +489,9 @@ void Instance::applyValue(const QByteArray &key, const QByteArray &value) {
 void Instance::updatePluralRules() {
 	auto id = _id;
 	if (isCustom()) {
-		auto path = _customFilePathAbsolute.isEmpty() ? _customFilePathRelative : _customFilePathAbsolute;
+		auto path = _customFilePathAbsolute.isEmpty()
+			? _customFilePathRelative
+			: _customFilePathAbsolute;
 		auto name = QFileInfo(path).fileName();
 		if (auto match = qthelp::regex_match("_([a-z]{2,3})(_[A-Z]{2,3}|\\-[a-z]{2,3})?\\.", name)) {
 			id = match->captured(1);

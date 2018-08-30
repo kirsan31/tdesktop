@@ -296,6 +296,7 @@ MainWidget::MainWidget(
 		checkFloatPlayerVisibility();
 	});
 
+	// MSVC BUG + REGRESSION rpl::mappers::tuple :(
 	using namespace rpl::mappers;
 	_controller->activeChatValue(
 	) | rpl::map([](Dialogs::Key key) {
@@ -303,7 +304,11 @@ MainWidget::MainWidget(
 		auto canWrite = peer
 			? Data::CanWriteValue(peer)
 			: rpl::single(false);
-		return std::move(canWrite) | rpl::map(tuple(key, _1));
+		return std::move(
+			canWrite
+		) | rpl::map([=](bool can) {
+			return std::make_tuple(key, can);
+		});
 	}) | rpl::flatten_latest(
 	) | rpl::start_with_next([this](Dialogs::Key key, bool canWrite) {
 		updateThirdColumnToCurrentChat(key, canWrite);
@@ -965,8 +970,11 @@ void MainWidget::deletePhotoLayer(PhotoData *photo) {
 		} else if (photo->peer && !photo->peer->isUser() && photo->peer->userpicPhotoId() == photo->id) {
 			Messenger::Instance().peerClearPhoto(photo->peer->id);
 		} else {
-			MTP::send(MTPphotos_DeletePhotos(MTP_vector<MTPInputPhoto>(1, MTP_inputPhoto(MTP_long(photo->id), MTP_long(photo->access)))));
-			Auth().storage().remove(Storage::UserPhotosRemoveOne(me->bareId(), photo->id));
+			MTP::send(MTPphotos_DeletePhotos(
+				MTP_vector<MTPInputPhoto>(1, photo->mtpInput())));
+			Auth().storage().remove(Storage::UserPhotosRemoveOne(
+				me->bareId(),
+				photo->id));
 		}
 	})));
 }
@@ -1559,12 +1567,6 @@ void MainWidget::createExportTopBar(Export::View::Content &&data) {
 	_exportTopBar.create(
 		this,
 		object_ptr<Export::View::TopBar>(this, std::move(data)));
-	rpl::merge(
-		_exportTopBar->heightValue() | rpl::map([] { return true; }),
-		_exportTopBar->shownValue()
-	) | rpl::start_with_next([=] {
-		exportTopBarHeightUpdated();
-	}, _exportTopBar->lifetime());
 	_exportTopBar->entity()->clicks(
 	) | rpl::start_with_next([=] {
 		if (_currentExportView) {
@@ -1581,6 +1583,12 @@ void MainWidget::createExportTopBar(Export::View::Content &&data) {
 		_exportTopBarHeight = _contentScrollAddToY = _exportTopBar->contentHeight();
 		updateControlsGeometry();
 	}
+	rpl::merge(
+		_exportTopBar->heightValue() | rpl::map([] { return true; }),
+		_exportTopBar->shownValue()
+	) | rpl::start_with_next([=] {
+		exportTopBarHeightUpdated();
+	}, _exportTopBar->lifetime());
 }
 
 void MainWidget::destroyExportTopBar() {
@@ -1630,18 +1638,24 @@ void MainWidget::documentLoadFailed(FileLoader *loader, bool started) {
 
 	auto document = Auth().data().document(documentId);
 	if (started) {
-		auto failedFileName = loader->fileName();
+		const auto origin = loader->fileOrigin();
+		const auto failedFileName = loader->fileName();
 		Ui::show(Box<ConfirmBox>(lang(lng_download_finish_failed), crl::guard(this, [=] {
 			Ui::hideLayer();
-			if (document) document->save(failedFileName);
+			if (document) {
+				document->save(origin, failedFileName);
+			}
 		})));
 	} else {
-		Ui::show(Box<ConfirmBox>(lang(lng_download_path_failed), lang(lng_download_path_settings), crl::guard(this, [=] {
-			Global::SetDownloadPath(QString());
-			Global::SetDownloadPathBookmark(QByteArray());
-			Ui::show(Box<DownloadPathBox>());
-			Global::RefDownloadPathChanged().notify();
-		})));
+		// Sometimes we have LOCATION_INVALID error in documents / stickers.
+		// Sometimes FILE_REFERENCE_EXPIRED could not be handled.
+		//
+		//Ui::show(Box<ConfirmBox>(lang(lng_download_path_failed), lang(lng_download_path_settings), crl::guard(this, [=] {
+		//	Global::SetDownloadPath(QString());
+		//	Global::SetDownloadPathBookmark(QByteArray());
+		//	Ui::show(Box<DownloadPathBox>());
+		//	Global::RefDownloadPathChanged().notify();
+		//})));
 	}
 
 	if (document) {
@@ -1674,7 +1688,7 @@ void MainWidget::onSendFileConfirm(
 }
 
 bool MainWidget::onSendSticker(DocumentData *document) {
-	return _history->onStickerSend(document);
+	return _history->onStickerOrGifSend(document);
 }
 
 void MainWidget::dialogsCancelled() {
@@ -1779,7 +1793,7 @@ void MainWidget::updateScrollColors() {
 
 void MainWidget::setChatBackground(const App::WallPaper &wp) {
 	_background = std::make_unique<App::WallPaper>(wp);
-	_background->full->loadEvenCancelled();
+	_background->full->loadEvenCancelled(Data::FileOrigin());
 	checkChatBackground();
 }
 
@@ -1804,7 +1818,7 @@ void MainWidget::checkChatBackground() {
 				|| _background->id == Window::Theme::kDefaultBackground) {
 				Window::Theme::Background()->setImage(_background->id);
 			} else {
-				Window::Theme::Background()->setImage(_background->id, _background->full->pix().toImage());
+				Window::Theme::Background()->setImage(_background->id, _background->full->pix(Data::FileOrigin()).toImage());
 			}
 			_background = nullptr;
 			QTimer::singleShot(0, this, SLOT(update()));
@@ -2245,8 +2259,14 @@ Window::SectionSlideParams MainWidget::prepareShowAnimation(
 			height() - sectionTop));
 	} else if (_mainSection) {
 		result.oldContentCache = _mainSection->grabForShowAnimation(result);
-	} else {
+	} else if (!Adaptive::OneColumn() || !_history->isHidden()) {
 		result.oldContentCache = _history->grabForShowAnimation(result);
+	} else {
+		result.oldContentCache = Ui::GrabWidget(this, QRect(
+			0,
+			sectionTop,
+			_dialogsWidth,
+			height() - sectionTop));
 	}
 
 	if (playerVolumeVisible) {

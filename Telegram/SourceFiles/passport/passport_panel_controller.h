@@ -22,26 +22,45 @@ enum class ReadScanError;
 
 EditDocumentScheme GetDocumentScheme(
 	Scope::Type type,
-	base::optional<Value::Type> scansType = base::none);
+	base::optional<Value::Type> scansType,
+	bool nativeNames);
 EditContactScheme GetContactScheme(Scope::Type type);
 
+const std::map<QString, QString> &LatinToNativeMap();
+const std::map<QString, QString> &NativeToLatinMap();
+QString AdjustKeyName(not_null<const Value*> value, const QString &key);
+bool SkipFieldCheck(not_null<const Value*> value, const QString &key);
+
 struct ScanInfo {
+	explicit ScanInfo(FileType type);
+	ScanInfo(
+		FileType type,
+		const FileKey &key,
+		const QString &status,
+		const QImage &thumb,
+		bool deleted,
+		const QString &error);
+
+	FileType type;
 	FileKey key;
 	QString status;
 	QImage thumb;
 	bool deleted = false;
-	base::optional<SpecialFile> special;
 	QString error;
-
 };
 
 struct ScopeError {
-	// FileKey:id != 0 - file_hash error (bad scan / selfie)
-	// FileKey:id == 0 - vector<file_hash> error (scan missing)
-	// QString - data_hash with such key error (bad value)
-	base::variant<FileKey, QString> key;
-	QString text;
+	enum class General {
+		WholeValue,
+		ScanMissing,
+		TranslationMissing,
+	};
 
+	// FileKey - file_hash error (bad scan / selfie / translation)
+	// General - general value error (or scan / translation missing)
+	// QString - data_hash with such key error (bad value)
+	base::variant<FileKey, General, QString> key;
+	QString text;
 };
 
 class BoxPointer {
@@ -77,13 +96,10 @@ public:
 	void setupPassword();
 	void cancelPasswordSubmit();
 
-	bool canAddScan() const;
-	void uploadScan(QByteArray &&content);
-	void deleteScan(int fileIndex);
-	void restoreScan(int fileIndex);
-	void uploadSpecialScan(SpecialFile type, QByteArray &&content);
-	void deleteSpecialScan(SpecialFile type);
-	void restoreSpecialScan(SpecialFile type);
+	bool canAddScan(FileType type) const;
+	void uploadScan(FileType type, QByteArray &&content);
+	void deleteScan(FileType type, base::optional<int> fileIndex);
+	void restoreScan(FileType type, base::optional<int> fileIndex);
 	rpl::producer<ScanInfo> scanUpdated() const;
 	rpl::producer<ScopeError> saveErrors() const;
 	void readScanError(ReadScanError error);
@@ -133,14 +149,15 @@ public:
 private:
 	void ensurePanelCreated();
 
-	void editScope(int index, int documentIndex);
+	void editScope(int index, base::optional<int> documentIndex);
 	void editWithUpload(int index, int documentIndex);
-	int findNonEmptyDocumentIndex(const Scope &scope) const;
+	bool editRequiresScanUpload(
+		int index,
+		base::optional<int> documentIndex) const;
+	void startScopeEdit(int index, base::optional<int> documentIndex);
+	base::optional<int> findBestDocumentIndex(const Scope &scope) const;
 	void requestScopeFilesType(int index);
 	void cancelValueEdit();
-	std::vector<ScanInfo> valueFiles(const Value &value) const;
-	std::map<SpecialFile, ScanInfo> valueSpecialFiles(
-		const Value &value) const;
 	void processValueSaveFinished(not_null<const Value*> value);
 	void processVerificationNeeded(not_null<const Value*> value);
 
@@ -148,8 +165,7 @@ private:
 	bool uploadingScopeScan() const;
 	bool hasValueDocument() const;
 	bool hasValueFields() const;
-	ScanInfo collectScanInfo(const EditFile &file) const;
-	std::vector<ScopeError> collectErrors(
+	std::vector<ScopeError> collectSaveErrors(
 		not_null<const Value*> value) const;
 	QString getDefaultContactValue(Scope::Type type) const;
 	void deleteValueSure(bool withDetails);

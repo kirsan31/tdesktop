@@ -56,7 +56,8 @@ public:
 		return *_session;
 	}
 
-	void startExport();
+	void startExport(PeerData *peer = nullptr);
+	void startExport(const MTPInputPeer &singlePeer);
 	void suggestStartExport(TimeId availableAt);
 	void clearExportSuggestion();
 	rpl::producer<Export::View::PanelController*> currentExportView() const;
@@ -249,6 +250,7 @@ public:
 	not_null<PhotoData*> photo(
 		PhotoId id,
 		const uint64 &access,
+		const QByteArray &fileReference,
 		TimeId date,
 		const ImagePtr &thumb,
 		const ImagePtr &medium,
@@ -267,7 +269,7 @@ public:
 	not_null<DocumentData*> document(
 		DocumentId id,
 		const uint64 &access,
-		int32 version,
+		const QByteArray &fileReference,
 		TimeId date,
 		const QVector<MTPDocumentAttribute> &attributes,
 		const QString &mime,
@@ -434,6 +436,7 @@ private:
 	void photoApplyFields(
 		not_null<PhotoData*> photo,
 		const uint64 &access,
+		const QByteArray &fileReference,
 		TimeId date,
 		const ImagePtr &thumb,
 		const ImagePtr &medium,
@@ -448,7 +451,7 @@ private:
 	void documentApplyFields(
 		not_null<DocumentData*> document,
 		const uint64 &access,
-		int32 version,
+		const QByteArray &fileReference,
 		TimeId date,
 		const QVector<MTPDocumentAttribute> &attributes,
 		const QString &mime,

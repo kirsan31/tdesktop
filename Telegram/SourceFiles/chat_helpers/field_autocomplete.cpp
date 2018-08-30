@@ -29,7 +29,7 @@ FieldAutocomplete::FieldAutocomplete(QWidget *parent) : TWidget(parent)
 	connect(_inner, SIGNAL(mentionChosen(UserData*, FieldAutocomplete::ChooseMethod)), this, SIGNAL(mentionChosen(UserData*, FieldAutocomplete::ChooseMethod)));
 	connect(_inner, SIGNAL(hashtagChosen(QString, FieldAutocomplete::ChooseMethod)), this, SIGNAL(hashtagChosen(QString, FieldAutocomplete::ChooseMethod)));
 	connect(_inner, SIGNAL(botCommandChosen(QString, FieldAutocomplete::ChooseMethod)), this, SIGNAL(botCommandChosen(QString, FieldAutocomplete::ChooseMethod)));
-	connect(_inner, SIGNAL(stickerChosen(DocumentData*, FieldAutocomplete::ChooseMethod)), this, SIGNAL(stickerChosen(DocumentData*, FieldAutocomplete::ChooseMethod)));
+	connect(_inner, SIGNAL(stickerChosen(not_null<DocumentData*>,FieldAutocomplete::ChooseMethod)), this, SIGNAL(stickerChosen(not_null<DocumentData*>,FieldAutocomplete::ChooseMethod)));
 	connect(_inner, SIGNAL(mustScrollTo(int, int)), _scroll, SLOT(scrollToY(int, int)));
 
 	_scroll->show();
@@ -551,8 +551,8 @@ void FieldAutocompleteInner::paintEvent(QPaintEvent *e) {
 				int32 index = row * _stickersPerRow + col;
 				if (index >= _srows->size()) break;
 
-				DocumentData *sticker = _srows->at(index);
-				if (!sticker->sticker()) continue;
+				const auto document = _srows->at(index);
+				if (!document->sticker()) continue;
 
 				QPoint pos(st::stickerPanPadding + col * st::stickerPanSize.width(), st::stickerPanPadding + row * st::stickerPanSize.height());
 				if (_sel == index) {
@@ -561,23 +561,16 @@ void FieldAutocompleteInner::paintEvent(QPaintEvent *e) {
 					App::roundRect(p, QRect(tl, st::stickerPanSize), st::emojiPanHover, StickerHoverCorners);
 				}
 
-				const auto goodThumb = sticker->hasGoodStickerThumb();
-				if (goodThumb) {
-					sticker->thumb->load();
-				} else {
-					sticker->checkSticker();
-				}
+				document->checkStickerThumb();
 
-				float64 coef = qMin((st::stickerPanSize.width() - st::buttonRadius * 2) / float64(sticker->dimensions.width()), (st::stickerPanSize.height() - st::buttonRadius * 2) / float64(sticker->dimensions.height()));
+				float64 coef = qMin((st::stickerPanSize.width() - st::buttonRadius * 2) / float64(document->dimensions.width()), (st::stickerPanSize.height() - st::buttonRadius * 2) / float64(document->dimensions.height()));
 				if (coef > 1) coef = 1;
-				int32 w = qRound(coef * sticker->dimensions.width()), h = qRound(coef * sticker->dimensions.height());
+				int32 w = qRound(coef * document->dimensions.width()), h = qRound(coef * document->dimensions.height());
 				if (w < 1) w = 1;
 				if (h < 1) h = 1;
 				QPoint ppos = pos + QPoint((st::stickerPanSize.width() - w) / 2, (st::stickerPanSize.height() - h) / 2);
-				if (goodThumb) {
-					p.drawPixmapLeft(ppos, width(), sticker->thumb->pix(w, h));
-				} else if (!sticker->sticker()->img->isNull()) {
-					p.drawPixmapLeft(ppos, width(), sticker->sticker()->img->pix(w, h));
+				if (const auto image = document->getStickerThumb()) {
+					p.drawPixmapLeft(ppos, width(), image->pix(document->stickerSetOrigin(), w, h));
 				}
 			}
 		}
@@ -736,7 +729,7 @@ bool FieldAutocompleteInner::moveSel(int key) {
 bool FieldAutocompleteInner::chooseSelected(FieldAutocomplete::ChooseMethod method) const {
 	if (!_srows->empty()) {
 		if (_sel >= 0 && _sel < _srows->size()) {
-			emit stickerChosen(_srows->at(_sel), method);
+			emit stickerChosen((*_srows)[_sel], method);
 			return true;
 		}
 	} else if (!_mrows->isEmpty()) {
@@ -901,7 +894,9 @@ void FieldAutocompleteInner::onUpdateSelected(bool force) {
 		if (_down >= 0 && _sel >= 0 && _down != _sel) {
 			_down = _sel;
 			if (_down >= 0 && _down < _srows->size()) {
-				Ui::showMediaPreview(_srows->at(_down));
+				Ui::showMediaPreview(
+					(*_srows)[_down]->stickerSetOrigin(),
+					(*_srows)[_down]);
 			}
 		}
 	}
@@ -917,7 +912,9 @@ void FieldAutocompleteInner::onParentGeometryChanged() {
 
 void FieldAutocompleteInner::onPreview() {
 	if (_down >= 0 && _down < _srows->size()) {
-		Ui::showMediaPreview(_srows->at(_down));
+		Ui::showMediaPreview(
+			(*_srows)[_down]->stickerSetOrigin(),
+			(*_srows)[_down]);
 		_previewShown = true;
 	}
 }

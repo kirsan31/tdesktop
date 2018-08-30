@@ -929,6 +929,10 @@ void ListWidget::markLayoutsStale() {
 	}
 }
 
+bool ListWidget::preventAutoHide() const {
+	return (_contextMenu != nullptr) || (_actionBoxWeak != nullptr);
+}
+
 void ListWidget::saveState(not_null<Memento*> memento) {
 	if (_universalAroundId != kDefaultAroundId) {
 		auto state = countScrollState();
@@ -1165,7 +1169,6 @@ void ListWidget::showContextMenu(
 		QContextMenuEvent *e,
 		ContextMenuSource source) {
 	if (_contextMenu) {
-		_contextMenu->deleteLater();
 		_contextMenu = nullptr;
 		repaintItem(_contextUniversalId);
 	}
@@ -1217,10 +1220,11 @@ void ListWidget::showContextMenu(
 
 	auto link = ClickHandler::getActive();
 
-	_contextMenu = new Ui::PopupMenu(nullptr);
+	const auto itemFullId = item->fullId();
+	_contextMenu = base::make_unique_q<Ui::PopupMenu>(this);
 	_contextMenu->addAction(
 		lang(lng_context_to_msg),
-		[itemFullId = item->fullId()] {
+		[itemFullId] {
 			if (auto item = App::histItemById(itemFullId)) {
 				Ui::showPeerHistoryAtItem(item);
 			}
@@ -1268,8 +1272,11 @@ void ListWidget::showContextMenu(
 					auto handler = App::LambdaDelayed(
 						st::defaultDropdownMenu.menu.ripple.hideDuration,
 						this,
-						[document] {
-							DocumentSaveClickHandler::doSave(document, true);
+						[=] {
+							DocumentSaveClickHandler::Save(
+								itemFullId,
+								document,
+								true);
 						});
 					_contextMenu->addAction(
 						lang(isVideo
@@ -1347,7 +1354,6 @@ void ListWidget::showContextMenu(
 	_contextMenu->setDestroyedCallback(crl::guard(
 		this,
 		[this, universalId] {
-			_contextMenu = nullptr;
 			mouseActionUpdate(QCursor::pos());
 			repaintItem(universalId);
 			_checkForHide.fire({});
@@ -2121,7 +2127,12 @@ auto ListWidget::findSectionAfterBottom(
 		[](const Section &section) { return section.top(); });
 }
 
-ListWidget::~ListWidget() = default;
+ListWidget::~ListWidget() {
+	if (_contextMenu) {
+		// We don't want it to be called after ListWidget is destroyed.
+		_contextMenu->setDestroyedCallback(nullptr);
+	}
+}
 
 } // namespace Media
 } // namespace Info

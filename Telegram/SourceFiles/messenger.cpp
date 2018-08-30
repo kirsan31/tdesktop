@@ -913,7 +913,9 @@ bool Messenger::openLocalUrl(const QString &url, QVariant context) {
 		const auto scope = params.value("scope", QString());
 		const auto callback = params.value("callback_url", QString());
 		const auto publicKey = params.value("public_key", QString());
-		const auto payload = params.value("payload", QString());
+		const auto nonce = params.value(
+			Passport::NonceNameByScope(scope),
+			QString());
 		const auto errors = params.value("errors", QString());
 		if (const auto window = App::wnd()) {
 			if (const auto controller = window->controller()) {
@@ -922,7 +924,7 @@ bool Messenger::openLocalUrl(const QString &url, QVariant context) {
 					scope,
 					callback,
 					publicKey,
-					payload,
+					nonce,
 					errors));
 				return true;
 			}
@@ -1026,10 +1028,14 @@ bool Messenger::openLocalUrl(const QString &url, QVariant context) {
 				};
 				if (result.is_update_app()) {
 					const auto box = std::make_shared<QPointer<BoxContent>>();
+					const auto callback = [=] {
+						Core::UpdateApplication();
+						if (*box) (*box)->closeBox();
+					};
 					*box = Ui::show(Box<ConfirmBox>(
 						text,
 						lang(lng_menu_update),
-						[=] { Core::UpdateApplication(); if (*box) (*box)->closeBox(); }));
+						callback));
 				} else {
 					Ui::show(Box<InformBox>(text));
 				}
@@ -1062,7 +1068,13 @@ void Messenger::uploadProfilePhoto(QImage &&tosend, const PeerId &peerId) {
 
 	PhotoId id = rand_value<PhotoId>();
 
-	auto photo = MTP_photo(MTP_flags(0), MTP_long(id), MTP_long(0), MTP_int(unixtime()), MTP_vector<MTPPhotoSize>(photoSizes));
+	auto photo = MTP_photo(
+		MTP_flags(0),
+		MTP_long(id),
+		MTP_long(0),
+		MTP_bytes(QByteArray()),
+		MTP_int(unixtime()),
+		MTP_vector<MTPPhotoSize>(photoSizes));
 
 	QString file, filename;
 	int32 filesize = 0;
@@ -1270,7 +1282,6 @@ void Messenger::loggedOut() {
 		_mediaView->clearData();
 	}
 	Local::reset();
-	Window::Theme::Background()->reset();
 
 	cSetOtherOnline(0);
 	clearStorageImages();

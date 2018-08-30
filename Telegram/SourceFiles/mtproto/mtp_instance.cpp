@@ -941,6 +941,10 @@ void Instance::Private::clearCallbacks(mtpRequestId requestId, int32 errorCode) 
 		}
 	}
 	if (errorCode && found) {
+		LOG(("API Error: callbacks cleared without handling! "
+			"Request: %1, error code: %2"
+			).arg(requestId
+			).arg(errorCode));
 		rpcErrorOccured(requestId, h, internal::rpcClientError("CLEAR_CALLBACK", QString("did not handle request %1, error code %2").arg(requestId).arg(errorCode)));
 	}
 }
@@ -1518,6 +1522,10 @@ QString Instance::systemLangCode() const {
 
 QString Instance::cloudLangCode() const {
 	return Lang::Current().cloudLangCode();
+}
+
+QString Instance::langPackName() const {
+	return Lang::Current().langPackName();
 }
 
 void Instance::requestConfig() {

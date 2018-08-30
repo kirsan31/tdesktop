@@ -143,6 +143,8 @@
 <(src_loc)/core/click_handler.h
 <(src_loc)/core/click_handler_types.cpp
 <(src_loc)/core/click_handler_types.h
+<(src_loc)/core/core_cloud_password.cpp
+<(src_loc)/core/core_cloud_password.h
 <(src_loc)/core/crash_report_window.cpp
 <(src_loc)/core/crash_report_window.h
 <(src_loc)/core/crash_reports.cpp
@@ -177,6 +179,8 @@
 <(src_loc)/data/data_feed.h
 <(src_loc)/data/data_feed_messages.cpp
 <(src_loc)/data/data_feed_messages.h
+<(src_loc)/data/data_file_origin.cpp
+<(src_loc)/data/data_file_origin.h
 <(src_loc)/data/data_flags.h
 <(src_loc)/data/data_game.h
 <(src_loc)/data/data_groups.cpp

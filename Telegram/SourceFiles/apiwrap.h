@@ -22,6 +22,7 @@ struct MessageGroupId;
 struct SendingAlbum;
 enum class SendMediaType;
 struct FileLoadTo;
+class mtpFileLoader;
 
 namespace InlineBots {
 class Result;
@@ -54,7 +55,6 @@ inline int32 CountHash(IntRange &&range) {
 	}
 	return int32(acc & 0x7FFFFFFF);
 }
-
 
 } // namespace Api
 
@@ -96,6 +96,17 @@ public:
 	void requestAdmins(not_null<ChannelData*> channel);
 	void requestParticipantsCountDelayed(not_null<ChannelData*> channel);
 	void requestChannelRangeDifference(not_null<History*> history);
+
+	using UpdatedFileReferences = Data::UpdatedFileReferences;
+	using FileReferencesHandler = FnMut<void(const UpdatedFileReferences&)>;
+	void refreshFileReference(
+		Data::FileOrigin origin,
+		FileReferencesHandler &&handler);
+	void refreshFileReference(
+		Data::FileOrigin origin,
+		not_null<mtpFileLoader*> loader,
+		int requestId,
+		const QByteArray &current);
 
 	void requestChangelog(
 		const QString &sinceVersion,
@@ -145,6 +156,14 @@ public:
 		const MTPInputStickerSet &set);
 	std::vector<not_null<DocumentData*>> *stickersByEmoji(
 		not_null<EmojiPtr> emoji);
+	void toggleFavedSticker(
+		not_null<DocumentData*> document,
+		Data::FileOrigin origin,
+		bool faved);
+	void toggleSavedGif(
+		not_null<DocumentData*> document,
+		Data::FileOrigin origin,
+		bool saved);
 
 	void joinChannel(not_null<ChannelData*> channel);
 	void leaveChannel(not_null<ChannelData*> channel);
@@ -302,6 +321,11 @@ public:
 		not_null<UserData*> bot,
 		not_null<InlineBots::Result*> data,
 		const SendOptions &options);
+	void sendExistingDocument(
+		not_null<DocumentData*> document,
+		Data::FileOrigin origin,
+		TextWithEntities caption,
+		const SendOptions &options);
 
 	~ApiWrap();
 
@@ -319,6 +343,10 @@ private:
 		int32 hash = 0;
 		TimeMs received = 0;
 	};
+
+	using SimpleFileLocationId = Data::SimpleFileLocationId;
+	using DocumentFileLocationId = Data::DocumentFileLocationId;
+	using FileLocationId = Data::FileLocationId;
 
 	void updatesReceived(const MTPUpdates &updates);
 	void checkQuitPreventFinished();
@@ -474,6 +502,12 @@ private:
 
 	void sendNotifySettingsUpdates();
 
+	template <typename Request>
+	void requestFileReference(
+		Data::FileOrigin origin,
+		FileReferencesHandler &&handler,
+		Request &&data);
+
 	not_null<AuthSession*> _session;
 
 	MessageDataRequests _messageDataRequests;
@@ -609,6 +643,10 @@ private:
 
 	base::flat_set<not_null<const PeerData*>> _updateNotifySettingsPeers;
 	base::Timer _updateNotifySettingsTimer;
+
+	std::map<
+		Data::FileOrigin,
+		std::vector<FileReferencesHandler>> _fileReferenceHandlers;
 
 	mtpRequestId _deepLinkInfoRequestId = 0;
 

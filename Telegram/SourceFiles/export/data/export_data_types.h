@@ -44,7 +44,7 @@ inline auto NumberToString(Type value, int length = 0, char filler = '0')
 	return FillLeft(
 		Utf8String(result.data(), int(result.size())),
 		length,
-		filler);
+		filler).replace(',', '.');
 }
 
 struct UserpicsInfo {
@@ -546,6 +546,12 @@ struct DialogsInfo {
 DialogInfo::Type DialogTypeFromChat(const Chat &chat);
 
 DialogsInfo ParseDialogsInfo(const MTPmessages_Dialogs &data);
+DialogsInfo ParseDialogsInfo(
+	const MTPInputPeer &singlePeer,
+	const MTPVector<MTPUser> &data);
+DialogsInfo ParseDialogsInfo(
+	const MTPInputPeer &singlePeer,
+	const MTPmessages_Chats &data);
 DialogsInfo ParseLeftChannelsInfo(const MTPmessages_Chats &data);
 void FinalizeDialogsInfo(DialogsInfo &info, const Settings &settings);
 

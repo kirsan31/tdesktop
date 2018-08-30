@@ -25,8 +25,9 @@ enum StickerSetType {
 namespace Serialize {
 
 void Document::writeToStream(QDataStream &stream, DocumentData *document) {
+	const auto version = 0;
 	stream << quint64(document->id) << quint64(document->_access) << qint32(document->date);
-	stream << qint32(document->_version);
+	stream << document->_fileReference << qint32(version);
 	stream << document->filename() << document->mimeString() << qint32(document->_dc) << qint32(document->size);
 	stream << qint32(document->dimensions.width()) << qint32(document->dimensions.height());
 	stream << qint32(document->type);
@@ -55,8 +56,12 @@ DocumentData *Document::readFromStreamHelper(int streamAppVersion, QDataStream &
 	quint64 id, access;
 	QString name, mime;
 	qint32 date, dc, size, width, height, type, version;
+	QByteArray fileReference;
 	stream >> id >> access >> date;
 	if (streamAppVersion >= 9061) {
+		if (streamAppVersion >= 1003013) {
+			stream >> fileReference;
+		}
 		stream >> version;
 	} else {
 		version = 0;
@@ -77,7 +82,7 @@ DocumentData *Document::readFromStreamHelper(int streamAppVersion, QDataStream &
 		qint32 typeOfSet;
 		stream >> alt >> typeOfSet;
 
-		thumb = readStorageImageLocation(stream);
+		thumb = readStorageImageLocation(streamAppVersion, stream);
 
 		if (typeOfSet == StickerSetTypeEmpty) {
 			attributes.push_back(MTP_documentAttributeSticker(MTP_flags(0), MTP_string(alt), MTP_inputStickerSetEmpty(), MTPMaskCoords()));
@@ -107,7 +112,7 @@ DocumentData *Document::readFromStreamHelper(int streamAppVersion, QDataStream &
 		if (type == AnimatedDocument) {
 			attributes.push_back(MTP_documentAttributeAnimated());
 		}
-		thumb = readStorageImageLocation(stream);
+		thumb = readStorageImageLocation(streamAppVersion, stream);
 	}
 	if (width > 0 && height > 0) {
 		if (duration >= 0) {
@@ -127,7 +132,7 @@ DocumentData *Document::readFromStreamHelper(int streamAppVersion, QDataStream &
 	return Auth().data().document(
 		id,
 		access,
-		version,
+		fileReference,
 		date,
 		attributes,
 		mime,
@@ -160,13 +165,13 @@ int Document::sizeInStream(DocumentData *document) {
 	if (auto sticker = document->sticker()) { // type == StickerDocument
 		// + altlen + alt + type-of-set
 		result += stringSize(sticker->alt) + sizeof(qint32);
-		// + thumb loc
-		result += Serialize::storageImageLocationSize();
+		// + sticker loc
+		result += Serialize::storageImageLocationSize(document->sticker()->loc);
 	} else {
 		// + duration
 		result += sizeof(qint32);
 		// + thumb loc
-		result += Serialize::storageImageLocationSize();
+		result += Serialize::storageImageLocationSize(document->thumb->location());
 	}
 
 	return result;

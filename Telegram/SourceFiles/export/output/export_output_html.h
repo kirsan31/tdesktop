@@ -108,6 +108,7 @@ private:
 	[[nodiscard]] Result validateDialogsMode(bool isLeftChannel);
 	[[nodiscard]] Result writeDialogOpening(int index);
 	[[nodiscard]] Result switchToNextChatFile(int index);
+	[[nodiscard]] Result writeEmptySinglePeer();
 
 	void pushSection(
 		int priority,
@@ -126,6 +127,10 @@ private:
 	void pushUserpicsSection();
 
 	[[nodiscard]] QString userpicsFilePath() const;
+
+	[[nodiscard]] QByteArray wrapMessageLink(
+		int messageId,
+		QByteArray text);
 
 	Settings _settings;
 	Environment _environment;
@@ -153,6 +158,7 @@ private:
 	int _dateMessageId = 0;
 	std::unique_ptr<Wrap> _chats;
 	std::unique_ptr<Wrap> _chat;
+	std::vector<int> _lastMessageIdsPerFile;
 	bool _chatFileEmpty = false;
 
 };

@@ -42,6 +42,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "chat_helpers/stickers.h"
 #include "ui/text_options.h"
 #include "storage/localimageloader.h"
+#include "storage/file_download.h"
 #include "storage/storage_facade.h"
 #include "storage/storage_shared_media.h"
 #include "storage/storage_user_photos.h"
@@ -66,6 +67,11 @@ constexpr auto kFileLoaderQueueStopTimeout = TimeMs(5000);
 constexpr auto kFeedReadTimeout = TimeMs(1000);
 constexpr auto kStickersByEmojiInvalidateTimeout = TimeMs(60 * 60 * 1000);
 constexpr auto kNotifySettingSaveTimeout = TimeMs(1000);
+
+using SimpleFileLocationId = Data::SimpleFileLocationId;
+using DocumentFileLocationId = Data::DocumentFileLocationId;
+using FileLocationId = Data::FileLocationId;
+using UpdatedFileReferences = Data::UpdatedFileReferences;
 
 bool IsSilentPost(not_null<HistoryItem*> item, bool silent) {
 	const auto history = item->history();
@@ -636,7 +642,7 @@ void ApiWrap::historyDialogEntryApplied(not_null<History*> history) {
 			if (!chat->haveLeft()) {
 				Local::addSavedPeer(
 					history->peer,
-					history->chatsListDate());
+					ParseDateTime(history->chatsListTimeId()));
 			}
 		} else if (const auto channel = history->peer->asChannel()) {
 			const auto inviter = channel->inviter;
@@ -653,12 +659,11 @@ void ApiWrap::historyDialogEntryApplied(not_null<History*> history) {
 		return;
 	}
 
-	if (!history->chatsListDate().isNull()
-		&& history->loadedAtBottom()) {
+	if (history->chatsListTimeId() != 0 && history->loadedAtBottom()) {
 		if (const auto channel = history->peer->asChannel()) {
 			const auto inviter = channel->inviter;
 			if (inviter != 0
-				&& history->chatsListDate() <= ParseDateTime(channel->inviteDate)
+				&& history->chatsListTimeId() <= channel->inviteDate
 				&& channel->amIn()) {
 				if (const auto from = App::userLoaded(inviter)) {
 					history->insertJoinedMessage(true);
@@ -2369,6 +2374,155 @@ void ApiWrap::channelRangeDifferenceDone(
 	}
 }
 
+template <typename Request>
+void ApiWrap::requestFileReference(
+		Data::FileOrigin origin,
+		FileReferencesHandler &&handler,
+		Request &&data) {
+	const auto i = _fileReferenceHandlers.find(origin);
+	if (i != end(_fileReferenceHandlers)) {
+		i->second.push_back(std::move(handler));
+		return;
+	}
+	auto handlers = std::vector<FileReferencesHandler>();
+	handlers.push_back(std::move(handler));
+	_fileReferenceHandlers.emplace(origin, std::move(handlers));
+
+	request(std::move(data)).done([=](const auto &result) {
+		const auto parsed = Data::GetFileReferences(result);
+		for (const auto &[origin, reference] : parsed) {
+			const auto documentId = base::get_if<DocumentFileLocationId>(
+				&origin);
+			if (documentId) {
+				_session->data().document(
+					*documentId
+				)->refreshFileReference(reference);
+			}
+		}
+		const auto i = _fileReferenceHandlers.find(origin);
+		Assert(i != end(_fileReferenceHandlers));
+		auto handlers = std::move(i->second);
+		_fileReferenceHandlers.erase(i);
+		for (auto &handler : handlers) {
+			handler(parsed);
+		}
+	}).fail([=](const RPCError &error) {
+		const auto i = _fileReferenceHandlers.find(origin);
+		Assert(i != end(_fileReferenceHandlers));
+		auto handlers = std::move(i->second);
+		_fileReferenceHandlers.erase(i);
+		for (auto &handler : handlers) {
+			handler(Data::UpdatedFileReferences());
+		}
+	}).send();
+}
+
+void ApiWrap::refreshFileReference(
+		Data::FileOrigin origin,
+		not_null<mtpFileLoader*> loader,
+		int requestId,
+		const QByteArray &current) {
+	return refreshFileReference(origin, crl::guard(loader, [=](
+			const Data::UpdatedFileReferences &data) {
+		loader->refreshFileReferenceFrom(data, requestId, current);
+	}));
+}
+
+void ApiWrap::refreshFileReference(
+		Data::FileOrigin origin,
+		FileReferencesHandler &&handler) {
+	const auto request = [&](
+			auto &&data,
+			Fn<void()> &&additional = nullptr) {
+		requestFileReference(
+			origin,
+			std::move(handler),
+			std::move(data));
+		if (additional) {
+			const auto i = _fileReferenceHandlers.find(origin);
+			Assert(i != end(_fileReferenceHandlers));
+			i->second.push_back([=](auto&&) {
+				additional();
+			});
+		}
+	};
+	const auto fail = [&] {
+		handler(Data::UpdatedFileReferences());
+	};
+	origin.match([&](Data::FileOriginMessage data) {
+		if (const auto item = App::histItemById(data)) {
+			if (const auto channel = item->history()->peer->asChannel()) {
+				request(MTPchannels_GetMessages(
+					channel->inputChannel,
+					MTP_vector<MTPInputMessage>(
+						1,
+						MTP_inputMessageID(MTP_int(item->id)))));
+			} else {
+				request(MTPmessages_GetMessages(
+					MTP_vector<MTPInputMessage>(
+						1,
+						MTP_inputMessageID(MTP_int(item->id)))));
+			}
+		} else {
+			fail();
+		}
+	}, [&](Data::FileOriginUserPhoto data) {
+		if (const auto user = App::user(data.userId)) {
+			request(MTPphotos_GetUserPhotos(
+				user->inputUser,
+				MTP_int(-1),
+				MTP_long(data.photoId),
+				MTP_int(1)));
+		} else {
+			fail();
+		}
+	}, [&](Data::FileOriginPeerPhoto data) {
+		if (const auto peer = App::peer(data.peerId)) {
+			if (const auto user = peer->asUser()) {
+				request(MTPusers_GetUsers(
+					MTP_vector<MTPInputUser>(1, user->inputUser)));
+			} else if (const auto chat = peer->asChat()) {
+				request(MTPmessages_GetChats(
+					MTP_vector<MTPint>(1, chat->inputChat)));
+			} else if (const auto channel = peer->asChannel()) {
+				request(MTPchannels_GetChannels(
+					MTP_vector<MTPInputChannel>(1, channel->inputChannel)));
+			} else {
+				fail();
+			}
+		} else {
+			fail();
+		}
+	}, [&](Data::FileOriginStickerSet data) {
+		if (data.setId == Stickers::CloudRecentSetId
+			|| data.setId == Stickers::RecentSetId) {
+			request(MTPmessages_GetRecentStickers(
+				MTP_flags(0),
+				MTP_int(0)),
+				[] { crl::on_main([] { Local::writeRecentStickers(); }); });
+		} else if (data.setId == Stickers::FavedSetId) {
+			request(MTPmessages_GetFavedStickers(MTP_int(0)),
+				[] { crl::on_main([] { Local::writeFavedStickers(); }); });
+		} else {
+			request(MTPmessages_GetStickerSet(
+				MTP_inputStickerSetID(
+					MTP_long(data.setId),
+					MTP_long(data.accessHash))),
+				[] { crl::on_main([] {
+					Local::writeInstalledStickers();
+					Local::writeRecentStickers();
+					Local::writeFavedStickers();
+				}); });
+		}
+	}, [&](Data::FileOriginSavedGifs data) {
+		request(
+			MTPmessages_GetSavedGifs(MTP_int(0)),
+			[] { crl::on_main([] { Local::writeSavedGifs(); }); });
+	}, [&](base::none_type) {
+		fail();
+	});
+}
+
 void ApiWrap::gotWebPages(ChannelData *channel, const MTPmessages_Messages &msgs, mtpRequestId req) {
 	const QVector<MTPMessage> *v = 0;
 	switch (msgs.type()) {
@@ -2518,6 +2672,80 @@ std::vector<not_null<DocumentData*>> *ApiWrap::stickersByEmoji(
 		return &it->second.list;
 	}
 	return nullptr;
+}
+
+void ApiWrap::toggleFavedSticker(
+		not_null<DocumentData*> document,
+		Data::FileOrigin origin,
+		bool faved) {
+	if (faved && !document->sticker()) {
+		return;
+	}
+
+	auto failHandler = std::make_shared<Fn<void(const RPCError&)>>();
+	auto performRequest = [=] {
+		request(MTPmessages_FaveSticker(
+			document->mtpInput(),
+			MTP_bool(!faved)
+		)).done([=](const MTPBool &result) {
+			if (mtpIsTrue(result)) {
+				Stickers::SetFaved(document, faved);
+			}
+		}).fail(
+			base::duplicate(*failHandler)
+		).send();
+	};
+	*failHandler = [=](const RPCError &error) {
+		if (error.code() == 400
+			&& error.type().startsWith(qstr("FILE_REFERENCE_"))) {
+			const auto current = document->fileReference();
+			auto refreshed = [=](const Data::UpdatedFileReferences &data) {
+				if (document->fileReference() != current) {
+					performRequest();
+				}
+			};
+			refreshFileReference(origin, std::move(refreshed));
+		}
+	};
+	performRequest();
+}
+
+void ApiWrap::toggleSavedGif(
+		not_null<DocumentData*> document,
+		Data::FileOrigin origin,
+		bool saved) {
+	if (saved && !document->isGifv()) {
+		return;
+	}
+
+	auto failHandler = std::make_shared<Fn<void(const RPCError&)>>();
+	auto performRequest = [=] {
+		request(MTPmessages_SaveGif(
+			document->mtpInput(),
+			MTP_bool(!saved)
+		)).done([=](const MTPBool &result) {
+			if (mtpIsTrue(result)) {
+				if (saved) {
+					App::addSavedGif(document);
+				}
+			}
+		}).fail(
+			base::duplicate(*failHandler)
+		).send();
+	};
+	*failHandler = [=](const RPCError &error) {
+		if (error.code() == 400
+			&& error.type().startsWith(qstr("FILE_REFERENCE_"))) {
+			const auto current = document->fileReference();
+			auto refreshed = [=](const Data::UpdatedFileReferences &data) {
+				if (document->fileReference() != current) {
+					performRequest();
+				}
+			};
+			refreshFileReference(origin, std::move(refreshed));
+		}
+	};
+	performRequest();
 }
 
 void ApiWrap::requestStickers(TimeId now) {
@@ -4203,6 +4431,113 @@ void ApiWrap::sendInlineResult(
 	}
 }
 
+void ApiWrap::sendExistingDocument(
+		not_null<DocumentData*> document,
+		Data::FileOrigin origin,
+		TextWithEntities caption,
+		const SendOptions &options) {
+	Auth().api().sendAction(options);
+
+	const auto history = options.history;
+	const auto peer = history->peer;
+	const auto newId = FullMsgId(peerToChannel(peer->id), clientMsgId());
+	const auto randomId = rand_value<uint64>();
+
+	auto flags = NewMessageFlags(peer) | MTPDmessage::Flag::f_media;
+	auto sendFlags = MTPmessages_SendMedia::Flags(0);
+	if (options.replyTo) {
+		flags |= MTPDmessage::Flag::f_reply_to_msg_id;
+		sendFlags |= MTPmessages_SendMedia::Flag::f_reply_to_msg_id;
+	}
+	bool channelPost = peer->isChannel() && !peer->isMegagroup();
+	bool silentPost = channelPost && Auth().data().notifySilentPosts(peer);
+	if (channelPost) {
+		flags |= MTPDmessage::Flag::f_views;
+		flags |= MTPDmessage::Flag::f_post;
+	}
+	if (!channelPost) {
+		flags |= MTPDmessage::Flag::f_from_id;
+	} else if (peer->asChannel()->addsSignature()) {
+		flags |= MTPDmessage::Flag::f_post_author;
+	}
+	if (silentPost) {
+		sendFlags |= MTPmessages_SendMedia::Flag::f_silent;
+	}
+	auto messageFromId = channelPost ? 0 : Auth().userId();
+	auto messagePostAuthor = channelPost
+		? App::peerName(Auth().user()) : QString();
+
+	TextUtilities::Trim(caption);
+	auto sentEntities = TextUtilities::EntitiesToMTP(
+		caption.entities,
+		TextUtilities::ConvertOption::SkipLocal);
+	if (!sentEntities.v.isEmpty()) {
+		sendFlags |= MTPmessages_SendMedia::Flag::f_entities;
+	}
+	const auto replyTo = options.replyTo;
+	const auto captionText = caption.text;
+
+	App::historyRegRandom(randomId, newId);
+
+	history->addNewDocument(
+		newId.msg,
+		flags,
+		0,
+		replyTo,
+		unixtime(),
+		messageFromId,
+		messagePostAuthor,
+		document,
+		caption,
+		MTPnullMarkup);
+
+	auto failHandler = std::make_shared<Fn<void(const RPCError&)>>();
+	auto performRequest = [=] {
+		history->sendRequestId = request(MTPmessages_SendMedia(
+			MTP_flags(sendFlags),
+			peer->input,
+			MTP_int(replyTo),
+			MTP_inputMediaDocument(
+				MTP_flags(0),
+				document->mtpInput(),
+				MTPint()),
+			MTP_string(captionText),
+			MTP_long(randomId),
+			MTPnullMarkup,
+			sentEntities
+		)).done([=](const MTPUpdates &result) {
+			applyUpdates(result, randomId);
+		}).fail(
+			base::duplicate(*failHandler)
+		).afterRequest(history->sendRequestId
+		).send();
+	};
+	*failHandler = [=](const RPCError &error) {
+		if (error.code() == 400
+			&& error.type().startsWith(qstr("FILE_REFERENCE_"))) {
+			const auto current = document->fileReference();
+			auto refreshed = [=](const Data::UpdatedFileReferences &data) {
+				if (document->fileReference() != current) {
+					performRequest();
+				} else {
+					sendMessageFail(error);
+				}
+			};
+			refreshFileReference(origin, std::move(refreshed));
+		} else {
+			sendMessageFail(error);
+		}
+	};
+	performRequest();
+
+	if (const auto main = App::main()) {
+		main->finishForwarding(history);
+		if (document->sticker()) {
+			main->incrementSticker(document);
+		}
+	}
+}
+
 void ApiWrap::uploadAlbumMedia(
 		not_null<HistoryItem*> item,
 		const MessageGroupId &groupId,
@@ -4242,7 +4577,10 @@ void ApiWrap::uploadAlbumMedia(
 					: MTPDinputMediaPhoto::Flag(0));
 			const auto media = MTP_inputMediaPhoto(
 				MTP_flags(flags),
-				MTP_inputPhoto(photo.vid, photo.vaccess_hash),
+				MTP_inputPhoto(
+					photo.vid,
+					photo.vaccess_hash,
+					photo.vfile_reference),
 				data.has_ttl_seconds() ? data.vttl_seconds : MTPint());
 			sendAlbumWithUploaded(item, groupId, media);
 		} break;
@@ -4260,7 +4598,10 @@ void ApiWrap::uploadAlbumMedia(
 					: MTPDinputMediaDocument::Flag(0));
 			const auto media = MTP_inputMediaDocument(
 				MTP_flags(flags),
-				MTP_inputDocument(document.vid, document.vaccess_hash),
+				MTP_inputDocument(
+					document.vid,
+					document.vaccess_hash,
+					document.vfile_reference),
 				data.has_ttl_seconds() ? data.vttl_seconds : MTPint());
 			sendAlbumWithUploaded(item, groupId, media);
 		} break;

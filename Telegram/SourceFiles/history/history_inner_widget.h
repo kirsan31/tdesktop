@@ -209,10 +209,11 @@ private:
 	void copyContextText(FullMsgId itemId);
 	void showContextInFolder(not_null<DocumentData*> document);
 	void savePhotoToFile(not_null<PhotoData*> photo);
-	void saveDocumentToFile(not_null<DocumentData*> document);
+	void saveDocumentToFile(
+		FullMsgId contextId,
+		not_null<DocumentData*> document);
 	void copyContextImage(not_null<PhotoData*> photo);
 	void showStickerPackInfo(not_null<DocumentData*> document);
-	void toggleFavedSticker(not_null<DocumentData*> document);
 
 	void itemRemoved(not_null<const HistoryItem*> item);
 	void viewRemoved(not_null<const Element*> view);

@@ -26,7 +26,7 @@ class Button;
 
 namespace Passport {
 
-enum class SpecialFile;
+enum class FileType;
 class PanelController;
 class ScanButton;
 struct ScanInfo;
@@ -38,44 +38,89 @@ enum class ReadScanError {
 	Unknown,
 };
 
+struct ScanListData {
+	std::vector<ScanInfo> files;
+	QString errorMissing;
+};
+
 class EditScans : public Ui::RpWidget {
 public:
 	EditScans(
 		QWidget *parent,
 		not_null<PanelController*> controller,
 		const QString &header,
-		const QString &errorMissing,
-		std::vector<ScanInfo> &&files);
+		const QString &error,
+		ScanListData &&scans,
+		base::optional<ScanListData> &&translations);
 	EditScans(
 		QWidget *parent,
 		not_null<PanelController*> controller,
-		std::map<SpecialFile, ScanInfo> &&specialFiles);
+		const QString &header,
+		const QString &error,
+		std::map<FileType, ScanInfo> &&specialFiles,
+		base::optional<ScanListData> &&translations);
 
 	base::optional<int> validateGetErrorTop();
 
+	void scanFieldsChanged(bool changed);
+
 	static void ChooseScan(
 		QPointer<QWidget> parent,
+		FileType type,
 		Fn<void(QByteArray&&)> doneCallback,
-		Fn<void(ReadScanError)> errorCallback,
-		bool allowMany);
+		Fn<void(ReadScanError)> errorCallback);
 
 	~EditScans();
 
 private:
 	struct SpecialScan;
+	struct List {
+		List(not_null<PanelController*> controller, ScanListData &&data);
+		List(
+			not_null<PanelController*> controller,
+			base::optional<ScanListData> &&data = base::none);
+
+		bool uploadedSomeMore() const;
+		bool uploadMoreRequired() const;
+		Ui::SlideWrap<ScanButton> *nonDeletedErrorRow() const;
+		rpl::producer<QString> uploadButtonText() const;
+		void toggleError(bool shown);
+		void hideError();
+		void errorAnimationCallback();
+		void updateScan(ScanInfo &&info, int width);
+		void pushScan(const ScanInfo &info);
+
+		not_null<PanelController*> controller;
+		std::vector<ScanInfo> files;
+		base::optional<int> initialCount;
+		QString errorMissing;
+		QPointer<Ui::SlideWrap<BoxContentDivider>> divider;
+		QPointer<Ui::SlideWrap<Ui::FlatLabel>> header;
+		QPointer<Ui::SlideWrap<Ui::FlatLabel>> uploadMoreError;
+		QPointer<Ui::VerticalLayout> wrap;
+		std::vector<base::unique_qptr<Ui::SlideWrap<ScanButton>>> rows;
+		QPointer<Info::Profile::Button> upload;
+		rpl::event_stream<rpl::producer<QString>> uploadTexts;
+		bool errorShown = false;
+		Animation errorAnimation;
+	};
+
+	List &list(FileType type);
+	const List &list(FileType type) const;
 
 	void setupScans(const QString &header);
-	void setupSpecialScans(std::map<SpecialFile, ScanInfo> &&files);
+	void setupList(
+		not_null<Ui::VerticalLayout*> container,
+		FileType type,
+		const QString &header);
+	void setupSpecialScans(
+		const QString &header,
+		std::map<FileType, ScanInfo> &&files);
 	void init();
 
-	void chooseScan();
-	void chooseSpecialScan(SpecialFile type);
+	void chooseScan(FileType type);
 	void updateScan(ScanInfo &&info);
-	void updateSpecialScan(SpecialFile type, ScanInfo &&info);
-	void updateFileRow(
-		not_null<ScanButton*> button,
-		const ScanInfo &info);
-	void pushScan(const ScanInfo &info);
+	void updateSpecialScan(ScanInfo &&info);
 	void createSpecialScanRow(
 		SpecialScan &scan,
 		const ScanInfo &info,
@@ -84,36 +129,27 @@ private:
 		not_null<Ui::VerticalLayout*> parent,
 		const ScanInfo &info,
 		const QString &name);
-	SpecialScan &findSpecialScan(SpecialFile type);
+	SpecialScan &findSpecialScan(FileType type);
 
-	rpl::producer<QString> uploadButtonText() const;
+	void updateErrorLabels();
+	bool somethingChanged() const;
 
-	void toggleError(bool shown);
-	void hideError();
-	void errorAnimationCallback();
-	bool uploadedSomeMore() const;
-
-	void toggleSpecialScanError(SpecialFile type, bool shown);
-	void hideSpecialScanError(SpecialFile type);
-	void specialScanErrorAnimationCallback(SpecialFile type);
+	void toggleSpecialScanError(FileType type, bool shown);
+	void hideSpecialScanError(FileType type);
+	void specialScanErrorAnimationCallback(FileType type);
+	void specialScanChanged(FileType type, bool changed);
 
 	not_null<PanelController*> _controller;
-	std::vector<ScanInfo> _files;
-	int _initialCount = 0;
-	QString _errorMissing;
-
+	QString _error;
 	object_ptr<Ui::VerticalLayout> _content;
-	QPointer<Ui::SlideWrap<BoxContentDivider>> _divider;
-	QPointer<Ui::SlideWrap<Ui::FlatLabel>> _header;
-	QPointer<Ui::SlideWrap<Ui::FlatLabel>> _uploadMoreError;
-	QPointer<Ui::VerticalLayout> _wrap;
-	std::vector<base::unique_qptr<Ui::SlideWrap<ScanButton>>> _rows;
-	QPointer<Info::Profile::Button> _upload;
-	rpl::event_stream<rpl::producer<QString>> _uploadTexts;
-	bool _errorShown = false;
-	Animation _errorAnimation;
+	QPointer<Ui::SlideWrap<Ui::FlatLabel>> _commonError;
+	bool _scanFieldsChanged = false;
+	bool _specialScanChanged = false;
 
-	std::map<SpecialFile, SpecialScan> _specialScans;
+	List _scansList;
+	std::map<FileType, SpecialScan> _specialScans;
+	List _translationsList;
+
 
 };
 

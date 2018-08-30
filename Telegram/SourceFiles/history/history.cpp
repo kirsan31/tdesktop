@@ -1827,14 +1827,11 @@ std::shared_ptr<AdminLog::LocalIdManager> History::adminLogIdManager() {
 	return result;
 }
 
-QDateTime History::adjustChatListDate() const {
-	const auto result = chatsListDate();
+TimeId History::adjustChatListTimeId() const {
+	const auto result = chatsListTimeId();
 	if (const auto draft = cloudDraft()) {
 		if (!Data::draftIsNull(draft)) {
-			const auto draftResult = ParseDateTime(draft->date);
-			if (draftResult > result) {
-				return draftResult;
-			}
+			return std::max(result, draft->date);
 		}
 	}
 	return result;
@@ -2182,7 +2179,7 @@ void History::setLastMessage(HistoryItem *item) {
 		if (const auto feed = peer->feed()) {
 			feed->updateLastMessage(item);
 		}
-		setChatsListDate(ItemDateTime(item));
+		setChatsListTimeId(item->date());
 	} else if (!_lastMessage || *_lastMessage) {
 		_lastMessage = nullptr;
 		updateChatListEntry();
@@ -2361,6 +2358,7 @@ HistoryItem *History::lastSentMessage() const {
 		for (const auto &message : base::reversed(block->messages)) {
 			const auto item = message->data();
 			if (IsServerMsgId(item->id)
+				&& !item->serviceMsg()
 				&& (item->out() || peer->isSelf())) {
 				return item;
 			}
@@ -2500,8 +2498,8 @@ HistoryService *History::insertJoinedMessage(bool unread) {
 					inviter,
 					flags);
 				addNewInTheMiddle(_joinedMessage, blockIndex, itemIndex);
-				const auto lastDate = chatsListDate();
-				if (lastDate.isNull() || ParseDateTime(inviteDate) >= lastDate) {
+				const auto lastDate = chatsListTimeId();
+				if (!lastDate || inviteDate >= lastDate) {
 					setLastMessage(_joinedMessage);
 					if (unread) {
 						newItemAdded(_joinedMessage);

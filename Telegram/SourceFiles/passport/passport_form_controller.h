@@ -10,8 +10,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "mtproto/sender.h"
 #include "boxes/confirm_phone_box.h"
 #include "base/weak_ptr.h"
+#include "core/core_cloud_password.h"
 
 class BoxContent;
+class mtpFileLoader;
 
 namespace Storage {
 struct UploadSecureDone;
@@ -24,11 +26,20 @@ class Controller;
 
 namespace Passport {
 
+struct Config {
+	int32 hash = 0;
+	std::map<QString, QString> languagesByCountryCode;
+};
+Config &ConfigInstance();
+Config ParseConfig(const MTPhelp_PassportConfig &data);
+
 struct SavedCredentials {
 	bytes::vector hashForAuth;
 	bytes::vector hashForSecret;
 	uint64 secretId = 0;
 };
+
+QString NonceNameByScope(const QString &scope);
 
 class ViewController;
 
@@ -38,14 +49,14 @@ struct FormRequest {
 		const QString &scope,
 		const QString &callbackUrl,
 		const QString &publicKey,
-		const QString &payload,
+		const QString &nonce,
 		const QString &errors);
 
 	UserId botId;
 	QString scope;
 	QString callbackUrl;
 	QString publicKey;
-	QString payload;
+	QString nonce;
 	QString errors;
 
 };
@@ -80,6 +91,14 @@ private:
 
 struct Value;
 
+enum class FileType {
+	Scan,
+	Translation,
+	FrontSide,
+	ReverseSide,
+	Selfie,
+};
+
 struct File {
 	uint64 id = 0;
 	uint64 accessHash = 0;
@@ -98,10 +117,12 @@ struct File {
 struct EditFile {
 	EditFile(
 		not_null<const Value*> value,
+		FileType type,
 		const File &fields,
 		std::unique_ptr<UploadScanData> &&uploadData);
 
 	not_null<const Value*> value;
+	FileType type;
 	File fields;
 	UploadScanDataPointer uploadData;
 	std::shared_ptr<bool> guard;
@@ -140,12 +161,6 @@ struct Verification {
 
 struct Form;
 
-enum class SpecialFile {
-	FrontSide,
-	ReverseSide,
-	Selfie,
-};
-
 struct Value {
 	enum class Type {
 		PersonalDetails,
@@ -163,55 +178,116 @@ struct Value {
 		Email,
 	};
 
+
 	explicit Value(Type type);
 	Value(Value &&other) = default;
-	Value &operator=(Value &&other) = default;
 
-	bool requiresSpecialScan(SpecialFile type, bool selfieRequired) const;
-	bool scansAreFilled(bool selfieRequired) const;
+	// Some data is not parsed from server-provided values.
+	// It should be preserved through re-parsing (for example when saving).
+	// So we hide "operator=(Value&&)" in private and instead provide this.
+	void fillDataFrom(Value &&other);
+	bool requiresSpecialScan(FileType type) const;
+	bool requiresScan(FileType type) const;
+	bool scansAreFilled() const;
+	void saveInEdit();
+	void clearEditData();
+	bool uploadingScan() const;
+	bool saving() const;
+
+	static constexpr auto kNothingFilled = 0x100;
+	static constexpr auto kNoTranslationFilled = 0x10;
+	static constexpr auto kNoSelfieFilled = 0x001;
+	int whatNotFilled() const;
+
+	std::vector<File> &files(FileType type);
+	const std::vector<File> &files(FileType type) const;
+	QString &fileMissingError(FileType type);
+	const QString &fileMissingError(FileType type) const;
+	std::vector<EditFile> &filesInEdit(FileType type);
+	const std::vector<EditFile> &filesInEdit(FileType type) const;
+	EditFile &fileInEdit(FileType type, base::optional<int> fileIndex);
+	const EditFile &fileInEdit(
+		FileType type,
+		base::optional<int> fileIndex) const;
+
+	std::vector<EditFile> takeAllFilesInEdit();
 
 	Type type;
 	ValueData data;
-	std::vector<File> scans;
-	std::map<SpecialFile, File> specialScans;
-	QString scanMissingError;
-	std::vector<EditFile> scansInEdit;
-	std::map<SpecialFile, EditFile> specialScansInEdit;
+	std::map<FileType, File> specialScans;
+	QString error;
+	std::map<FileType, EditFile> specialScansInEdit;
 	Verification verification;
 	bytes::vector submitHash;
 
+	bool selfieRequired = false;
+	bool translationRequired = false;
+	bool nativeNames = false;
 	int editScreens = 0;
+
 	mtpRequestId saveRequestId = 0;
 
+private:
+	Value &operator=(Value &&other) = default;
+
+	std::vector<File> _scans;
+	std::vector<File> _translations;
+	std::vector<EditFile> _scansInEdit;
+	std::vector<EditFile> _translationsInEdit;
+	QString _scanMissingError;
+	QString _translationMissingError;
+
+};
+
+bool ValueChanged(not_null<const Value*> value, const ValueMap &data);
+
+struct RequestedValue {
+	explicit RequestedValue(Value::Type type);
+
+	Value::Type type;
+	bool selfieRequired = false;
+	bool translationRequired = false;
+	bool nativeNames = false;
+};
+
+struct RequestedRow {
+	std::vector<RequestedValue> values;
 };
 
 struct Form {
+	using Request = std::vector<std::vector<Value::Type>>;
+
 	std::map<Value::Type, Value> values;
-	std::vector<Value::Type> request;
-	bool identitySelfieRequired = false;
+	Request request;
 	QString privacyPolicyUrl;
 	QVector<MTPSecureValueError> pendingErrors;
-
 };
 
 struct PasswordSettings {
-	bytes::vector salt;
-	bytes::vector newSalt;
-	bytes::vector newSecureSalt;
+	Core::CloudPasswordCheckRequest request;
+	Core::CloudPasswordAlgo newAlgo;
+	Core::SecureSecretAlgo newSecureAlgo;
 	QString hint;
 	QString unconfirmedPattern;
 	QString confirmedEmail;
 	bool hasRecovery = false;
 	bool notEmptyPassport = false;
+	bool unknownAlgo = false;
 
 	bool operator==(const PasswordSettings &other) const {
-		return (salt == other.salt)
-			&& (newSalt == other.newSalt)
-			&& (newSecureSalt == other.newSecureSalt)
+		return (request == other.request)
+// newAlgo and newSecureAlgo are always different, because they have
+// different random parts added on the client to the server salts.
+//			&& (newAlgo == other.newAlgo)
+//			&& (newSecureAlgo == other.newSecureAlgo)
+			&& ((!newAlgo && !other.newAlgo) || (newAlgo && other.newAlgo))
+			&& ((!newSecureAlgo && !other.newSecureAlgo)
+				|| (newSecureAlgo && other.newSecureAlgo))
 			&& (hint == other.hint)
 			&& (unconfirmedPattern == other.unconfirmedPattern)
 			&& (confirmedEmail == other.confirmedEmail)
-			&& (hasRecovery == other.hasRecovery);
+			&& (hasRecovery == other.hasRecovery)
+			&& (unknownAlgo == other.unknownAlgo);
 	}
 	bool operator!=(const PasswordSettings &other) const {
 		return !(*this == other);
@@ -261,20 +337,19 @@ public:
 	void reloadAndSubmitPassword(const QByteArray &password);
 	void cancelPassword();
 
-	bool canAddScan(not_null<const Value*> value) const;
-	void uploadScan(not_null<const Value*> value, QByteArray &&content);
-	void deleteScan(not_null<const Value*> value, int fileIndex);
-	void restoreScan(not_null<const Value*> value, int fileIndex);
-	void uploadSpecialScan(
+	bool canAddScan(not_null<const Value*> value, FileType type) const;
+	void uploadScan(
 		not_null<const Value*> value,
-		SpecialFile type,
+		FileType type,
 		QByteArray &&content);
-	void deleteSpecialScan(
+	void deleteScan(
 		not_null<const Value*> value,
-		SpecialFile type);
-	void restoreSpecialScan(
+		FileType type,
+		base::optional<int> fileIndex);
+	void restoreScan(
 		not_null<const Value*> value,
-		SpecialFile type);
+		FileType type,
+		base::optional<int> fileIndex);
 
 	rpl::producer<> secretReadyEvents() const;
 
@@ -291,13 +366,8 @@ public:
 	void startValueEdit(not_null<const Value*> value);
 	void cancelValueEdit(not_null<const Value*> value);
 	void cancelValueVerification(not_null<const Value*> value);
-	bool editValueChanged(
-		not_null<const Value*> value,
-		const ValueMap &data) const;
 	void saveValueEdit(not_null<const Value*> value, ValueMap &&data);
 	void deleteValueEdit(not_null<const Value*> value);
-	bool savingValue(not_null<const Value*> value) const;
-	bool uploadingScan(not_null<const Value*> value) const;
 
 	void cancel();
 	void cancelSure();
@@ -307,11 +377,17 @@ public:
 	~FormController();
 
 private:
+	using PasswordCheckCallback = Fn<void(
+		const Core::CloudPasswordResult &check)>;
+
 	struct FinalData {
 		QVector<MTPSecureValueHash> hashes;
 		QByteArray credentials;
 		std::vector<not_null<const Value*>> errors;
 	};
+
+	template <typename Condition>
+	EditFile *findEditFileByCondition(Condition &&condition);
 	EditFile *findEditFile(const FullMsgId &fullId);
 	EditFile *findEditFile(const FileKey &key);
 	std::pair<Value*, File*> findFile(const FileKey &key);
@@ -319,10 +395,11 @@ private:
 
 	void requestForm();
 	void requestPassword();
+	void requestConfig();
 
 	void formDone(const MTPaccount_AuthorizationForm &result);
 	void formFail(const QString &error);
-	void parseForm(const MTPaccount_AuthorizationForm &result);
+	bool parseForm(const MTPaccount_AuthorizationForm &result);
 	void showForm();
 	Value parseValue(
 		const MTPSecureValue &value,
@@ -336,29 +413,49 @@ private:
 	void fillDownloadedFile(
 		File &destination,
 		const std::vector<EditFile> &source) const;
+	bool handleAppUpdateError(const QString &error);
 
+	void submitPassword(
+		const Core::CloudPasswordResult &check,
+		const QByteArray &password,
+		bool submitSaved);
+	void checkPasswordHash(
+		mtpRequestId &guard,
+		bytes::vector hash,
+		PasswordCheckCallback callback);
+	bool handleSrpIdInvalid(mtpRequestId &guard);
+	void requestPasswordData(mtpRequestId &guard);
+	void passwordChecked();
+	void passwordServerError();
 	void passwordDone(const MTPaccount_Password &result);
-	bool applyPassword(const MTPDaccount_noPassword &settings);
 	bool applyPassword(const MTPDaccount_password &settings);
 	bool applyPassword(PasswordSettings &&settings);
 	bytes::vector passwordHashForAuth(bytes::const_span password) const;
 	void checkSavedPasswordSettings(const SavedCredentials &credentials);
+	void checkSavedPasswordSettings(
+		const Core::CloudPasswordResult &check,
+		const SavedCredentials &credentials);
 	void validateSecureSecret(
 		bytes::const_span encryptedSecret,
 		bytes::const_span passwordHashForSecret,
 		bytes::const_span passwordBytes,
 		uint64 serverSecretId);
 	void decryptValues();
-	void decryptValue(Value &value);
-	bool validateValueSecrets(Value &value);
-	void resetValue(Value &value);
+	void decryptValue(Value &value) const;
+	bool validateValueSecrets(Value &value) const;
+	void resetValue(Value &value) const;
 	void fillErrors();
+	void fillNativeFromFallback();
 
 	void loadFile(File &file);
 	void fileLoadDone(FileKey key, const QByteArray &bytes);
 	void fileLoadProgress(FileKey key, int offset);
 	void fileLoadFail(FileKey key);
 	void generateSecret(bytes::const_span password);
+	void saveSecret(
+		const Core::CloudPasswordResult &check,
+		const SavedCredentials &saved,
+		const bytes::vector &secret);
 
 	void subscribeToUploader();
 	void encryptFile(
@@ -376,11 +473,8 @@ private:
 	void scanUploadFail(const FullMsgId &fullId);
 	void scanDeleteRestore(
 		not_null<const Value*> value,
-		int fileIndex,
-		bool deleted);
-	void specialScanDeleteRestore(
-		not_null<const Value*> value,
-		SpecialFile type,
+		FileType type,
+		base::optional<int> fileIndex,
 		bool deleted);
 
 	QString getPhoneFromValue(not_null<const Value*> value) const;
@@ -397,7 +491,6 @@ private:
 	void valueEditFailed(not_null<Value*> value);
 	void clearValueEdit(not_null<Value*> value);
 	void clearValueVerification(not_null<Value*> value);
-	bool editFileChanged(const EditFile &file) const;
 
 	bool isEncryptedValue(Value::Type type) const;
 	void saveEncryptedValue(not_null<Value*> value);
@@ -408,6 +501,9 @@ private:
 	FinalData prepareFinalData();
 
 	void suggestReset(bytes::vector password);
+	void resetSecret(
+		const Core::CloudPasswordResult &check,
+		const bytes::vector &password);
 	void suggestRestart();
 	void cancelAbort();
 	void shortPollEmailConfirmation();
@@ -419,8 +515,12 @@ private:
 	mtpRequestId _formRequestId = 0;
 	mtpRequestId _passwordRequestId = 0;
 	mtpRequestId _passwordCheckRequestId = 0;
+	mtpRequestId _configRequestId = 0;
 
 	PasswordSettings _password;
+	TimeMs _lastSrpIdInvalidTime = 0;
+	bytes::vector _passwordCheckHash;
+	PasswordCheckCallback _passwordCheckCallback;
 	QByteArray _savedPasswordValue;
 	Form _form;
 	bool _cancelled = false;

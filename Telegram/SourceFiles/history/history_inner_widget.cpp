@@ -1456,7 +1456,7 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 		isUponSelected = hasSelected;
 	}
 
-	_menu = base::make_unique_q<Ui::PopupMenu>(nullptr);
+	_menu = base::make_unique_q<Ui::PopupMenu>(this);
 
 	const auto addItemActions = [&](HistoryItem *item) {
 		if (!item
@@ -1536,7 +1536,7 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 					});
 				}
 				_menu->addAction(lang(lnkIsVideo ? lng_context_save_video : (lnkIsVoice ? lng_context_save_audio : (lnkIsAudio ? lng_context_save_audio_file : lng_context_save_file))), App::LambdaDelayed(st::defaultDropdownMenu.menu.ripple.hideDuration, this, [=] {
-					saveDocumentToFile(document);
+					saveDocumentToFile(itemId, document);
 				}));
 			}
 		}
@@ -1636,11 +1636,14 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 									showStickerPackInfo(document);
 								});
 								_menu->addAction(lang(Stickers::IsFaved(document) ? lng_faved_stickers_remove : lng_faved_stickers_add), [=] {
-									toggleFavedSticker(document);
+									Auth().api().toggleFavedSticker(
+										document,
+										itemId,
+										!Stickers::IsFaved(document));
 								});
 							}
-							_menu->addAction(lang(lng_context_save_image), App::LambdaDelayed(st::defaultDropdownMenu.menu.ripple.hideDuration, this, [this, document] {
-								saveDocumentToFile(document);
+							_menu->addAction(lang(lng_context_save_image), App::LambdaDelayed(st::defaultDropdownMenu.menu.ripple.hideDuration, this, [=] {
+								saveDocumentToFile(itemId, document);
 							}));
 						}
 					}
@@ -1753,7 +1756,7 @@ void HistoryInner::savePhotoToFile(not_null<PhotoData*> photo) {
 			qsl(".jpg")),
 		crl::guard(this, [=](const QString &result) {
 			if (!result.isEmpty()) {
-				photo->full->pix().toImage().save(result, "JPG");
+				photo->full->pix(Data::FileOrigin()).toImage().save(result, "JPG");
 			}
 		}));
 }
@@ -1761,7 +1764,7 @@ void HistoryInner::savePhotoToFile(not_null<PhotoData*> photo) {
 void HistoryInner::copyContextImage(not_null<PhotoData*> photo) {
 	if (!photo->date || !photo->loaded()) return;
 
-	QApplication::clipboard()->setPixmap(photo->full->pix());
+	QApplication::clipboard()->setPixmap(photo->full->pix(Data::FileOrigin()));
 }
 
 void HistoryInner::showStickerPackInfo(not_null<DocumentData*> document) {
@@ -1770,13 +1773,6 @@ void HistoryInner::showStickerPackInfo(not_null<DocumentData*> document) {
 			App::main()->stickersBox(sticker->set);
 		}
 	}
-}
-
-void HistoryInner::toggleFavedSticker(not_null<DocumentData*> document) {
-	auto unfave = Stickers::IsFaved(document);
-	MTP::send(MTPmessages_FaveSticker(document->mtpInput(), MTP_bool(unfave)), rpcDone([document, unfave](const MTPBool &result) {
-		Stickers::SetFaved(document, !unfave);
-	}));
 }
 
 void HistoryInner::cancelContextDownload(not_null<DocumentData*> document) {
@@ -1791,8 +1787,10 @@ void HistoryInner::showContextInFolder(not_null<DocumentData*> document) {
 	}
 }
 
-void HistoryInner::saveDocumentToFile(not_null<DocumentData*> document) {
-	DocumentSaveClickHandler::doSave(document, true);
+void HistoryInner::saveDocumentToFile(
+		FullMsgId contextId,
+		not_null<DocumentData*> document) {
+	DocumentSaveClickHandler::Save(contextId, document, true);
 }
 
 void HistoryInner::openContextGif(FullMsgId itemId) {
@@ -1809,7 +1807,7 @@ void HistoryInner::saveContextGif(FullMsgId itemId) {
 	if (const auto item = App::histItemById(itemId)) {
 		if (const auto media = item->media()) {
 			if (const auto document = media->document()) {
-				_widget->saveGif(document);
+				Auth().api().toggleSavedGif(document, item->fullId(), true);
 			}
 		}
 	}
