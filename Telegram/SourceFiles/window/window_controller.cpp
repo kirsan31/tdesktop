@@ -9,6 +9,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "window/main_window.h"
 #include "info/info_memento.h"
+#include "info/info_controller.h"
 #include "history/history.h"
 #include "history/history_item.h"
 #include "history/view/history_view_element.h"
@@ -473,6 +474,20 @@ void Navigation::showPeerInfo(
 	showPeerInfo(history->peer->id, params);
 }
 
+void Navigation::showSettings(
+		Settings::Type type,
+		const SectionShow &params) {
+	showSection(
+		Info::Memento(
+			Info::Settings::Tag{ Auth().user() },
+			Info::Section(type)),
+		params);
+}
+
+void Navigation::showSettings(const SectionShow &params) {
+	showSettings(Settings::Type::Main, params);
+}
+
 void Controller::showSection(
 		SectionMemento &&memento,
 		const SectionShow &params) {
@@ -492,6 +507,10 @@ void Controller::showSpecialLayer(
 		object_ptr<LayerWidget> &&layer,
 		anim::type animated) {
 	App::wnd()->showSpecialLayer(std::move(layer), animated);
+}
+
+void Controller::removeLayerBlackout() {
+	App::wnd()->ui_removeLayerBlackout();
 }
 
 not_null<MainWidget*> Controller::chats() const {

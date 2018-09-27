@@ -99,8 +99,10 @@ void TopBar::enableBackButton() {
 		st::infoTopBarScale);
 	_back->setDuration(st::infoTopBarDuration);
 	_back->toggle(!selectionMode(), anim::type::instant);
-	_back->entity()->clicks()
-		| rpl::start_to_stream(_backClicks, _back->lifetime());
+	_back->entity()->clicks(
+	) | rpl::map([] {
+		return rpl::empty_value();
+	}) | rpl::start_to_stream(_backClicks, _back->lifetime());
 	registerToggleControlCallback(_back.data(), [=] {
 		return !selectionMode();
 	});
@@ -150,6 +152,13 @@ Ui::FadeWrap<Ui::RpWidget> *TopBar::pushButton(
 		updateControlsGeometry(width());
 	}, lifetime());
 	return weak;
+}
+
+void TopBar::forceButtonVisibility(
+		Ui::FadeWrap<Ui::RpWidget> *button,
+		rpl::producer<bool> shown) {
+	_updateControlCallbacks.erase(button);
+	button->toggleOn(std::move(shown));
 }
 
 void TopBar::setSearchField(
@@ -427,7 +436,9 @@ void TopBar::createSelectionControls() {
 		st::infoTopBarScale));
 	_cancelSelection->setDuration(st::infoTopBarDuration);
 	_cancelSelection->entity()->clicks(
-	) | rpl::start_to_stream(
+	) | rpl::map([] {
+		return rpl::empty_value();
+	}) | rpl::start_to_stream(
 		_cancelSelectionClicks,
 		_cancelSelection->lifetime());
 	_selectionText = wrap(Ui::CreateChild<Ui::FadeWrap<Ui::LabelWithNumbers>>(
@@ -587,6 +598,22 @@ rpl::producer<QString> TitleValue(
 		case Section::Type::Channels:
 			return lng_info_feed_channels;
 
+		case Section::Type::Settings:
+			switch (section.settingsType()) {
+			case Section::SettingsType::Main:
+				return lng_menu_settings;
+			case Section::SettingsType::Information:
+				return lng_settings_section_info;
+			case Section::SettingsType::Notifications:
+				return lng_settings_section_notify;
+			case Section::SettingsType::PrivacySecurity:
+				return lng_settings_section_privacy;
+			case Section::SettingsType::Advanced:
+				return lng_settings_advanced;
+			case Section::SettingsType::Chat:
+				return lng_settings_section_chat_settings;
+			}
+			Unexpected("Bad settings type in Info::TitleValue()");
 		}
 		Unexpected("Bad section type in Info::TitleValue()");
 	}());

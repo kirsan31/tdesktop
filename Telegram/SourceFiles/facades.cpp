@@ -119,7 +119,7 @@ void activateBotCommand(
 			Ui::showPeerHistory(history, ShowAtTheEndMsgId);
 			auto options = ApiWrap::SendOptions(history);
 			options.replyTo = msgId;
-			Auth().api().shareContact(App::self(), options);
+			Auth().api().shareContact(Auth().user(), options);
 		}));
 	} break;
 
@@ -371,68 +371,128 @@ uint64 SandboxUserTag = 0;
 
 namespace Sandbox {
 
-bool CheckBetaVersionDir() {
-	QFile beta(cExeDir() + qsl("TelegramBeta_data/tdata/beta"));
-	if (cBetaVersion()) {
-		cForceWorkingDir(cExeDir() + qsl("TelegramBeta_data/"));
-		QDir().mkpath(cWorkingDir() + qstr("tdata"));
-		if (*BetaPrivateKey) {
-			cSetBetaPrivateKey(QByteArray(BetaPrivateKey));
-		}
-		if (beta.open(QIODevice::WriteOnly)) {
-			QDataStream dataStream(&beta);
-			dataStream.setVersion(QDataStream::Qt_5_3);
-			dataStream << quint64(cRealBetaVersion()) << cBetaPrivateKey();
-		} else {
-			LOG(("FATAL: Could not open '%1' for writing private key!").arg(beta.fileName()));
-			return false;
-		}
-	} else if (beta.exists()) {
-		cForceWorkingDir(cExeDir() + qsl("TelegramBeta_data/"));
-		if (beta.open(QIODevice::ReadOnly)) {
-			QDataStream dataStream(&beta);
-			dataStream.setVersion(QDataStream::Qt_5_3);
-
-			quint64 v;
-			QByteArray k;
-			dataStream >> v >> k;
-			if (dataStream.status() == QDataStream::Ok && !k.isEmpty()) {
-				cSetBetaVersion(AppVersion * 1000ULL);
-				cSetBetaPrivateKey(k);
-				cSetRealBetaVersion(v);
-			} else {
-				LOG(("FATAL: '%1' is corrupted, reinstall private beta!").arg(beta.fileName()));
+bool MoveLegacyAlphaFolder() {
+	const auto was = cExeDir() + qsl("TelegramBeta_data");
+	const auto now = cExeDir() + qsl("TelegramAlpha_data");
+	if (QDir(was).exists() && !QDir(now).exists()) {
+		const auto oldFile = was + "/tdata/beta";
+		const auto newFile = was + "/tdata/alpha";
+		if (QFile(oldFile).exists() && !QFile(newFile).exists()) {
+			if (!QFile(oldFile).copy(newFile)) {
+				LOG(("FATAL: Could not copy '%1' to '%2'"
+					).arg(oldFile
+					).arg(newFile));
 				return false;
 			}
-		} else {
-			LOG(("FATAL: could not open '%1' for reading private key!").arg(beta.fileName()));
+		}
+		if (!QDir().rename(was, now)) {
+			LOG(("FATAL: Could not rename '%1' to '%2'"
+				).arg(was
+				).arg(now));
 			return false;
 		}
 	}
 	return true;
 }
 
-void WorkingDirReady() {
+bool CheckAlphaVersionDir() {
+	if (!MoveLegacyAlphaFolder()) {
+		return false;
+	}
+	QFile alpha(cExeDir() + qsl("TelegramAlpha_data/tdata/alpha"));
+	if (cAlphaVersion()) {
+		cForceWorkingDir(cExeDir() + qsl("TelegramAlpha_data/"));
+		QDir().mkpath(cWorkingDir() + qstr("tdata"));
+		if (*AlphaPrivateKey) {
+			cSetAlphaPrivateKey(QByteArray(AlphaPrivateKey));
+		}
+		if (alpha.open(QIODevice::WriteOnly)) {
+			QDataStream dataStream(&alpha);
+			dataStream.setVersion(QDataStream::Qt_5_3);
+			dataStream << quint64(cRealAlphaVersion()) << cAlphaPrivateKey();
+		} else {
+			LOG(("FATAL: Could not open '%1' for writing private key!").arg(alpha.fileName()));
+			return false;
+		}
+	} else if (alpha.exists()) {
+		cForceWorkingDir(cExeDir() + qsl("TelegramAlpha_data/"));
+		if (alpha.open(QIODevice::ReadOnly)) {
+			QDataStream dataStream(&alpha);
+			dataStream.setVersion(QDataStream::Qt_5_3);
+
+			quint64 v;
+			QByteArray k;
+			dataStream >> v >> k;
+			if (dataStream.status() == QDataStream::Ok && !k.isEmpty()) {
+				cSetAlphaVersion(AppVersion * 1000ULL);
+				cSetAlphaPrivateKey(k);
+				cSetRealAlphaVersion(v);
+			} else {
+				LOG(("FATAL: '%1' is corrupted, reinstall private alpha!").arg(alpha.fileName()));
+				return false;
+			}
+		} else {
+			LOG(("FATAL: could not open '%1' for reading private key!").arg(alpha.fileName()));
+			return false;
+		}
+	}
+	return true;
+}
+
+QString InstallBetaVersionsSettingPath() {
+	return cWorkingDir() + qsl("tdata/devversion");
+}
+
+void WriteInstallBetaVersionsSetting() {
+	QFile f(InstallBetaVersionsSettingPath());
+	if (f.open(QIODevice::WriteOnly)) {
+		f.write(cInstallBetaVersion() ? "1" : "0");
+	}
+}
+
+QString DebugModeSettingPath() {
+	return cWorkingDir() + qsl("tdata/withdebug");
+}
+
+void WriteDebugModeSetting() {
+	QFile f(DebugModeSettingPath());
+	if (f.open(QIODevice::WriteOnly)) {
+		f.write(Logs::DebugEnabled() ? "1" : "0");
+	}
+}
+
+void ComputeTestMode() {
 	if (QFile(cWorkingDir() + qsl("tdata/withtestmode")).exists()) {
 		cSetTestMode(true);
 	}
-	if (!Logs::DebugEnabled()
-		&& QFile(cWorkingDir() + qsl("tdata/withdebug")).exists()) {
-		Logs::SetDebugEnabled(true);
-	}
-	if (cBetaVersion()) {
-		cSetAlphaVersion(false);
-	} else if (!cAlphaVersion() && QFile(cWorkingDir() + qsl("tdata/devversion")).exists()) {
-		cSetAlphaVersion(true);
-	} else if (AppAlphaVersion) {
-		QFile f(cWorkingDir() + qsl("tdata/devversion"));
-		if (!f.exists() && f.open(QIODevice::WriteOnly)) {
-			f.write("1");
+}
+
+void ComputeDebugMode() {
+	Logs::SetDebugEnabled(cAlphaVersion() != 0);
+	const auto debugModeSettingPath = DebugModeSettingPath();
+	if (QFile(debugModeSettingPath).exists()) {
+		QFile f(debugModeSettingPath);
+		if (f.open(QIODevice::ReadOnly)) {
+			Logs::SetDebugEnabled(f.read(1) != "0");
 		}
 	}
+}
 
-	srand((int32)time(NULL));
+void ComputeInstallBetaVersions() {
+	const auto installBetaSettingPath = InstallBetaVersionsSettingPath();
+	if (cAlphaVersion()) {
+		cSetInstallBetaVersion(false);
+	} else if (QFile(installBetaSettingPath).exists()) {
+		QFile f(installBetaSettingPath);
+		if (f.open(QIODevice::ReadOnly)) {
+			cSetInstallBetaVersion(f.read(1) != "0");
+		}
+	} else if (AppBetaVersion) {
+		WriteInstallBetaVersionsSetting();
+	}
+}
 
+void ComputeUserTag() {
 	SandboxUserTag = 0;
 	QFile usertag(cWorkingDir() + qsl("tdata/usertag"));
 	if (usertag.open(QIODevice::ReadOnly)) {
@@ -451,6 +511,15 @@ void WorkingDirReady() {
 			usertag.close();
 		}
 	}
+}
+
+void WorkingDirReady() {
+	srand((int32)time(NULL));
+
+	ComputeTestMode();
+	ComputeDebugMode();
+	ComputeInstallBetaVersions();
+	ComputeUserTag();
 }
 
 void start() {
@@ -550,8 +619,6 @@ struct Data {
 	Stickers::Order ArchivedStickerSetsOrder;
 
 	CircleMasksMap CircleMasks;
-
-	base::Observable<void> SelfChanged;
 
 	bool AskDownloadPath = false;
 	QString DownloadPath;
@@ -680,8 +747,6 @@ DefineVar(Global, TimeMs, LastFeaturedStickersUpdate);
 DefineVar(Global, Stickers::Order, ArchivedStickerSetsOrder);
 
 DefineRefVar(Global, CircleMasksMap, CircleMasks);
-
-DefineRefVar(Global, base::Observable<void>, SelfChanged);
 
 DefineVar(Global, bool, AskDownloadPath);
 DefineVar(Global, QString, DownloadPath);

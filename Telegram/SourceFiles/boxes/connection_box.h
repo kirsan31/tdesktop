@@ -23,30 +23,14 @@ class Radioenum;
 } // namespace Ui
 
 class AutoDownloadBox : public BoxContent {
-	Q_OBJECT
-
 public:
 	AutoDownloadBox(QWidget *parent);
 
 protected:
 	void prepare() override;
 
-	void paintEvent(QPaintEvent *e) override;
-	void resizeEvent(QResizeEvent *e) override;
-
-private slots:
-	void onSave();
-
 private:
-	object_ptr<Ui::Checkbox> _photoPrivate;
-	object_ptr<Ui::Checkbox> _photoGroups;
-	object_ptr<Ui::Checkbox> _audioPrivate;
-	object_ptr<Ui::Checkbox> _audioGroups;
-	object_ptr<Ui::Checkbox> _gifPrivate;
-	object_ptr<Ui::Checkbox> _gifGroups;
-	object_ptr<Ui::Checkbox> _gifPlay;
-
-	int _sectionHeight = 0;
+	void setupContent();
 
 };
 

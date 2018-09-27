@@ -294,7 +294,7 @@ void History::setHasPendingResizedItems() {
 void History::itemRemoved(not_null<HistoryItem*> item) {
 	item->removeMainView();
 	if (lastMessage() == item) {
-		_lastMessage = base::none;
+		_lastMessage = std::nullopt;
 		if (loadedAtBottom()) {
 			if (const auto last = lastAvailableMessage()) {
 				setLastMessage(last);
@@ -423,7 +423,7 @@ void History::setSentDraftText(const QString &text) {
 
 void History::clearSentDraftText(const QString &text) {
 	if (_lastSentDraftText && *_lastSentDraftText == text) {
-		_lastSentDraftText = base::none;
+		_lastSentDraftText = std::nullopt;
 	}
 	accumulate_max(_lastSentDraftTime, unixtime());
 }
@@ -632,7 +632,7 @@ bool History::updateSendActionNeedsAnimating(TimeMs ms, bool force) {
 		}
 	}
 	auto result = (!_typing.isEmpty() || !_sendActions.isEmpty());
-	if (changed || result) {
+	if (changed || (result && !anim::Disabled())) {
 		App::histories().sendActionAnimationUpdated().notify({
 			this,
 			_sendActionAnimation.width(),
@@ -2135,7 +2135,11 @@ void History::getReadyFor(MsgId msgId) {
 	}
 	if (!isReadyFor(msgId)) {
 		unloadBlocks();
-
+		if (const auto migratePeer = peer->migrateFrom()) {
+			if (const auto migrated = App::historyLoaded(migratePeer)) {
+				migrated->unloadBlocks();
+			}
+		}
 		if (msgId == ShowAtTheEndMsgId) {
 			_loadedAtBottom = true;
 		}

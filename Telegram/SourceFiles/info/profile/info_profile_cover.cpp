@@ -212,17 +212,17 @@ int SectionWithToggle::toggleSkip() const {
 
 Cover::Cover(
 	QWidget *parent,
-	not_null<Controller*> controller)
+	not_null<PeerData*> peer,
+	not_null<Window::Controller*> controller)
 : SectionWithToggle(
 	parent,
 	st::infoProfilePhotoTop
 		+ st::infoProfilePhoto.size.height()
 		+ st::infoProfilePhotoBottom)
-, _controller(controller)
-, _peer(_controller->key().peer())
+, _peer(peer)
 , _userpic(
 	this,
-	controller->parentController(),
+	controller,
 	_peer,
 	Ui::UserpicButton::Role::OpenPhoto,
 	st::infoProfilePhoto)
@@ -274,12 +274,13 @@ Cover *Cover::setOnlineCount(rpl::producer<int> &&count) {
 
 void Cover::initViewers() {
 	using Flag = Notify::PeerUpdate::Flag;
-	Notify::PeerUpdateValue(
-		_peer,
-		Flag::NameChanged
-	) | rpl::start_with_next(
-		[this] { refreshNameText(); },
-		lifetime());
+	NameValue(
+		_peer
+	) | rpl::start_with_next([=](const TextWithEntities &name) {
+		_name->setText(name.text);
+		refreshNameGeometry(width());
+	}, lifetime());
+
 	Notify::PeerUpdateValue(
 		_peer,
 		Flag::UserOnlineChanged | Flag::MembersChanged
@@ -293,6 +294,8 @@ void Cover::initViewers() {
 		) | rpl::start_with_next(
 			[this] { refreshUploadPhotoOverlay(); },
 			lifetime());
+	} else if (_peer->isSelf()) {
+		refreshUploadPhotoOverlay();
 	}
 	VerifiedValue(
 		_peer
@@ -303,12 +306,12 @@ void Cover::initViewers() {
 
 void Cover::refreshUploadPhotoOverlay() {
 	_userpic->switchChangePhotoOverlay([&] {
-		if (auto chat = _peer->asChat()) {
+		if (const auto chat = _peer->asChat()) {
 			return chat->canEdit();
-		} else if (auto channel = _peer->asChannel()) {
+		} else if (const auto channel = _peer->asChannel()) {
 			return channel->canEditInformation();
 		}
-		return false;
+		return _peer->isSelf();
 	}());
 }
 
@@ -328,11 +331,6 @@ void Cover::setVerified(bool verified) {
 	} else {
 		_verifiedCheck.destroy();
 	}
-	refreshNameGeometry(width());
-}
-
-void Cover::refreshNameText() {
-	_name->setText(App::peerName(_peer));
 	refreshNameGeometry(width());
 }
 
@@ -376,9 +374,7 @@ void Cover::refreshStatusText() {
 	_status->setRichText(statusText);
 	if (hasMembersLink) {
 		_status->setLink(1, std::make_shared<LambdaClickHandler>([=] {
-			_controller->showSection(Info::Memento(
-				_controller->peerId(),
-				Section::Type::Members));
+			_showSection.fire(Section::Type::Members);
 		}));
 	}
 	refreshStatusGeometry(width());

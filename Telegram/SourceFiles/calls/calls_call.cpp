@@ -119,6 +119,8 @@ Call::ControllerPointer::~ControllerPointer() {
 	reset();
 }
 
+Call::Delegate::~Delegate() = default;
+
 Call::Call(
 	not_null<Delegate*> delegate,
 	not_null<UserData*> user,
@@ -534,14 +536,16 @@ void Call::createAndStartController(const MTPDphoneCall &call) {
 	if (Logs::DebugEnabled()) {
 		auto callLogFolder = cWorkingDir() + qsl("DebugLogs");
 		auto callLogPath = callLogFolder + qsl("/last_call_log.txt");
-		auto callLogNative = QFile::encodeName(QDir::toNativeSeparators(callLogPath));
-		auto callLogBytesSrc = bytes::make_span(callLogNative);
-		auto callLogBytesDst = bytes::make_span(config.logFilePath);
-		if (callLogBytesSrc.size() + 1 <= callLogBytesDst.size()) { // +1 - zero-terminator
-			QFile(callLogPath).remove();
-			QDir().mkpath(callLogFolder);
-			bytes::copy(callLogBytesDst, callLogBytesSrc);
-		}
+		auto callLogNative = QDir::toNativeSeparators(callLogPath);
+#ifdef Q_OS_WIN
+		config.logFilePath = callLogNative.toStdWString();
+#else // Q_OS_WIN
+		const auto callLogUtf = QFile::encodeName(callLogNative);
+		config.logFilePath.resize(callLogUtf.size());
+		ranges::copy(callLogUtf, config.logFilePath.begin());
+#endif // Q_OS_WIN
+		QFile(callLogPath).remove();
+		QDir().mkpath(callLogFolder);
 	}
 
 	const auto &protocol = call.vprotocol.c_phoneCallProtocol();
@@ -570,7 +574,20 @@ void Call::createAndStartController(const MTPDphoneCall &call) {
 		_controller->SetMicMute(_mute);
 	}
 	_controller->implData = static_cast<void*>(this);
-	_controller->SetRemoteEndpoints(endpoints, true, protocol.vmax_layer.v);
+	const auto p2p = [&] {
+		switch (Auth().settings().callsPeerToPeer()) {
+		case PeerToPeer::DefaultContacts:
+		case PeerToPeer::Contacts:
+			return _user->isContact();
+		case PeerToPeer::DefaultEveryone:
+		case PeerToPeer::Everyone:
+			return true;
+		case PeerToPeer::Nobody:
+			return false;
+		}
+		Unexpected("Calls::PeerToPeer value in Auth().settings().");
+	}();
+	_controller->SetRemoteEndpoints(endpoints, p2p, protocol.vmax_layer.v);
 	_controller->SetConfig(config);
 	_controller->SetEncryptionKey(reinterpret_cast<char*>(_authKey.data()), (_type == Type::Outgoing));
 	_controller->SetCallbacks(callbacks);

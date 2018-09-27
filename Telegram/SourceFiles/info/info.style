@@ -155,6 +155,15 @@ infoTopBarCall: IconButton(infoTopBarNotifications) {
 	icon: icon {{ "top_bar_call", boxTitleCloseFg }};
 	iconOver: icon {{ "top_bar_call", boxTitleCloseFgOver }};
 }
+infoTopBarSave: IconButton(infoTopBarNotifications) {
+	width: 48px;
+	icon: icon {{ "passport_ready", windowActiveTextFg }};
+	iconOver: icon {{ "passport_ready", windowActiveTextFg }};
+	iconPosition: point(11px, 17px);
+	ripple: RippleAnimation(defaultRippleAnimation) {
+		color: lightButtonBgOver;
+	}
+}
 infoTopBarForward: IconButton(infoTopBarBack) {
 	width: 46px;
 	icon: icon {{ "info_media_forward", boxTitleCloseFg }};
@@ -221,6 +230,14 @@ infoLayerTopBarNotifications: IconButton(infoLayerTopBarMenu) {
 infoLayerTopBarCall: IconButton(infoLayerTopBarNotifications) {
 	icon: icon {{ "top_bar_call", boxTitleCloseFg }};
 	iconOver: icon {{ "top_bar_call", boxTitleCloseFgOver }};
+}
+infoLayerTopBarSave: IconButton(infoLayerTopBarNotifications) {
+	icon: icon {{ "passport_ready", windowActiveTextFg }};
+	iconOver: icon {{ "passport_ready", windowActiveTextFg }};
+	iconPosition: point(13px, 18px);
+	ripple: RippleAnimation(defaultRippleAnimation) {
+		color: lightButtonBgOver;
+	}
 }
 infoLayerTopBarForward: IconButton(infoLayerTopBarBack) {
 	width: 45px;
@@ -378,8 +395,6 @@ infoBlockHeaderLabel: FlatLabel(infoProfileStatusLabel) {
 infoBlockHeaderPosition: point(79px, 22px);
 
 infoProfileToggle: Toggle(defaultToggle) {
-	diameter: 16px;
-	width: 14px;
 	untoggledFg: menuIconFg;
 }
 infoProfileToggleOver: Toggle(infoProfileToggle) {

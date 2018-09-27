@@ -20,6 +20,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/history_item.h"
 #include "history/history_media_types.h"
 #include "window/window_controller.h"
+#include "storage/cache/storage_cache_database.h"
 #include "auth_session.h"
 #include "mainwindow.h"
 #include "messenger.h"
@@ -785,13 +786,15 @@ void DocumentData::save(
 				&_urlLocation,
 				size,
 				fromCloud,
-				autoLoading);
+				autoLoading,
+				cacheTag());
 		} else if (!_access && !_url.isEmpty()) {
 			_loader = new webFileLoader(
 				_url,
 				toFile,
 				fromCloud,
-				autoLoading);
+				autoLoading,
+				cacheTag());
 		} else {
 			_loader = new mtpFileLoader(
 				_dc,
@@ -804,7 +807,8 @@ void DocumentData::save(
 				size,
 				(saveToCache() ? LoadToCacheAsWell : LoadToFileOnly),
 				fromCloud,
-				autoLoading);
+				autoLoading,
+				cacheTag());
 		}
 
 		_loader->connect(_loader, SIGNAL(progress(FileLoader*)), App::main(), SLOT(documentLoadProgress(FileLoader*)));
@@ -1015,7 +1019,11 @@ ImagePtr DocumentData::getStickerThumb() {
 
 Data::FileOrigin DocumentData::stickerSetOrigin() const {
 	if (const auto data = sticker()) {
-		return data->setOrigin();
+		if (const auto result = data->setOrigin()) {
+			return result;
+		} else if (Stickers::IsFaved(this)) {
+			return Data::FileOriginStickerSet(Stickers::FavedSetId, 0);
+		}
 	}
 	return Data::FileOrigin();
 }
@@ -1078,6 +1086,15 @@ void DocumentData::refreshFileReference(const QByteArray &value) {
 	_fileReference = value;
 }
 
+void DocumentData::refreshStickerThumbFileReference() {
+	if (const auto data = sticker()) {
+		if (thumb->loading()) {
+			data->loc.refreshFileReference(
+				thumb->location().fileReference());
+		}
+	}
+}
+
 QString DocumentData::filename() const {
 	return _filename;
 }
@@ -1096,6 +1113,29 @@ void DocumentData::setMimeString(const QString &mime) {
 
 MediaKey DocumentData::mediaKey() const {
 	return ::mediaKey(locationType(), _dc, id);
+}
+
+Storage::Cache::Key DocumentData::cacheKey() const {
+	if (hasWebLocation()) {
+		return Data::WebDocumentCacheKey(_urlLocation);
+	} else if (!_access && !_url.isEmpty()) {
+		return Data::UrlCacheKey(_url);
+	} else {
+		return Data::DocumentCacheKey(_dc, id);
+	}
+}
+
+uint8 DocumentData::cacheTag() const {
+	if (type == StickerDocument) {
+		return Data::kStickerCacheTag;
+	} else if (isVoiceMessage()) {
+		return Data::kVoiceMessageCacheTag;
+	} else if (isVideoMessage()) {
+		return Data::kVideoMessageCacheTag;
+	} else if (isAnimation()) {
+		return Data::kAnimationCacheTag;
+	}
+	return 0;
 }
 
 QString DocumentData::composeNameString() const {
@@ -1222,17 +1262,9 @@ void DocumentData::setWebLocation(const WebFileLocation &location) {
 void DocumentData::collectLocalData(DocumentData *local) {
 	if (local == this) return;
 
+	_session->data().cache().copyIfEmpty(local->cacheKey(), cacheKey());
 	if (!local->_data.isEmpty()) {
 		_data = local->_data;
-		if (isVoiceMessage()) {
-			if (!Local::copyAudio(local->mediaKey(), mediaKey())) {
-				Local::writeAudio(mediaKey(), _data);
-			}
-		} else {
-			if (!Local::copyStickerImage(local->mediaKey(), mediaKey())) {
-				Local::writeStickerImage(mediaKey(), _data);
-			}
-		}
 	}
 	if (!local->_location.isEmpty()) {
 		_location = local->_location;

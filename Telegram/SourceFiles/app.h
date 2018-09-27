@@ -7,7 +7,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #pragma once
 
-#include "core/basic_types.h"
 #include "data/data_types.h"
 #include "data/data_peer.h"
 
@@ -136,7 +135,6 @@ namespace App {
 	void enumerateChatsChannels(
 		Fn<void(not_null<PeerData*>)> action);
 
-	UserData *self();
 	PeerData *peerByName(const QString &username);
 	QString peerName(const PeerData *peer, bool forDialogs = false);
 

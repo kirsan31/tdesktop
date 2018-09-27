@@ -54,11 +54,6 @@ Instance::Instance()
 	subscribe(Media::Player::Updated(), [this](const AudioMsgId &audioId) {
 		handleSongUpdate(audioId);
 	});
-	subscribe(Global::RefSelfChanged(), [this] {
-		if (!App::self()) {
-			handleLogout();
-		}
-	});
 
 	// While we have one Media::Player::Instance for all authsessions we have to do this.
 	auto handleAuthSessionChange = [this] {
@@ -69,9 +64,11 @@ Instance::Instance()
 					pause(AudioMsgId::Type::Song);
 				}
 			});
+		} else {
+			handleLogout();
 		}
 	};
-	subscribe(Messenger::Instance().authSessionChanged(), [handleAuthSessionChange] {
+	subscribe(Messenger::Instance().authSessionChanged(), [=] {
 		handleAuthSessionChange();
 	});
 	handleAuthSessionChange();
@@ -130,7 +127,7 @@ void Instance::playlistUpdated(not_null<Data*> data) {
 		const auto fullId = data->current.contextId();
 		data->playlistIndex = data->playlistSlice->indexOf(fullId);
 	} else {
-		data->playlistIndex = base::none;
+		data->playlistIndex = std::nullopt;
 	}
 	data->playlistChanges.fire({});
 }
@@ -149,7 +146,7 @@ bool Instance::validPlaylist(not_null<Data*> data) {
 			return [&](const SparseIdsMergedSlice &data) {
 				return inSameDomain(a, b)
 					? data.distance(a, b)
-					: base::optional<int>();
+					: std::optional<int>();
 			};
 		};
 
@@ -183,14 +180,14 @@ void Instance::validatePlaylist(not_null<Data*> data) {
 			playlistUpdated(data);
 		}, data->playlistLifetime);
 	} else {
-		data->playlistSlice = base::none;
-		data->playlistSliceKey = data->playlistRequestedKey = base::none;
+		data->playlistSlice = std::nullopt;
+		data->playlistSliceKey = data->playlistRequestedKey = std::nullopt;
 		playlistUpdated(data);
 	}
 }
 
 auto Instance::playlistKey(not_null<Data*> data) const
--> base::optional<SliceKey> {
+-> std::optional<SliceKey> {
 	const auto contextId = data->current.contextId();
 	const auto history = data->history;
 	if (!contextId || !history || !IsServerMsgId(contextId.msg)) {

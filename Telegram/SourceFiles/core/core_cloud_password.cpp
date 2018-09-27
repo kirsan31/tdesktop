@@ -157,7 +157,7 @@ CloudPasswordResult ComputeCheck(
 }
 
 bytes::vector ComputeHash(
-		base::none_type,
+		std::nullopt_t,
 		bytes::const_span password) {
 	Unexpected("Bad secure secret algorithm.");
 }
@@ -203,7 +203,7 @@ CloudPasswordCheckRequest ParseCloudPasswordCheckRequest(
 
 CloudPasswordAlgo ValidateNewCloudPasswordAlgo(CloudPasswordAlgo &&parsed) {
 	if (!parsed.is<CloudPasswordAlgoModPow>()) {
-		return base::none;
+		return std::nullopt;
 	}
 	auto &value = parsed.get_unchecked<CloudPasswordAlgoModPow>();
 	const auto already = value.salt1.size();
@@ -219,7 +219,7 @@ MTPPasswordKdfAlgo PrepareCloudPasswordAlgo(const CloudPasswordAlgo &data) {
 			MTP_bytes(data.salt2),
 			MTP_int(data.g),
 			MTP_bytes(data.p));
-	}, [](base::none_type) {
+	}, [](std::nullopt_t) {
 		return MTP_passwordKdfAlgoUnknown();
 	});
 }
@@ -233,7 +233,7 @@ bytes::vector ComputeCloudPasswordHash(
 		bytes::const_span password) {
 	return algo.match([&](const CloudPasswordAlgoModPow &data) {
 		return ComputeHash(data, password);
-	}, [](base::none_type) -> bytes::vector {
+	}, [](std::nullopt_t) -> bytes::vector {
 		Unexpected("Bad cloud password algorithm.");
 	});
 }
@@ -243,7 +243,7 @@ CloudPasswordDigest ComputeCloudPasswordDigest(
 		bytes::const_span password) {
 	return algo.match([&](const CloudPasswordAlgoModPow &data) {
 		return ComputeDigest(data, password);
-	}, [](base::none_type) -> CloudPasswordDigest {
+	}, [](std::nullopt_t) -> CloudPasswordDigest {
 		Unexpected("Bad cloud password algorithm.");
 	});
 }
@@ -253,7 +253,7 @@ CloudPasswordResult ComputeCloudPasswordCheck(
 		bytes::const_span hash) {
 	return request.algo.match([&](const CloudPasswordAlgoModPow &data) {
 		return ComputeCheck(request, data, hash);
-	}, [](base::none_type) -> CloudPasswordResult {
+	}, [](std::nullopt_t) -> CloudPasswordResult {
 		Unexpected("Bad cloud password algorithm.");
 	});
 }
@@ -274,7 +274,7 @@ SecureSecretAlgo ParseSecureSecretAlgo(
 
 SecureSecretAlgo ValidateNewSecureSecretAlgo(SecureSecretAlgo &&parsed) {
 	if (!parsed.is<SecureSecretAlgoPBKDF2>()) {
-		return base::none;
+		return std::nullopt;
 	}
 	auto &value = parsed.get_unchecked<SecureSecretAlgoPBKDF2>();
 	const auto already = value.salt.size();
@@ -290,7 +290,7 @@ MTPSecurePasswordKdfAlgo PrepareSecureSecretAlgo(
 			MTP_bytes(data.salt));
 	}, [](const SecureSecretAlgoSHA512 &data) {
 		return MTP_securePasswordKdfAlgoSHA512(MTP_bytes(data.salt));
-	}, [](base::none_type) {
+	}, [](std::nullopt_t) {
 		return MTP_securePasswordKdfAlgoUnknown();
 	});
 }
@@ -301,6 +301,24 @@ bytes::vector ComputeSecureSecretHash(
 	return algo.match([&](const auto &data) {
 		return ComputeHash(data, password);
 	});
+}
+
+CloudPasswordState ParseCloudPasswordState(
+		const MTPDaccount_password &data) {
+	auto result = CloudPasswordState();
+	result.request = ParseCloudPasswordCheckRequest(data);
+	result.unknownAlgorithm = data.has_current_algo() && !result.request;
+	result.hasRecovery = data.is_has_recovery();
+	result.notEmptyPassport = data.is_has_secure_values();
+	result.hint = data.has_hint() ? qs(data.vhint) : QString();
+	result.newPassword = ValidateNewCloudPasswordAlgo(
+		ParseCloudPasswordAlgo(data.vnew_algo));
+	result.newSecureSecret = ValidateNewSecureSecretAlgo(
+		ParseSecureSecretAlgo(data.vnew_secure_algo));
+	result.unconfirmedPattern = data.has_email_unconfirmed_pattern()
+		? qs(data.vemail_unconfirmed_pattern)
+		: QString();
+	return result;
 }
 
 } // namespace Core

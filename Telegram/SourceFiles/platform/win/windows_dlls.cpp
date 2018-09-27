@@ -7,6 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "platform/win/windows_dlls.h"
 
+#include <QtCore/QSysInfo>
+
 namespace Platform {
 namespace Dlls {
 
@@ -43,6 +45,11 @@ f_WindowsDeleteString WindowsDeleteString;
 f_PropVariantToString PropVariantToString;
 f_PSStringFromPropertyKey PSStringFromPropertyKey;
 f_DwmIsCompositionEnabled DwmIsCompositionEnabled;
+f_RmStartSession RmStartSession;
+f_RmRegisterResources RmRegisterResources;
+f_RmGetList RmGetList;
+f_RmShutdown RmShutdown;
+f_RmEndSession RmEndSession;
 
 HINSTANCE LibUxTheme;
 HINSTANCE LibShell32;
@@ -50,6 +57,7 @@ HINSTANCE LibWtsApi32;
 HINSTANCE LibPropSys;
 HINSTANCE LibComBase;
 HINSTANCE LibDwmApi;
+HINSTANCE LibRstrtMgr;
 
 void start() {
 	init();
@@ -62,10 +70,6 @@ void start() {
 	load(LibShell32, "SHQueryUserNotificationState", SHQueryUserNotificationState);
 	load(LibShell32, "SHChangeNotify", SHChangeNotify);
 	load(LibShell32, "SetCurrentProcessExplicitAppUserModelID", SetCurrentProcessExplicitAppUserModelID);
-
-	if (cBetaVersion() == 10020001 && SHChangeNotify) { // Temp - app icon was changed
-		SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST, nullptr, nullptr);
-	}
 
 	LibUxTheme = LoadLibrary(L"UXTHEME.DLL");
 	load(LibUxTheme, "SetWindowTheme", SetWindowTheme);
@@ -89,6 +93,13 @@ void start() {
 
 		LibDwmApi = LoadLibrary(L"DWMAPI.DLL");
 		load(LibDwmApi, "DwmIsCompositionEnabled", DwmIsCompositionEnabled);
+
+		LibRstrtMgr = LoadLibrary(L"RSTRTMGR.DLL");
+		load(LibRstrtMgr, "RmStartSession", RmStartSession);
+		load(LibRstrtMgr, "RmRegisterResources", RmRegisterResources);
+		load(LibRstrtMgr, "RmGetList", RmGetList);
+		load(LibRstrtMgr, "RmShutdown", RmShutdown);
+		load(LibRstrtMgr, "RmEndSession", RmEndSession);
 	}
 }
 

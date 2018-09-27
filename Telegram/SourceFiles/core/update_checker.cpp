@@ -16,7 +16,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "mtproto/session.h"
 #include "mainwindow.h"
 #include "core/click_handler_types.h"
-#include "settings/settings_widget.h"
+#include "info/info_memento.h"
+#include "info/settings/info_settings_widget.h"
+#include "window/window_controller.h"
+#include "settings/settings_intro.h"
 
 extern "C" {
 #include <openssl/rsa.h>
@@ -155,12 +158,12 @@ private:
 	void gotFailure(QNetworkReply::NetworkError e);
 	void clearSentRequest();
 	bool handleResponse(const QByteArray &response);
-	base::optional<QString> parseOldResponse(
+	std::optional<QString> parseOldResponse(
 		const QByteArray &response) const;
-	base::optional<QString> parseResponse(const QByteArray &response) const;
+	std::optional<QString> parseResponse(const QByteArray &response) const;
 	QString validateLatestUrl(
 		uint64 availableVersion,
-		bool isAvailableBeta,
+		bool isAvailableAlpha,
 		QString url) const;
 
 	std::unique_ptr<QNetworkAccessManager> _manager;
@@ -259,14 +262,14 @@ private:
 		const QString &username,
 		Fn<void(const MTPInputChannel &channel)> callback);
 	void gotMessage(const MTPmessages_Messages &result);
-	base::optional<FileLocation> parseMessage(
+	std::optional<FileLocation> parseMessage(
 		const MTPmessages_Messages &result) const;
-	base::optional<FileLocation> parseText(const QByteArray &text) const;
+	std::optional<FileLocation> parseText(const QByteArray &text) const;
 	FileLocation validateLatestLocation(
 		uint64 availableVersion,
 		const FileLocation &location) const;
 	void gotFile(const MTPmessages_Messages &result);
-	base::optional<ParsedFile> parseFile(
+	std::optional<ParsedFile> parseFile(
 		const MTPmessages_Messages &result) const;
 
 	MtpWeak _mtp;
@@ -388,15 +391,15 @@ bool UnpackUpdate(const QString &filepath) {
 		return false;
 	}
 
-	RSA *pbKey = PEM_read_bio_RSAPublicKey(BIO_new_mem_buf(const_cast<char*>(AppAlphaVersion ? UpdatesPublicAlphaKey : UpdatesPublicKey), -1), 0, 0, 0);
+	RSA *pbKey = PEM_read_bio_RSAPublicKey(BIO_new_mem_buf(const_cast<char*>(AppBetaVersion ? UpdatesPublicBetaKey : UpdatesPublicKey), -1), 0, 0, 0);
 	if (!pbKey) {
 		LOG(("Update Error: cant read public rsa key!"));
 		return false;
 	}
 	if (RSA_verify(NID_sha1, (const uchar*)(compressed.constData() + hSigLen), hShaLen, (const uchar*)(compressed.constData()), hSigLen, pbKey) != 1) { // verify signature
 		RSA_free(pbKey);
-		if (cAlphaVersion() || cBetaVersion()) { // try other public key, if we are in alpha or beta version
-			pbKey = PEM_read_bio_RSAPublicKey(BIO_new_mem_buf(const_cast<char*>(AppAlphaVersion ? UpdatesPublicKey : UpdatesPublicAlphaKey), -1), 0, 0, 0);
+		if (cInstallBetaVersion() || cAlphaVersion()) { // try other public key, if we are in beta or alpha version
+			pbKey = PEM_read_bio_RSAPublicKey(BIO_new_mem_buf(const_cast<char*>(AppBetaVersion ? UpdatesPublicKey : UpdatesPublicBetaKey), -1), 0, 0, 0);
 			if (!pbKey) {
 				LOG(("Update Error: cant read public rsa key!"));
 				return false;
@@ -485,15 +488,15 @@ bool UnpackUpdate(const QString &filepath) {
 			return false;
 		}
 
-		quint64 betaVersion = 0;
-		if (version == 0x7FFFFFFF) { // beta version
-			stream >> betaVersion;
+		quint64 alphaVersion = 0;
+		if (version == 0x7FFFFFFF) { // alpha version
+			stream >> alphaVersion;
 			if (stream.status() != QDataStream::Ok) {
-				LOG(("Update Error: cant read beta version from downloaded stream, status: %1").arg(stream.status()));
+				LOG(("Update Error: cant read alpha version from downloaded stream, status: %1").arg(stream.status()));
 				return false;
 			}
-			if (!cBetaVersion() || betaVersion <= cBetaVersion()) {
-				LOG(("Update Error: downloaded beta version %1 is not greater, than mine %2").arg(betaVersion).arg(cBetaVersion()));
+			if (!cAlphaVersion() || alphaVersion <= cAlphaVersion()) {
+				LOG(("Update Error: downloaded alpha version %1 is not greater, than mine %2").arg(alphaVersion).arg(cAlphaVersion()));
 				return false;
 			}
 		} else if (int32(version) <= AppVersion) {
@@ -568,8 +571,8 @@ bool UnpackUpdate(const QString &filepath) {
 			return false;
 		}
 		fVersion.write((const char*)&versionNum, sizeof(VersionInt));
-		if (versionNum == 0x7FFFFFFF) { // beta version
-			fVersion.write((const char*)&betaVersion, sizeof(quint64));
+		if (versionNum == 0x7FFFFFFF) { // alpha version
+			fVersion.write((const char*)&alphaVersion, sizeof(quint64));
 		} else {
 			fVersion.write((const char*)&versionLen, sizeof(VersionInt));
 			fVersion.write((const char*)&versionStr[0], versionLen);
@@ -594,7 +597,7 @@ bool UnpackUpdate(const QString &filepath) {
 	return true;
 }
 
-base::optional<MTPInputChannel> ExtractChannel(
+std::optional<MTPInputChannel> ExtractChannel(
 		const MTPcontacts_ResolvedPeer &result) {
 	const auto &data = result.c_contacts_resolvedPeer();
 	if (const auto peer = peerFromMTP(data.vpeer)) {
@@ -609,7 +612,7 @@ base::optional<MTPInputChannel> ExtractChannel(
 			}
 		}
 	}
-	return base::none;
+	return std::nullopt;
 }
 
 template <typename Callback>
@@ -650,14 +653,14 @@ bool ParseCommonMap(
 	}
 	const auto types = (*it).toObject();
 	const auto list = [&]() -> std::vector<QString> {
-		if (cBetaVersion()) {
+		if (cAlphaVersion()) {
 			return { "alpha", "beta", "stable" };
-		} else if (cAlphaVersion()) {
+		} else if (cInstallBetaVersion()) {
 			return { "beta", "stable" };
 		}
 		return { "stable" };
 	}();
-	auto bestIsAvailableBeta = false;
+	auto bestIsAvailableAlpha = false;
 	auto bestAvailableVersion = 0ULL;
 	for (const auto &type : list) {
 		const auto it = types.constFind(type);
@@ -674,7 +677,7 @@ bool ParseCommonMap(
 		if (version == map.constEnd()) {
 			continue;
 		}
-		const auto isAvailableBeta = (type == "alpha");
+		const auto isAvailableAlpha = (type == "alpha");
 		const auto availableVersion = [&] {
 			if ((*version).isString()) {
 				const auto string = (*version).toString();
@@ -692,16 +695,16 @@ bool ParseCommonMap(
 				).arg(platform).arg(type).arg(key));
 			return false;
 		}
-		const auto compare = isAvailableBeta
+		const auto compare = isAvailableAlpha
 			? availableVersion
 			: availableVersion * 1000;
-		const auto bestCompare = bestIsAvailableBeta
+		const auto bestCompare = bestIsAvailableAlpha
 			? bestAvailableVersion
 			: bestAvailableVersion * 1000;
 		if (compare > bestCompare) {
 			bestAvailableVersion = availableVersion;
-			bestIsAvailableBeta = isAvailableBeta;
-			if (!callback(availableVersion, isAvailableBeta, map)) {
+			bestIsAvailableAlpha = isAvailableAlpha;
+			if (!callback(availableVersion, isAvailableAlpha, map)) {
 				return false;
 			}
 		}
@@ -714,11 +717,11 @@ bool ParseCommonMap(
 	return true;
 }
 
-base::optional<MTPMessage> GetMessagesElement(
+std::optional<MTPMessage> GetMessagesElement(
 		const MTPmessages_Messages &list) {
-	const auto get = [](auto &&data) -> base::optional<MTPMessage> {
+	const auto get = [](auto &&data) -> std::optional<MTPMessage> {
 		return data.vmessages.v.isEmpty()
-			? base::none
+			? std::nullopt
 			: base::make_optional(data.vmessages.v[0]);
 	};
 	switch (list.type()) {
@@ -729,7 +732,7 @@ base::optional<MTPMessage> GetMessagesElement(
 	case mtpc_messages_channelMessages:
 		return get(list.c_messages_channelMessages());
 	case mtpc_messages_messagesNotModified:
-		return base::none;
+		return std::nullopt;
 	default: Unexpected("Type of messages.Messages (GetMessagesElement)");
 	}
 }
@@ -958,35 +961,35 @@ void HttpChecker::gotFailure(QNetworkReply::NetworkError e) {
 	fail();
 }
 
-base::optional<QString> HttpChecker::parseOldResponse(
+std::optional<QString> HttpChecker::parseOldResponse(
 		const QByteArray &response) const {
 	const auto string = QString::fromLatin1(response);
 	const auto old = QRegularExpression(
 		qsl("^\\s*(\\d+)\\s*:\\s*([\\x21-\\x7f]+)\\s*$")
 	).match(string);
 	if (!old.hasMatch()) {
-		return base::none;
+		return std::nullopt;
 	}
 	const auto availableVersion = old.captured(1).toULongLong();
 	const auto url = old.captured(2);
-	const auto isAvailableBeta = url.startsWith(qstr("beta_"));
+	const auto isAvailableAlpha = url.startsWith(qstr("beta_"));
 	return validateLatestUrl(
 		availableVersion,
-		isAvailableBeta,
-		isAvailableBeta ? url.mid(5) + "_{signature}" : url);
+		isAvailableAlpha,
+		isAvailableAlpha ? url.mid(5) + "_{signature}" : url);
 }
 
-base::optional<QString> HttpChecker::parseResponse(
+std::optional<QString> HttpChecker::parseResponse(
 		const QByteArray &response) const {
 	auto bestAvailableVersion = 0ULL;
-	auto bestIsAvailableBeta = false;
+	auto bestIsAvailableAlpha = false;
 	auto bestLink = QString();
 	const auto accumulate = [&](
 			uint64 version,
-			bool isBeta,
+			bool isAlpha,
 			const QJsonObject &map) {
 		bestAvailableVersion = version;
-		bestIsAvailableBeta = isBeta;
+		bestIsAvailableAlpha = isAlpha;
 		const auto link = map.constFind("link");
 		if (link == map.constEnd()) {
 			LOG(("Update Error: Link not found for version %1."
@@ -1002,32 +1005,32 @@ base::optional<QString> HttpChecker::parseResponse(
 	};
 	const auto result = ParseCommonMap(response, testing(), accumulate);
 	if (!result) {
-		return base::none;
+		return std::nullopt;
 	}
 	return validateLatestUrl(
 		bestAvailableVersion,
-		bestIsAvailableBeta,
+		bestIsAvailableAlpha,
 		Local::readAutoupdatePrefix() + bestLink);
 }
 
 QString HttpChecker::validateLatestUrl(
 		uint64 availableVersion,
-		bool isAvailableBeta,
+		bool isAvailableAlpha,
 		QString url) const {
-	const auto myVersion = isAvailableBeta
-		? cBetaVersion()
+	const auto myVersion = isAvailableAlpha
+		? cAlphaVersion()
 		: uint64(AppVersion);
-	const auto validVersion = (cBetaVersion() || !isAvailableBeta);
+	const auto validVersion = (cAlphaVersion() || !isAvailableAlpha);
 	if (!validVersion || availableVersion <= myVersion) {
 		return QString();
 	}
 	const auto versionUrl = url.replace(
 		"{version}",
 		QString::number(availableVersion));
-	const auto finalUrl = isAvailableBeta
+	const auto finalUrl = isAvailableAlpha
 		? QString(versionUrl).replace(
 			"{signature}",
-			countBetaVersionSignature(availableVersion))
+			countAlphaVersionSignature(availableVersion))
 		: versionUrl;
 	return finalUrl;
 }
@@ -1347,25 +1350,25 @@ void MtpChecker::gotMessage(const MTPmessages_Messages &result) {
 }
 
 auto MtpChecker::parseMessage(const MTPmessages_Messages &result) const
--> base::optional<FileLocation> {
+-> std::optional<FileLocation> {
 	const auto message = GetMessagesElement(result);
 	if (!message || message->type() != mtpc_message) {
 		LOG(("Update Error: MTP feed message not found."));
-		return base::none;
+		return std::nullopt;
 	}
 	return parseText(message->c_message().vmessage.v);
 }
 
 auto MtpChecker::parseText(const QByteArray &text) const
--> base::optional<FileLocation> {
+-> std::optional<FileLocation> {
 	auto bestAvailableVersion = 0ULL;
 	auto bestLocation = FileLocation();
 	const auto accumulate = [&](
 			uint64 version,
-			bool isBeta,
+			bool isAlpha,
 			const QJsonObject &map) {
-		if (isBeta) {
-			LOG(("Update Error: MTP closed beta found."));
+		if (isAlpha) {
+			LOG(("Update Error: MTP closed alpha found."));
 			return false;
 		}
 		bestAvailableVersion = version;
@@ -1401,7 +1404,7 @@ auto MtpChecker::parseText(const QByteArray &text) const
 	};
 	const auto result = ParseCommonMap(text, testing(), accumulate);
 	if (!result) {
-		return base::none;
+		return std::nullopt;
 	}
 	return validateLatestLocation(bestAvailableVersion, bestLocation);
 }
@@ -1427,23 +1430,23 @@ void MtpChecker::gotFile(const MTPmessages_Messages &result) {
 }
 
 auto MtpChecker::parseFile(const MTPmessages_Messages &result) const
--> base::optional<ParsedFile> {
+-> std::optional<ParsedFile> {
 	const auto message = GetMessagesElement(result);
 	if (!message || message->type() != mtpc_message) {
 		LOG(("Update Error: MTP file message not found."));
-		return base::none;
+		return std::nullopt;
 	}
 	const auto &data = message->c_message();
 	if (!data.has_media()
 		|| data.vmedia.type() != mtpc_messageMediaDocument) {
 		LOG(("Update Error: MTP file media not found."));
-		return base::none;
+		return std::nullopt;
 	}
 	const auto &document = data.vmedia.c_messageMediaDocument();
 	if (!document.has_document()
 		|| document.vdocument.type() != mtpc_document) {
 		LOG(("Update Error: MTP file not found."));
-		return base::none;
+		return std::nullopt;
 	}
 	const auto &fields = document.vdocument.c_document();
 	const auto name = [&] {
@@ -1457,12 +1460,12 @@ auto MtpChecker::parseFile(const MTPmessages_Messages &result) const
 	}();
 	if (name.isEmpty()) {
 		LOG(("Update Error: MTP file name not found."));
-		return base::none;
+		return std::nullopt;
 	}
 	const auto size = fields.vsize.v;
 	if (size <= 0) {
 		LOG(("Update Error: MTP file size is invalid."));
-		return base::none;
+		return std::nullopt;
 	}
 	const auto location = MTP_inputDocumentFileLocation(
 		fields.vid,
@@ -1635,7 +1638,7 @@ private:
 	Implementation _httpImplementation;
 	Implementation _mtpImplementation;
 	std::shared_ptr<Loader> _activeLoader;
-	bool _usingMtprotoLoader = (cBetaVersion() != 0);
+	bool _usingMtprotoLoader = (cAlphaVersion() != 0);
 	QPointer<MTP::Instance> _mtproto;
 
 	rpl::lifetime _lifetime;
@@ -1758,8 +1761,8 @@ void Updater::start(bool forceWait) {
 	}
 
 	_retryTimer.cancel();
-	const auto constDelay = cBetaVersion() ? 600 : UpdateDelayConstPart;
-	const auto randDelay = cBetaVersion() ? 300 : UpdateDelayRandPart;
+	const auto constDelay = cAlphaVersion() ? 600 : UpdateDelayConstPart;
+	const auto randDelay = cAlphaVersion() ? 300 : UpdateDelayRandPart;
 	const auto updateInSecs = cLastUpdateCheck()
 		+ constDelay
 		+ int(rand() % randDelay)
@@ -2039,15 +2042,15 @@ bool checkReadyUpdate() {
 			ClearAll();
 			return false;
 		}
-		if (versionNum == 0x7FFFFFFF) { // beta version
-			quint64 betaVersion = 0;
-			if (fVersion.read((char*)&betaVersion, sizeof(quint64)) != sizeof(quint64)) {
-				LOG(("Update Error: cant read beta version from file '%1'").arg(versionPath));
+		if (versionNum == 0x7FFFFFFF) { // alpha version
+			quint64 alphaVersion = 0;
+			if (fVersion.read((char*)&alphaVersion, sizeof(quint64)) != sizeof(quint64)) {
+				LOG(("Update Error: cant read alpha version from file '%1'").arg(versionPath));
 				ClearAll();
 				return false;
 			}
-			if (!cBetaVersion() || betaVersion <= cBetaVersion()) {
-				LOG(("Update Error: cant install beta version %1 having beta version %2").arg(betaVersion).arg(cBetaVersion()));
+			if (!cAlphaVersion() || alphaVersion <= cAlphaVersion()) {
+				LOG(("Update Error: cant install alpha version %1 having alpha version %2").arg(alphaVersion).arg(cAlphaVersion()));
 				ClearAll();
 				return false;
 			}
@@ -2124,23 +2127,29 @@ void UpdateApplication() {
 		}();
 		UrlClickHandler::Open(url);
 	} else {
-		cSetLastUpdateCheck(0);
-		Core::UpdateChecker().start();
+		cSetAutoUpdate(true);
 		if (const auto window = App::wnd()) {
-			auto settings = Box<Settings::Widget>();
-			const auto weak = make_weak(settings.data());
-			window->showSpecialLayer(std::move(settings), anim::type::normal);
-			if (weak) {
-				weak->scrollToUpdateRow();
+			if (const auto controller = window->controller()) {
+				controller->showSection(
+					Info::Memento(
+						Info::Settings::Tag{ Auth().user() },
+						Info::Section::SettingsType::Advanced),
+					Window::SectionShow());
+			} else {
+				window->showSpecialLayer(
+					Box<Settings::LayerWidget>(),
+					anim::type::normal);
 			}
 			window->showFromTray();
 		}
+		cSetLastUpdateCheck(0);
+		Core::UpdateChecker().start();
 	}
 }
 
-QString countBetaVersionSignature(uint64 version) { // duplicated in packer.cpp
-	if (cBetaPrivateKey().isEmpty()) {
-		LOG(("Error: Trying to count beta version signature without beta private key!"));
+QString countAlphaVersionSignature(uint64 version) { // duplicated in packer.cpp
+	if (cAlphaPrivateKey().isEmpty()) {
+		LOG(("Error: Trying to count alpha version signature without alpha private key!"));
 		return QString();
 	}
 
@@ -2153,27 +2162,27 @@ QString countBetaVersionSignature(uint64 version) { // duplicated in packer.cpp
 
 	uint32 siglen = 0;
 
-	RSA *prKey = PEM_read_bio_RSAPrivateKey(BIO_new_mem_buf(const_cast<char*>(cBetaPrivateKey().constData()), -1), 0, 0, 0);
+	RSA *prKey = PEM_read_bio_RSAPrivateKey(BIO_new_mem_buf(const_cast<char*>(cAlphaPrivateKey().constData()), -1), 0, 0, 0);
 	if (!prKey) {
-		LOG(("Error: Could not read beta private key!"));
+		LOG(("Error: Could not read alpha private key!"));
 		return QString();
 	}
 	if (RSA_size(prKey) != keySize) {
-		LOG(("Error: Bad beta private key size: %1").arg(RSA_size(prKey)));
+		LOG(("Error: Bad alpha private key size: %1").arg(RSA_size(prKey)));
 		RSA_free(prKey);
 		return QString();
 	}
 	QByteArray signature;
 	signature.resize(keySize);
 	if (RSA_sign(NID_sha1, (const uchar*)(sha1Buffer), shaSize, (uchar*)(signature.data()), &siglen, prKey) != 1) { // count signature
-		LOG(("Error: Counting beta version signature failed!"));
+		LOG(("Error: Counting alpha version signature failed!"));
 		RSA_free(prKey);
 		return QString();
 	}
 	RSA_free(prKey);
 
 	if (siglen != keySize) {
-		LOG(("Error: Bad beta version signature length: %1").arg(siglen));
+		LOG(("Error: Bad alpha version signature length: %1").arg(siglen));
 		return QString();
 	}
 

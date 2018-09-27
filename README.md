@@ -29,6 +29,7 @@ The source code is published under GPLv3 with OpenSSL exception, the license is 
 * Mac OS X 10.6 - Mac OS X 10.7 (separate build)
 * Ubuntu 12.04 - Ubuntu 18.04
 * Fedora 22 - Fedora 28
+* [Snappy](https://snapcraft.io/telegram-desktop)
 
 ## Third-party
 
@@ -53,6 +54,7 @@ The source code is published under GPLv3 with OpenSSL exception, the license is 
 * Catch test framework ([Boost License](https://github.com/philsquared/Catch/blob/master/LICENSE.txt))
 * Sonnet ([LGPL](https://github.com/KDE/sonnet/blob/master/COPYING.LIB))
 * Hunspell ([MPL+LGPL](https://github.com/hunspell/hunspell/blob/master/license.hunspell))
+* xxHash ([BSD License](https://github.com/Cyan4973/xxHash/blob/dev/LICENSE))
 
 ## Build instructions
 

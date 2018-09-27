@@ -96,7 +96,7 @@ public:
 			std::is_assignable_v<Type&, OtherType>>>
 	variable(producer<OtherType, Error, Generator> &&stream) {
 		std::move(stream)
-			| start_with_next([this](auto &&data) {
+			| start_with_next([=](auto &&data) {
 				assign(std::forward<decltype(data)>(data));
 			}, _lifetime);
 	}
@@ -111,9 +111,10 @@ public:
 			producer<OtherType, Error, Generator> &&stream) {
 		_lifetime.destroy();
 		std::move(stream)
-			| start_with_next([this](auto &&data) {
+			| start_with_next([=](auto &&data) {
 				assign(std::forward<decltype(data)>(data));
 			}, _lifetime);
+		return *this;
 	}
 
 	Type current() const {

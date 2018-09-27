@@ -659,7 +659,9 @@ void StickersBox::Inner::setInnerFocus() {
 void StickersBox::Inner::paintEvent(QPaintEvent *e) {
 	Painter p(this);
 
-	_a_shifting.step();
+	if (_a_shifting.animating()) {
+		_a_shifting.step();
+	}
 
 	auto clip = e->rect();
 	auto ms = getms();
@@ -1204,6 +1206,9 @@ void StickersBox::Inner::leaveToChildEvent(QEvent *e, QWidget *child) {
 }
 
 void StickersBox::Inner::step_shifting(TimeMs ms, bool timer) {
+	if (anim::Disabled()) {
+		ms += st::stickersRowDuration;
+	}
 	auto animating = false;
 	auto updateMin = -1;
 	auto updateMax = 0;

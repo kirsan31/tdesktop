@@ -7,16 +7,10 @@
 {
   'conditions': [[ 'build_win', {
     'msbuild_toolset': 'v141',
-    'sources': [
-      '<(res_loc)/winrc/Telegram.rc',
-    ],
     'library_dirs': [
       '<(libs_loc)/ffmpeg',
     ],
     'libraries': [
-      '-llibeay32',
-      '-lssleay32',
-      '-lCrypt32',
       '-lzlibstat',
       '-lLzmaLib',
       '-lUxTheme',
@@ -41,11 +35,7 @@
     },
     'configurations': {
       'Debug': {
-        'include_dirs': [
-          '<(libs_loc)/openssl/Debug/include',
-        ],              
         'library_dirs': [
-          '<(libs_loc)/openssl/Debug/lib',
           '<(libs_loc)/lzma/C/Util/LzmaLib/Debug',
           '<(libs_loc)/opus/win32/VS2015/Win32/Debug',
           '<(libs_loc)/openal-soft/build/Debug',
@@ -59,11 +49,7 @@
         }]],         
       },
       'Release': {
-        'include_dirs': [
-          '<(libs_loc)/openssl/Release/include',
-        ], 
         'library_dirs': [
-          '<(libs_loc)/openssl/Release/lib',
           '<(libs_loc)/lzma/C/Util/LzmaLib/Release',
           '<(libs_loc)/opus/win32/VS2015/Win32/Release',
           '<(libs_loc)/openal-soft/build/Release',

@@ -37,10 +37,13 @@ public:
 		not_null<Window::SectionMemento*> memento,
 		const Window::SectionShow &params) override;
 
+	bool closeByOutsideClick() const override;
+
 	static int MinimalSupportedWidth();
 
 protected:
 	int resizeGetHeight(int newWidth) override;
+	void doSetInnerFocus() override;
 
 	void paintEvent(QPaintEvent *e) override;
 

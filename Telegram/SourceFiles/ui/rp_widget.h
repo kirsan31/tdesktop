@@ -24,12 +24,18 @@ public:
 	, _value(std::forward<OtherValue>(value)) {
 	}
 
+	not_null<Value*> value() {
+		return &_value;
+	}
+
 private:
 	Value _value;
 
 };
 
 } // namespace details
+
+class RpWidget;
 
 template <typename Widget, typename ...Args>
 inline base::unique_qptr<Widget> CreateObject(Args &&...args) {
@@ -50,12 +56,18 @@ inline void DestroyChild(QWidget *child) {
 	delete child;
 }
 
+void ResizeFitChild(
+	not_null<RpWidget*> parent,
+	not_null<RpWidget*> child);
+
 template <typename Value>
-inline void AttachAsChild(not_null<QObject*> parent, Value &&value) {
-	using PlainValue = std::decay_t<Value>;
-	CreateChild<details::AttachmentOwner<PlainValue>>(
+inline not_null<std::decay_t<Value>*> AttachAsChild(
+		not_null<QObject*> parent,
+		Value &&value) {
+	return CreateChild<details::AttachmentOwner<std::decay_t<Value>>>(
 		parent.get(),
-		std::forward<Value>(value));
+		std::forward<Value>(value)
+	)->value();
 }
 
 template <typename Widget>

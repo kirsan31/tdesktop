@@ -199,9 +199,9 @@ editBioCountdownLabel: FlatLabel(defaultFlatLabel) {
 	textFg: windowSubTextFg;
 }
 
-contactUserIcon: icon {{ "add_contact_user", menuIconFg }};
-contactPhoneIcon: icon {{ "add_contact_phone", menuIconFg }};
-contactIconTop: 28px;
+contactUserIcon: icon {{ "settings_name", menuIconFg }};
+contactPhoneIcon: icon {{ "settings_phone_number", menuIconFg }};
+contactIconPosition: point(-5px, 23px);
 
 contactsAddIconAbove: icon {{ "contacts_add", activeButtonFg, point(18px, 18px) }};
 contactsAdd: TwoIconButton {
@@ -354,7 +354,35 @@ peerListBox: PeerList(defaultPeerList) {
 	}
 }
 
-localStorageBoxSkip: 10px;
+localStorageRowHeight: 50px;
+localStorageRowPadding: margins(23px, 5px, 20px, 5px);
+localStorageRowTitle: FlatLabel(defaultFlatLabel) {
+	textFg: windowBoldFg;
+	maxHeight: 20px;
+	style: TextStyle(defaultTextStyle) {
+		font: font(14px semibold);
+		linkFont: font(14px semibold);
+		linkFontOver: font(14px semibold);
+	}
+}
+localStorageRowSize: FlatLabel(defaultFlatLabel) {
+	textFg: contactsStatusFg;
+	maxHeight: 20px;
+	style: TextStyle(defaultTextStyle) {
+		font: font(14px);
+		linkFont: font(14px);
+		linkFontOver: font(14px);
+	}
+}
+localStorageClear: defaultBoxButton;
+localStorageLimitLabel: LabelSimple(defaultLabelSimple) {
+	font: boxTextFont;
+}
+localStorageLimitLabelMargin: margins(23px, 10px, 20px, 5px);
+localStorageLimitSlider: MediaSlider(defaultContinuousSlider) {
+	seekSize: size(15px, 15px);
+}
+localStorageLimitMargin: margins(23px, 5px, 20px, 10px);
 
 shareRowsTop: 12px;
 shareRowHeight: 108px;
@@ -591,27 +619,6 @@ colorValueInput: InputField(defaultInputField) {
 colorResultInput: InputField(colorValueInput) {
 }
 
-editPrivacyOptionMargin: margins(23px, 14px, 21px, 0px);
-editPrivacyPadding: margins(23px, 0px, 21px, 0px);
-editPrivacyWarningPadding: margins(23px, 14px, 21px, 0px);
-editPrivacyTitle: FlatLabel(defaultFlatLabel) {
-	minWidth: 320px;
-	textFg: boxTitleFg;
-	maxHeight: 56px;
-	style: TextStyle(defaultTextStyle) {
-		font: boxTitleFont;
-		linkFont: boxTitleFont;
-		linkFontOver: boxTitleFont;
-	}
-}
-editPrivacyTitlePadding: margins(23px, 20px, 21px, 13px);
-editPrivacyLabel: FlatLabel(defaultFlatLabel) {
-	minWidth: 320px;
-	textFg: membersAboutLimitFg;
-	style: defaultTextStyle;
-}
-editPrivacyLinkMargin: margins(0px, 0px, 0px, 8px);
-
 changePhoneIcon: icon {
 	{ "phone_simcard_from", changePhoneSimcardFrom },
 	{ "phone_simcard_migrate", changePhoneSimcardTo, point(30px, 11px) },
@@ -791,3 +798,10 @@ termsContent: FlatLabel(defaultFlatLabel) {
 }
 termsPadding: margins(23px, 4px, 16px, 16px);
 termsAgePadding: margins(23px, 16px, 16px, 0px);
+
+themesSmallSkip: 10px;
+themesBackgroundSize: 120px;
+themesScroll: ScrollArea(defaultScrollArea) {
+	bottomsh: 0px;
+	topsh: 0px;
+}

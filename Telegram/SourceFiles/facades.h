@@ -185,8 +185,10 @@ inline bool IsTopCorner(ScreenCorner corner) {
 
 namespace Sandbox {
 
-bool CheckBetaVersionDir();
+bool CheckAlphaVersionDir();
 void WorkingDirReady();
+void WriteInstallBetaVersionsSetting();
+void WriteDebugModeSetting();
 
 void MainThreadTaskAdded();
 
@@ -291,8 +293,6 @@ DeclareVar(HiddenPinnedMessagesMap, HiddenPinnedMessages);
 
 typedef QMap<uint64, QPixmap> CircleMasksMap;
 DeclareRefVar(CircleMasksMap, CircleMasks);
-
-DeclareRefVar(base::Observable<void>, SelfChanged);
 
 DeclareVar(bool, AskDownloadPath);
 DeclareVar(QString, DownloadPath);

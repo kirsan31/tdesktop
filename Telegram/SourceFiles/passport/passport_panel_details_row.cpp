@@ -16,6 +16,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/widgets/checkbox.h"
 #include "ui/wrap/slide_wrap.h"
 #include "ui/countryinput.h"
+#include "auth_session.h"
 #include "styles/style_boxes.h"
 #include "styles/style_passport.h"
 
@@ -224,7 +225,7 @@ private:
 		Female,
 	};
 
-	static base::optional<Gender> StringToGender(const QString &value);
+	static std::optional<Gender> StringToGender(const QString &value);
 	static QString GenderToString(Gender gender);
 
 	int resizeInner(int left, int top, int width) override;
@@ -365,7 +366,7 @@ void CountryRow::toggleError(bool shown) {
 void CountryRow::errorAnimationCallback() {
 	const auto error = _errorAnimation.current(_errorShown ? 1. : 0.);
 	if (error == 0.) {
-		_link->setColorOverride(base::none);
+		_link->setColorOverride(std::nullopt);
 	} else {
 		_link->setColorOverride(anim::color(
 			st::boxLinkButton.color,
@@ -377,7 +378,8 @@ void CountryRow::errorAnimationCallback() {
 void CountryRow::chooseCountry() {
 	const auto top = _value.current();
 	const auto name = CountrySelectBox::NameByISO(top);
-	const auto isoByPhone = CountrySelectBox::ISOByPhone(App::self()->phone());
+	const auto isoByPhone = CountrySelectBox::ISOByPhone(
+		Auth().user()->phone());
 	const auto box = _controller->show(Box<CountrySelectBox>(!name.isEmpty()
 		? top
 		: !isoByPhone.isEmpty()
@@ -875,13 +877,13 @@ std::unique_ptr<Ui::AbstractCheckView> GenderRow::createRadioView(
 }
 
 auto GenderRow::StringToGender(const QString &value)
--> base::optional<Gender> {
+-> std::optional<Gender> {
 	if (value == qstr("male")) {
 		return Gender::Male;
 	} else if (value == qstr("female")) {
 		return Gender::Female;
 	}
-	return base::none;
+	return std::nullopt;
 }
 
 QString GenderRow::GenderToString(Gender gender) {
@@ -934,8 +936,8 @@ void GenderRow::toggleError(bool shown) {
 void GenderRow::errorAnimationCallback() {
 	const auto error = _errorAnimation.current(_errorShown ? 1. : 0.);
 	if (error == 0.) {
-		_maleRadio->setUntoggledOverride(base::none);
-		_femaleRadio->setUntoggledOverride(base::none);
+		_maleRadio->setUntoggledOverride(std::nullopt);
+		_femaleRadio->setUntoggledOverride(std::nullopt);
 	} else {
 		const auto color = anim::color(
 			st::defaultRadio.untoggledFg,
@@ -1039,7 +1041,7 @@ int PanelDetailsRow::resizeGetHeight(int newWidth) {
 	return result;
 }
 
-void PanelDetailsRow::showError(base::optional<QString> error) {
+void PanelDetailsRow::showError(std::optional<QString> error) {
 	if (!_errorHideSubscription) {
 		_errorHideSubscription = true;
 

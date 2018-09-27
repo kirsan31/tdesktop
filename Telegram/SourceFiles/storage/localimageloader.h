@@ -89,6 +89,8 @@ struct SendMediaReady {
 
 };
 
+SendMediaReady PreparePeerPhoto(PeerId peerId, QImage &&image);
+
 using TaskId = void*; // no interface, just id
 
 class Task {
@@ -163,7 +165,7 @@ struct SendingAlbum {
 		}
 		TaskId taskId;
 		FullMsgId msgId;
-		base::optional<MTPInputSingleMedia> media;
+		std::optional<MTPInputSingleMedia> media;
 	};
 
 	SendingAlbum();

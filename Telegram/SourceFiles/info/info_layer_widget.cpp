@@ -7,7 +7,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "info/info_layer_widget.h"
 
-#include <rpl/mappers.h>
 #include "info/info_content_widget.h"
 #include "info/info_top_bar.h"
 #include "info/info_memento.h"
@@ -19,7 +18,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "window/main_window.h"
 #include "auth_session.h"
 #include "styles/style_info.h"
-#include "styles/style_settings.h"
 #include "styles/style_window.h"
 #include "styles/style_boxes.h"
 
@@ -133,6 +131,10 @@ bool LayerWidget::showSectionInternal(
 	return false;
 }
 
+bool LayerWidget::closeByOutsideClick() const {
+	return _content->closeByOutsideClick();
+}
+
 int LayerWidget::MinimalSupportedWidth() {
 	auto minimalMargins = 2 * st::infoMinimalLayerMargin;
 	return st::infoMinimalWidth + minimalMargins;
@@ -188,6 +190,10 @@ int LayerWidget::resizeGetHeight(int newWidth) {
 	}
 
 	return desiredHeight;
+}
+
+void LayerWidget::doSetInnerFocus() {
+	_content->setInnerFocus();
 }
 
 void LayerWidget::paintEvent(QPaintEvent *e) {

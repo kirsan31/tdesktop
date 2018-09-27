@@ -19,6 +19,10 @@ class Translator;
 class MediaView;
 class BoxContent;
 
+namespace Storage {
+class Databases;
+} // namespace Storage
+
 namespace Core {
 class Launcher;
 } // namespace Core
@@ -112,7 +116,9 @@ public:
 	void setMtpKey(MTP::DcId dcId, const MTP::AuthKey::Data &keyData);
 	void setAuthSessionUserId(UserId userId);
 	void setAuthSessionFromStorage(
-		std::unique_ptr<AuthSessionSettings> data);
+		std::unique_ptr<AuthSessionSettings> data,
+		QByteArray &&selfSerialized,
+		int32 selfStreamVersion);
 	AuthSessionSettings *getAuthSessionSettings();
 
 	// Serialization.
@@ -126,6 +132,11 @@ public:
 	void suggestMainDcId(MTP::DcId mainDcId);
 	void destroyStaleAuthorizationKeys();
 
+	// Databases
+	Storage::Databases &databases() {
+		return *_databases;
+	}
+
 	// AuthSession component.
 	AuthSession *authSession() {
 		return _authSession.get();
@@ -136,7 +147,7 @@ public:
 	Lang::CloudManager *langCloudManager() {
 		return _langCloudManager.get();
 	}
-	void authSessionCreate(UserId userId);
+	void authSessionCreate(const MTPUser &user);
 	base::Observable<void> &authSessionChanged() {
 		return _authSessionChanged;
 	}
@@ -154,20 +165,6 @@ public:
 	void checkStartUrl();
 	bool openLocalUrl(const QString &url, QVariant context);
 
-	void uploadProfilePhoto(QImage &&tosend, const PeerId &peerId);
-	void regPhotoUpdate(const PeerId &peer, const FullMsgId &msgId);
-	bool isPhotoUpdating(const PeerId &peer);
-	void cancelPhotoUpdate(const PeerId &peer);
-
-	void selfPhotoCleared(const MTPUserProfilePhoto &result);
-	void chatPhotoCleared(PeerId peer, const MTPUpdates &updates);
-	void selfPhotoDone(const MTPphotos_Photo &result);
-	void chatPhotoDone(PeerId peerId, const MTPUpdates &updates);
-	bool peerPhotoFailed(PeerId peerId, const RPCError &e);
-	void peerClearPhoto(PeerId peer);
-
-	void writeUserConfigIn(TimeMs ms);
-
 	void killDownloadSessionsStart(MTP::DcId dcId);
 	void killDownloadSessionsStop(MTP::DcId dcId);
 
@@ -181,7 +178,7 @@ public:
 
 	void lockByTerms(const Window::TermsLock &data);
 	void unlockTerms();
-	[[nodiscard]] base::optional<Window::TermsLock> termsLocked() const;
+	[[nodiscard]] std::optional<Window::TermsLock> termsLocked() const;
 	rpl::producer<bool> termsLockChanges() const;
 	rpl::producer<bool> termsLockValue() const;
 	void termsDeleteNow();
@@ -209,10 +206,6 @@ public:
 protected:
 	bool eventFilter(QObject *object, QEvent *event) override;
 
-signals:
-	void peerPhotoDone(PeerId peer);
-	void peerPhotoFail(PeerId peer);
-
 public slots:
 	void onAllKeysDestroyed();
 
@@ -231,15 +224,12 @@ private:
 	static void QuitAttempt();
 	void quitDelayed();
 
-	void photoUpdated(const FullMsgId &msgId, const MTPInputFile &file);
 	void resetAuthorizationKeys();
 	void authSessionDestroy();
 	void clearPasscodeLock();
 	void loggedOut();
 
 	not_null<Core::Launcher*> _launcher;
-
-	QMap<FullMsgId, PeerId> photoUpdates;
 
 	QMap<MTP::DcId, TimeMs> killDownloadSessionTimes;
 	SingleTimer killDownloadSessionsTimer;
@@ -250,6 +240,7 @@ private:
 
 	QWidget _globalShortcutParent;
 
+	std::unique_ptr<Storage::Databases> _databases;
 	std::unique_ptr<MainWindow> _window;
 	std::unique_ptr<MediaView> _mediaView;
 	std::unique_ptr<Lang::Instance> _langpack;
@@ -262,9 +253,6 @@ private:
 	base::Observable<void> _authSessionChanged;
 	base::Observable<void> _passcodedChanged;
 	QPointer<BoxContent> _badProxyDisableBox;
-
-	// While profile photo uploading is not moved to apiwrap.
-	rpl::lifetime _uploaderSubscription;
 
 	std::unique_ptr<Media::Audio::Instance> _audio;
 	QImage _logo;

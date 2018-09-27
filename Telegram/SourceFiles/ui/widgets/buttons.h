@@ -24,7 +24,7 @@ public:
 	int naturalWidth() const override;
 
 	void setText(const QString &text);
-	void setColorOverride(base::optional<QColor> textFg);
+	void setColorOverride(std::optional<QColor> textFg);
 
 protected:
 	void paintEvent(QPaintEvent *e) override;
@@ -35,7 +35,7 @@ private:
 	const style::LinkButton &_st;
 	QString _text;
 	int _textWidth = 0;
-	base::optional<QColor> _textFgOverride;
+	std::optional<QColor> _textFgOverride;
 
 };
 
@@ -100,7 +100,10 @@ private:
 
 class RoundButton : public RippleButton, private base::Subscriber {
 public:
-	RoundButton(QWidget *parent, Fn<QString()> textFactory, const style::RoundButton &st);
+	RoundButton(
+		QWidget *parent,
+		Fn<QString()> textFactory,
+		const style::RoundButton &st);
 
 	void setText(Fn<QString()> textFactory);
 
@@ -117,6 +120,7 @@ public:
 	int contentWidth() const;
 
 	void setFullWidth(int newFullWidth);
+	void setFullRadius(bool enabled);
 
 	enum class TextTransform {
 		NoTransform,
@@ -150,6 +154,7 @@ private:
 	const style::RoundButton &_st;
 
 	TextTransform _transform = TextTransform::ToUpper;
+	bool _fullRadius = false;
 
 };
 

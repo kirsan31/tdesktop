@@ -87,8 +87,8 @@ std::pair<QString, QSize> WriteImageThumb(
 	const QString &basePath,
 	const QString &largePath,
 	Fn<QSize(QSize)> convertSize,
-	base::optional<QByteArray> format = base::none,
-	base::optional<int> quality = base::none,
+	std::optional<QByteArray> format = std::nullopt,
+	std::optional<int> quality = std::nullopt,
 	const QString &postfix = "_thumb");
 
 QString WriteImageThumb(
@@ -318,7 +318,8 @@ struct ParseMediaContext {
 Media ParseMedia(
 	ParseMediaContext &context,
 	const MTPMessageMedia &data,
-	const QString &folder);
+	const QString &folder,
+	TimeId date);
 
 struct ActionChatCreate {
 	Utf8String title;

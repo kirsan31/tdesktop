@@ -17,8 +17,7 @@ class AbstractCheckView {
 public:
 	AbstractCheckView(int duration, bool checked, Fn<void()> updateCallback);
 
-	void setCheckedFast(bool checked);
-	void setCheckedAnimated(bool checked);
+	void setChecked(bool checked, anim::type animated);
 	void finishAnimating();
 	void setUpdateCallback(Fn<void()> updateCallback);
 	bool checked() const {
@@ -26,6 +25,7 @@ public:
 	}
 	void update();
 	float64 currentAnimationValue(TimeMs ms);
+	bool animating() const;
 
 	auto checkedValue() const {
 		return _checks.events_starting_with(checked());
@@ -47,6 +47,9 @@ public:
 	virtual ~AbstractCheckView() = default;
 
 private:
+	virtual void checkedChangedHook(anim::type animated) {
+	}
+
 	int _duration = 0;
 	bool _checked = false;
 	Fn<void()> _updateCallback;
@@ -71,13 +74,13 @@ public:
 	bool checkRippleStartPosition(QPoint position) const override;
 
 	void setUntoggledOverride(
-		base::optional<QColor> untoggledOverride);
+		std::optional<QColor> untoggledOverride);
 
 private:
 	QSize rippleSize() const;
 
 	not_null<const style::Check*> _st;
-	base::optional<QColor> _untoggledOverride;
+	std::optional<QColor> _untoggledOverride;
 
 };
 
@@ -90,7 +93,8 @@ public:
 
 	void setStyle(const style::Radio &st);
 
-	void setUntoggledOverride(base::optional<QColor> untoggledOverride);
+	void setToggledOverride(std::optional<QColor> toggledOverride);
+	void setUntoggledOverride(std::optional<QColor> untoggledOverride);
 
 	QSize getSize() const override;
 	void paint(Painter &p, int left, int top, int outerWidth, TimeMs ms) override;
@@ -101,7 +105,8 @@ private:
 	QSize rippleSize() const;
 
 	not_null<const style::Radio*> _st;
-	base::optional<QColor> _untoggledOverride;
+	std::optional<QColor> _toggledOverride;
+	std::optional<QColor> _untoggledOverride;
 
 };
 

@@ -2916,7 +2916,9 @@ void HistoryWidget::saveEditMsg() {
 			: WebPageId(0));
 
 	const auto textWithTags = _field->getTextWithAppliedMarkdown();
-	const auto prepareFlags = Ui::ItemTextOptions(_history, App::self()).flags;
+	const auto prepareFlags = Ui::ItemTextOptions(
+		_history,
+		Auth().user()).flags;
 	auto sending = TextWithEntities();
 	auto left = TextWithEntities { textWithTags.text, ConvertTextTagsToEntities(textWithTags.tags) };
 	TextUtilities::PrepareForSending(left, prepareFlags);
@@ -3290,14 +3292,16 @@ void HistoryWidget::unreadMentionsAnimationFinish() {
 }
 
 void HistoryWidget::step_recording(float64 ms, bool timer) {
-	float64 dt = ms / AudioVoiceMsgUpdateView;
+	const auto dt = anim::Disabled() ? 1. : (ms / AudioVoiceMsgUpdateView);
 	if (dt >= 1) {
 		_a_recording.stop();
 		a_recordingLevel.finish();
 	} else {
 		a_recordingLevel.update(dt, anim::linear);
 	}
-	if (timer) update(_attachToggle->geometry());
+	if (timer && !anim::Disabled()) {
+		update(_attachToggle->geometry());
+	}
 }
 
 void HistoryWidget::chooseAttach() {
@@ -4508,7 +4512,7 @@ void HistoryWidget::sendFileConfirmed(
 	};
 	const auto prepareFlags = Ui::ItemTextOptions(
 		history,
-		App::self()).flags;
+		Auth().user()).flags;
 	TextUtilities::PrepareForSending(caption, prepareFlags);
 	TextUtilities::Trim(caption);
 	auto localEntities = TextUtilities::EntitiesToMTP(caption.entities);
@@ -4640,7 +4644,7 @@ void HistoryWidget::documentUploaded(
 		const FullMsgId &newId,
 		bool silent,
 		const MTPInputFile &file) {
-	Auth().api().sendUploadedDocument(newId, file, base::none, silent);
+	Auth().api().sendUploadedDocument(newId, file, std::nullopt, silent);
 }
 
 void HistoryWidget::thumbDocumentUploaded(
@@ -5127,7 +5131,7 @@ bool HistoryWidget::hasPendingResizedItems() const {
 		|| (_migrated && _migrated->hasPendingResizedItems());
 }
 
-base::optional<int> HistoryWidget::unreadBarTop() const {
+std::optional<int> HistoryWidget::unreadBarTop() const {
 	auto getUnreadBar = [this]() -> HistoryView::Element* {
 		if (const auto bar = _migrated ? _migrated->unreadBar() : nullptr) {
 			return bar;
@@ -5144,7 +5148,7 @@ base::optional<int> HistoryWidget::unreadBarTop() const {
 		}
 		return result;
 	}
-	return base::none;
+	return std::nullopt;
 }
 
 HistoryView::Element *HistoryWidget::firstUnreadMessage() const {
@@ -5411,6 +5415,8 @@ void HistoryWidget::keyPressEvent(QKeyEvent *e) {
 		}
 	} else if (e->key() == Qt::Key_Return || e->key() == Qt::Key_Enter) {
 		onListEnterPressed();
+	} else if (e->key() == Qt::Key_O && e->modifiers() == Qt::ControlModifier) {
+		chooseAttach();
 	} else {
 		e->ignore();
 	}

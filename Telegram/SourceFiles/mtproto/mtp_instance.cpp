@@ -16,6 +16,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "mtproto/sender.h"
 #include "mtproto/rsa_public_key.h"
 #include "storage/localstorage.h"
+#include "calls/calls_instance.h"
 #include "auth_session.h"
 #include "application.h"
 #include "apiwrap.h"
@@ -150,9 +151,9 @@ private:
 	void configLoadDone(const MTPConfig &result);
 	bool configLoadFail(const RPCError &error);
 
-	base::optional<ShiftedDcId> queryRequestByDc(
+	std::optional<ShiftedDcId> queryRequestByDc(
 		mtpRequestId requestId) const;
-	base::optional<ShiftedDcId> changeRequestByDc(
+	std::optional<ShiftedDcId> changeRequestByDc(
 		mtpRequestId requestId, DcId newdc);
 
 	// RPCError::NoError means do not toggle onError callback.
@@ -782,6 +783,18 @@ void Instance::Private::configLoadDone(const MTPConfig &result) {
 		+ (data.vexpires.v - unixtime()) * TimeMs(1000);
 	requestConfigIfExpired();
 
+	if (AuthSession::Exists()) {
+		using PeerToPeer = Calls::PeerToPeer;
+		const auto current = Auth().settings().callsPeerToPeer();
+		if (current == PeerToPeer::DefaultContacts
+			|| current == PeerToPeer::DefaultEveryone) {
+			Auth().settings().setCallsPeerToPeer(
+				(data.is_default_p2p_contacts()
+					? PeerToPeer::DefaultContacts
+					: PeerToPeer::DefaultEveryone));
+		}
+	}
+
 	emit _instance->configLoaded();
 }
 
@@ -793,17 +806,17 @@ bool Instance::Private::configLoadFail(const RPCError &error) {
 	return false;
 }
 
-base::optional<ShiftedDcId> Instance::Private::queryRequestByDc(
+std::optional<ShiftedDcId> Instance::Private::queryRequestByDc(
 		mtpRequestId requestId) const {
 	QMutexLocker locker(&_requestByDcLock);
 	auto it = _requestsByDc.find(requestId);
 	if (it != _requestsByDc.cend()) {
 		return it->second;
 	}
-	return base::none;
+	return std::nullopt;
 }
 
-base::optional<ShiftedDcId> Instance::Private::changeRequestByDc(
+std::optional<ShiftedDcId> Instance::Private::changeRequestByDc(
 		mtpRequestId requestId,
 		DcId newdc) {
 	QMutexLocker locker(&_requestByDcLock);
@@ -816,7 +829,7 @@ base::optional<ShiftedDcId> Instance::Private::changeRequestByDc(
 		}
 		return it->second;
 	}
-	return base::none;
+	return std::nullopt;
 }
 
 void Instance::Private::checkDelayedRequests() {

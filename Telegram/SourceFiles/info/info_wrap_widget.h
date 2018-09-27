@@ -118,6 +118,8 @@ public:
 
 	object_ptr<Ui::RpWidget> createTopBarSurrogate(QWidget *parent);
 
+	bool closeByOutsideClick() const;
+
 	void updateGeometry(QRect newGeometry, int additionalScroll);
 	int scrollTillBottom(int forHeight) const;
 	rpl::producer<int>  scrollTillBottomChanges() const;
@@ -150,6 +152,7 @@ private:
 	void injectActiveFeedProfile(not_null<Data::Feed*> feed);
 	void injectActiveProfileMemento(
 		std::unique_ptr<ContentMemento> memento);
+	void checkBeforeClose(Fn<void()> close);
 	void restoreHistoryStack(
 		std::vector<std::unique_ptr<ContentMemento>> stack);
 	bool hasStackHistory() const {
@@ -191,10 +194,11 @@ private:
 	rpl::producer<SelectedItems> selectedListValue() const;
 	bool requireTopBarSearch() const;
 
-	void addProfileMenuButton();
+	void addTopBarMenuButton();
+	void addContentSaveButton();
 	void addProfileCallsButton();
 	void addProfileNotificationsButton();
-	void showProfileMenu();
+	void showTopBarMenu();
 
 	rpl::variable<Wrap> _wrap;
 	std::unique_ptr<Controller> _controller;

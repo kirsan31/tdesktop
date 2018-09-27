@@ -81,10 +81,12 @@ public:
 	void setError(bool error);
 
 	rpl::producer<> deleteClicks() const {
-		return _delete->entity()->clicks();
+		return _delete->entity()->clicks(
+		) | rpl::map([] { return rpl::empty_value(); });
 	}
 	rpl::producer<> restoreClicks() const {
-		return _restore->entity()->clicks();
+		return _restore->entity()->clicks(
+		) | rpl::map([] { return rpl::empty_value(); });
 	}
 
 protected:
@@ -158,10 +160,10 @@ EditScans::List::List(
 
 EditScans::List::List(
 	not_null<PanelController*> controller,
-	base::optional<ScanListData> &&data)
+	std::optional<ScanListData> &&data)
 : controller(controller)
 , files(data ? std::move(data->files) : std::vector<ScanInfo>())
-, initialCount(data ? base::make_optional(int(files.size())) : base::none)
+, initialCount(data ? base::make_optional(int(files.size())) : std::nullopt)
 , errorMissing(data ? std::move(data->errorMissing) : QString()) {
 }
 
@@ -230,7 +232,7 @@ void EditScans::List::toggleError(bool shown) {
 void EditScans::List::errorAnimationCallback() {
 	const auto error = errorAnimation.current(errorShown ? 1. : 0.);
 	if (error == 0.) {
-		upload->setColorOverride(base::none);
+		upload->setColorOverride(std::nullopt);
 	} else {
 		upload->setColorOverride(anim::color(
 			st::passportUploadButton.textFg,
@@ -426,7 +428,7 @@ EditScans::EditScans(
 	const QString &header,
 	const QString &error,
 	ScanListData &&scans,
-	base::optional<ScanListData> &&translations)
+	std::optional<ScanListData> &&translations)
 : RpWidget(parent)
 , _controller(controller)
 , _error(error)
@@ -442,7 +444,7 @@ EditScans::EditScans(
 	const QString &header,
 	const QString &error,
 	std::map<FileType, ScanInfo> &&specialFiles,
-	base::optional<ScanListData> &&translations)
+	std::optional<ScanListData> &&translations)
 : RpWidget(parent)
 , _controller(controller)
 , _error(error)
@@ -452,8 +454,8 @@ EditScans::EditScans(
 	setupSpecialScans(header, std::move(specialFiles));
 }
 
-base::optional<int> EditScans::validateGetErrorTop() {
-	auto result = base::optional<int>();
+std::optional<int> EditScans::validateGetErrorTop() {
+	auto result = std::optional<int>();
 	const auto suggestResult = [&](int value) {
 		if (!result || *result > value) {
 			result = value;
@@ -826,12 +828,12 @@ void EditScans::createSpecialScanRow(
 
 	row->deleteClicks(
 	) | rpl::start_with_next([=] {
-		_controller->deleteScan(type, base::none);
+		_controller->deleteScan(type, std::nullopt);
 	}, row->lifetime());
 
 	row->restoreClicks(
 	) | rpl::start_with_next([=] {
-		_controller->restoreScan(type, base::none);
+		_controller->restoreScan(type, std::nullopt);
 	}, row->lifetime());
 
 	scan.rowCreated = !info.deleted;
@@ -972,7 +974,7 @@ void EditScans::specialScanErrorAnimationCallback(FileType type) {
 	const auto error = scan.errorAnimation.current(
 		scan.errorShown ? 1. : 0.);
 	if (error == 0.) {
-		scan.upload->setColorOverride(base::none);
+		scan.upload->setColorOverride(std::nullopt);
 	} else {
 		scan.upload->setColorOverride(anim::color(
 			st::passportUploadButton.textFg,

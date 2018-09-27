@@ -219,7 +219,9 @@ void DialogsInner::paintRegion(Painter &p, const QRegion &region, bool paintingO
 	auto fullWidth = getFullWidth();
 	auto ms = getms();
 	if (_state == State::Default) {
-		_a_pinnedShifting.step(ms, false);
+		if (_a_pinnedShifting.animating()) {
+			_a_pinnedShifting.step(ms, false);
+		}
 
 		auto rows = shownDialogs();
 		auto dialogsClip = r;
@@ -834,6 +836,10 @@ void DialogsInner::mousePressEvent(QMouseEvent *e) {
 			rtlupdate(0, searchedOffset() + index * st::dialogsRowHeight, getFullWidth(), st::dialogsRowHeight);
 		});
 	}
+	if (anim::Disabled()
+		&& (!_pressed || !_pressed->entry()->isPinnedDialog())) {
+		mousePressReleased(e->button());
+	}
 }
 
 void DialogsInner::checkReorderPinnedStart(QPoint localPosition) {
@@ -1000,12 +1006,18 @@ bool DialogsInner::updateReorderPinned(QPoint localPosition) {
 }
 
 void DialogsInner::step_pinnedShifting(TimeMs ms, bool timer) {
+	if (anim::Disabled()) {
+		ms += st::stickersRowDuration;
+	}
+
+	auto wasAnimating = false;
 	auto animating = false;
 	auto updateMin = -1;
 	auto updateMax = 0;
 	for (auto i = 0, l = static_cast<int>(_pinnedRows.size()); i != l; ++i) {
 		auto start = _pinnedRows[i].animStartTime;
 		if (start) {
+			wasAnimating = true;
 			if (updateMin < 0) updateMin = i;
 			updateMax = i;
 			if (start + st::stickersRowDuration > ms && ms >= start) {
@@ -1017,7 +1029,7 @@ void DialogsInner::step_pinnedShifting(TimeMs ms, bool timer) {
 			}
 		}
 	}
-	if (timer) {
+	if (timer || (wasAnimating && !animating)) {
 		updateReorderIndexGetCount();
 		if (_draggingIndex >= 0) {
 			if (updateMin < 0 || updateMin > _draggingIndex) {

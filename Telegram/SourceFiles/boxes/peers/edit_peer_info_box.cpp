@@ -93,12 +93,12 @@ private:
 		Ui::Checkbox *signatures = nullptr;
 	};
 	struct Saving {
-		base::optional<QString> username;
-		base::optional<QString> title;
-		base::optional<QString> description;
-		base::optional<bool> hiddenPreHistory;
-		base::optional<bool> signatures;
-		base::optional<bool> everyoneInvites;
+		std::optional<QString> username;
+		std::optional<QString> title;
+		std::optional<QString> description;
+		std::optional<bool> hiddenPreHistory;
+		std::optional<bool> signatures;
+		std::optional<bool> everyoneInvites;
 	};
 
 	Fn<QString()> computeTitle() const;
@@ -143,7 +143,7 @@ private:
 	void revokeInviteLink();
 	void exportInviteLink(const QString &confirmation);
 
-	base::optional<Saving> validate() const;
+	std::optional<Saving> validate() const;
 	bool validateUsername(Saving &to) const;
 	bool validateTitle(Saving &to) const;
 	bool validateDescription(Saving &to) const;
@@ -1087,7 +1087,7 @@ void Controller::submitDescription() {
 	}
 }
 
-base::optional<Controller::Saving> Controller::validate() const {
+std::optional<Controller::Saving> Controller::validate() const {
 	auto result = Saving();
 	if (validateUsername(result)
 		&& validateTitle(result)
@@ -1391,9 +1391,7 @@ void Controller::savePhoto() {
 		? _controls.photo->takeResultImage()
 		: QImage();
 	if (!image.isNull()) {
-		Messenger::Instance().uploadProfilePhoto(
-			std::move(image),
-			_peer->id);
+		Auth().api().uploadPeerPhoto(_peer, std::move(image));
 	}
 	_box->closeBox();
 }
@@ -1442,7 +1440,7 @@ void EditPeerInfoBox::prepare() {
 	) | rpl::start_with_next([this](int height) {
 		setDimensions(st::boxWideWidth, height);
 	}, content->lifetime());
-	setInnerWidget(object_ptr<Ui::IgnoreMargins>(
+	setInnerWidget(object_ptr<Ui::OverrideMargins>(
 		this,
 		std::move(content)));
 	Ui::AttachAsChild(this, std::move(controller));

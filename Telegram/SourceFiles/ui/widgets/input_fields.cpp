@@ -15,6 +15,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "lang/lang_keys.h"
 #include "mainwindow.h"
 #include "numbers.h"
+#include "auth_session.h"
 #include "messenger.h"
 #ifdef TDESKTOP_ENABLE_SONNET_SPELLCHECK
 #include <highlighter.h>
@@ -2861,7 +2862,7 @@ void InputField::commitInstantReplacement(
 		int from,
 		int till,
 		const QString &with,
-		base::optional<QString> checkOriginal) {
+		std::optional<QString> checkOriginal) {
 	const auto original = getTextWithTagsPart(from, till).text;
 	if (checkOriginal
 		&& checkOriginal->compare(original, Qt::CaseInsensitive) != 0) {
@@ -4141,10 +4142,11 @@ void PhoneInput::focusInEvent(QFocusEvent *e) {
 
 void PhoneInput::clearText() {
 	QString phone;
-	if (App::self()) {
-		QVector<int> newPattern = phoneNumberParse(App::self()->phone());
+	if (AuthSession::Exists()) {
+		const auto self = Auth().user();
+		QVector<int> newPattern = phoneNumberParse(self->phone());
 		if (!newPattern.isEmpty()) {
-			phone = App::self()->phone().mid(0, newPattern.at(0));
+			phone = self->phone().mid(0, newPattern.at(0));
 		}
 	}
 	setText(phone);

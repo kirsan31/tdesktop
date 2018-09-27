@@ -23,6 +23,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "window/window_controller.h"
 #include "lang/lang_keys.h"
 #include "auth_session.h"
+#include "apiwrap.h"
 #include "mainwidget.h"
 #include "messenger.h"
 #include "observer_peer.h"
@@ -181,28 +182,50 @@ void EmojiButton::paintEvent(QPaintEvent *e) {
 	p.fillRect(e->rect(), st::historyComposeAreaBg);
 	paintRipple(p, _st.rippleAreaPosition.x(), _st.rippleAreaPosition.y(), ms, _rippleOverride ? &(*_rippleOverride)->c : nullptr);
 
+	const auto over = isOver();
 	const auto loadingState = _loading
 		? _loading->computeState()
 		: Ui::InfiniteRadialAnimation::State{ 0., 0, FullArcLength };
-	p.setOpacity(1. - loadingState.shown);
+	if (loadingState.shown < 1.) {
+		p.setOpacity(1. - loadingState.shown);
 
-	auto over = isOver();
-	auto icon = _iconOverride ? _iconOverride : &(over ? _st.iconOver : _st.icon);
-	icon->paint(p, _st.iconPosition, width());
+		auto icon = _iconOverride ? _iconOverride : &(over ? _st.iconOver : _st.icon);
+		icon->paint(p, _st.iconPosition, width());
 
-	p.setOpacity(1.);
-	auto pen = _colorOverride ? (*_colorOverride)->p : (over ? st::historyEmojiCircleFgOver : st::historyEmojiCircleFg)->p;
-	pen.setWidth(st::historyEmojiCircleLine);
-	pen.setCapStyle(Qt::RoundCap);
-	p.setPen(pen);
-	p.setBrush(Qt::NoBrush);
+		p.setOpacity(1.);
+	}
 
-	PainterHighQualityEnabler hq(p);
 	QRect inner(QPoint((width() - st::historyEmojiCircle.width()) / 2, st::historyEmojiCircleTop), st::historyEmojiCircle);
-	if (loadingState.arcLength < FullArcLength) {
-		p.drawArc(inner, loadingState.arcFrom, loadingState.arcLength);
+	const auto color = (_colorOverride
+		? *_colorOverride
+		: (over
+			? st::historyEmojiCircleFgOver
+			: st::historyEmojiCircleFg));
+	if (_loading && anim::Disabled()) {
+		anim::DrawStaticLoading(
+			p,
+			inner,
+			st::historyEmojiCircleLine,
+			color);
 	} else {
-		p.drawEllipse(inner);
+		auto pen = color->p;
+		pen.setWidth(st::historyEmojiCircleLine);
+		pen.setCapStyle(Qt::RoundCap);
+		p.setPen(pen);
+		p.setBrush(Qt::NoBrush);
+
+		PainterHighQualityEnabler hq(p);
+		if (loadingState.arcLength < FullArcLength) {
+			p.drawArc(inner, loadingState.arcFrom, loadingState.arcLength);
+		} else {
+			p.drawEllipse(inner);
+		}
+	}
+}
+
+void EmojiButton::step_loading(TimeMs ms, bool timer) {
+	if (timer && !anim::Disabled()) {
+		update();
 	}
 }
 
@@ -214,8 +237,10 @@ void EmojiButton::setLoading(bool loading) {
 	}
 	if (loading) {
 		_loading->start();
+		update();
 	} else if (_loading) {
 		_loading->stop();
+		update();
 	}
 }
 
@@ -478,14 +503,9 @@ void UserpicButton::changePhotoLazy() {
 }
 
 void UserpicButton::uploadNewPeerPhoto() {
-	auto callback = crl::guard(
-		this,
-		[this](QImage &&image) {
-			Messenger::Instance().uploadProfilePhoto(
-				std::move(image),
-				_peer->id
-			);
-		});
+	auto callback = crl::guard(this, [=](QImage &&image) {
+		Auth().api().uploadPeerPhoto(_peer, std::move(image));
+	});
 	ShowChoosePhotoBox(this, _peerForCrop, std::move(callback));
 }
 
@@ -984,7 +1004,7 @@ void SilentToggle::mouseReleaseEvent(QMouseEvent *e) {
 	Ui::Tooltip::Show(0, this);
 	Auth().data().updateNotifySettings(
 		_channel,
-		base::none,
+		std::nullopt,
 		_checked);
 }
 

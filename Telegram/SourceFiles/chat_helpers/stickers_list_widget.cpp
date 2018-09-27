@@ -653,6 +653,9 @@ void StickersListWidget::Footer::paintSetIcon(
 }
 
 void StickersListWidget::Footer::step_icons(TimeMs ms, bool timer) {
+	if (anim::Disabled()) {
+		ms += st::stickerIconMove;
+	}
 	if (_iconsStartAnim) {
 		auto dt = (ms - _iconsStartAnim) / float64(st::stickerIconMove);
 		if (dt >= 1) {
@@ -1495,7 +1498,7 @@ void StickersListWidget::mouseReleaseEvent(QMouseEvent *e) {
 	_previewTimer.stop();
 
 	auto pressed = _pressed;
-	setPressed(base::none);
+	setPressed(std::nullopt);
 	if (pressed != _selected) {
 		update();
 	}
@@ -1649,8 +1652,8 @@ void StickersListWidget::enterFromChildEvent(QEvent *e, QWidget *child) {
 }
 
 void StickersListWidget::clearSelection() {
-	setPressed(base::none);
-	setSelected(base::none);
+	setPressed(std::nullopt);
+	setSelected(std::nullopt);
 	update();
 }
 
@@ -2055,7 +2058,7 @@ void StickersListWidget::updateSelected() {
 		return;
 	}
 
-	auto newSelected = OverState { base::none };
+	auto newSelected = OverState { std::nullopt };
 	auto p = mapFromGlobal(_lastMousePosition);
 	if (!rect().contains(p)
 		|| p.y() < getVisibleTop() || p.y() >= getVisibleBottom()

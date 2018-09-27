@@ -142,6 +142,7 @@ Radio {
 
 Checkbox {
 	textFg: color;
+	textFgActive: color;
 
 	width: pixels;
 	margin: margins;
@@ -754,8 +755,8 @@ defaultToggle: Toggle {
 	duration: 120;
 	border: 2px;
 	shift: 1px;
-	diameter: 20px;
-	width: 16px;
+	diameter: 16px;
+	width: 14px;
 	xsize: 0px;
 	vsize: 0px;
 	vshift: 0px;
@@ -886,6 +887,18 @@ defaultPanelAnimation: PanelAnimation {
 	fadeOpacity: 1.0;
 	fadeBg: menuBg;
 	shadow: defaultRoundShadow;
+}
+
+defaultContinuousSlider: MediaSlider {
+	width: 3px;
+	activeFg: mediaPlayerActiveFg;
+	inactiveFg: mediaPlayerInactiveFg;
+	activeFgOver: mediaPlayerActiveFg;
+	inactiveFgOver: mediaPlayerInactiveFg;
+	activeFgDisabled: mediaPlayerInactiveFg;
+	inactiveFgDisabled: windowBg;
+	seekSize: size(9px, 9px);
+	duration: 150;
 }
 
 defaultRoundCheckbox: RoundCheckbox {

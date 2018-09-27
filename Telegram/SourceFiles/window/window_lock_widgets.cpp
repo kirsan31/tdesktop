@@ -179,7 +179,7 @@ TermsLock TermsLock::FromMTP(const MTPDhelp_termsOfService &data) {
 			TextUtilities::EntitiesFromMTP(data.ventities.v) },
 		(data.has_min_age_confirm()
 			? base::make_optional(data.vmin_age_confirm.v)
-			: base::none),
+			: std::nullopt),
 		data.is_popup()
 	};
 }
@@ -200,7 +200,7 @@ TermsBox::TermsBox(
 	Fn<QString()> agree,
 	Fn<QString()> cancel,
 	bool attentionAgree)
-: _data{ {}, text, base::none, false }
+: _data{ {}, text, std::nullopt, false }
 , _agree(agree)
 , _cancel(cancel)
 , _attentionAgree(attentionAgree) {
@@ -263,7 +263,7 @@ void TermsBox::prepare() {
 		const auto error = _ageErrorAnimation.current(
 			_ageErrorShown ? 1. : 0.);
 		if (error == 0.) {
-			check->setUntoggledOverride(base::none);
+			check->setUntoggledOverride(std::nullopt);
 		} else {
 			const auto color = anim::color(
 				st::defaultCheck.untoggledFg,
@@ -293,11 +293,15 @@ void TermsBox::prepare() {
 			return false;
 		}
 		return true;
+	}) | rpl::map([] {
+		return rpl::empty_value();
 	}) | rpl::start_to_stream(_agreeClicks, lifetime());
 
 	if (_cancel) {
 		addButton(_cancel, [=] {})->clicks(
-		) | rpl::start_to_stream(_cancelClicks, lifetime());
+		) | rpl::map([] {
+			return rpl::empty_value();
+		}) | rpl::start_to_stream(_cancelClicks, lifetime());
 	}
 
 	if (age) {

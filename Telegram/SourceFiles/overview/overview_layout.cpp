@@ -227,10 +227,15 @@ void RadialProgressItem::setLinks(ClickHandlerPtr &&openl, ClickHandlerPtr &&sav
 }
 
 void RadialProgressItem::step_radial(TimeMs ms, bool timer) {
+	const auto updateRadial = [&] {
+		return _radial->update(dataProgress(), dataFinished(), ms);
+	};
 	if (timer) {
-		Auth().data().requestItemRepaint(parent());
+		if (!anim::Disabled() || updateRadial()) {
+			Auth().data().requestItemRepaint(parent());
+		}
 	} else {
-		_radial->update(dataProgress(), dataFinished(), ms);
+		updateRadial();
 		if (!_radial->animating()) {
 			checkRadialFinished();
 		}
@@ -863,7 +868,7 @@ void Document::paint(Painter &p, const QRect &clip, TextSelection selection, con
 	bool selected = (selection == FullSelection);
 
 	_data->automaticLoad(parent()->fullId(), parent());
-	bool loaded = _data->loaded() || Local::willStickerImageLoad(_data->mediaKey()), displayLoading = _data->displayLoading();
+	bool loaded = _data->loaded(), displayLoading = _data->displayLoading();
 
 	if (displayLoading) {
 		ensureRadial();
@@ -1024,8 +1029,7 @@ void Document::paint(Painter &p, const QRect &clip, TextSelection selection, con
 TextState Document::getState(
 		QPoint point,
 		StateRequest request) const {
-	const auto loaded = _data->loaded()
-		|| Local::willStickerImageLoad(_data->mediaKey());
+	const auto loaded = _data->loaded();
 	const auto wthumb = withThumb();
 
 	if (_data->isAudioFile()) {

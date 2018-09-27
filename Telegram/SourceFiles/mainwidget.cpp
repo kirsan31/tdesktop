@@ -960,22 +960,8 @@ void MainWidget::cancelUploadLayer(not_null<HistoryItem*> item) {
 void MainWidget::deletePhotoLayer(PhotoData *photo) {
 	if (!photo) return;
 	Ui::show(Box<ConfirmBox>(lang(lng_delete_photo_sure), lang(lng_box_delete), crl::guard(this, [=] {
+		Auth().api().clearPeerPhoto(photo);
 		Ui::hideLayer();
-
-		auto me = App::self();
-		if (!me) return;
-
-		if (me->userpicPhotoId() == photo->id) {
-			Messenger::Instance().peerClearPhoto(me->id);
-		} else if (photo->peer && !photo->peer->isUser() && photo->peer->userpicPhotoId() == photo->id) {
-			Messenger::Instance().peerClearPhoto(photo->peer->id);
-		} else {
-			MTP::send(MTPphotos_DeletePhotos(
-				MTP_vector<MTPInputPhoto>(1, photo->mtpInput())));
-			Auth().storage().remove(Storage::UserPhotosRemoveOne(
-				me->bareId(),
-				photo->id));
-		}
 	})));
 }
 
@@ -1126,7 +1112,12 @@ void MainWidget::deleteConversation(
 
 void MainWidget::deleteAndExit(ChatData *chat) {
 	PeerData *peer = chat;
-	MTP::send(MTPmessages_DeleteChatUser(chat->inputChat, App::self()->inputUser), rpcDone(&MainWidget::deleteHistoryAfterLeave, peer), rpcFail(&MainWidget::leaveChatFailed, peer));
+	MTP::send(
+		MTPmessages_DeleteChatUser(
+			chat->inputChat,
+			Auth().user()->inputUser),
+		rpcDone(&MainWidget::deleteHistoryAfterLeave, peer),
+		rpcFail(&MainWidget::leaveChatFailed, peer));
 }
 
 void MainWidget::addParticipants(
@@ -2413,6 +2404,9 @@ void MainWidget::showNewSection(
 		auto direction = (back || settingSection->forceAnimateBack())
 			? Window::SlideDirection::FromLeft
 			: Window::SlideDirection::FromRight;
+		if (Adaptive::OneColumn()) {
+			_controller->removeLayerBlackout();
+		}
 		settingSection->showAnimated(direction, animationParams);
 	} else {
 		settingSection->showFast();
@@ -3659,26 +3653,13 @@ void MainWidget::mtpPing() {
 	MTP::ping();
 }
 
-void MainWidget::start(const MTPUser *self) {
+void MainWidget::start() {
 	Auth().api().requestNotifySettings(MTP_inputNotifyUsers());
 	Auth().api().requestNotifySettings(MTP_inputNotifyChats());
 
-	if (!self) {
-		MTP::send(MTPusers_GetFullUser(MTP_inputUserSelf()), rpcDone(&MainWidget::startWithSelf));
-		return;
-	} else if (!Auth().validateSelf(*self)) {
-		constexpr auto kRequestUserAgainTimeout = TimeMs(10000);
-		App::CallDelayed(kRequestUserAgainTimeout, this, [=] {
-			MTP::send(MTPusers_GetFullUser(MTP_inputUserSelf()), rpcDone(&MainWidget::startWithSelf));
-		});
-		return;
-	}
-
 	Local::readSavedPeers();
 	cSetOtherOnline(0);
-	if (const auto user = App::feedUsers(MTP_vector<MTPUser>(1, *self))) {
-		user->loadUserpic();
-	}
+	Auth().user()->loadUserpic();
 
 	MTP::send(MTPupdates_GetState(), rpcDone(&MainWidget::gotState));
 	update();
@@ -3950,15 +3931,6 @@ bool MainWidget::inviteImportFail(const RPCError &error) {
 	return true;
 }
 
-void MainWidget::startWithSelf(const MTPUserFull &result) {
-	Expects(result.type() == mtpc_userFull);
-	auto &d = result.c_userFull();
-	start(&d.vuser);
-	if (auto user = App::self()) {
-		Auth().api().processFullPeer(user, result);
-	}
-}
-
 void MainWidget::incrementSticker(DocumentData *sticker) {
 	if (!sticker || !sticker->sticker()) return;
 	if (sticker->sticker()->set.type() == mtpc_inputStickerSetEmpty) return;
@@ -4157,12 +4129,11 @@ void MainWidget::updateOnline(bool gotOtherOffline) {
 		_lastSetOnline = ms;
 		_onlineRequest = MTP::send(MTPaccount_UpdateStatus(MTP_bool(!isOnline)));
 
-		if (App::self()) {
-			App::self()->onlineTill = unixtime() + (isOnline ? (Global::OnlineUpdatePeriod() / 1000) : -1);
-			Notify::peerUpdatedDelayed(
-				App::self(),
-				Notify::PeerUpdate::Flag::UserOnlineChanged);
-		}
+		const auto self = Auth().user();
+		self->onlineTill = unixtime() + (isOnline ? (Global::OnlineUpdatePeriod() / 1000) : -1);
+		Notify::peerUpdatedDelayed(
+			self,
+			Notify::PeerUpdate::Flag::UserOnlineChanged);
 		if (!isOnline) { // Went offline, so we need to save message draft to the cloud.
 			saveDraftToCloud();
 		}

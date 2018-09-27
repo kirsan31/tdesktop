@@ -559,7 +559,7 @@ const std::vector<EditFile> &Value::filesInEdit(FileType type) const {
 	Unexpected("Type in Value::filesInEdit() const.");
 }
 
-EditFile &Value::fileInEdit(FileType type, base::optional<int> fileIndex) {
+EditFile &Value::fileInEdit(FileType type, std::optional<int> fileIndex) {
 	switch (type) {
 	case FileType::Scan:
 	case FileType::Translation: {
@@ -577,7 +577,7 @@ EditFile &Value::fileInEdit(FileType type, base::optional<int> fileIndex) {
 
 const EditFile &Value::fileInEdit(
 		FileType type,
-		base::optional<int> fileIndex) const {
+		std::optional<int> fileIndex) const {
 	switch (type) {
 	case FileType::Scan:
 	case FileType::Translation: {
@@ -1232,7 +1232,7 @@ void FormController::fillNativeFromFallback() {
 	// Check if additional values should be copied from fallback values.
 	const auto scheme = GetDocumentScheme(
 		Scope::Type::PersonalDetails,
-		base::none,
+		std::nullopt,
 		true);
 	const auto dependencyIt = values.fields.find(
 		scheme.additionalDependencyKey);
@@ -1363,7 +1363,7 @@ void FormController::uploadScan(
 		return;
 	}
 	const auto nonconst = findValue(value);
-	const auto fileIndex = [&]() -> base::optional<int> {
+	const auto fileIndex = [&]() -> std::optional<int> {
 		auto scanInEdit = EditFile{ nonconst, type, File(), nullptr };
 		if (type == FileType::Scan || type == FileType::Translation) {
 			auto &list = nonconst->filesInEdit(type);
@@ -1379,7 +1379,7 @@ void FormController::uploadScan(
 				type,
 				std::move(scanInEdit)).first;
 		}
-		return base::none;
+		return std::nullopt;
 	}();
 	auto &scan = nonconst->fileInEdit(type, fileIndex);
 	encryptFile(scan, std::move(content), [=](UploadScanData &&result) {
@@ -1392,14 +1392,14 @@ void FormController::uploadScan(
 void FormController::deleteScan(
 		not_null<const Value*> value,
 		FileType type,
-		base::optional<int> fileIndex) {
+		std::optional<int> fileIndex) {
 	scanDeleteRestore(value, type, fileIndex, true);
 }
 
 void FormController::restoreScan(
 		not_null<const Value*> value,
 		FileType type,
-		base::optional<int> fileIndex) {
+		std::optional<int> fileIndex) {
 	scanDeleteRestore(value, type, fileIndex, false);
 }
 
@@ -1454,7 +1454,7 @@ void FormController::encryptFile(
 void FormController::scanDeleteRestore(
 		not_null<const Value*> value,
 		FileType type,
-		base::optional<int> fileIndex,
+		std::optional<int> fileIndex,
 		bool deleted) {
 	const auto nonconst = findValue(value);
 	auto &scan = nonconst->fileInEdit(type, fileIndex);
@@ -1579,10 +1579,7 @@ QString FormController::defaultEmail() const {
 }
 
 QString FormController::defaultPhoneNumber() const {
-	if (const auto self = App::self()) {
-		return self->phone();
-	}
-	return QString();
+	return Auth().user()->phone();
 }
 
 auto FormController::scanUpdated() const
@@ -1726,13 +1723,14 @@ void FormController::loadFile(File &file) {
 			file.id,
 			file.accessHash,
 			QByteArray(), // file_reference
-			base::none, // origin
+			std::nullopt, // origin
 			SecureFileLocation,
 			QString(),
 			file.size,
 			LoadToCacheAsWell,
 			LoadFromCloudOrLocal,
-			false));
+			false,
+			Data::kImageCacheTag));
 	const auto loader = j->second.get();
 	loader->connect(loader, &mtpFileLoader::progress, [=] {
 		if (loader->finished()) {
@@ -2301,10 +2299,10 @@ auto FormController::parseFiles(
 auto FormController::parseFile(
 	const MTPSecureFile &data,
 	const std::vector<EditFile> &editData) const
--> base::optional<File> {
+-> std::optional<File> {
 	switch (data.type()) {
 	case mtpc_secureFileEmpty:
-		return base::none;
+		return std::nullopt;
 
 	case mtpc_secureFile: {
 		const auto &fields = data.c_secureFile();
@@ -2338,16 +2336,17 @@ void FormController::fillDownloadedFile(
 	if (!i->uploadData) {
 		return;
 	}
-	Local::writeImage(
-		StorageKey(
-			storageMix32To64(
-				SecureFileLocation,
-				destination.dcId),
-			destination.id),
-		StorageImageSaved(QByteArray::fromRawData(
-			reinterpret_cast<const char*>(
-				i->uploadData->bytes.data()),
-			i->uploadData->bytes.size())));
+	const auto &bytes = i->uploadData->bytes;
+	if (bytes.size() > Storage::kMaxFileInMemory) {
+		return;
+	}
+	Auth().data().cache().put(
+		Data::DocumentCacheKey(destination.dcId, destination.id),
+		Storage::Cache::Database::TaggedValue(
+			QByteArray(
+				reinterpret_cast<const char*>(bytes.data()),
+				bytes.size()),
+			Data::kImageCacheTag));
 }
 
 auto FormController::parseValue(

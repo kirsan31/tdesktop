@@ -23,6 +23,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "window/section_widget.h"
 #include "chat_helpers/tabbed_selector.h"
 #include "boxes/send_files_box.h"
+#include "observer_peer.h"
 
 namespace {
 
@@ -72,6 +73,7 @@ QByteArray AuthSessionSettings::serialize() const {
 		stream << qint32(_variables.thirdColumnWidth.current());
 		stream << qint32(_variables.thirdSectionExtendedBy);
 		stream << qint32(_variables.sendFilesWay);
+		stream << qint32(_variables.callsPeerToPeer.current());
 	}
 	return result;
 }
@@ -97,6 +99,7 @@ void AuthSessionSettings::constructFromSerialized(const QByteArray &serialized) 
 	int thirdColumnWidth = _variables.thirdColumnWidth.current();
 	int thirdSectionExtendedBy = _variables.thirdSectionExtendedBy;
 	qint32 sendFilesWay = static_cast<qint32>(_variables.sendFilesWay);
+	qint32 callsPeerToPeer = qint32(_variables.callsPeerToPeer.current());
 	stream >> selectorTab;
 	stream >> lastSeenWarningSeen;
 	if (!stream.atEnd()) {
@@ -145,6 +148,12 @@ void AuthSessionSettings::constructFromSerialized(const QByteArray &serialized) 
 		stream >> value;
 		thirdSectionExtendedBy = value;
 	}
+	if (!stream.atEnd()) {
+		stream >> sendFilesWay;
+	}
+	if (!stream.atEnd()) {
+		stream >> callsPeerToPeer;
+	}
 	if (stream.status() != QDataStream::Ok) {
 		LOG(("App Error: "
 			"Bad data for AuthSessionSettings::constructFromSerialized()"));
@@ -187,7 +196,15 @@ void AuthSessionSettings::constructFromSerialized(const QByteArray &serialized) 
 	switch (uncheckedSendFilesWay) {
 	case SendFilesWay::Album:
 	case SendFilesWay::Photos:
-	case SendFilesWay::Files: _variables.sendFilesWay = uncheckedSendFilesWay;
+	case SendFilesWay::Files: _variables.sendFilesWay = uncheckedSendFilesWay; break;
+	}
+	auto uncheckedCallsPeerToPeer = static_cast<Calls::PeerToPeer>(callsPeerToPeer);
+	switch (uncheckedCallsPeerToPeer) {
+	case Calls::PeerToPeer::DefaultContacts:
+	case Calls::PeerToPeer::DefaultEveryone:
+	case Calls::PeerToPeer::Everyone:
+	case Calls::PeerToPeer::Contacts:
+	case Calls::PeerToPeer::Nobody: _variables.callsPeerToPeer = uncheckedCallsPeerToPeer; break;
 	}
 }
 
@@ -265,8 +282,8 @@ AuthSession &Auth() {
 	return *result;
 }
 
-AuthSession::AuthSession(UserId userId)
-: _userId(userId)
+AuthSession::AuthSession(const MTPUser &user)
+: _user(App::user(user.match([](const auto &data) { return data.vid.v; })))
 , _autoLockTimer([this] { checkAutoLock(); })
 , _api(std::make_unique<ApiWrap>(this))
 , _calls(std::make_unique<Calls::Instance>())
@@ -276,7 +293,7 @@ AuthSession::AuthSession(UserId userId)
 , _notifications(std::make_unique<Window::Notifications::System>(this))
 , _data(std::make_unique<Data::Session>(this))
 , _changelogs(Core::Changelogs::Create(this)) {
-	Expects(_userId != 0);
+	App::feedUser(user);
 
 	_saveDataTimer.setCallback([=] {
 		Local::writeUserSettings();
@@ -294,19 +311,34 @@ AuthSession::AuthSession(UserId userId)
 	});
 	_api->refreshProxyPromotion();
 	_api->requestTermsUpdate();
+	_api->requestFullPeer(_user);
+
+	crl::on_main(this, [=] {
+		using Flag = Notify::PeerUpdate::Flag;
+		const auto events = Flag::NameChanged
+			| Flag::UsernameChanged
+			| Flag::PhotoChanged
+			| Flag::AboutChanged
+			| Flag::UserPhoneChanged;
+		subscribe(
+			Notify::PeerUpdated(),
+			Notify::PeerUpdatedHandler(
+				events,
+				[=](const Notify::PeerUpdate &update) {
+					if (update.peer == _user) {
+						Local::writeSelf();
+					}
+				}));
+	});
 
 	Window::Theme::Background()->start();
 }
 
 bool AuthSession::Exists() {
-	if (auto messenger = Messenger::InstancePointer()) {
+	if (const auto messenger = Messenger::InstancePointer()) {
 		return (messenger->authSession() != nullptr);
 	}
 	return false;
-}
-
-UserData *AuthSession::user() const {
-	return App::user(userId());
 }
 
 base::Observable<void> &AuthSession::downloaderTaskFinished() {

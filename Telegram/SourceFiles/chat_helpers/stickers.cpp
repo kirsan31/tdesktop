@@ -176,9 +176,17 @@ void UndoInstallLocally(uint64 setId) {
 		LayerOption::KeepOther);
 }
 
-bool IsFaved(not_null<DocumentData*> document) {
-	auto it = Auth().data().stickerSets().constFind(FavedSetId);
-	return (it != Auth().data().stickerSets().cend()) && it->stickers.contains(document);
+bool IsFaved(not_null<const DocumentData*> document) {
+	const auto it = Auth().data().stickerSets().constFind(FavedSetId);
+	if (it == Auth().data().stickerSets().cend()) {
+		return false;
+	}
+	for (const auto sticker : it->stickers) {
+		if (sticker == document) {
+			return true;
+		}
+	}
+	return false;
 }
 
 void CheckFavedLimit(Set &set) {
@@ -231,7 +239,7 @@ void MoveFavedToFront(Set &set, int index) {
 
 void RequestSetToPushFaved(not_null<DocumentData*> document);
 
-void SetIsFaved(not_null<DocumentData*> document, base::optional<std::vector<not_null<EmojiPtr>>> emojiList = base::none) {
+void SetIsFaved(not_null<DocumentData*> document, std::optional<std::vector<not_null<EmojiPtr>>> emojiList = std::nullopt) {
 	auto &sets = Auth().data().stickerSetsRef();
 	auto it = sets.find(FavedSetId);
 	if (it == sets.end()) {
@@ -817,17 +825,17 @@ std::vector<not_null<DocumentData*>> GetListByEmoji(
 	}) | ranges::to_vector;
 }
 
-base::optional<std::vector<not_null<EmojiPtr>>> GetEmojiListFromSet(
+std::optional<std::vector<not_null<EmojiPtr>>> GetEmojiListFromSet(
 		not_null<DocumentData*> document) {
 	if (auto sticker = document->sticker()) {
 		auto &inputSet = sticker->set;
 		if (inputSet.type() != mtpc_inputStickerSetID) {
-			return base::none;
+			return std::nullopt;
 		}
 		auto &sets = Auth().data().stickerSets();
 		auto it = sets.constFind(inputSet.c_inputStickerSetID().vid.v);
 		if (it == sets.cend()) {
-			return base::none;
+			return std::nullopt;
 		}
 		auto result = std::vector<not_null<EmojiPtr>>();
 		for (auto i = it->emoji.cbegin(), e = it->emoji.cend(); i != e; ++i) {
@@ -836,11 +844,11 @@ base::optional<std::vector<not_null<EmojiPtr>>> GetEmojiListFromSet(
 			}
 		}
 		if (result.empty()) {
-			return base::none;
+			return std::nullopt;
 		}
 		return std::move(result);
 	}
-	return base::none;
+	return std::nullopt;
 }
 
 Set *FeedSet(const MTPDstickerSet &set) {

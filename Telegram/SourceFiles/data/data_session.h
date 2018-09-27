@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #pragma once
 
+#include "storage/storage_databases.h"
 #include "chat_helpers/stickers.h"
 #include "dialogs/dialogs_key.h"
 #include "data/data_groups.h"
@@ -70,6 +71,8 @@ public:
 		Passport::SavedCredentials data,
 		TimeMs rememberFor);
 	void forgetPassportCredentials();
+
+	Storage::Cache::Database &cache();
 
 	[[nodiscard]] base::Variable<bool> &contactsLoaded() {
 		return _contactsLoaded;
@@ -393,8 +396,8 @@ public:
 		const MTPPeerNotifySettings &settings);
 	void updateNotifySettings(
 		not_null<PeerData*> peer,
-		base::optional<int> muteForSeconds,
-		base::optional<bool> silentPosts = base::none);
+		std::optional<int> muteForSeconds,
+		std::optional<bool> silentPosts = std::nullopt);
 	bool notifyIsMuted(
 		not_null<const PeerData*> peer,
 		TimeMs *changesIn = nullptr) const;
@@ -519,6 +522,8 @@ private:
 		Method method);
 
 	not_null<AuthSession*> _session;
+
+	Storage::DatabasePointer _cache;
 
 	std::unique_ptr<Export::ControllerWrap> _export;
 	std::unique_ptr<Export::View::PanelController> _exportPanel;

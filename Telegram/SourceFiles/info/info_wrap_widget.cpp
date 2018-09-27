@@ -25,6 +25,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "window/window_slide_animation.h"
 #include "window/window_peer_menu.h"
 #include "boxes/peer_list_box.h"
+#include "boxes/confirm_box.h"
 #include "auth_session.h"
 #include "data/data_session.h"
 #include "mainwidget.h"
@@ -200,6 +201,8 @@ Dialogs::RowDescriptor WrapWidget::activeChat() const {
 		return Dialogs::RowDescriptor(App::history(peer), FullMsgId());
 	} else if (const auto feed = key().feed()) {
 		return Dialogs::RowDescriptor(feed, FullMsgId());
+	} else if (key().settingsSelf()) {
+		return Dialogs::RowDescriptor();
 	}
 	Unexpected("Owner in WrapWidget::activeChat().");
 }
@@ -348,8 +351,8 @@ void WrapWidget::createTopBar() {
 	if (wrapValue == Wrap::Narrow || hasStackHistory()) {
 		_topBar->enableBackButton();
 		_topBar->backRequest(
-		) | rpl::start_with_next([this] {
-			_controller->showBackFromStack();
+		) | rpl::start_with_next([=] {
+			checkBeforeClose([=] { _controller->showBackFromStack(); });
 		}, _topBar->lifetime());
 	} else if (wrapValue == Wrap::Side) {
 		auto close = _topBar->addButton(
@@ -366,7 +369,9 @@ void WrapWidget::createTopBar() {
 				_topBar,
 				st::infoLayerTopBarClose));
 		close->addClickHandler([this] {
-			_controller->parentController()->hideSpecialLayer();
+			checkBeforeClose([=] {
+				_controller->parentController()->hideSpecialLayer();
+			});
 		});
 	} else if (requireTopBarSearch()) {
 		auto search = _controller->searchFieldController();
@@ -376,11 +381,18 @@ void WrapWidget::createTopBar() {
 			_controller->searchEnabledByContent(),
 			_controller->takeSearchStartsFocused());
 	}
-	if (_controller->section().type() == Section::Type::Profile
+	const auto section = _controller->section();
+	if (section.type() == Section::Type::Profile
 		&& (wrapValue != Wrap::Side || hasStackHistory())) {
-		addProfileMenuButton();
+		addTopBarMenuButton();
 		addProfileCallsButton();
 //		addProfileNotificationsButton();
+	} else if (section.type() == Section::Type::Settings
+		&& section.settingsType() == Section::SettingsType::Main) {
+		addTopBarMenuButton();
+	} else if (section.type() == Section::Type::Settings
+		&& section.settingsType() == Section::SettingsType::Information) {
+		addContentSaveButton();
 	}
 
 	_topBar->lower();
@@ -389,7 +401,23 @@ void WrapWidget::createTopBar() {
 	_topBar->show();
 }
 
-void WrapWidget::addProfileMenuButton() {
+void WrapWidget::checkBeforeClose(Fn<void()> close) {
+	const auto confirmed = [=] {
+		const auto copy = close;
+		Ui::hideLayer();
+		copy();
+	};
+	if (_controller->canSaveChangesNow()) {
+		Ui::show(Box<ConfirmBox>(
+			lang(lng_settings_close_sure),
+			lang(lng_close),
+			confirmed));
+	} else {
+		confirmed();
+	}
+}
+
+void WrapWidget::addTopBarMenuButton() {
 	Expects(_topBar != nullptr);
 
 	_topBarMenuToggle.reset(_topBar->addButton(
@@ -399,8 +427,29 @@ void WrapWidget::addProfileMenuButton() {
 				? st::infoLayerTopBarMenu
 				: st::infoTopBarMenu))));
 	_topBarMenuToggle->addClickHandler([this] {
-		showProfileMenu();
+		showTopBarMenu();
 	});
+}
+
+void WrapWidget::addContentSaveButton() {
+	Expects(_topBar != nullptr);
+
+	_topBar->addButtonWithVisibility(
+		base::make_unique_q<Ui::IconButton>(
+			_topBar,
+			(wrap() == Wrap::Layer
+				? st::infoLayerTopBarSave
+				: st::infoTopBarSave)),
+		_controller->canSaveChanges()
+	)->addClickHandler([=] {
+		_content->saveChanges(crl::guard(_content.data(), [=] {
+			_controller->showBackFromStack();
+		}));
+	});
+}
+
+bool WrapWidget::closeByOutsideClick() const {
+	return !_controller->canSaveChangesNow();
 }
 
 void WrapWidget::addProfileCallsButton() {
@@ -469,7 +518,7 @@ void WrapWidget::addProfileNotificationsButton() {
 	}, notifications->lifetime());
 }
 
-void WrapWidget::showProfileMenu() {
+void WrapWidget::showTopBarMenu() {
 	if (_topBarMenu) {
 		_topBarMenu->hideAnimated(
 			Ui::InnerDropdown::HideOption::IgnoreShow);
@@ -512,6 +561,13 @@ void WrapWidget::showProfileMenu() {
 			feed,
 			addAction,
 			Window::PeerMenuSource::Profile);
+	} else if (const auto self = key().settingsSelf()) {
+		const auto showOther = [=](::Settings::Type type) {
+			const auto controller = _controller.get();
+			_topBarMenu = nullptr;
+			controller->showSettings(type);
+		};
+		::Settings::FillMenu(showOther, addAction);
 	} else {
 		_topBarMenu = nullptr;
 		return;
@@ -915,9 +971,9 @@ void WrapWidget::resizeEvent(QResizeEvent *e) {
 }
 
 void WrapWidget::keyPressEvent(QKeyEvent *e) {
-	if (e->key() == Qt::Key_Escape) {
+	if (e->key() == Qt::Key_Escape || e->key() == Qt::Key_Back) {
 		if (hasStackHistory() || wrap() != Wrap::Layer) {
-			_controller->showBackFromStack();
+			checkBeforeClose([=] { _controller->showBackFromStack(); });
 			return;
 		}
 	}
