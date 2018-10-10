@@ -69,6 +69,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "inline_bots/inline_results_widget.h"
 #include "chat_helpers/emoji_suggestions_widget.h"
 #include "core/crash_reports.h"
+#include "support/support_common.h"
+#include "support/support_autocomplete.h"
 #include "dialogs/dialogs_key.h"
 #include "styles/style_history.h"
 #include "styles/style_dialogs.h"
@@ -420,6 +422,9 @@ HistoryWidget::HistoryWidget(
 , _historyDown(_scroll, st::historyToDown)
 , _unreadMentions(_scroll, st::historyUnreadMentions)
 , _fieldAutocomplete(this)
+, _supportAutocomplete(Auth().supportMode()
+	? object_ptr<Support::Autocomplete>(this, &Auth())
+	: nullptr)
 , _send(this)
 , _unblock(this, lang(lng_unblock_button).toUpper(), st::historyUnblock)
 , _botStart(this, lang(lng_bot_start).toUpper(), st::historyComposeButton)
@@ -457,7 +462,10 @@ HistoryWidget::HistoryWidget(
 	connect(_botStart, SIGNAL(clicked()), this, SLOT(onBotStart()));
 	connect(_joinChannel, SIGNAL(clicked()), this, SLOT(onJoinChannel()));
 	connect(_muteUnmute, SIGNAL(clicked()), this, SLOT(onMuteUnmute()));
-	connect(_field, &Ui::InputField::submitted, [=] { send(); });
+	connect(
+		_field,
+		&Ui::InputField::submitted,
+		[=](Qt::KeyboardModifiers modifiers) { send(modifiers); });
 	connect(_field, SIGNAL(cancelled()), this, SLOT(onCancel()));
 	connect(_field, SIGNAL(tabbed()), this, SLOT(onFieldTabbed()));
 	connect(_field, SIGNAL(resized()), this, SLOT(onFieldResize()));
@@ -522,6 +530,9 @@ HistoryWidget::HistoryWidget(
 	connect(_fieldAutocomplete, SIGNAL(botCommandChosen(QString,FieldAutocomplete::ChooseMethod)), this, SLOT(onHashtagOrBotCommandInsert(QString,FieldAutocomplete::ChooseMethod)));
 	connect(_fieldAutocomplete, SIGNAL(stickerChosen(not_null<DocumentData*>,FieldAutocomplete::ChooseMethod)), this, SLOT(onStickerOrGifSend(not_null<DocumentData*>)));
 	connect(_fieldAutocomplete, SIGNAL(moderateKeyActivate(int,bool*)), this, SLOT(onModerateKeyActivate(int,bool*)));
+	if (_supportAutocomplete) {
+		supportInitAutocomplete();
+	}
 	_fieldLinksParser = std::make_unique<MessageLinksParser>(_field);
 	_fieldLinksParser->list().changes(
 	) | rpl::start_with_next([=](QStringList &&parsed) {
@@ -753,9 +764,65 @@ HistoryWidget::HistoryWidget(
 		if (cancelReply(lastKeyboardUsed) && !options.clearDraft) {
 			onCloudDraftSave();
 		}
+		if (options.handleSupportSwitch) {
+			handleSupportSwitch(options.history);
+		}
 	}, lifetime());
 
 	orderWidgets();
+}
+
+void HistoryWidget::supportInitAutocomplete() {
+	_supportAutocomplete->hide();
+
+	_supportAutocomplete->insertRequests(
+	) | rpl::start_with_next([=](const QString &text) {
+		supportInsertText(text);
+	}, _supportAutocomplete->lifetime());
+
+	_supportAutocomplete->shareContactRequests(
+	) | rpl::start_with_next([=](const Support::Contact &contact) {
+		supportShareContact(contact);
+	}, _supportAutocomplete->lifetime());
+}
+
+void HistoryWidget::supportInsertText(const QString &text) {
+	_field->setFocus();
+	_field->textCursor().insertText(text);
+}
+
+void HistoryWidget::supportShareContact(Support::Contact contact) {
+	if (!_history) {
+		return;
+	}
+	const auto commented = !contact.comment.isEmpty();
+	if (commented) {
+		supportInsertText(contact.comment);
+	}
+	contact.comment = _field->getLastText();
+
+	const auto submit = [=](Qt::KeyboardModifiers modifiers) {
+		const auto history = _history;
+		if (!history) {
+			return;
+		}
+		send(Support::SkipSwitchModifiers());
+		auto options = ApiWrap::SendOptions(history);
+		options.handleSupportSwitch = Support::HandleSwitch(modifiers);
+		Auth().api().shareContact(
+			contact.phone,
+			contact.firstName,
+			contact.lastName,
+			options);
+	};
+	const auto box = Ui::show(Box<Support::ConfirmContactBox>(
+		_history,
+		contact,
+		crl::guard(this, submit)));
+	box->boxClosing(
+	) | rpl::start_with_next([=] {
+		_field->document()->undo();
+	}, lifetime());
 }
 
 void HistoryWidget::scrollToCurrentVoiceMessage(FullMsgId fromId, FullMsgId toId) {
@@ -1524,33 +1591,50 @@ bool HistoryWidget::cmd_next_chat() {
 		Dialogs::RowDescriptor(
 			_history,
 			FullMsgId(_history->channelId(), std::max(_showAtMsgId, 0))));
-	if (const auto history = next.key.history()) {
-		Ui::showPeerHistory(history, next.fullId.msg);
-		return true;
-	} else if (const auto feed = next.key.feed()) {
-		if (const auto item = App::histItemById(next.fullId)) {
-			controller()->showSection(HistoryFeed::Memento(feed, item->position()));
-		} else {
-			controller()->showSection(HistoryFeed::Memento(feed));
+	const auto to = [&] {
+		auto result = next;
+		if (Auth().supportMode()) {
+			while (result.key
+				&& !result.key.entry()->chatListUnreadCount()
+				&& !result.key.entry()->chatListUnreadMark()) {
+				result = App::main()->chatListEntryAfter(result);
+			}
 		}
-	}
-	return false;
+		return result;
+	}();
+	return jumpToDialogRow(to);
 }
 
 bool HistoryWidget::cmd_previous_chat() {
 	if (!_history) {
 		return false;
 	}
-	const auto next = App::main()->chatListEntryBefore(
+	const auto previous = App::main()->chatListEntryBefore(
 		Dialogs::RowDescriptor(
 			_history,
 			FullMsgId(_history->channelId(), std::max(_showAtMsgId, 0))));
-	if (const auto history = next.key.history()) {
-		Ui::showPeerHistory(history, next.fullId.msg);
+	const auto to = [&] {
+		auto result = previous;
+		if (Auth().supportMode()) {
+			while (result.key
+				&& !result.key.entry()->chatListUnreadCount()
+				&& !result.key.entry()->chatListUnreadMark()) {
+				result = App::main()->chatListEntryBefore(result);
+			}
+		}
+		return result;
+	}();
+	return jumpToDialogRow(to);
+}
+
+bool HistoryWidget::jumpToDialogRow(const Dialogs::RowDescriptor &to) {
+	if (const auto history = to.key.history()) {
+		Ui::showPeerHistory(history, to.fullId.msg);
 		return true;
-	} else if (const auto feed = next.key.feed()) {
-		if (const auto item = App::histItemById(next.fullId)) {
-			controller()->showSection(HistoryFeed::Memento(feed, item->position()));
+	} else if (const auto feed = to.key.feed()) {
+		if (const auto item = App::histItemById(to.fullId)) {
+			controller()->showSection(
+				HistoryFeed::Memento(feed, item->position()));
 		} else {
 			controller()->showSection(HistoryFeed::Memento(feed));
 		}
@@ -1958,12 +2042,9 @@ void HistoryWidget::clearAllLoadRequests() {
 }
 
 void HistoryWidget::updateFieldSubmitSettings() {
-	auto settings = Ui::InputField::SubmitSettings::Enter;
-	if (_isInlineBot) {
-		settings = Ui::InputField::SubmitSettings::None;
-	} else if (cCtrlEnter()) {
-		settings = Ui::InputField::SubmitSettings::CtrlEnter;
-	}
+	const auto settings = _isInlineBot
+		? Ui::InputField::SubmitSettings::None
+		: Auth().settings().sendSubmitWay();
 	_field->setSubmitSettings(settings);
 }
 
@@ -2179,6 +2260,9 @@ void HistoryWidget::updateControlsVisibility() {
 		}
 		_kbShown = false;
 		_fieldAutocomplete->hide();
+		if (_supportAutocomplete) {
+			_supportAutocomplete->hide();
+		}
 		_send->hide();
 		if (_silent) {
 			_silent->hide();
@@ -2271,6 +2355,9 @@ void HistoryWidget::updateControlsVisibility() {
 		}
 	} else {
 		_fieldAutocomplete->hide();
+		if (_supportAutocomplete) {
+			_supportAutocomplete->hide();
+		}
 		_send->hide();
 		_unblock->hide();
 		_botStart->hide();
@@ -2898,7 +2985,9 @@ void HistoryWidget::historyDownClicked() {
 	} else if (_replyReturn && _replyReturn->history() == _migrated) {
 		showHistory(_peer->id, -_replyReturn->id);
 	} else if (_peer) {
-		showHistory(_peer->id, ShowAtUnreadMsgId);
+		showHistory(
+			_peer->id,
+			Auth().supportMode() ? ShowAtTheEndMsgId : ShowAtUnreadMsgId);
 	}
 }
 
@@ -3005,6 +3094,9 @@ bool HistoryWidget::saveEditMsgFail(History *history, const RPCError &error, mtp
 
 void HistoryWidget::hideSelectorControlsAnimated() {
 	_fieldAutocomplete->hideAnimated();
+	if (_supportAutocomplete) {
+		_supportAutocomplete->hide();
+	}
 	if (_tabbedPanel) {
 		_tabbedPanel->hideAnimated();
 	}
@@ -3066,7 +3158,7 @@ bool HistoryWidget::SandHtmlAsFile(const QString &Html) {
 	return true;
 }
 
-void HistoryWidget::send() {
+void HistoryWidget::send(Qt::KeyboardModifiers modifiers) {
 	if (!_history) return;
 
 	if (_editMsgId) {
@@ -3081,17 +3173,18 @@ void HistoryWidget::send() {
 		}
 	}
 	else {
-		WebPageId webPageId = _previewCancelled
-			? CancelledWebPageId
-			: ((_previewData && _previewData->pendingTill >= 0)
-				? _previewData->id
-				: 0);
-
-		auto message = ApiWrap::MessageToSend(_history);
-		message.textWithTags = _field->getTextWithAppliedMarkdown();
-		message.replyTo = replyToId();
-		message.webPageId = webPageId;
-		Auth().api().sendMessage(std::move(message));
+	      const auto webPageId = _previewCancelled
+		      ? CancelledWebPageId
+		      : ((_previewData && _previewData->pendingTill >= 0)
+			      ? _previewData->id
+			      : WebPageId(0));
+      
+	      auto message = ApiWrap::MessageToSend(_history);
+	      message.textWithTags = _field->getTextWithAppliedMarkdown();
+	      message.replyTo = replyToId();
+	      message.webPageId = webPageId;
+	      message.handleSupportSwitch = Support::HandleSwitch(modifiers);
+	      Auth().api().sendMessage(std::move(message));
 	}
 	clearFieldText();
 	_saveDraftText = true;
@@ -3738,6 +3831,15 @@ bool HistoryWidget::hasSilentToggle() const {
 		&& !_peer->isMegagroup()
 		&& _peer->canWrite()
 		&& !Auth().data().notifySilentPostsUnknown(_peer);
+}
+
+void HistoryWidget::handleSupportSwitch(not_null<History*> updated) {
+	if (_history != updated || !Auth().supportMode()) {
+		return;
+	}
+	crl::on_main(this, [to = Auth().settings().supportSwitch()] {
+		Support::PerformSwitch(to);
+	});
 }
 
 void HistoryWidget::inlineBotResolveDone(
@@ -4868,6 +4970,9 @@ void HistoryWidget::updateControlsGeometry() {
 	if (_scroll->y() != scrollAreaTop) {
 		_scroll->moveToLeft(0, scrollAreaTop);
 		_fieldAutocomplete->setBoundings(_scroll->geometry());
+		if (_supportAutocomplete) {
+			_supportAutocomplete->setBoundings(_scroll->geometry());
+		}
 	}
 	if (_reportSpamPanel) {
 		_reportSpamPanel->setGeometryToLeft(0, _scroll->y(), width(), _reportSpamPanel->height());
@@ -4997,6 +5102,9 @@ int HistoryWidget::countAutomaticScrollTop() {
 				setMsgId(ShowAtUnreadMsgId);
 				result = countInitialScrollTop();
 				App::wnd()->checkHistoryActivation();
+				if (Auth().supportMode()) {
+					history->unsetFirstUnreadMessage();
+				}
 				return result;
 			}
 		}
@@ -5048,6 +5156,9 @@ void HistoryWidget::updateHistoryGeometry(bool initial, bool loadedDown, const S
 		}
 
 		_fieldAutocomplete->setBoundings(_scroll->geometry());
+		if (_supportAutocomplete) {
+			_supportAutocomplete->setBoundings(_scroll->geometry());
+		}
 		if (!_historyDownShown.animating()) {
 			// _historyDown is a child widget of _scroll, not me.
 			_historyDown->moveToRight(st::historyToDownPosition.x(), _scroll->height() - _historyDown->height() - st::historyToDownPosition.y());
@@ -5414,7 +5525,15 @@ void HistoryWidget::keyPressEvent(QKeyEvent *e) {
 			replyToPreviousMessage();
 		}
 	} else if (e->key() == Qt::Key_Return || e->key() == Qt::Key_Enter) {
-		onListEnterPressed();
+		if (!_botStart->isHidden()) {
+			onBotStart();
+		}
+		if (!_canSendMessages) {
+			const auto submitting = Ui::InputField::ShouldSubmit(
+				Auth().settings().sendSubmitWay(),
+				e->modifiers());
+			send(e->modifiers());
+		}
 	} else if (e->key() == Qt::Key_O && e->modifiers() == Qt::ControlModifier) {
 		chooseAttach();
 	} else {
@@ -5462,7 +5581,9 @@ void HistoryWidget::replyToNextMessage() {
 }
 
 void HistoryWidget::onFieldTabbed() {
-	if (!_fieldAutocomplete->isHidden()) {
+	if (_supportAutocomplete) {
+		_supportAutocomplete->activate();
+	} else if (!_fieldAutocomplete->isHidden()) {
 		_fieldAutocomplete->chooseSelected(FieldAutocomplete::ChooseMethod::ByTab);
 	}
 }
@@ -6391,12 +6512,6 @@ void HistoryWidget::onListEscapePressed() {
 		clearSelected();
 	} else {
 		onCancel();
-	}
-}
-
-void HistoryWidget::onListEnterPressed() {
-	if (!_botStart->isHidden()) {
-		onBotStart();
 	}
 }
 

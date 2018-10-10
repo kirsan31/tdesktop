@@ -15,6 +15,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_drafts.h"
 #include "boxes/send_files_box.h"
 #include "window/themes/window_theme.h"
+#include "ui/widgets/input_fields.h"
 #include "export/export_settings.h"
 #include "core/crash_reports.h"
 #include "core/update_checker.h"
@@ -522,7 +523,7 @@ enum {
 	dbiDcOptionOldOld = 0x02,
 	dbiChatSizeMax = 0x03,
 	dbiMutePeer = 0x04,
-	dbiSendKey = 0x05,
+	dbiSendKeyOld = 0x05,
 	dbiAutoStart = 0x06,
 	dbiStartMinimized = 0x07,
 	dbiSoundNotify = 0x08,
@@ -1432,13 +1433,19 @@ bool _readSetting(quint32 blockId, QDataStream &stream, int version, ReadSetting
 		if (!_checkStreamStatus(stream)) return false;
 	} break;
 
-	case dbiSendKey: {
+	case dbiSendKeyOld: {
 		qint32 v;
 		stream >> v;
 		if (!_checkStreamStatus(stream)) return false;
 
-		cSetCtrlEnter(v == dbiskCtrlEnter);
-		if (App::main()) App::main()->ctrlEnterSubmitUpdated();
+		using SendSettings = Ui::InputSubmitSettings;
+		const auto unchecked = static_cast<SendSettings>(v);
+
+		if (unchecked != SendSettings::Enter
+			&& unchecked != SendSettings::CtrlEnter) {
+			return false;
+		}
+		GetStoredAuthSessionCache().setSendSubmitWay(unchecked);
 	} break;
 
 	case dbiCatsAndDogs: { // deprecated
@@ -1945,7 +1952,6 @@ void _writeUserSettings() {
 	}
 
 	EncryptedDescriptor data(size);
-	data.stream << quint32(dbiSendKey) << qint32(cCtrlEnter() ? dbiskCtrlEnter : dbiskEnter);
 	data.stream
 		<< quint32(dbiTileBackground)
 		<< qint32(Window::Theme::Background()->tileDay() ? 1 : 0)
@@ -4339,6 +4345,8 @@ void WriteExportSettings(const Export::Settings &settings) {
 		}, [&](const MTPDinputPeerEmpty &) {
 			data.stream << kSinglePeerTypeEmpty;
 		});
+		data.stream << qint32(settings.singlePeerFrom);
+		data.stream << qint32(settings.singlePeerTill);
 
 		FileWriteDescriptor file(_exportSettingsKey);
 		file.writeEncrypted(data);
@@ -4360,6 +4368,7 @@ Export::Settings ReadExportSettings() {
 	QString path;
 	qint32 singlePeerType = 0, singlePeerBareId = 0;
 	quint64 singlePeerAccessHash = 0;
+	qint32 singlePeerFrom = 0, singlePeerTill = 0;
 	file.stream
 		>> types
 		>> fullChats
@@ -4380,6 +4389,9 @@ Export::Settings ReadExportSettings() {
 		case kSinglePeerTypeEmpty: break;
 		default: return Export::Settings();
 		}
+	}
+	if (!file.stream.atEnd()) {
+		file.stream >> singlePeerFrom >> singlePeerTill;
 	}
 	auto result = Export::Settings();
 	result.types = Export::Settings::Types::from_raw(types);
@@ -4408,6 +4420,8 @@ Export::Settings ReadExportSettings() {
 		}
 		Unexpected("Type in export data single peer.");
 	}();
+	result.singlePeerFrom = singlePeerFrom;
+	result.singlePeerTill = singlePeerTill;
 	return (file.stream.status() == QDataStream::Ok && result.validate())
 		? result
 		: Export::Settings();

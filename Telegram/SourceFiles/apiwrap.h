@@ -87,6 +87,7 @@ public:
 	void requestDialogEntry(
 		not_null<History*> history,
 		Fn<void()> callback = nullptr);
+	void requestDialogEntries(std::vector<not_null<History*>> histories);
 	//void applyFeedSources(const MTPDchannels_feedSources &data); // #feed
 	//void setFeedChannels(
 	//	not_null<Data::Feed*> feed,
@@ -262,6 +263,7 @@ public:
 		WebPageId webPageId = 0;
 		bool clearDraft = false;
 		bool generateLocal = true;
+		bool handleSupportSwitch = false;
 	};
 	rpl::producer<SendOptions> sendActions() const {
 		return _sendActions.events();
@@ -323,6 +325,7 @@ public:
 		MsgId replyTo = 0;
 		WebPageId webPageId = 0;
 		bool clearDraft = true;
+		bool handleSupportSwitch = false;
 	};
 	void sendMessage(MessageToSend &&message);
 	void sendInlineResult(

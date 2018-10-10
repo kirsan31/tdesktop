@@ -417,16 +417,20 @@ void MainWindow::themeUpdated(const Window::Theme::BackgroundUpdate &data) {
 
 bool MainWindow::doWeReadServerHistory() {
 	updateIsActive(0);
-	return isActive() && _main && !Ui::isLayerShown() && _main->doWeReadServerHistory();
+	return isActive()
+		&& !Ui::isLayerShown()
+		&& (_main ? _main->doWeReadServerHistory() : false);
 }
 
 bool MainWindow::doWeReadMentions() {
 	updateIsActive(0);
-	return isActive() && _main && !Ui::isLayerShown() && _main->doWeReadMentions();
+	return isActive()
+		&& !Ui::isLayerShown()
+		&& (_main ? _main->doWeReadMentions() : false);
 }
 
 void MainWindow::checkHistoryActivation() {
-	if (_main && doWeReadServerHistory()) {
+	if (doWeReadServerHistory()) {
 		_main->markActiveHistoryAsRead();
 	}
 }
@@ -872,6 +876,9 @@ QImage MainWindow::iconWithCounter(int size, int count, style::color bg, style::
 	}
 
 	QImage img(smallIcon ? ((size == 16) ? iconbig16 : (size == 32 ? iconbig32 : iconbig64)) : ((size == 16) ? icon16 : (size == 32 ? icon32 : icon64)));
+	if (AuthSession::Exists() && Auth().supportMode()) {
+		Window::ConvertIconToBlack(img);
+	}
 	if (!count) return img;
 
 	if (smallIcon) {

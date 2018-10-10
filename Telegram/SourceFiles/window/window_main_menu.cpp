@@ -13,10 +13,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/widgets/buttons.h"
 #include "ui/widgets/labels.h"
 #include "ui/widgets/menu.h"
+#include "ui/toast/toast.h"
 #include "ui/special_buttons.h"
 #include "ui/empty_userpic.h"
 #include "mainwindow.h"
 #include "storage/localstorage.h"
+#include "support/support_templates.h"
 #include "boxes/about_box.h"
 #include "boxes/peer_list_controllers.h"
 #include "calls/calls_box_controller.h"
@@ -93,31 +95,57 @@ MainMenu::MainMenu(
 
 void MainMenu::refreshMenu() {
 	_menu->clearActions();
-	_menu->addAction(lang(lng_create_group_title), [] {
-		App::wnd()->onShowNewGroup();
-	}, &st::mainMenuNewGroup, &st::mainMenuNewGroupOver);
-	_menu->addAction(lang(lng_create_channel_title), [] {
-		App::wnd()->onShowNewChannel();
-	}, &st::mainMenuNewChannel, &st::mainMenuNewChannelOver);
-	_menu->addAction(lang(lng_menu_contacts), [] {
-		Ui::show(Box<PeerListBox>(std::make_unique<ContactsBoxController>(), [](not_null<PeerListBox*> box) {
-			box->addButton(langFactory(lng_close), [box] { box->closeBox(); });
-			box->addLeftButton(langFactory(lng_profile_add_contact), [] { App::wnd()->onShowAddContact(); });
-		}));
-	}, &st::mainMenuContacts, &st::mainMenuContactsOver);
-	if (Global::PhoneCallsEnabled()) {
-		_menu->addAction(lang(lng_menu_calls), [] {
-			Ui::show(Box<PeerListBox>(std::make_unique<Calls::BoxController>(), [](not_null<PeerListBox*> box) {
+	if (!Auth().supportMode()) {
+		_menu->addAction(lang(lng_create_group_title), [] {
+			App::wnd()->onShowNewGroup();
+		}, &st::mainMenuNewGroup, &st::mainMenuNewGroupOver);
+		_menu->addAction(lang(lng_create_channel_title), [] {
+			App::wnd()->onShowNewChannel();
+		}, &st::mainMenuNewChannel, &st::mainMenuNewChannelOver);
+		_menu->addAction(lang(lng_menu_contacts), [] {
+			Ui::show(Box<PeerListBox>(std::make_unique<ContactsBoxController>(), [](not_null<PeerListBox*> box) {
 				box->addButton(langFactory(lng_close), [box] { box->closeBox(); });
+				box->addLeftButton(langFactory(lng_profile_add_contact), [] { App::wnd()->onShowAddContact(); });
 			}));
-		}, &st::mainMenuCalls, &st::mainMenuCallsOver);
+		}, &st::mainMenuContacts, &st::mainMenuContactsOver);
+		if (Global::PhoneCallsEnabled()) {
+			_menu->addAction(lang(lng_menu_calls), [] {
+				Ui::show(Box<PeerListBox>(std::make_unique<Calls::BoxController>(), [](not_null<PeerListBox*> box) {
+					box->addButton(langFactory(lng_close), [box] { box->closeBox(); });
+				}));
+			}, &st::mainMenuCalls, &st::mainMenuCallsOver);
+		}
+	} else {
+		_menu->addAction(lang(lng_profile_add_contact), [] {
+			App::wnd()->onShowAddContact();
+		}, &st::mainMenuContacts, &st::mainMenuContactsOver);
+
+		const auto fix = std::make_shared<QPointer<QAction>>();
+		*fix = _menu->addAction(qsl("Fix chats order"), [=] {
+			(*fix)->setChecked(!(*fix)->isChecked());
+			Auth().settings().setSupportFixChatsOrder((*fix)->isChecked());
+			Local::writeUserSettings();
+		}, &st::mainMenuFixOrder, &st::mainMenuFixOrderOver);
+		(*fix)->setCheckable(true);
+		(*fix)->setChecked(Auth().settings().supportFixChatsOrder());
+
+		const auto subscription = Ui::AttachAsChild(_menu, rpl::lifetime());
+		_menu->addAction(qsl("Reload templates"), [=] {
+			*subscription = Auth().supportTemplates()->errors(
+			) | rpl::start_with_next([=](QStringList errors) {
+				Ui::Toast::Show(errors.isEmpty()
+					? "Templates reloaded!"
+					: ("Errors:\n\n" + errors.join("\n\n")));
+			});
+			Auth().supportTemplates()->reload();
+		}, &st::mainMenuReload, &st::mainMenuReloadOver);
 	}
 	_menu->addAction(lang(lng_menu_settings), [] {
 		App::wnd()->showSettings();
 	}, &st::mainMenuSettings, &st::mainMenuSettingsOver);
 
-	_nightThemeAction = std::make_shared<QPointer<QAction>>(nullptr);
-	auto action = _menu->addAction(lang(lng_menu_night_mode), [this] {
+	_nightThemeAction = std::make_shared<QPointer<QAction>>();
+	auto action = _menu->addAction(lang(lng_menu_night_mode), [=] {
 		if (auto action = *_nightThemeAction) {
 			action->setChecked(!action->isChecked());
 			_nightThemeSwitch.callOnce(st::mainMenu.itemToggle.duration);

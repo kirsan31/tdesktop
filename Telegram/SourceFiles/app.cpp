@@ -1255,7 +1255,6 @@ namespace App {
 
 	void historyClearMsgs() {
 		::dependentItems.clear();
-
 		const auto oldData = base::take(msgsData);
 		const auto oldChannelData = base::take(channelMsgsData);
 		for (const auto item : oldData) {
@@ -1265,6 +1264,9 @@ namespace App {
 			for (const auto item : data) {
 				delete item;
 			}
+		}
+		for (const auto data : base::take(::locationsData)) {
+			delete data;
 		}
 
 		clearMousedItems();
@@ -1587,11 +1589,6 @@ namespace App {
 			Auth().data().forgetMedia();
 			serviceImageCacheSize = imageCacheSize();
 		}
-	}
-
-	bool isValidPhone(QString phone) {
-		phone = phone.replace(QRegularExpression(qsl("[^\\d]")), QString());
-		return phone.length() >= 8 || phone == qsl("777") || phone == qsl("333") || phone == qsl("111") || (phone.startsWith(qsl("42")) && (phone.length() == 2 || phone.length() == 5 || phone == qsl("4242")));
 	}
 
 	void quit() {

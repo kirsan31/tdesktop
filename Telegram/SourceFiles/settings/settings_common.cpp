@@ -20,6 +20,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "boxes/abstract_box.h"
 #include "lang/lang_keys.h"
 #include "mainwindow.h"
+#include "auth_session.h"
 #include "styles/style_boxes.h"
 #include "styles/style_settings.h"
 
@@ -161,19 +162,27 @@ not_null<Button*> AddButtonWithLabel(
 
 void AddSubsectionTitle(
 		not_null<Ui::VerticalLayout*> container,
-		LangKey text) {
+		rpl::producer<QString> text) {
 	container->add(
 		object_ptr<Ui::FlatLabel>(
 			container,
-			Lang::Viewer(text),
+			std::move(text),
 			st::settingsSubsectionTitle),
 		st::settingsSubsectionTitlePadding);
 }
 
+void AddSubsectionTitle(
+		not_null<Ui::VerticalLayout*> container,
+		LangKey text) {
+	AddSubsectionTitle(container, Lang::Viewer(text));
+}
+
 void FillMenu(Fn<void(Type)> showOther, MenuCallback addAction) {
-	addAction(
-		lang(lng_settings_information),
-		[=] { showOther(Type::Information); });
+	if (!Auth().supportMode()) {
+		addAction(
+			lang(lng_settings_information),
+			[=] { showOther(Type::Information); });
+	}
 	addAction(
 		lang(lng_settings_logout),
 		[=] { App::wnd()->onLogout(); });

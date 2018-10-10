@@ -699,6 +699,7 @@ void MainWindow::updateGlobalMenuHook() {
 	const auto logged = AuthSession::Exists();
 	const auto locked = !Messenger::Instance().locked();
 	const auto inactive = !logged || locked;
+	const auto support = logged && Auth().supportMode();
 	_forceDisabled(psLogout, !logged && !locked);
 	_forceDisabled(psUndo, !canUndo);
 	_forceDisabled(psRedo, !canRedo);
@@ -707,10 +708,10 @@ void MainWindow::updateGlobalMenuHook() {
 	_forceDisabled(psPaste, !canPaste);
 	_forceDisabled(psDelete, !canDelete);
 	_forceDisabled(psSelectAll, !canSelectAll);
-	_forceDisabled(psContacts, inactive);
+	_forceDisabled(psContacts, inactive || support);
 	_forceDisabled(psAddContact, inactive);
-	_forceDisabled(psNewGroup, inactive);
-	_forceDisabled(psNewChannel, inactive);
+	_forceDisabled(psNewGroup, inactive || support);
+	_forceDisabled(psNewChannel, inactive || support);
 	_forceDisabled(psShowTelegram, App::wnd()->isActive());
 }
 

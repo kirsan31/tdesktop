@@ -371,11 +371,11 @@ uint64 SandboxUserTag = 0;
 
 namespace Sandbox {
 
-bool MoveLegacyAlphaFolder() {
-	const auto was = cExeDir() + qsl("TelegramBeta_data");
-	const auto now = cExeDir() + qsl("TelegramAlpha_data");
+bool MoveLegacyAlphaFolder(const QString &folder, const QString &file) {
+	const auto was = cExeDir() + folder;
+	const auto now = cExeDir() + qsl("TelegramForcePortable");
 	if (QDir(was).exists() && !QDir(now).exists()) {
-		const auto oldFile = was + "/tdata/beta";
+		const auto oldFile = was + "/tdata/" + file;
 		const auto newFile = was + "/tdata/alpha";
 		if (QFile(oldFile).exists() && !QFile(newFile).exists()) {
 			if (!QFile(oldFile).copy(newFile)) {
@@ -395,47 +395,66 @@ bool MoveLegacyAlphaFolder() {
 	return true;
 }
 
-bool CheckAlphaVersionDir() {
+bool MoveLegacyAlphaFolder() {
+	if (!MoveLegacyAlphaFolder(qsl("TelegramAlpha_data"), qsl("alpha"))
+		|| !MoveLegacyAlphaFolder(qsl("TelegramBeta_data"), qsl("beta"))) {
+		return false;
+	}
+	return true;
+}
+
+bool CheckPortableVersionDir() {
 	if (!MoveLegacyAlphaFolder()) {
 		return false;
 	}
-	QFile alpha(cExeDir() + qsl("TelegramAlpha_data/tdata/alpha"));
+
+	const auto portable = cExeDir() + qsl("TelegramForcePortable");
+	QFile key(portable + qsl("/tdata/alpha"));
 	if (cAlphaVersion()) {
-		cForceWorkingDir(cExeDir() + qsl("TelegramAlpha_data/"));
+		cForceWorkingDir(portable + '/');
 		QDir().mkpath(cWorkingDir() + qstr("tdata"));
 		if (*AlphaPrivateKey) {
 			cSetAlphaPrivateKey(QByteArray(AlphaPrivateKey));
 		}
-		if (alpha.open(QIODevice::WriteOnly)) {
-			QDataStream dataStream(&alpha);
-			dataStream.setVersion(QDataStream::Qt_5_3);
-			dataStream << quint64(cRealAlphaVersion()) << cAlphaPrivateKey();
-		} else {
-			LOG(("FATAL: Could not open '%1' for writing private key!").arg(alpha.fileName()));
+		if (!key.open(QIODevice::WriteOnly)) {
+			LOG(("FATAL: Could not open '%1' for writing private key!"
+				).arg(key.fileName()));
 			return false;
 		}
-	} else if (alpha.exists()) {
-		cForceWorkingDir(cExeDir() + qsl("TelegramAlpha_data/"));
-		if (alpha.open(QIODevice::ReadOnly)) {
-			QDataStream dataStream(&alpha);
-			dataStream.setVersion(QDataStream::Qt_5_3);
-
-			quint64 v;
-			QByteArray k;
-			dataStream >> v >> k;
-			if (dataStream.status() == QDataStream::Ok && !k.isEmpty()) {
-				cSetAlphaVersion(AppVersion * 1000ULL);
-				cSetAlphaPrivateKey(k);
-				cSetRealAlphaVersion(v);
-			} else {
-				LOG(("FATAL: '%1' is corrupted, reinstall private alpha!").arg(alpha.fileName()));
-				return false;
-			}
-		} else {
-			LOG(("FATAL: could not open '%1' for reading private key!").arg(alpha.fileName()));
-			return false;
-		}
+		QDataStream dataStream(&key);
+		dataStream.setVersion(QDataStream::Qt_5_3);
+		dataStream << quint64(cRealAlphaVersion()) << cAlphaPrivateKey();
+		return true;
 	}
+	if (!QDir(portable).exists()) {
+		return true;
+	}
+	cForceWorkingDir(portable + '/');
+	if (!key.exists()) {
+		return true;
+	}
+
+	if (!key.open(QIODevice::ReadOnly)) {
+		LOG(("FATAL: could not open '%1' for reading private key. "
+			"Delete it or reinstall private alpha version."
+			).arg(key.fileName()));
+		return false;
+	}
+	QDataStream dataStream(&key);
+	dataStream.setVersion(QDataStream::Qt_5_3);
+
+	quint64 v;
+	QByteArray k;
+	dataStream >> v >> k;
+	if (dataStream.status() != QDataStream::Ok || k.isEmpty()) {
+		LOG(("FATAL: '%1' is corrupted. "
+			"Delete it or reinstall private alpha version."
+			).arg(key.fileName()));
+		return false;
+	}
+	cSetAlphaVersion(AppVersion * 1000ULL);
+	cSetAlphaPrivateKey(k);
+	cSetRealAlphaVersion(v);
 	return true;
 }
 
