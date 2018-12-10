@@ -21,6 +21,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/wrap/fade_wrap.h"
 #include "platform/platform_specific.h"
 #include "core/file_utilities.h"
+#include "boxes/calendar_box.h"
 #include "auth_session.h"
 #include "styles/style_widgets.h"
 #include "styles/style_export.h"
@@ -210,6 +211,7 @@ void SettingsWidget::setupPathAndFormat(
 		not_null<Ui::VerticalLayout*> container) {
 	if (_singlePeerId != 0) {
 		addLocationLabel(container);
+		addLimitsLabel(container);
 		return;
 	}
 	const auto formatGroup = std::make_shared<Ui::RadioenumGroup<Format>>(
@@ -269,6 +271,127 @@ void SettingsWidget::addLocationLabel(
 		return false;
 	});
 #endif // OS_MAC_STORE
+}
+
+void SettingsWidget::addLimitsLabel(
+		not_null<Ui::VerticalLayout*> container) {
+	auto pathLabel = value() | rpl::map([](const Settings &data) {
+		return std::make_tuple(data.singlePeerFrom, data.singlePeerTill);
+	}) | rpl::distinct_until_changed(
+	) | rpl::map([](TimeId from, TimeId till) {
+		const auto begin = from
+			? langDayOfMonthFull(ParseDateTime(from).date())
+			: lang(lng_export_beginning);
+		const auto end = till
+			? langDayOfMonthFull(ParseDateTime(till).date())
+			: lang(lng_export_end);
+		auto fromLink = TextWithEntities{ begin };
+		fromLink.entities.push_back(EntityInText(
+			EntityInTextCustomUrl,
+			0,
+			begin.size(),
+			QString("internal:edit_from")));
+		auto tillLink = TextWithEntities{ end };
+		tillLink.entities.push_back(EntityInText(
+			EntityInTextCustomUrl,
+			0,
+			end.size(),
+			QString("internal:edit_till")));
+		return lng_export_limits__generic<TextWithEntities>(
+			lt_from,
+			fromLink,
+			lt_till,
+			tillLink);
+	}) | rpl::after_next([=] {
+		container->resizeToWidth(container->width());
+	});
+	const auto label = container->add(
+		object_ptr<Ui::FlatLabel>(
+			container,
+			std::move(pathLabel),
+			st::exportLocationLabel),
+		st::exportLimitsPadding);
+	label->setClickHandlerFilter([=](
+			const ClickHandlerPtr &handler,
+			Qt::MouseButton) {
+		const auto url = handler->dragText();
+		if (url == qstr("internal:edit_from")) {
+			const auto done = [=](TimeId limit) {
+				changeData([&](Settings &settings) {
+					settings.singlePeerFrom = limit;
+				});
+			};
+			editDateLimit(
+				readData().singlePeerFrom,
+				0,
+				readData().singlePeerTill,
+				lng_export_from_beginning,
+				done);
+		} else if (url == qstr("internal:edit_till")) {
+			const auto done = [=](TimeId limit) {
+				changeData([&](Settings &settings) {
+					settings.singlePeerTill = limit;
+				});
+			};
+			editDateLimit(
+				readData().singlePeerTill,
+				readData().singlePeerFrom,
+				0,
+				lng_export_till_end,
+				done);
+		} else {
+			Unexpected("Click handler URL in export limits edit.");
+		}
+		return false;
+	});
+
+}
+
+void SettingsWidget::editDateLimit(
+		TimeId current,
+		TimeId min,
+		TimeId max,
+		LangKey resetLabel,
+		Fn<void(TimeId)> done) {
+	Expects(_showBoxCallback != nullptr);
+
+	const auto highlighted = current
+		? ParseDateTime(current).date()
+		: max
+		? ParseDateTime(max).date()
+		: min
+		? ParseDateTime(min).date()
+		: QDate::currentDate();
+	const auto month = highlighted;
+	const auto shared = std::make_shared<QPointer<CalendarBox>>();
+	const auto finalize = [=](not_null<CalendarBox*> box) {
+		box->setMaxDate(max
+			? ParseDateTime(max).date()
+			: QDate::currentDate());
+		box->setMinDate(min
+			? ParseDateTime(min).date()
+			: QDate(2013, 8, 1)); // Telegram was launched in August 2013 :)
+		box->addLeftButton(langFactory(resetLabel), crl::guard(this, [=] {
+			done(0);
+			if (const auto weak = shared->data()) {
+				weak->closeBox();
+			}
+		}));
+	};
+	const auto callback = crl::guard(this, [=](const QDate &date) {
+		done(ServerTimeFromParsed(QDateTime(date)));
+		if (const auto weak = shared->data()) {
+			weak->closeBox();
+		}
+	});
+	auto box = Box<CalendarBox>(
+		month,
+		highlighted,
+		callback,
+		finalize,
+		st::exportCalendarSizes);
+	*shared = make_weak(box.data());
+	_showBoxCallback(std::move(box));
 }
 
 not_null<Ui::RpWidget*> SettingsWidget::setupButtons(
@@ -341,8 +464,7 @@ not_null<Ui::Checkbox*> SettingsWidget::addOption(
 			((readData().types & types) == types),
 			st::defaultBoxCheckbox),
 		st::exportSettingPadding);
-	base::ObservableViewer(
-		checkbox->checkedChanged
+	checkbox->checkedChanges(
 	) | rpl::start_with_next([=](bool checked) {
 		changeData([&](Settings &data) {
 			if (checked) {
@@ -351,7 +473,7 @@ not_null<Ui::Checkbox*> SettingsWidget::addOption(
 				data.types &= ~types;
 			}
 		});
-	}, lifetime());
+	}, checkbox->lifetime());
 	return checkbox;
 }
 
@@ -386,8 +508,7 @@ void SettingsWidget::addChatOption(
 				st::defaultBoxCheckbox),
 			st::exportSubSettingPadding));
 
-	base::ObservableViewer(
-		onlyMy->entity()->checkedChanged
+	onlyMy->entity()->checkedChanges(
 	) | rpl::start_with_next([=](bool checked) {
 		changeData([&](Settings &data) {
 			if (checked) {
@@ -396,13 +517,9 @@ void SettingsWidget::addChatOption(
 				data.fullChats |= types;
 			}
 		});
-	}, checkbox->lifetime());
+	}, onlyMy->lifetime());
 
-	onlyMy->toggleOn(base::ObservableViewer(
-		checkbox->checkedChanged
-	));
-
-	onlyMy->toggle(checkbox->checked(), anim::type::instant);
+	onlyMy->toggleOn(checkbox->checkedValue());
 
 	if (types & (Type::PublicGroups | Type::PublicChannels)) {
 		onlyMy->entity()->setChecked(true);
@@ -445,8 +562,7 @@ void SettingsWidget::addMediaOption(
 			((readData().media.types & type) == type),
 			st::defaultBoxCheckbox),
 		st::exportSettingPadding);
-	base::ObservableViewer(
-		checkbox->checkedChanged
+	checkbox->checkedChanges(
 	) | rpl::start_with_next([=](bool checked) {
 		changeData([&](Settings &data) {
 			if (checked) {
@@ -455,7 +571,7 @@ void SettingsWidget::addMediaOption(
 				data.media.types &= ~type;
 			}
 		});
-	}, lifetime());
+	}, checkbox->lifetime());
 }
 
 void SettingsWidget::addSizeSlider(

@@ -12,6 +12,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "dialogs/dialogs_layout.h"
 #include "ui/effects/ripple_animation.h"
 #include "ui/effects/radial_animation.h"
+#include "ui/image/image_prepare.h"
 #include "ui/empty_userpic.h"
 #include "data/data_photo.h"
 #include "data/data_session.h"
@@ -139,9 +140,9 @@ QPoint HistoryDownButton::prepareRippleStartPosition() const {
 void HistoryDownButton::paintEvent(QPaintEvent *e) {
 	Painter p(this);
 
-	auto ms = getms();
-	auto over = isOver();
-	auto down = isDown();
+	const auto ms = getms();
+	const auto over = isOver();
+	const auto down = isDown();
 	((over || down) ? _st.iconBelowOver : _st.iconBelow).paint(p, _st.iconPosition, width());
 	paintRipple(p, _st.rippleAreaPosition.x(), _st.rippleAreaPosition.y(), ms);
 	((over || down) ? _st.iconAboveOver : _st.iconAbove).paint(p, _st.iconPosition, width());
@@ -189,13 +190,20 @@ void EmojiButton::paintEvent(QPaintEvent *e) {
 	if (loadingState.shown < 1.) {
 		p.setOpacity(1. - loadingState.shown);
 
-		auto icon = _iconOverride ? _iconOverride : &(over ? _st.iconOver : _st.icon);
-		icon->paint(p, _st.iconPosition, width());
+		const auto icon = _iconOverride ? _iconOverride : &(over ? _st.iconOver : _st.icon);
+		auto position = _st.iconPosition;
+		if (position.x() < 0) {
+			position.setX((width() - icon->width()) / 2);
+		}
+		if (position.y() < 0) {
+			position.setY((height() - icon->height()) / 2);
+		}
+		icon->paint(p, position, width());
 
 		p.setOpacity(1.);
 	}
 
-	QRect inner(QPoint((width() - st::historyEmojiCircle.width()) / 2, st::historyEmojiCircleTop), st::historyEmojiCircle);
+	QRect inner(QPoint((width() - st::historyEmojiCircle.width()) / 2, (height() - st::historyEmojiCircle.height()) / 2), st::historyEmojiCircle);
 	const auto color = (_colorOverride
 		? *_colorOverride
 		: (over
@@ -260,6 +268,9 @@ void EmojiButton::onStateChanged(State was, StateChangeSource source) {
 }
 
 QPoint EmojiButton::prepareRippleStartPosition() const {
+	if (!_st.rippleAreaSize) {
+		return DisabledRippleStartPosition();
+	}
 	return mapFromGlobal(QCursor::pos()) - _st.rippleAreaPosition;
 }
 

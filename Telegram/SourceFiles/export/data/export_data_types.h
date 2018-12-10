@@ -66,6 +66,7 @@ struct File {
 		Unavailable,
 		FileType,
 		FileSize,
+		DateLimits,
 	};
 	FileLocation location;
 	int size = 0;
@@ -188,6 +189,7 @@ UserpicsSlice ParseUserpicsSlice(
 struct User {
 	ContactInfo info;
 	Utf8String username;
+	int32 id;
 	bool isBot = false;
 	bool isSelf = false;
 
@@ -567,6 +569,14 @@ MessagesSlice ParseMessagesSlice(
 	const MTPVector<MTPUser> &users,
 	const MTPVector<MTPChat> &chats,
 	const QString &mediaFolder);
+
+bool SingleMessageBefore(
+	const MTPmessages_Messages &data,
+	TimeId date);
+bool SingleMessageAfter(
+	const MTPmessages_Messages &data,
+	TimeId date);
+bool SkipMessageByDate(const Message &message, const Settings &settings);
 
 Utf8String FormatPhoneNumber(const Utf8String &phoneNumber);
 Utf8String FormatDateTime(

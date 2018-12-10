@@ -617,6 +617,7 @@ User ParseUser(const MTPUser &data) {
 	auto result = User();
 	result.info = ParseContactInfo(data);
 	data.match([&](const MTPDuser &data) {
+		result.id = data.vid.v;
 		if (data.has_username()) {
 			result.username = ParseString(data.vusername);
 		}
@@ -1567,6 +1568,44 @@ MessagesSlice ParseMessagesSlice(
 	}
 	result.peers = ParsePeersLists(users, chats);
 	return result;
+}
+
+TimeId SingleMessageDate(const MTPmessages_Messages &data) {
+	return data.match([&](const MTPDmessages_messagesNotModified &data) {
+		return 0;
+	}, [&](const auto &data) {
+		const auto &list = data.vmessages.v;
+		if (list.isEmpty()) {
+			return 0;
+		}
+		return list[0].match([](const MTPDmessageEmpty &data) {
+			return 0;
+		}, [](const auto &data) {
+			return data.vdate.v;
+		});
+	});
+}
+
+bool SingleMessageBefore(
+		const MTPmessages_Messages &data,
+		TimeId date) {
+	const auto single = SingleMessageDate(data);
+	return (single > 0 && single < date);
+}
+
+bool SingleMessageAfter(
+		const MTPmessages_Messages &data,
+		TimeId date) {
+	const auto single = SingleMessageDate(data);
+	return (single > 0 && single > date);
+}
+
+bool SkipMessageByDate(const Message &message, const Settings &settings) {
+	const auto goodFrom = (settings.singlePeerFrom <= 0)
+		|| (settings.singlePeerFrom <= message.date);
+	const auto goodTill = (settings.singlePeerTill <= 0)
+		|| (message.date < settings.singlePeerTill);
+	return !goodFrom || !goodTill;
 }
 
 Utf8String FormatPhoneNumber(const Utf8String &phoneNumber) {

@@ -1,3 +1,43 @@
+1.4.8 beta (04.12.18)
+
+- Add emoji to media captions.
+- Switch off the 'Count unread messages' option in Settings > Notifications if you want to see the unread chats count in the badge instead.
+
+1.4.7 beta (10.11.18)
+
+- Crash fix.
+
+1.4.6 beta (09.11.18)
+
+- Bug fixes and other minor improvements.
+
+1.4.5 beta (08.11.18)
+
+- Listen to voice and video messages in 2X mode if you're in a hurry.
+- Find video messages in the shared voice messages section.
+- Add a comment when you share posts from channels.
+- View all photos and videos in Twitter and Instagram link previews.
+- Bug fixes and other minor improvements.
+
+1.4.4 beta (16.10.18)
+
+- Interface scaling for large screens, up to 300% (up to 150% for macOS retina screens).
+- Updated emoji.
+
+1.4.3 (13.10.18)
+
+- Bug fixes and other minor improvements.
+
+1.4.2 (10.10.18)
+
+- Crash fix.
+
+1.4.1 (09.10.18)
+
+- Reduce crashes due to the out of memory exceptions.
+- Load map previews through mtproto.
+- Bug fixes and other minor improvements.
+
 1.4 (28.09.18)
 
 - Fully redesigned Settings section.

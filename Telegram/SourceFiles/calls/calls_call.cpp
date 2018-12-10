@@ -8,7 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "calls/calls_call.h"
 
 #include "auth_session.h"
-#include "mainwidget.h"
+#include "apiwrap.h"
 #include "lang/lang_keys.h"
 #include "boxes/confirm_box.h"
 #include "boxes/rate_call_box.h"
@@ -58,7 +58,7 @@ void ConvertEndpoint(
 		(uint16_t)mtc.vport.v,
 		ipv4,
 		ipv6,
-		tgvoip::Endpoint::TYPE_UDP_RELAY,
+		tgvoip::Endpoint::Type::UDP_RELAY,
 		(unsigned char*)mtc.vpeer_tag.v.data()));
 }
 
@@ -241,6 +241,12 @@ void Call::startIncoming() {
 }
 
 void Call::answer() {
+	_delegate->requestMicrophonePermissionOrFail(crl::guard(this, [=] {
+		actuallyAnswer();
+	}));
+}
+
+void Call::actuallyAnswer() {
 	Expects(_type == Type::Incoming);
 
 	if (_state != State::Starting && _state != State::WaitingIncoming) {
@@ -574,24 +580,15 @@ void Call::createAndStartController(const MTPDphoneCall &call) {
 		_controller->SetMicMute(_mute);
 	}
 	_controller->implData = static_cast<void*>(this);
-	const auto p2p = [&] {
-		switch (Auth().settings().callsPeerToPeer()) {
-		case PeerToPeer::DefaultContacts:
-		case PeerToPeer::Contacts:
-			return _user->isContact();
-		case PeerToPeer::DefaultEveryone:
-		case PeerToPeer::Everyone:
-			return true;
-		case PeerToPeer::Nobody:
-			return false;
-		}
-		Unexpected("Calls::PeerToPeer value in Auth().settings().");
-	}();
-	_controller->SetRemoteEndpoints(endpoints, p2p, protocol.vmax_layer.v);
+	_controller->SetRemoteEndpoints(
+		endpoints,
+		call.is_p2p_allowed(),
+		protocol.vmax_layer.v);
 	_controller->SetConfig(config);
 	_controller->SetEncryptionKey(reinterpret_cast<char*>(_authKey.data()), (_type == Type::Outgoing));
 	_controller->SetCallbacks(callbacks);
-	if (Global::UseProxy() && Global::UseProxyForCalls()) {
+	if (Global::UseProxyForCalls()
+		&& (Global::ProxySettings() == ProxyData::Settings::Enabled)) {
 		const auto proxy = Global::SelectedProxy();
 		if (proxy.supportsCalls()) {
 			Assert(proxy.type == ProxyData::Type::Socks5);
@@ -791,7 +788,7 @@ void Call::finish(FinishType type, const MTPPhoneCallDiscardReason &reason) {
 		// This could be destroyed by updates, so we set Ended after
 		// updates being handled, but in a guarded way.
 		crl::on_main(this, [=] { setState(finalState); });
-		App::main()->sentUpdatesReceived(result);
+		Auth().api().applyUpdates(result);
 	}).fail([this, finalState](const RPCError &error) {
 		setState(finalState);
 	}).send();

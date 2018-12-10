@@ -109,15 +109,18 @@ bool IsDefaultPath(const QString &path) {
 			: value;
 		return (cPlatform() == dbipWindows) ? result.toLower() : result;
 	};
-	return (check(path) == check(psDownloadPath()));
+	return (check(path) == check(File::DefaultDownloadPath()));
 }
 
 void ResolveSettings(Settings &settings) {
 	if (settings.path.isEmpty()) {
-		settings.path = psDownloadPath();
+		settings.path = File::DefaultDownloadPath();
 		settings.forceSubPath = true;
 	} else {
 		settings.forceSubPath = IsDefaultPath(settings.path);
+	}
+	if (!settings.onlySinglePeer()) {
+		settings.singlePeerFrom = settings.singlePeerTill = 0;
 	}
 }
 
@@ -158,6 +161,12 @@ void PanelController::showSettings() {
 	auto settings = base::make_unique_q<SettingsWidget>(
 		_panel,
 		*_settings);
+	settings->setShowBoxCallback([=](object_ptr<BoxContent> box) {
+		_panel->showBox(
+			std::move(box),
+			LayerOption::KeepOther,
+			anim::type::normal);
+	});
 
 	settings->startClicks(
 	) | rpl::start_with_next([=]() {
@@ -372,7 +381,7 @@ void PanelController::saveSettings() const {
 		return (cPlatform() == dbipWindows) ? result.toLower() : result;
 	};
 	auto settings = *_settings;
-	if (check(settings.path) == check(psDownloadPath())) {
+	if (check(settings.path) == check(File::DefaultDownloadPath())) {
 		settings.path = QString();
 	}
 	Local::WriteExportSettings(settings);

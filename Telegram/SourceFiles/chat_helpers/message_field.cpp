@@ -12,6 +12,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/qthelp_url.h"
 #include "boxes/abstract_box.h"
 #include "ui/wrap/vertical_layout.h"
+#include "chat_helpers/emoji_suggestions_widget.h"
 #include "window/window_controller.h"
 #include "lang/lang_keys.h"
 #include "mainwindow.h"
@@ -112,6 +113,9 @@ void EditLinkBox::prepare() {
 		st::markdownLinkFieldPadding);
 	text->setInstantReplaces(Ui::InstantReplaces::Default());
 	text->setInstantReplacesEnabled(Global::ReplaceEmojiValue());
+	Ui::Emoji::SuggestionsController::Init(
+		getDelegate()->outerContainer(),
+		text);
 
 	const auto url = content->add(
 		object_ptr<Ui::InputField>(
@@ -279,7 +283,6 @@ Fn<bool(
 	QString text,
 	QString link,
 	EditLinkAction action)> DefaultEditLinkCallback(
-		not_null<Window::Controller*> controller,
 		not_null<Ui::InputField*> field) {
 	const auto weak = make_weak(field);
 	return [=](
@@ -312,14 +315,13 @@ void InitMessageField(
 	field->setTagMimeProcessor(std::make_unique<FieldTagMimeProcessor>());
 
 	field->document()->setDocumentMargin(4.);
-	field->setAdditionalMargin(convertScale(4) - 4);
+	field->setAdditionalMargin(ConvertScale(4) - 4);
 
 	field->customTab(true);
 	field->setInstantReplaces(Ui::InstantReplaces::Default());
 	field->setInstantReplacesEnabled(Global::ReplaceEmojiValue());
 	field->setMarkdownReplacesEnabled(rpl::single(true));
-	field->setEditLinkCallback(
-		DefaultEditLinkCallback(controller, field));
+	field->setEditLinkCallback(DefaultEditLinkCallback(field));
 }
 
 bool HasSendText(not_null<const Ui::InputField*> field) {
@@ -339,7 +341,8 @@ bool HasSendText(not_null<const Ui::InputField*> field) {
 InlineBotQuery ParseInlineBotQuery(not_null<const Ui::InputField*> field) {
 	auto result = InlineBotQuery();
 
-	const auto &text = field->getTextWithTags().text;
+	const auto &full = field->getTextWithTags();
+	const auto &text = full.text;
 	const auto textLength = text.size();
 
 	auto inlineUsernameStart = 1;
@@ -365,6 +368,11 @@ InlineBotQuery ParseInlineBotQuery(not_null<const Ui::InputField*> field) {
 			validInlineUsername = text[inlineUsernameEnd].isSpace();
 		}
 		if (validInlineUsername) {
+			if (!full.tags.isEmpty()
+				&& (full.tags.front().offset
+					< inlineUsernameStart + inlineUsernameLength)) {
+				return InlineBotQuery();
+			}
 			auto username = text.midRef(inlineUsernameStart, inlineUsernameLength);
 			if (username != result.username) {
 				result.username = username.toString();

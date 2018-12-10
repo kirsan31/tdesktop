@@ -12,10 +12,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtCore/QByteArray>
 #include <QtCore/QString>
 
-#if QT_VERSION < QT_VERSION_CHECK(5, 5, 0)
-#define OS_MAC_OLD
-#endif // QT_VERSION < 5.5.0
-
 #include <crl/crl.h>
 #include <rpl/rpl.h>
 
@@ -25,9 +21,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <set>
 
 #include <range/v3/all.hpp>
-#ifdef Q_OS_WIN
-#include "platform/win/windows_range_v3_helpers.h"
-#endif // Q_OS_WIN
 
 #include "base/flat_map.h"
 #include "base/flat_set.h"

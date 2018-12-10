@@ -8,6 +8,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_photo.h"
 
 #include "data/data_session.h"
+#include "ui/image/image.h"
+#include "ui/image/image_source.h"
 #include "mainwidget.h"
 #include "history/history_media_types.h"
 #include "auth_session.h"
@@ -102,41 +104,44 @@ bool PhotoData::uploading() const {
 	return (uploadingData != nullptr);
 }
 
-void PhotoData::forget() {
-	thumb->forget();
-	replyPreview->forget();
-	medium->forget();
-	full->forget();
+void PhotoData::unload() {
+	// Forget thumb only when image cache limit exceeds.
+	//thumb->unload();
+	medium->unload();
+	full->unload();
+	_replyPreview = nullptr;
 }
 
-ImagePtr PhotoData::makeReplyPreview(Data::FileOrigin origin) {
-	if (replyPreview->isNull() && !thumb->isNull()) {
+Image *PhotoData::getReplyPreview(Data::FileOrigin origin) {
+	if (!_replyPreview && !thumb->isNull()) {
 		const auto previewFromImage = [&](const ImagePtr &image) {
 			if (!image->loaded()) {
 				image->load(origin);
-				return ImagePtr();
+				return std::unique_ptr<Image>();
 			}
 			int w = image->width(), h = image->height();
 			if (w <= 0) w = 1;
 			if (h <= 0) h = 1;
-			return ImagePtr(
+			return std::make_unique<Image>(
+				std::make_unique<Images::ImageSource>(
 				(w > h
 					? image->pix(
 						origin,
 						w * st::msgReplyBarSize.height() / h,
 						st::msgReplyBarSize.height())
-					: image->pix(origin, st::msgReplyBarSize.height())),
-				"PNG");
+					: image->pix(origin, st::msgReplyBarSize.height())
+					).toImage(),
+					"PNG"));
 		};
-		if (thumb->toDelayedStorageImage()
+		if (thumb->isDelayedStorageImage()
 			&& !full->isNull()
-			&& !full->toDelayedStorageImage()) {
-			return previewFromImage(full);
+			&& !full->isDelayedStorageImage()) {
+			_replyPreview = previewFromImage(full);
 		} else {
-			return previewFromImage(thumb);
+			_replyPreview = previewFromImage(thumb);
 		}
 	}
-	return replyPreview;
+	return _replyPreview.get();
 }
 
 MTPInputPhoto PhotoData::mtpInput() const {

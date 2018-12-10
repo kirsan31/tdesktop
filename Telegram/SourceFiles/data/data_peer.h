@@ -10,6 +10,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_types.h"
 #include "data/data_flags.h"
 #include "data/data_notify_settings.h"
+#include "data/data_file_origin.h"
 
 namespace Ui {
 class EmptyUserpic;
@@ -165,17 +166,9 @@ public:
 		int x,
 		int y,
 		int size) const;
-	void loadUserpic(bool loadFirst = false, bool prior = true) {
-		_userpic->load(userpicPhotoOrigin(), loadFirst, prior);
-	}
-	bool userpicLoaded() const {
-		return _userpic->loaded();
-	}
-	bool useEmptyUserpic() const {
-		return _userpicLocation.isNull()
-			|| !_userpic
-			|| !_userpic->loaded();
-	}
+	void loadUserpic(bool loadFirst = false, bool prior = true);
+	bool userpicLoaded() const;
+	bool useEmptyUserpic() const;
 	StorageKey userpicUniqueKey() const;
 	void saveUserpic(const QString &path, int size) const;
 	void saveUserpicRounded(const QString &path, int size) const;
@@ -190,10 +183,13 @@ public:
 	PhotoId userpicPhotoId() const {
 		return userpicPhotoUnknown() ? 0 : _userpicPhotoId;
 	}
+	Data::FileOrigin userpicOrigin() const {
+		return Data::FileOrigin(Data::FileOriginPeerPhoto(id));
+	}
 	Data::FileOrigin userpicPhotoOrigin() const {
 		return (isUser() && userpicPhotoId())
 			? Data::FileOriginUserPhoto(bareId(), userpicPhotoId())
-			: Data::FileOrigin(Data::FileOriginPeerPhoto(id));
+			: Data::FileOrigin();
 	}
 
 	int nameVersion = 1;
@@ -213,6 +209,15 @@ public:
 	}
 
 	ImagePtr currentUserpic() const;
+
+	bool canPinMessages() const;
+	MsgId pinnedMessageId() const {
+		return _pinnedMessageId;
+	}
+	void setPinnedMessageId(MsgId messageId);
+	void clearPinnedMessage() {
+		setPinnedMessageId(0);
+	}
 
 protected:
 	void updateNameDelayed(
@@ -246,6 +251,7 @@ private:
 	base::flat_set<QChar> _nameFirstLetters;
 
 	TimeMs _lastFullUpdate = 0;
+	MsgId _pinnedMessageId = 0;
 
 };
 
@@ -922,7 +928,6 @@ public:
 	bool hiddenPreHistory() const;
 	bool canAddMembers() const;
 	bool canAddAdmins() const;
-	bool canPinMessages() const;
 	bool canPublish() const;
 	bool canWrite() const;
 	bool canViewMembers() const;
@@ -1003,14 +1008,6 @@ public:
 	}
 	void setAvailableMinId(MsgId availableMinId);
 
-	MsgId pinnedMessageId() const {
-		return _pinnedMessageId;
-	}
-	void setPinnedMessageId(MsgId messageId);
-	void clearPinnedMessage() {
-		setPinnedMessageId(0);
-	}
-
 	void setFeed(not_null<Data::Feed*> feed);
 	void clearFeed();
 
@@ -1035,7 +1032,6 @@ private:
 	int _restrictedCount = 0;
 	int _kickedCount = 0;
 	MsgId _availableMinId = 0;
-	MsgId _pinnedMessageId = 0;
 
 	AdminRightFlags _adminRights;
 	RestrictionFlags _restrictions;

@@ -163,14 +163,6 @@ void searchByHashtag(const QString &tag, PeerData *inPeer) {
 	}
 }
 
-void openPeerByName(const QString &username, MsgId msgId, const QString &startToken) {
-	if (MainWidget *m = main()) m->openPeerByName(username, msgId, startToken);
-}
-
-void joinGroupByHash(const QString &hash) {
-	if (MainWidget *m = main()) m->joinGroupByHash(hash);
-}
-
 void showSettings() {
 	if (auto w = wnd()) {
 		w->showSettings();
@@ -214,12 +206,6 @@ void showMediaPreview(
 void showMediaPreview(Data::FileOrigin origin, not_null<PhotoData*> photo) {
 	if (auto w = App::wnd()) {
 		w->ui_showMediaPreview(origin, photo);
-	}
-}
-
-void hideMediaPreview() {
-	if (auto w = App::wnd()) {
-		w->ui_hideMediaPreview();
 	}
 }
 
@@ -371,11 +357,11 @@ uint64 SandboxUserTag = 0;
 
 namespace Sandbox {
 
-bool MoveLegacyAlphaFolder() {
-	const auto was = cExeDir() + qsl("TelegramBeta_data");
-	const auto now = cExeDir() + qsl("TelegramAlpha_data");
+bool MoveLegacyAlphaFolder(const QString &folder, const QString &file) {
+	const auto was = cExeDir() + folder;
+	const auto now = cExeDir() + qsl("TelegramForcePortable");
 	if (QDir(was).exists() && !QDir(now).exists()) {
-		const auto oldFile = was + "/tdata/beta";
+		const auto oldFile = was + "/tdata/" + file;
 		const auto newFile = was + "/tdata/alpha";
 		if (QFile(oldFile).exists() && !QFile(newFile).exists()) {
 			if (!QFile(oldFile).copy(newFile)) {
@@ -395,47 +381,66 @@ bool MoveLegacyAlphaFolder() {
 	return true;
 }
 
-bool CheckAlphaVersionDir() {
+bool MoveLegacyAlphaFolder() {
+	if (!MoveLegacyAlphaFolder(qsl("TelegramAlpha_data"), qsl("alpha"))
+		|| !MoveLegacyAlphaFolder(qsl("TelegramBeta_data"), qsl("beta"))) {
+		return false;
+	}
+	return true;
+}
+
+bool CheckPortableVersionDir() {
 	if (!MoveLegacyAlphaFolder()) {
 		return false;
 	}
-	QFile alpha(cExeDir() + qsl("TelegramAlpha_data/tdata/alpha"));
-	if (cAlphaVersion()) {
-		cForceWorkingDir(cExeDir() + qsl("TelegramAlpha_data/"));
-		QDir().mkpath(cWorkingDir() + qstr("tdata"));
-		if (*AlphaPrivateKey) {
-			cSetAlphaPrivateKey(QByteArray(AlphaPrivateKey));
-		}
-		if (alpha.open(QIODevice::WriteOnly)) {
-			QDataStream dataStream(&alpha);
-			dataStream.setVersion(QDataStream::Qt_5_3);
-			dataStream << quint64(cRealAlphaVersion()) << cAlphaPrivateKey();
-		} else {
-			LOG(("FATAL: Could not open '%1' for writing private key!").arg(alpha.fileName()));
-			return false;
-		}
-	} else if (alpha.exists()) {
-		cForceWorkingDir(cExeDir() + qsl("TelegramAlpha_data/"));
-		if (alpha.open(QIODevice::ReadOnly)) {
-			QDataStream dataStream(&alpha);
-			dataStream.setVersion(QDataStream::Qt_5_3);
 
-			quint64 v;
-			QByteArray k;
-			dataStream >> v >> k;
-			if (dataStream.status() == QDataStream::Ok && !k.isEmpty()) {
-				cSetAlphaVersion(AppVersion * 1000ULL);
-				cSetAlphaPrivateKey(k);
-				cSetRealAlphaVersion(v);
-			} else {
-				LOG(("FATAL: '%1' is corrupted, reinstall private alpha!").arg(alpha.fileName()));
-				return false;
-			}
-		} else {
-			LOG(("FATAL: could not open '%1' for reading private key!").arg(alpha.fileName()));
+	const auto portable = cExeDir() + qsl("TelegramForcePortable");
+	QFile key(portable + qsl("/tdata/alpha"));
+	if (cAlphaVersion()) {
+		Assert(*AlphaPrivateKey != 0);
+
+		cForceWorkingDir(portable + '/');
+		QDir().mkpath(cWorkingDir() + qstr("tdata"));
+		cSetAlphaPrivateKey(QByteArray(AlphaPrivateKey));
+		if (!key.open(QIODevice::WriteOnly)) {
+			LOG(("FATAL: Could not open '%1' for writing private key!"
+				).arg(key.fileName()));
 			return false;
 		}
+		QDataStream dataStream(&key);
+		dataStream.setVersion(QDataStream::Qt_5_3);
+		dataStream << quint64(cRealAlphaVersion()) << cAlphaPrivateKey();
+		return true;
 	}
+	if (!QDir(portable).exists()) {
+		return true;
+	}
+	cForceWorkingDir(portable + '/');
+	if (!key.exists()) {
+		return true;
+	}
+
+	if (!key.open(QIODevice::ReadOnly)) {
+		LOG(("FATAL: could not open '%1' for reading private key. "
+			"Delete it or reinstall private alpha version."
+			).arg(key.fileName()));
+		return false;
+	}
+	QDataStream dataStream(&key);
+	dataStream.setVersion(QDataStream::Qt_5_3);
+
+	quint64 v;
+	QByteArray k;
+	dataStream >> v >> k;
+	if (dataStream.status() != QDataStream::Ok || k.isEmpty()) {
+		LOG(("FATAL: '%1' is corrupted. "
+			"Delete it or reinstall private alpha version."
+			).arg(key.fileName()));
+		return false;
+	}
+	cSetAlphaVersion(AppVersion * 1000ULL);
+	cSetAlphaPrivateKey(k);
+	cSetRealAlphaVersion(v);
 	return true;
 }
 
@@ -603,6 +608,7 @@ struct Data {
 		: qsl("apv2.stel.com");
 	bool PhoneCallsEnabled = true;
 	bool BlockedMode = false;
+	int32 CaptionLengthMax = 1024;
 	base::Observable<void> PhoneCallsEnabledChanged;
 
 	HiddenPinnedMessagesMap HiddenPinnedMessages;
@@ -629,10 +635,10 @@ struct Data {
 	bool SuggestEmoji = true;
 	bool SuggestStickersByEmoji = true;
 	base::Observable<void> ReplaceEmojiChanged;
+	bool VoiceMsgPlaybackDoubled = false;
 	bool SoundNotify = true;
 	bool DesktopNotify = true;
 	bool RestoreSoundNotifyFromTray = false;
-	bool IncludeMuted = true;
 	DBINotifyView NotifyView = dbinvShowPreview;
 	bool NativeNotifications = false;
 	int NotificationsCount = 3;
@@ -642,7 +648,7 @@ struct Data {
 	bool TryIPv6 = (cPlatform() == dbipWindows) ? false : true;
 	std::vector<ProxyData> ProxiesList;
 	ProxyData SelectedProxy;
-	bool UseProxy = false;
+	ProxyData::Settings ProxySettings = ProxyData::Settings::System;
 	bool UseProxyForCalls = false;
 	base::Observable<void> ConnectionTypeChanged;
 
@@ -731,6 +737,7 @@ DefineVar(Global, int32, WebFileDcId);
 DefineVar(Global, QString, TxtDomainString);
 DefineVar(Global, bool, PhoneCallsEnabled);
 DefineVar(Global, bool, BlockedMode);
+DefineVar(Global, int32, CaptionLengthMax);
 DefineRefVar(Global, base::Observable<void>, PhoneCallsEnabledChanged);
 
 DefineVar(Global, HiddenPinnedMessagesMap, HiddenPinnedMessages);
@@ -757,10 +764,10 @@ DefineVar(Global, bool, ReplaceEmoji);
 DefineVar(Global, bool, SuggestEmoji);
 DefineVar(Global, bool, SuggestStickersByEmoji);
 DefineRefVar(Global, base::Observable<void>, ReplaceEmojiChanged);
+DefineVar(Global, bool, VoiceMsgPlaybackDoubled);
 DefineVar(Global, bool, SoundNotify);
 DefineVar(Global, bool, DesktopNotify);
 DefineVar(Global, bool, RestoreSoundNotifyFromTray);
-DefineVar(Global, bool, IncludeMuted);
 DefineVar(Global, DBINotifyView, NotifyView);
 DefineVar(Global, bool, NativeNotifications);
 DefineVar(Global, int, NotificationsCount);
@@ -770,7 +777,7 @@ DefineVar(Global, bool, NotificationsDemoIsShown);
 DefineVar(Global, bool, TryIPv6);
 DefineVar(Global, std::vector<ProxyData>, ProxiesList);
 DefineVar(Global, ProxyData, SelectedProxy);
-DefineVar(Global, bool, UseProxy);
+DefineVar(Global, ProxyData::Settings, ProxySettings);
 DefineVar(Global, bool, UseProxyForCalls);
 DefineRefVar(Global, base::Observable<void>, ConnectionTypeChanged);
 

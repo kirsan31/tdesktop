@@ -9,6 +9,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 class HistoryItem;
 class HistoryMedia;
+class LocationCoords;
+struct LocationData;
 
 namespace base {
 template <typename Enum>
@@ -83,7 +85,7 @@ public:
 	virtual Storage::SharedMediaTypesMask sharedMediaTypes() const;
 	virtual bool canBeGrouped() const;
 	virtual bool hasReplyPreview() const;
-	virtual ImagePtr replyPreview() const;
+	virtual Image *replyPreview() const;
 	// Returns text with link-start and link-end commands for service-color highlighting.
 	// Example: "[link1-start]You:[link1-end] [link1-start]Photo,[link1-end] caption text"
 	virtual QString chatsListText() const;
@@ -136,7 +138,7 @@ public:
 	Storage::SharedMediaTypesMask sharedMediaTypes() const override;
 	bool canBeGrouped() const override;
 	bool hasReplyPreview() const override;
-	ImagePtr replyPreview() const override;
+	Image *replyPreview() const override;
 	QString chatsListText() const override;
 	QString notificationText() const override;
 	QString pinnedTextSubstring() const override;
@@ -172,7 +174,7 @@ public:
 	Storage::SharedMediaTypesMask sharedMediaTypes() const override;
 	bool canBeGrouped() const override;
 	bool hasReplyPreview() const override;
-	ImagePtr replyPreview() const override;
+	Image *replyPreview() const override;
 	QString chatsListText() const override;
 	QString notificationText() const override;
 	QString pinnedTextSubstring() const override;
@@ -298,7 +300,7 @@ public:
 	WebPageData *webpage() const override;
 
 	bool hasReplyPreview() const override;
-	ImagePtr replyPreview() const override;
+	Image *replyPreview() const override;
 	QString chatsListText() const override;
 	QString notificationText() const override;
 	QString pinnedTextSubstring() const override;
@@ -327,7 +329,7 @@ public:
 	GameData *game() const override;
 
 	bool hasReplyPreview() const override;
-	ImagePtr replyPreview() const override;
+	Image *replyPreview() const override;
 	QString notificationText() const override;
 	QString pinnedTextSubstring() const override;
 	TextWithEntities clipboardText() const override;
@@ -363,7 +365,7 @@ public:
 	const Invoice *invoice() const override;
 
 	bool hasReplyPreview() const override;
-	ImagePtr replyPreview() const override;
+	Image *replyPreview() const override;
 	QString notificationText() const override;
 	QString pinnedTextSubstring() const override;
 	TextWithEntities clipboardText() const override;

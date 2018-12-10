@@ -9,6 +9,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "data/data_types.h"
 
+namespace Images {
+class Source;
+} // namespace Images
+
 namespace Storage {
 namespace Cache {
 struct Key;
@@ -43,7 +47,7 @@ struct DocumentAdditionalData {
 struct StickerData : public DocumentAdditionalData {
 	Data::FileOrigin setOrigin() const;
 
-	ImagePtr img;
+	std::unique_ptr<Image> image;
 	QString alt;
 	MTPInputStickerSet set = MTP_inputStickerSetEmpty();
 	StorageImageLocation loc; // doc thumb location
@@ -121,13 +125,14 @@ public:
 
 	void performActionOnLoad();
 
-	void forget();
-	ImagePtr makeReplyPreview(Data::FileOrigin origin);
+	void unload();
+	Image *getReplyPreview(Data::FileOrigin origin);
 
 	StickerData *sticker() const;
 	void checkSticker();
 	void checkStickerThumb();
-	ImagePtr getStickerThumb();
+	Image *getStickerThumb();
+	Image *getStickerImage();
 	Data::FileOrigin stickerSetOrigin() const;
 	Data::FileOrigin stickerOrGifOrigin() const;
 	bool isStickerSetInstalled() const;
@@ -149,11 +154,18 @@ public:
 	int32 duration() const;
 	bool isImage() const;
 	void recountIsImage();
+	bool supportsStreaming() const;
 	void setData(const QByteArray &data) {
 		_data = data;
 	}
 
 	bool hasGoodStickerThumb() const;
+
+	Image *goodThumbnail() const;
+	Storage::Cache::Key goodThumbnailCacheKey() const;
+	void setGoodThumbnail(QImage &&image, QByteArray &&bytes);
+	void refreshGoodThumbnail();
+	void replaceGoodThumbnail(std::unique_ptr<Images::Source> &&source);
 
 	void setRemoteLocation(
 		int32 dc,
@@ -196,7 +208,7 @@ public:
 	DocumentType type = FileDocument;
 	QSize dimensions;
 	int32 date = 0;
-	ImagePtr thumb, replyPreview;
+	ImagePtr thumb;
 	int32 size = 0;
 
 	FileStatus status = FileReady;
@@ -207,8 +219,9 @@ private:
 	friend class Serialize::Document;
 
 	LocationType locationType() const;
+	void validateGoodThumbnail();
 
-	void destroyLoaderDelayed(mtpFileLoader *newValue = nullptr) const;
+	void destroyLoader(mtpFileLoader *newValue = nullptr) const;
 
 	// Two types of location: from MTProto by dc+access or from web by url
 	int32 _dc = 0;
@@ -219,12 +232,17 @@ private:
 	QString _mimeString;
 	WebFileLocation _urlLocation;
 
+	std::unique_ptr<Image> _goodThumbnail;
+	std::unique_ptr<Image> _replyPreview;
+
 	not_null<AuthSession*> _session;
 
 	FileLocation _location;
 	QByteArray _data;
 	std::unique_ptr<DocumentAdditionalData> _additional;
 	int32 _duration = -1;
+	bool _isImage = false;
+	bool _supportsStreaming = false;
 
 	ActionOnLoad _actionOnLoad = ActionOnLoadNone;
 	FullMsgId _actionOnLoadMsgId;
@@ -314,3 +332,11 @@ QString FileNameForSave(
 	QString name,
 	bool savingAs,
 	const QDir &dir = QDir());
+
+namespace Data {
+
+QString FileExtension(const QString &filepath);
+bool IsValidMediaFile(const QString &filepath);
+bool IsExecutableName(const QString &filepath);
+
+} // namespace Data

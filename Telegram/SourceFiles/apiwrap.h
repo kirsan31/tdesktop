@@ -87,6 +87,7 @@ public:
 	void requestDialogEntry(
 		not_null<History*> history,
 		Fn<void()> callback = nullptr);
+	void requestDialogEntries(std::vector<not_null<History*>> histories);
 	//void applyFeedSources(const MTPDchannels_feedSources &data); // #feed
 	//void setFeedChannels(
 	//	not_null<Data::Feed*> feed,
@@ -123,6 +124,12 @@ public:
 		Fn<void(const MTPDhelp_deepLinkInfo &result)> callback);
 	void requestTermsUpdate();
 	void acceptTerms(bytes::const_span termsId);
+
+	void checkChatInvite(
+		const QString &hash,
+		FnMut<void(const MTPChatInvite &)> done,
+		FnMut<void(const RPCError &)> fail);
+	void importChatInvite(const QString &hash);
 
 	void requestChannelMembersForAdd(
 		not_null<ChannelData*> channel,
@@ -262,6 +269,7 @@ public:
 		WebPageId webPageId = 0;
 		bool clearDraft = false;
 		bool generateLocal = true;
+		bool handleSupportSwitch = false;
 	};
 	rpl::producer<SendOptions> sendActions() const {
 		return _sendActions.events();
@@ -323,8 +331,10 @@ public:
 		MsgId replyTo = 0;
 		WebPageId webPageId = 0;
 		bool clearDraft = true;
+		bool handleSupportSwitch = false;
 	};
 	void sendMessage(MessageToSend &&message);
+	void sendBotStart(not_null<UserData*> bot);
 	void sendInlineResult(
 		not_null<UserData*> bot,
 		not_null<InlineBots::Result*> data,
@@ -352,6 +362,7 @@ public:
 			LastSeen,
 			Calls,
 			Invites,
+			CallsPeer2Peer,
 		};
 		enum class Option {
 			Everyone,
@@ -708,6 +719,10 @@ private:
 
 	TimeMs _termsUpdateSendAt = 0;
 	mtpRequestId _termsUpdateRequestId = 0;
+
+	mtpRequestId _checkInviteRequestId = 0;
+	FnMut<void(const MTPChatInvite &result)> _checkInviteDone;
+	FnMut<void(const RPCError &error)> _checkInviteFail;
 
 	std::vector<FnMut<void(const MTPUser &)>> _supportContactCallbacks;
 

@@ -13,8 +13,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "mainwidget.h"
 #include "history/history_media_types.h"
 #include "chat_helpers/message_field.h"
+#include "chat_helpers/emoji_suggestions_widget.h"
+#include "chat_helpers/tabbed_panel.h"
+#include "chat_helpers/tabbed_selector.h"
 #include "core/file_utilities.h"
 #include "core/mime_type.h"
+#include "core/event_filter.h"
 #include "ui/widgets/checkbox.h"
 #include "ui/widgets/buttons.h"
 #include "ui/widgets/input_fields.h"
@@ -22,11 +26,13 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/wrap/fade_wrap.h"
 #include "ui/grouped_layout.h"
 #include "ui/text_options.h"
+#include "ui/special_buttons.h"
 #include "media/media_clip_reader.h"
 #include "window/window_controller.h"
+#include "layout.h"
 #include "styles/style_history.h"
 #include "styles/style_boxes.h"
-#include "layout.h"
+#include "styles/style_chat_helpers.h"
 
 namespace {
 
@@ -766,13 +772,13 @@ void SingleFilePreview::prepareThumb(const QImage &preview) {
 		| Images::Option::RoundedTopRight
 		| Images::Option::RoundedBottomLeft
 		| Images::Option::RoundedBottomRight;
-	_fileThumb = Images::pixmap(
+	_fileThumb = App::pixmapFromImageInPlace(Images::prepare(
 		preview,
 		thumbWidth * cIntRetinaFactor(),
 		0,
 		options,
 		st::msgFileThumbSize,
-		st::msgFileThumbSize);
+		st::msgFileThumbSize));
 }
 
 void SingleFilePreview::preparePreview(const Storage::PreparedFile &file) {
@@ -1556,7 +1562,7 @@ void SendFilesBox::applyAlbumOrder() {
 }
 
 void SendFilesBox::setupCaption() {
-	_caption->setMaxLength(MaxPhotoCaption);
+	_caption->setMaxLength(Global::CaptionLengthMax());
 	_caption->setSubmitSettings(Ui::InputField::SubmitSettings::Both);
 	connect(_caption, &Ui::InputField::resized, [=] {
 		captionResized();
@@ -1582,13 +1588,67 @@ void SendFilesBox::setupCaption() {
 	_caption->setInstantReplaces(Ui::InstantReplaces::Default());
 	_caption->setInstantReplacesEnabled(Global::ReplaceEmojiValue());
 	_caption->setMarkdownReplacesEnabled(rpl::single(true));
-	_caption->setEditLinkCallback(
-		DefaultEditLinkCallback(_controller, _caption));
+	_caption->setEditLinkCallback(DefaultEditLinkCallback(_caption));
+	Ui::Emoji::SuggestionsController::Init(
+		getDelegate()->outerContainer(),
+		_caption);
+
+	setupEmojiPanel();
+}
+
+void SendFilesBox::setupEmojiPanel() {
+	const auto container = getDelegate()->outerContainer();
+	_emojiPanel = base::make_unique_q<ChatHelpers::TabbedPanel>(
+		container,
+		_controller,
+		object_ptr<ChatHelpers::TabbedSelector>(
+			nullptr,
+			_controller,
+			ChatHelpers::TabbedSelector::Mode::EmojiOnly));
+	_emojiPanel->setDesiredHeightValues(
+		1.,
+		st::emojiPanMinHeight / 2,
+		st::emojiPanMinHeight);
+	_emojiPanel->hide();
+	_emojiPanel->getSelector()->emojiChosen(
+	) | rpl::start_with_next([=](EmojiPtr emoji) {
+		Ui::InsertEmojiAtCursor(_caption->textCursor(), emoji);
+	}, lifetime());
+
+	_emojiFilter.reset(Core::InstallEventFilter(
+		container,
+		[=](not_null<QEvent*> event) { return emojiFilter(event); }));
+
+	_emojiToggle.create(this, st::boxAttachEmoji);
+	_emojiToggle->installEventFilter(_emojiPanel);
+	_emojiToggle->addClickHandler([=] {
+		_emojiPanel->toggleAnimated();
+	});
+}
+
+bool SendFilesBox::emojiFilter(not_null<QEvent*> event) {
+	const auto type = event->type();
+	if (type == QEvent::Move || type == QEvent::Resize) {
+		// updateEmojiPanelGeometry uses not only container geometry, but
+		// also container children geometries that will be updated later.
+		crl::on_main(this, [=] { updateEmojiPanelGeometry(); });
+	}
+	return false;
+}
+
+void SendFilesBox::updateEmojiPanelGeometry() {
+	const auto parent = _emojiPanel->parentWidget();
+	const auto global = _emojiToggle->mapToGlobal({ 0, 0 });
+	const auto local = parent->mapFromGlobal(global);
+	_emojiPanel->moveBottomRight(
+		local.y(),
+		local.x() + _emojiToggle->width() * 3);
 }
 
 void SendFilesBox::captionResized() {
 	updateBoxSize();
 	updateControlsGeometry();
+	updateEmojiPanelGeometry();
 	update();
 }
 
@@ -1744,6 +1804,12 @@ void SendFilesBox::updateControlsGeometry() {
 			st::boxPhotoPadding.left(),
 			bottom - _caption->height());
 		bottom -= st::boxPhotoCaptionSkip + _caption->height();
+
+		_emojiToggle->moveToLeft(
+			(st::boxPhotoPadding.left()
+				+ st::sendMediaPreviewSize
+				- _emojiToggle->width()),
+			_caption->y() + st::boxAttachEmojiTop);
 	}
 	const auto pointers = {
 		_sendAlbum.data(),

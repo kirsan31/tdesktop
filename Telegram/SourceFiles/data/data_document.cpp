@@ -8,10 +8,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_document.h"
 
 #include "data/data_session.h"
+#include "data/data_document_good_thumbnail.h"
 #include "lang/lang_keys.h"
 #include "inline_bots/inline_bot_layout_item.h"
 #include "mainwidget.h"
 #include "core/file_utilities.h"
+#include "core/media_active_cache.h"
 #include "core/mime_type.h"
 #include "media/media_audio.h"
 #include "storage/localstorage.h"
@@ -21,11 +23,29 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/history_media_types.h"
 #include "window/window_controller.h"
 #include "storage/cache/storage_cache_database.h"
+#include "boxes/confirm_box.h"
+#include "ui/image/image.h"
+#include "ui/image/image_source.h"
 #include "auth_session.h"
 #include "mainwindow.h"
 #include "messenger.h"
 
 namespace {
+
+constexpr auto kMemoryForCache = 32 * 1024 * 1024;
+
+Core::MediaActiveCache<DocumentData> &ActiveCache() {
+	static auto Instance = Core::MediaActiveCache<DocumentData>(
+		kMemoryForCache,
+		[](DocumentData *document) { document->unload(); });
+	return Instance;
+}
+
+int64 ComputeUsage(StickerData *sticker) {
+	return (sticker != nullptr && sticker->image != nullptr)
+		? sticker->image->width() * sticker->image->height() * 4
+		: 0;
+}
 
 QString JoinStringList(const QStringList &list, const QString &separator) {
 	const auto count = list.size();
@@ -44,6 +64,38 @@ QString JoinStringList(const QStringList &list, const QString &separator) {
 		result.append(separator).append(list[i]);
 	}
 	return result;
+}
+
+void LaunchWithWarning(const QString &name, HistoryItem *item) {
+	const auto warn = [&] {
+		if (!Data::IsExecutableName(name)) {
+			return false;
+		} else if (!Auth().settings().exeLaunchWarning()) {
+			return false;
+		} else if (item && item->history()->peer->isVerified()) {
+			return false;
+		}
+		return true;
+	}();
+	if (!warn) {
+		File::Launch(name);
+		return;
+	}
+	const auto extension = '.' + Data::FileExtension(name);
+	const auto callback = [=](bool checked) {
+		if (checked) {
+			Auth().settings().setExeLaunchWarning(false);
+			Auth().saveSettingsDelayed();
+		}
+		File::Launch(name);
+	};
+	Ui::show(Box<ConfirmDontWarnBox>(
+		lng_launch_exe_warning(
+			lt_extension,
+			textcmdStartSemibold() + extension + textcmdStopSemibold()),
+		lang(lng_launch_exe_dont_ask),
+		lang(lng_launch_exe_sure),
+		callback));
 }
 
 } // namespace
@@ -127,7 +179,7 @@ QString FileNameUnsafe(
 
 	QString path;
 	if (Global::DownloadPath().isEmpty()) {
-		path = psDownloadPath();
+		path = File::DefaultDownloadPath();
 	} else if (Global::DownloadPath() == qsl("tmp")) {
 		path = cTempDir();
 	} else {
@@ -289,15 +341,15 @@ void DocumentOpenClickHandler::Open(
 				Messenger::Instance().showDocument(data, context);
 				location.accessDisable();
 			} else {
-				auto filepath = location.name();
-				if (documentIsValidMediaFile(filepath)) {
+				const auto filepath = location.name();
+				if (Data::IsValidMediaFile(filepath)) {
 					File::Launch(filepath);
 				}
 			}
 			data->session()->data().markMediaRead(data);
 		} else if (data->isVoiceMessage() || data->isAudioFile() || data->isVideoFile()) {
-			auto filepath = location.name();
-			if (documentIsValidMediaFile(filepath)) {
+			const auto filepath = location.name();
+			if (Data::IsValidMediaFile(filepath)) {
 				File::Launch(filepath);
 			}
 			data->session()->data().markMediaRead(data);
@@ -320,14 +372,14 @@ void DocumentOpenClickHandler::Open(
 					Messenger::Instance().showHtmlDocument(location.name());
 				}
 				else {
-					File::Launch(location.name());
+					LaunchWithWarning(location.name(), context);
 				}
 				location.accessDisable();
 			} else {
-				File::Launch(location.name());
+				LaunchWithWarning(location.name(), context);
 			}
 		} else {
-			File::Launch(location.name());
+			LaunchWithWarning(location.name(), context);
 		}
 		return;
 	}
@@ -423,6 +475,8 @@ not_null<AuthSession*> DocumentData::session() const {
 }
 
 void DocumentData::setattributes(const QVector<MTPDocumentAttribute> &attributes) {
+	_isImage = false;
+	_supportsStreaming = false;
 	for (int32 i = 0, l = attributes.size(); i < l; ++i) {
 		switch (attributes[i].type()) {
 		case mtpc_documentAttributeImageSize: {
@@ -452,6 +506,7 @@ void DocumentData::setattributes(const QVector<MTPDocumentAttribute> &attributes
 				type = d.is_round_message() ? RoundVideoDocument : VideoDocument;
 			}
 			_duration = d.vduration.v;
+			_supportsStreaming = d.is_supports_streaming();
 			dimensions = QSize(d.vw.v, d.vh.v);
 		} break;
 		case mtpc_documentAttributeAudio: {
@@ -519,6 +574,46 @@ void DocumentData::setattributes(const QVector<MTPDocumentAttribute> &attributes
 			_additional = nullptr;
 		}
 	}
+	validateGoodThumbnail();
+}
+
+Storage::Cache::Key DocumentData::goodThumbnailCacheKey() const {
+	return Data::DocumentThumbCacheKey(_dc, id);
+}
+
+Image *DocumentData::goodThumbnail() const {
+	return _goodThumbnail.get();
+}
+
+void DocumentData::validateGoodThumbnail() {
+	if (!isVideoFile() && !isAnimation()) {
+		_goodThumbnail = nullptr;
+	} else if (!_goodThumbnail && hasRemoteLocation()) {
+		_goodThumbnail = std::make_unique<Image>(
+			std::make_unique<Data::GoodThumbSource>(this));
+	}
+}
+
+void DocumentData::refreshGoodThumbnail() {
+	if (_goodThumbnail && hasRemoteLocation()) {
+		replaceGoodThumbnail(std::make_unique<Data::GoodThumbSource>(this));
+	}
+}
+
+void DocumentData::replaceGoodThumbnail(
+		std::unique_ptr<Images::Source> &&source) {
+	_goodThumbnail->replaceSource(std::move(source));
+}
+
+void DocumentData::setGoodThumbnail(QImage &&image, QByteArray &&bytes) {
+	Expects(uploadingData != nullptr);
+
+	if (image.isNull()) {
+		return;
+	}
+	_goodThumbnail = std::make_unique<Image>(
+		std::make_unique<Images::LocalFileSource>(
+			QString(), std::move(bytes), "JPG", std::move(image)));
 }
 
 bool DocumentData::saveToCache() const {
@@ -527,11 +622,20 @@ bool DocumentData::saveToCache() const {
 		|| (isVoiceMessage() && size < Storage::kMaxVoiceInMemory);
 }
 
-void DocumentData::forget() {
-	thumb->forget();
-	if (sticker()) sticker()->img->forget();
-	replyPreview->forget();
-	_data.clear();
+void DocumentData::unload() {
+	// Forget thumb only when image cache limit exceeds.
+	//thumb->unload();
+	if (sticker()) {
+		if (sticker()->image) {
+			ActiveCache().decrement(ComputeUsage(sticker()));
+			sticker()->image = nullptr;
+		}
+	}
+	_replyPreview = nullptr;
+	if (!_data.isEmpty()) {
+		ActiveCache().decrement(_data.size());
+		_data.clear();
+	}
 }
 
 void DocumentData::automaticLoad(
@@ -641,7 +745,7 @@ void DocumentData::performActionOnLoad() {
 		}
 		else if (_actionOnLoad == ActionOnLoadOpen || _actionOnLoad == ActionOnLoadPlayInline) {
 			if (isVoiceMessage() || isAudioFile() || isVideoFile()) {
-				if (documentIsValidMediaFile(already)) {
+				if (Data::IsValidMediaFile(already)) {
 					File::Launch(already);
 				}
 				_session->data().markMediaRead(this);
@@ -654,12 +758,12 @@ void DocumentData::performActionOnLoad() {
 					Messenger::Instance().showHtmlDocument(already);
 				}
 				else {
-					File::Launch(already);
+					LaunchWithWarning(already, item);
 				}
 				loc.accessDisable();
 			}
 			else {
-				File::Launch(already);
+				LaunchWithWarning(already, item);
 			}
 		}
 	}
@@ -669,25 +773,43 @@ void DocumentData::performActionOnLoad() {
 bool DocumentData::loaded(FilePathResolveType type) const {
 	if (loading() && _loader->finished()) {
 		if (_loader->cancelled()) {
-			destroyLoaderDelayed(CancelledMtpFileLoader);
+			destroyLoader(CancelledMtpFileLoader);
 		} else {
 			auto that = const_cast<DocumentData*>(this);
 			that->_location = FileLocation(_loader->fileName());
+			ActiveCache().decrement(that->_data.size());
 			that->_data = _loader->bytes();
-			if (that->sticker() && !_loader->imagePixmap().isNull()) {
-				that->sticker()->img = ImagePtr(_data, _loader->imageFormat(), _loader->imagePixmap());
+			ActiveCache().increment(that->_data.size());
+			if (that->sticker()
+				&& !that->sticker()->image
+				&& !_loader->imageData().isNull()) {
+				that->sticker()->image = std::make_unique<Image>(
+					std::make_unique<Images::LocalFileSource>(
+						QString(),
+						_data,
+						_loader->imageFormat(),
+						_loader->imageData()));
+				ActiveCache().increment(ComputeUsage(that->sticker()));
 			}
-			destroyLoaderDelayed();
+			if (!that->_data.isEmpty() || that->getStickerImage()) {
+				ActiveCache().up(that);
+			}
+
+			that->refreshGoodThumbnail();
+			destroyLoader();
 		}
 		_session->data().notifyDocumentLayoutChanged(this);
 	}
 	return !data().isEmpty() || !filepath(type).isEmpty();
 }
 
-void DocumentData::destroyLoaderDelayed(mtpFileLoader *newValue) const {
-	_loader->stop();
-	auto loader = std::unique_ptr<FileLoader>(std::exchange(_loader, newValue));
-	_session->downloader().delayedDestroyLoader(std::move(loader));
+void DocumentData::destroyLoader(mtpFileLoader *newValue) const {
+	const auto loader = std::exchange(_loader, newValue);
+	if (_loader == CancelledMtpFileLoader) {
+		loader->cancel();
+	}
+	loader->stop();
+	delete loader;
 }
 
 bool DocumentData::loading() const {
@@ -767,7 +889,9 @@ void DocumentData::save(
 		return;
 	}
 
-	if (_loader == CancelledMtpFileLoader) _loader = nullptr;
+	if (_loader == CancelledMtpFileLoader) {
+		_loader = nullptr;
+	}
 	if (_loader) {
 		if (!_loader->setFileName(toFile)) {
 			cancel(); // changes _actionOnLoad
@@ -823,10 +947,7 @@ void DocumentData::cancel() {
 		return;
 	}
 
-	auto loader = std::unique_ptr<FileLoader>(std::exchange(_loader, CancelledMtpFileLoader));
-	loader->cancel();
-	loader->stop();
-	_session->downloader().delayedDestroyLoader(std::move(loader));
+	destroyLoader(CancelledMtpFileLoader);
 	_session->data().notifyDocumentLayoutChanged(this);
 	if (auto main = App::main()) {
 		main->documentLoadProgress(this);
@@ -888,6 +1009,9 @@ QByteArray documentWaveformEncode5bit(const VoiceWaveform &waveform) {
 }
 
 QByteArray DocumentData::data() const {
+	if (!_data.isEmpty()) {
+		ActiveCache().up(const_cast<DocumentData*>(this));
+	}
 	return _data;
 }
 
@@ -957,8 +1081,8 @@ bool DocumentData::isStickerSetInstalled() const {
 	return false;
 }
 
-ImagePtr DocumentData::makeReplyPreview(Data::FileOrigin origin) {
-	if (replyPreview->isNull() && !thumb->isNull()) {
+Image *DocumentData::getReplyPreview(Data::FileOrigin origin) {
+	if (!_replyPreview->isNull() && !thumb->isNull()) {
 		if (thumb->loaded()) {
 			int w = thumb->width(), h = thumb->height();
 			if (w <= 0) w = 1;
@@ -968,12 +1092,15 @@ ImagePtr DocumentData::makeReplyPreview(Data::FileOrigin origin) {
 			auto options = Images::Option::Smooth | (isVideoMessage() ? Images::Option::Circled : Images::Option::None) | Images::Option::TransparentBackground;
 			auto outerSize = st::msgReplyBarSize.height();
 			auto image = thumb->pixNoCache(origin, thumbSize.width(), thumbSize.height(), options, outerSize, outerSize);
-			replyPreview = ImagePtr(image, "PNG");
+			_replyPreview = std::make_unique<Image>(
+				std::make_unique<Images::ImageSource>(
+					image.toImage(),
+					"PNG"));
 		} else {
 			thumb->load(origin);
 		}
 	}
-	return replyPreview;
+	return _replyPreview.get();
 }
 
 StickerData *DocumentData::sticker() const {
@@ -987,15 +1114,27 @@ void DocumentData::checkSticker() {
 	if (!data) return;
 
 	automaticLoad(stickerSetOrigin(), nullptr);
-	if (data->img->isNull() && loaded()) {
+	if (!data->image && loaded()) {
 		if (_data.isEmpty()) {
 			const auto &loc = location(true);
 			if (loc.accessEnable()) {
-				data->img = ImagePtr(loc.name());
+				data->image = std::make_unique<Image>(
+					std::make_unique<Images::LocalFileSource>(loc.name()));
 				loc.accessDisable();
 			}
 		} else {
-			data->img = ImagePtr(_data);
+			auto format = QByteArray();
+			auto image = App::readImage(_data, &format, false);
+			data->image = std::make_unique<Image>(
+				std::make_unique<Images::LocalFileSource>(
+					QString(),
+					_data,
+					format,
+					std::move(image)));
+		}
+		if (const auto usage = ComputeUsage(data)) {
+			ActiveCache().increment(usage);
+			ActiveCache().up(this);
 		}
 	}
 }
@@ -1008,13 +1147,21 @@ void DocumentData::checkStickerThumb() {
 	}
 }
 
-ImagePtr DocumentData::getStickerThumb() {
-	if (hasGoodStickerThumb()) {
-		return thumb;
-	} else if (const auto data = sticker()) {
-		return data->img;
+Image *DocumentData::getStickerImage() {
+	checkSticker();
+	if (const auto data = sticker()) {
+		return data->image.get();
 	}
-	return ImagePtr();
+	return nullptr;
+}
+
+Image *DocumentData::getStickerThumb() {
+	if (hasGoodStickerThumb()) {
+		return thumb->isNull() ? nullptr : thumb.get();
+	} else if (const auto data = sticker()) {
+		return data->image.get();
+	}
+	return nullptr;
 }
 
 Data::FileOrigin DocumentData::stickerSetOrigin() const {
@@ -1199,7 +1346,13 @@ bool DocumentData::isAudioFile() const {
 	} else if (isSong()) {
 		return true;
 	}
-	return _mimeString.startsWith(qstr("audio/"), Qt::CaseInsensitive);
+	const auto prefix = qstr("audio/");
+	if (!_mimeString.startsWith(prefix, Qt::CaseInsensitive)) {
+		return false;
+	}
+	const auto left = _mimeString.midRef(prefix.size()).toString();
+	const auto types = { qstr("x-wav"), qstr("wav"), qstr("mp4") };
+	return ranges::find(types, left) != end(types);
 }
 
 bool DocumentData::isSharedMediaMusic() const {
@@ -1218,14 +1371,17 @@ int32 DocumentData::duration() const {
 }
 
 bool DocumentData::isImage() const {
-	return !isAnimation() && !isVideoFile() && (_duration > 0);
+	return _isImage;
+}
+
+bool DocumentData::supportsStreaming() const {
+	return _supportsStreaming;
 }
 
 void DocumentData::recountIsImage() {
-	if (isAnimation() || isVideoFile()) {
-		return;
-	}
-	_duration = fileIsImage(filename(), mimeString()) ? 1 : -1; // hack
+	_isImage = !isAnimation()
+		&& !isVideoFile()
+		&& fileIsImage(filename(), mimeString());
 }
 
 bool DocumentData::hasGoodStickerThumb() const {
@@ -1249,6 +1405,7 @@ void DocumentData::setRemoteLocation(
 			}
 		}
 	}
+	validateGoodThumbnail();
 }
 
 void DocumentData::setContentUrl(const QString &url) {
@@ -1264,7 +1421,12 @@ void DocumentData::collectLocalData(DocumentData *local) {
 
 	_session->data().cache().copyIfEmpty(local->cacheKey(), cacheKey());
 	if (!local->_data.isEmpty()) {
+		ActiveCache().decrement(_data.size());
 		_data = local->_data;
+		ActiveCache().increment(_data.size());
+		if (!_data.isEmpty()) {
+			ActiveCache().up(this);
+		}
 	}
 	if (!local->_location.isEmpty()) {
 		_location = local->_location;
@@ -1274,8 +1436,10 @@ void DocumentData::collectLocalData(DocumentData *local) {
 
 DocumentData::~DocumentData() {
 	if (loading()) {
-		destroyLoaderDelayed();
+		destroyLoader();
 	}
+	unload();
+	ActiveCache().remove(this);
 }
 
 QString DocumentData::ComposeNameString(
@@ -1293,3 +1457,57 @@ QString DocumentData::ComposeNameString(
 	auto trackTitle = (songTitle.isEmpty() ? qsl("Unknown Track") : songTitle);
 	return songPerformer + QString::fromUtf8(" \xe2\x80\x93 ") + trackTitle;
 }
+
+namespace Data {
+
+QString FileExtension(const QString &filepath) {
+	const auto reversed = ranges::view::reverse(filepath);
+	const auto last = ranges::find_first_of(reversed, ".\\/");
+	if (last == reversed.end() || *last != '.') {
+		return QString();
+	}
+	return QString(last.base(), last - reversed.begin());
+}
+
+bool IsValidMediaFile(const QString &filepath) {
+	static const auto kExtensions = [] {
+		const auto list = qsl("\
+webm mkv flv vob ogv ogg drc gif gifv mng avi mov qt wmv yuv rm rmvb asf \
+amv mp4 m4p m4v mpg mp2 mpeg mpe mpv m2v svi 3gp 3g2 mxf roq nsv f4v f4p \
+f4a f4b wma divx evo mk3d mka mks mcf m2p ps ts m2ts ifo aaf avchd cam dat \
+dsh dvr-ms m1v fla flr sol wrap smi swf wtv 8svx 16svx iff aiff aif aifc \
+au bwf cdda raw wav flac la pac m4a ape ofr ofs off rka shn tak tta wv \
+brstm dts dtshd dtsma ast amr mp3 spx gsm aac mpc vqf ra ots swa vox voc \
+dwd smp aup cust mid mus sib sid ly gym vgm psf nsf mod ptb s3m xm it mt2 \
+minipsf psflib 2sf dsf gsf psf2 qsf ssf usf rmj spc niff mxl xml txm ym \
+jam mp1 mscz").split(' ');
+		return base::flat_set<QString>(list.begin(), list.end());
+	}();
+
+	return ranges::binary_search(
+		kExtensions,
+		FileExtension(filepath).toLower());
+}
+
+bool IsExecutableName(const QString &filepath) {
+	static const auto kExtensions = [] {
+		const auto joined =
+#ifdef Q_OS_MAC
+			qsl("action app bin command csh osx workflow");
+#elif defined Q_OS_LINUX // Q_OS_MAC
+			qsl("bin csh ksh out run");
+#else // Q_OS_MAC || Q_OS_LINUX
+			qsl("\
+bat bin cmd com cpl exe gadget inf ins inx isu job jse lnk msc msi msp mst \
+paf pif ps1 reg rgs scr sct shb shs u3p vb vbe vbs vbscript ws wsf");
+#endif // !Q_OS_MAC && !Q_OS_LINUX
+		const auto list = joined.split(' ');
+		return base::flat_set<QString>(list.begin(), list.end());
+	}();
+
+	return ranges::binary_search(
+		kExtensions,
+		FileExtension(filepath).toLower());
+}
+
+} // namespace Data

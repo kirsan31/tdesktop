@@ -9,6 +9,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "ui/widgets/popup_menu.h"
 #include "ui/countryinput.h"
+#include "ui/emoji_config.h"
 #include "emoji_suggestions_data.h"
 #include "chat_helpers/emoji_suggestions_helper.h"
 #include "window/themes/window_theme.h"
@@ -533,7 +534,8 @@ QString AccumulateText(Iterator begin, Iterator end) {
 
 QTextImageFormat PrepareEmojiFormat(EmojiPtr emoji, const QFont &font) {
 	const auto factor = cIntRetinaFactor();
-	const auto width = Ui::Emoji::Size() + st::emojiPadding * factor * 2;
+	const auto width = Ui::Emoji::GetSizeNormal()
+		+ st::emojiPadding * factor * 2;
 	const auto height = QFontMetrics(font).height() * factor;
 	auto result = QTextImageFormat();
 	result.setWidth(width / factor);
@@ -1065,9 +1067,7 @@ void FlatInput::phPrepare(Painter &p, float64 placeholderFocused) {
 void FlatInput::keyPressEvent(QKeyEvent *e) {
 	QString wasText(_oldtext);
 
-	bool shift = e->modifiers().testFlag(Qt::ShiftModifier), alt = e->modifiers().testFlag(Qt::AltModifier);
-	bool ctrl = e->modifiers().testFlag(Qt::ControlModifier) || e->modifiers().testFlag(Qt::MetaModifier), ctrlGood = true;
-	if (_customUpDown && (e->key() == Qt::Key_Up || e->key() == Qt::Key_Down)) {
+	if (_customUpDown && (e->key() == Qt::Key_Up || e->key() == Qt::Key_Down || e->key() == Qt::Key_PageUp || e->key() == Qt::Key_PageDown)) {
 		e->ignore();
 	} else {
 		QLineEdit::keyPressEvent(e);
@@ -1246,7 +1246,7 @@ bool InputField::viewportEventInner(QEvent *e) {
 QVariant InputField::loadResource(int type, const QUrl &name) {
 	const auto imageName = name.toDisplayString();
 	if (const auto emoji = Ui::Emoji::FromUrl(imageName)) {
-		return QVariant(App::emojiSingle(emoji, _st.font->height));
+		return QVariant(Ui::Emoji::SinglePixmap(emoji, _st.font->height));
 	}
 	return _inner->QTextEdit::loadResource(type, name);
 }
@@ -1857,8 +1857,7 @@ bool InputField::isRedoAvailable() const {
 
 void InputField::processFormatting(int insertPosition, int insertEnd) {
 	// Tilde formatting.
-	const auto tildeFormatting = !cRetina()
-		&& (_st.font->f.pixelSize() == 13)
+	const auto tildeFormatting = (_st.font->f.pixelSize() * cIntRetinaFactor() == 13)
 		&& (_st.font->f.family() == qstr("Open Sans"));
 	auto isTildeFragment = false;
 	const auto tildeFixedFont = AdjustFont(st::semiboldFont, _st.font);
@@ -2475,6 +2474,10 @@ void InputField::clearFocus() {
 	_inner->clearFocus();
 }
 
+void InputField::ensureCursorVisible() {
+	_inner->ensureCursorVisible();
+}
+
 not_null<QTextEdit*> InputField::rawTextEdit() {
 	return _inner.get();
 }
@@ -2483,19 +2486,28 @@ not_null<const QTextEdit*> InputField::rawTextEdit() const {
 	return _inner.get();
 }
 
+bool InputField::ShouldSubmit(
+		SubmitSettings settings,
+		Qt::KeyboardModifiers modifiers) {
+	const auto shift = modifiers.testFlag(Qt::ShiftModifier);
+	const auto ctrl = modifiers.testFlag(Qt::ControlModifier)
+		|| modifiers.testFlag(Qt::MetaModifier);
+	return (ctrl && shift)
+		|| (ctrl
+			&& settings != SubmitSettings::None
+			&& settings != SubmitSettings::Enter)
+		|| (!ctrl
+			&& !shift
+			&& settings != SubmitSettings::None
+			&& settings != SubmitSettings::CtrlEnter);
+}
+
 void InputField::keyPressEventInner(QKeyEvent *e) {
 	bool shift = e->modifiers().testFlag(Qt::ShiftModifier), alt = e->modifiers().testFlag(Qt::AltModifier);
 	bool macmeta = (cPlatform() == dbipMac || cPlatform() == dbipMacOld) && e->modifiers().testFlag(Qt::ControlModifier) && !e->modifiers().testFlag(Qt::MetaModifier) && !e->modifiers().testFlag(Qt::AltModifier);
 	bool ctrl = e->modifiers().testFlag(Qt::ControlModifier) || e->modifiers().testFlag(Qt::MetaModifier);
 	bool enterSubmit = (_mode == Mode::SingleLine)
-		|| (ctrl && shift)
-		|| (ctrl
-			&& _submitSettings != SubmitSettings::None
-			&& _submitSettings != SubmitSettings::Enter)
-		|| (!ctrl
-			&& !shift
-			&& _submitSettings != SubmitSettings::None
-			&& _submitSettings != SubmitSettings::CtrlEnter);
+		|| ShouldSubmit(_submitSettings, e->modifiers());
 	bool enter = (e->key() == Qt::Key_Enter || e->key() == Qt::Key_Return);
 	if (e->key() == Qt::Key_Left
 		|| e->key() == Qt::Key_Right
@@ -2532,7 +2544,7 @@ void InputField::keyPressEventInner(QKeyEvent *e) {
 		e->ignore();
 	} else if (handleMarkdownKey(e)) {
 		e->accept();
-	} else if (_customUpDown && (e->key() == Qt::Key_Up || e->key() == Qt::Key_Down)) {
+	} else if (_customUpDown && (e->key() == Qt::Key_Up || e->key() == Qt::Key_Down || e->key() == Qt::Key_PageUp || e->key() == Qt::Key_PageDown)) {
 		e->ignore();
 #ifdef Q_OS_MAC
 	} else if (e->key() == Qt::Key_E && e->modifiers().testFlag(Qt::ControlModifier)) {
@@ -3767,9 +3779,7 @@ void MaskedInputField::keyPressEvent(QKeyEvent *e) {
 	QString wasText(_oldtext);
 	int32 wasCursor(_oldcursor);
 
-	bool shift = e->modifiers().testFlag(Qt::ShiftModifier), alt = e->modifiers().testFlag(Qt::AltModifier);
-	bool ctrl = e->modifiers().testFlag(Qt::ControlModifier) || e->modifiers().testFlag(Qt::MetaModifier), ctrlGood = true;
-	if (_customUpDown && (e->key() == Qt::Key_Up || e->key() == Qt::Key_Down)) {
+	if (_customUpDown && (e->key() == Qt::Key_Up || e->key() == Qt::Key_Down || e->key() == Qt::Key_PageUp || e->key() == Qt::Key_PageDown)) {
 		e->ignore();
 	} else {
 		QLineEdit::keyPressEvent(e);

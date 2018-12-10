@@ -15,11 +15,13 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/widgets/buttons.h"
 #include "ui/widgets/input_fields.h"
 #include "mainwindow.h"
-#include "mainwidget.h"
+#include "auth_session.h"
+#include "apiwrap.h"
 
 namespace {
 
 constexpr auto kMaxRating = 5;
+constexpr auto kRateCallCommentLengthMax = 200;
 
 } // namespace
 
@@ -78,7 +80,7 @@ void RateCallBox::ratingChanged(int value) {
 				langFactory(lng_call_rate_comment));
 			_comment->show();
 			_comment->setSubmitSettings(Ui::InputField::SubmitSettings::Both);
-			_comment->setMaxLength(MaxPhotoCaption);
+			_comment->setMaxLength(kRateCallCommentLengthMax);
 			_comment->resize(width() - (st::callRatingPadding.left() + st::callRatingPadding.right()), _comment->height());
 
 			updateMaxHeight();
@@ -113,10 +115,14 @@ void RateCallBox::send() {
 		return;
 	}
 	auto comment = _comment ? _comment->getLastText().trimmed() : QString();
-	_requestId = request(MTPphone_SetCallRating(MTP_inputPhoneCall(MTP_long(_callId), MTP_long(_callAccessHash)), MTP_int(_rating), MTP_string(comment))).done([this](const MTPUpdates &updates) {
-		App::main()->sentUpdatesReceived(updates);
+	_requestId = request(MTPphone_SetCallRating(
+		MTP_inputPhoneCall(MTP_long(_callId), MTP_long(_callAccessHash)),
+		MTP_int(_rating),
+		MTP_string(comment)
+	)).done([=](const MTPUpdates &updates) {
+		Auth().api().applyUpdates(updates);
 		closeBox();
-	}).fail([this](const RPCError &error) { closeBox(); }).send();
+	}).fail([=](const RPCError &error) { closeBox(); }).send();
 }
 
 void RateCallBox::updateMaxHeight() {

@@ -22,6 +22,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "mainwindow.h"
 #include "auth_session.h"
 #include "apiwrap.h"
+#include "support/support_helper.h"
 #include "styles/style_window.h"
 #include "styles/style_dialogs.h"
 
@@ -50,6 +51,10 @@ Controller::Controller(not_null<MainWindow*> window)
 			startRoundVideo(item);
 		}
 	}, lifetime());
+
+	if (Auth().supportMode()) {
+		Auth().supportHelper().registerWindow(this);
+	}
 }
 
 void Controller::setActiveChatEntry(Dialogs::RowDescriptor row) {
@@ -549,6 +554,40 @@ void Controller::roundVideoFinished(not_null<RoundController*> video) {
 		_roundVideo = nullptr;
 		disableGifPauseReason(Window::GifPauseReason::RoundPlaying);
 	}
+}
+
+void Controller::setDefaultFloatPlayerDelegate(
+		not_null<Media::Player::FloatDelegate*> delegate) {
+	Expects(_defaultFloatPlayerDelegate == nullptr);
+
+	_defaultFloatPlayerDelegate = delegate;
+	_floatPlayers = std::make_unique<Media::Player::FloatController>(
+		delegate);
+	_floatPlayers->closeEvents();
+}
+
+void Controller::replaceFloatPlayerDelegate(
+		not_null<Media::Player::FloatDelegate*> replacement) {
+	Expects(_floatPlayers != nullptr);
+
+	_replacementFloatPlayerDelegate = replacement;
+	_floatPlayers->replaceDelegate(replacement);
+}
+
+void Controller::restoreFloatPlayerDelegate(
+		not_null<Media::Player::FloatDelegate*> replacement) {
+	Expects(_floatPlayers != nullptr);
+
+	if (_replacementFloatPlayerDelegate == replacement) {
+		_replacementFloatPlayerDelegate = nullptr;
+		_floatPlayers->replaceDelegate(_defaultFloatPlayerDelegate);
+	}
+}
+
+rpl::producer<FullMsgId> Controller::floatPlayerClosed() const {
+	Expects(_floatPlayers != nullptr);
+
+	return _floatPlayers->closeEvents();
 }
 
 Controller::~Controller() = default;
