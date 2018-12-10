@@ -8,8 +8,8 @@ Workaround for [Automatically Syntax-Highlight]. More [here](docs/html-code-proc
 Spell checking with Sonnet on Win (using Hunspell).
 
 
-**Tested only on Windows7 x64!!!**  
-Due to lack of time and desire to deeply understand the TDesktop code, some of my corrections may be look ... :)  
+**Tested only on Windows7 x64!**  
+Due to lack of time to deeply understand the TDesktop code, some of my corrections are _quick fixes_ for achievement desire result.  
 
 ### Original text:
 This is the complete source code and the build instructions for the alpha version of the official desktop client for the [Telegram][telegram] messenger, based on the [Telegram API][telegram_api] and the [MTProto][telegram_proto] secure protocol.
