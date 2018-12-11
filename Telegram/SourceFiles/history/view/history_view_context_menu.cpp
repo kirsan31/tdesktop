@@ -15,8 +15,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/history_item_text.h"
 #include "history/history_media_types.h"
 #include "ui/widgets/popup_menu.h"
+#include "ui/image/image.h"
 #include "chat_helpers/message_field.h"
 #include "boxes/confirm_box.h"
+#include "boxes/sticker_set_box.h"
 #include "data/data_photo.h"
 #include "data/data_document.h"
 #include "data/data_media_types.h"
@@ -70,11 +72,7 @@ void CopyImage(not_null<PhotoData*> photo) {
 }
 
 void ShowStickerPackInfo(not_null<DocumentData*> document) {
-	if (const auto sticker = document->sticker()) {
-		if (sticker->set.type() != mtpc_inputStickerSetEmpty) {
-			App::main()->stickersBox(sticker->set);
-		}
-	}
+	StickerSetBox::Show(document);
 }
 
 void ToggleFavedSticker(

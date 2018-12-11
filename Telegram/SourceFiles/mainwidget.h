@@ -10,13 +10,13 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/single_timer.h"
 #include "base/weak_ptr.h"
 #include "ui/rp_widget.h"
+#include "media/player/media_player_float.h"
 
 struct HistoryMessageMarkupButton;
 class MainWindow;
 class ConfirmBox;
 class DialogsWidget;
 class HistoryWidget;
-class HistoryHider;
 class StackItem;
 struct FileLoadResult;
 
@@ -36,7 +36,6 @@ namespace Player {
 class Widget;
 class VolumeWidget;
 class Panel;
-class Float;
 } // namespace Player
 } // namespace Media
 
@@ -67,6 +66,7 @@ class ConnectingWidget;
 struct SectionSlideParams;
 struct SectionShow;
 enum class Column;
+class HistoryHider;
 } // namespace Window
 
 namespace Calls {
@@ -80,7 +80,11 @@ class ItemBase;
 } // namespace Layout
 } // namespace InlineBots
 
-class MainWidget : public Ui::RpWidget, public RPCSender, private base::Subscriber {
+class MainWidget
+	: public Ui::RpWidget
+	, public RPCSender
+	, private base::Subscriber
+	, private Media::Player::FloatDelegate {
 	Q_OBJECT
 
 public:
@@ -102,8 +106,6 @@ public:
 		MsgId msgId = ShowAtUnreadMsgId,
 		const QString &startToken = QString(),
 		FullMsgId clickFromMessageId = FullMsgId());
-	void joinGroupByHash(const QString &hash);
-	void stickersBox(const MTPInputStickerSet &set);
 
 	bool started();
 
@@ -132,11 +134,6 @@ public:
 		not_null<History*> history,
 		not_null<HistoryItem*> item);
 	void markActiveHistoryAsRead();
-
-	Dialogs::RowDescriptor chatListEntryBefore(
-		const Dialogs::RowDescriptor &which) const;
-	Dialogs::RowDescriptor chatListEntryAfter(
-		const Dialogs::RowDescriptor &which) const;
 
 	PeerData *peer();
 
@@ -177,20 +174,17 @@ public:
 	void cancelUploadLayer(not_null<HistoryItem*> item);
 	void shareUrlLayer(const QString &url, const QString &text);
 	void inlineSwitchLayer(const QString &botAndQuery);
-	void hiderLayer(object_ptr<HistoryHider> h);
-	void noHider(HistoryHider *destroyed);
+	void hiderLayer(base::unique_qptr<Window::HistoryHider> h);
 	bool setForwardDraft(PeerId peer, MessageIdsList &&items);
 	bool shareUrl(
-		not_null<PeerData*> peer,
+		PeerId peerId,
 		const QString &url,
 		const QString &text);
 	void replyToItem(not_null<HistoryItem*> item);
-	bool onInlineSwitchChosen(const PeerId &peer, const QString &botAndQuery);
-	bool onSendPaths(const PeerId &peer);
+	bool inlineSwitchChosen(PeerId peerId, const QString &botAndQuery);
+	bool sendPaths(PeerId peerId);
 	void onFilesOrForwardDrop(const PeerId &peer, const QMimeData *data);
-	bool selectingPeer(bool withConfirm = false) const;
-	bool selectingPeerForInlineSwitch();
-	void offerPeer(PeerId peer);
+	bool selectingPeer() const;
 	void dialogsActivate();
 
 	void deletePhotoLayer(PhotoData *photo);
@@ -206,7 +200,6 @@ public:
 		not_null<PeerData*> peer,
 		bool deleteHistory = true);
 	void deleteAndExit(ChatData *chat);
-	void deleteAllFromUser(ChannelData *channel, UserData *from);
 
 	void addParticipants(
 		not_null<PeerData*> chatOrChannel,
@@ -310,10 +303,6 @@ public:
 	void notify_migrateUpdated(PeerData *peer);
 	void notify_historyMuteUpdated(History *history);
 
-	bool cmd_search();
-	bool cmd_next_chat();
-	bool cmd_previous_chat();
-
 	~MainWidget();
 
 signals:
@@ -338,8 +327,6 @@ public slots:
 
 	void onCacheBackground();
 
-	void onInviteImport();
-
 	void onViewsIncrement();
 
 protected:
@@ -349,28 +336,6 @@ protected:
 	bool eventFilter(QObject *o, QEvent *e) override;
 
 private:
-	struct Float {
-		template <typename ToggleCallback, typename DraggedCallback>
-		Float(
-			QWidget *parent,
-			not_null<Window::Controller*> controller,
-			not_null<HistoryItem*> item,
-			ToggleCallback toggle,
-			DraggedCallback dragged);
-
-		bool hiddenByWidget = false;
-		bool hiddenByHistory = false;
-		bool visible = false;
-		RectPart animationSide;
-		Animation visibleAnimation;
-		Window::Column column;
-		RectPart corner;
-		QPoint dragFrom;
-		Animation draggedAnimation;
-		bool hiddenByDrag = false;
-		object_ptr<Media::Player::Float> widget;
-	};
-
 	using ChannelGetDifferenceTime = QMap<ChannelData*, TimeMs>;
 	enum class ChannelDifferenceRequest {
 		Unknown,
@@ -467,39 +432,25 @@ private:
 	void usernameResolveDone(QPair<MsgId, QString> msgIdAndStartToken, const MTPcontacts_ResolvedPeer &result);
 	bool usernameResolveFail(QString name, const RPCError &error);
 
-	void inviteCheckDone(QString hash, const MTPChatInvite &invite);
-	bool inviteCheckFail(const RPCError &error);
-	void inviteImportDone(const MTPUpdates &result);
-	bool inviteImportFail(const RPCError &error);
-
 	int getMainSectionTop() const;
 	int getThirdSectionTop() const;
 
 	void hideAll();
 	void showAll();
+	void clearHider(not_null<Window::HistoryHider*> instance);
 
 	void clearCachedBackground();
-	void checkCurrentFloatPlayer();
-	void createFloatPlayer(not_null<HistoryItem*> item);
-	void toggleFloatPlayer(not_null<Float*> instance);
-	void checkFloatPlayerVisibility();
-	void updateFloatPlayerPosition(not_null<Float*> instance);
-	void removeFloatPlayer(not_null<Float*> instance);
-	Float *currentFloatPlayer() const {
-		return _playerFloats.empty() ? nullptr : _playerFloats.back().get();
-	}
-	Window::AbstractSectionWidget *getFloatPlayerSection(
-		Window::Column column) const;
-	void finishFloatPlayerDrag(
-		not_null<Float*> instance,
-		bool closed);
-	void updateFloatPlayerColumnCorner(QPoint center);
-	QPoint getFloatPlayerPosition(not_null<Float*> instance) const;
-	QPoint getFloatPlayerHiddenPosition(
-		QPoint position,
-		QSize size,
-		RectPart side) const;
-	RectPart getFloatPlayerSide(QPoint center) const;
+
+	not_null<Media::Player::FloatDelegate*> floatPlayerDelegate();
+	not_null<Ui::RpWidget*> floatPlayerWidget() override;
+	not_null<Window::Controller*> floatPlayerController() override;
+	not_null<Window::AbstractSectionWidget*> floatPlayerGetSection(
+		Window::Column column) override;
+	void floatPlayerEnumerateSections(Fn<void(
+		not_null<Window::AbstractSectionWidget*> widget,
+		Window::Column widgetColumn)> callback) override;
+	bool floatPlayerIsVisible(not_null<HistoryItem*> item) override;
+	void floatPlayerClosed(FullMsgId itemId);
 
 	bool getDifferenceTimeChanged(ChannelData *channel, int32 ms, ChannelGetDifferenceTime &channelCurTime, TimeMs &curTime);
 
@@ -517,8 +468,6 @@ private:
 
 	not_null<Window::Controller*> _controller;
 	bool _started = false;
-
-	QString _inviteHash;
 
 	Animation _a_show;
 	bool _showBack = false;
@@ -552,10 +501,8 @@ private:
 	object_ptr<Media::Player::Panel> _playerPlaylist;
 	object_ptr<Media::Player::Panel> _playerPanel;
 	bool _playerUsingPanel = false;
-	std::vector<std::unique_ptr<Float>> _playerFloats;
 
-	QPointer<ConfirmBox> _forwardConfirm; // for single column layout
-	object_ptr<HistoryHider> _hider = { nullptr };
+	base::unique_qptr<Window::HistoryHider> _hider;
 	std::vector<std::unique_ptr<StackItem>> _stack;
 
 	int _playerHeight = 0;

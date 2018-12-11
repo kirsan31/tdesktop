@@ -11,11 +11,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_peer.h"
 
 enum NewMessageType : char;
+enum class ImageRoundRadius;
 class Messenger;
 class MainWindow;
 class MainWidget;
-class LocationCoords;
-struct LocationData;
 class HistoryItem;
 class History;
 class Histories;
@@ -132,14 +131,11 @@ namespace App {
 		return channel(channelId, PeerData::FullLoaded);
 	}
 	void enumerateUsers(Fn<void(not_null<UserData*>)> action);
-	void enumerateChatsChannels(
-		Fn<void(not_null<PeerData*>)> action);
+	void enumerateGroups(Fn<void(not_null<PeerData*>)> action);
+	void enumerateChannels(Fn<void(not_null<ChannelData*>)> action);
 
 	PeerData *peerByName(const QString &username);
 	QString peerName(const PeerData *peer, bool forDialogs = false);
-
-	LocationData *location(const LocationCoords &coords);
-	void forgetMedia();
 
 	Histories &histories();
 	not_null<History*> history(const PeerId &peer);
@@ -186,16 +182,11 @@ namespace App {
 	void clearMousedItems();
 
 	const style::font &monofont();
-	const QPixmap &emoji();
-	const QPixmap &emojiLarge();
-	const QPixmap &emojiSingle(EmojiPtr emoji, int32 fontHeight);
 
 	void clearHistories();
 
 	void initMedia();
 	void deinitMedia();
-
-	void checkImageCacheSize();
 
 	enum LaunchState {
 		Launched = 0,

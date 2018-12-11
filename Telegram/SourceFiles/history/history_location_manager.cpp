@@ -9,6 +9,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "mainwidget.h"
 #include "lang/lang_keys.h"
+#include "ui/image/image.h"
 #include "platform/platform_specific.h"
 
 namespace {
@@ -17,15 +18,10 @@ constexpr auto kCoordPrecision = 8;
 constexpr auto kMaxHttpRedirects = 5;
 
 GeoPointLocation ComputeLocation(const LocationCoords &coords) {
-	int32 w = st::locationSize.width(), h = st::locationSize.height();
-	int32 zoom = 15, scale = 1;
-	if (cScale() == dbisTwo || cRetina()) {
-		scale = 2;
-		zoom = 16;
-	} else {
-		w = convertScale(w);
-		h = convertScale(h);
-	}
+	const auto scale = 1 + (cScale() * cIntRetinaFactor()) / 200;
+	const auto zoom = 13 + (scale - 1);
+	const auto w = st::locationSize.width() / scale;
+	const auto h = st::locationSize.height() / scale;
 
 	auto result = GeoPointLocation();
 	result.lat = coords.lat();
@@ -61,7 +57,7 @@ void LocationClickHandler::setup() {
 
 LocationData::LocationData(const LocationCoords &coords)
 : coords(coords)
-, thumb(ComputeLocation(coords)) {
+, thumb(Images::Create(ComputeLocation(coords))) {
 }
 
 void LocationData::load(Data::FileOrigin origin) {

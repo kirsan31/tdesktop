@@ -16,6 +16,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "boxes/send_files_box.h"
 #include "window/themes/window_theme.h"
 #include "ui/widgets/input_fields.h"
+#include "ui/emoji_config.h"
 #include "export/export_settings.h"
 #include "core/crash_reports.h"
 #include "core/update_checker.h"
@@ -23,6 +24,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "mainwidget.h"
 #include "mainwindow.h"
 #include "lang/lang_keys.h"
+#include "lang/lang_cloud_manager.h"
 #include "media/media_audio.h"
 #include "mtproto/dc_options.h"
 #include "messenger.h"
@@ -540,7 +542,7 @@ enum {
 	dbiReplaceEmoji = 0x13,
 	dbiAskDownloadPath = 0x14,
 	dbiDownloadPathOld = 0x15,
-	dbiScale = 0x16,
+	dbiScaleOld = 0x16,
 	dbiEmojiTabOld = 0x17,
 	dbiRecentEmojiOldOld = 0x18,
 	dbiLoggedPhoneNumber = 0x19,
@@ -561,7 +563,7 @@ enum {
 	dbiTryIPv6 = 0x28,
 	dbiSongVolume = 0x29,
 	dbiWindowsNotificationsOld = 0x30,
-	dbiIncludeMuted = 0x31,
+	dbiIncludeMutedOld = 0x31,
 	dbiMegagroupSizeMax = 0x32,
 	dbiDownloadPath = 0x33,
 	dbiAutoDownload = 0x34,
@@ -596,6 +598,9 @@ enum {
 	dbiTileBackground = 0x55,
 	dbiCacheSettings = 0x56,
 	dbiAnimationsDisabled = 0x57,
+	dbiScalePercent = 0x58,
+	dbiPlaybackSpeed = 0x59,
+	dbiLanguagesKey = 0x5a,
 
 	dbiEncryptedWithSalt = 333,
 	dbiEncrypted = 444,
@@ -610,7 +615,8 @@ enum {
 	dbictHttpAuto = 1, // not used
 	dbictHttpProxy = 2,
 	dbictTcpProxy = 3,
-	dbictProxiesList = 4,
+	dbictProxiesListOld = 4,
+	dbictProxiesList = 5,
 };
 
 typedef QMap<PeerId, FileKey> DraftsMap;
@@ -660,6 +666,7 @@ FileKey _exportSettingsKey = 0;
 
 FileKey _savedPeersKey = 0;
 FileKey _langPackKey = 0;
+FileKey _languagesKey = 0;
 
 bool _mapChanged = false;
 int32 _oldMapVersion = 0, _oldSettingsVersion = 0;
@@ -1092,12 +1099,12 @@ bool _readSetting(quint32 blockId, QDataStream &stream, int version, ReadSetting
 		Global::SetModerateModeEnabled(enabled == 1);
 	} break;
 
-	case dbiIncludeMuted: {
+	case dbiIncludeMutedOld: {
 		qint32 v;
 		stream >> v;
 		if (!_checkStreamStatus(stream)) return false;
 
-		Global::SetIncludeMuted(v == 1);
+		GetStoredAuthSessionCache().setIncludeMutedCounter(v == 1);
 	} break;
 
 	case dbiShowingSavedGifsOld: {
@@ -1212,7 +1219,9 @@ bool _readSetting(quint32 blockId, QDataStream &stream, int version, ReadSetting
 		} break;
 		};
 		Global::SetSelectedProxy(proxy ? proxy : ProxyData());
-		Global::SetUseProxy(proxy ? true : false);
+		Global::SetProxySettings(proxy
+			? ProxyData::Settings::Enabled
+			: ProxyData::Settings::System);
 		if (proxy) {
 			Global::SetProxiesList({ 1, proxy });
 		} else {
@@ -1246,14 +1255,16 @@ bool _readSetting(quint32 blockId, QDataStream &stream, int version, ReadSetting
 				: ProxyData::Type::None;
 			return proxy;
 		};
-		if (connectionType == dbictProxiesList) {
+		if (connectionType == dbictProxiesListOld
+			|| connectionType == dbictProxiesList) {
 			qint32 count = 0, index = 0;
 			stream >> count >> index;
-			if (std::abs(index) > count) {
-				Global::SetUseProxyForCalls(true);
+			qint32 settings = 0, calls = 0;
+			if (connectionType == dbictProxiesList) {
+				stream >> settings >> calls;
+			} else if (std::abs(index) > count) {
+				calls = 1;
 				index -= (index > 0 ? count : -count);
-			} else {
-				Global::SetUseProxyForCalls(false);
 			}
 
 			auto list = std::vector<ProxyData>();
@@ -1271,13 +1282,31 @@ bool _readSetting(quint32 blockId, QDataStream &stream, int version, ReadSetting
 				return false;
 			}
 			Global::SetProxiesList(list);
-			Global::SetUseProxy(index > 0 && index <= list.size());
-			index = std::abs(index);
+			if (connectionType == dbictProxiesListOld) {
+				settings = static_cast<qint32>(
+					(index > 0 && index <= list.size()
+						? ProxyData::Settings::Enabled
+						: ProxyData::Settings::System));
+				index = std::abs(index);
+			}
 			if (index > 0 && index <= list.size()) {
 				Global::SetSelectedProxy(list[index - 1]);
 			} else {
 				Global::SetSelectedProxy(ProxyData());
 			}
+
+			const auto unchecked = static_cast<ProxyData::Settings>(settings);
+			switch (unchecked) {
+			case ProxyData::Settings::Disabled:
+			case ProxyData::Settings::System:
+			case ProxyData::Settings::Enabled:
+				Global::SetProxySettings(unchecked);
+				break;
+			default:
+				Global::SetProxySettings(ProxyData::Settings::System);
+				break;
+			}
+			Global::SetUseProxyForCalls(calls == 1);
 		} else {
 			const auto proxy = readProxy();
 			if (!_checkStreamStatus(stream)) {
@@ -1288,14 +1317,14 @@ bool _readSetting(quint32 blockId, QDataStream &stream, int version, ReadSetting
 				Global::SetSelectedProxy(proxy);
 				if (connectionType == dbictTcpProxy
 					|| connectionType == dbictHttpProxy) {
-					Global::SetUseProxy(true);
+					Global::SetProxySettings(ProxyData::Settings::Enabled);
 				} else {
-					Global::SetUseProxy(false);
+					Global::SetProxySettings(ProxyData::Settings::System);
 				}
 			} else {
 				Global::SetProxiesList({});
 				Global::SetSelectedProxy(ProxyData());
-				Global::SetUseProxy(false);
+				Global::SetProxySettings(ProxyData::Settings::System);
 			}
 		}
 		Sandbox::refreshGlobalProxy();
@@ -1326,6 +1355,14 @@ bool _readSetting(quint32 blockId, QDataStream &stream, int version, ReadSetting
 		if (!_checkStreamStatus(stream)) return false;
 
 		_langPackKey = langPackKey;
+	} break;
+
+	case dbiLanguagesKey: {
+		quint64 languagesKey = 0;
+		stream >> languagesKey;
+		if (!_checkStreamStatus(stream)) return false;
+
+		_languagesKey = languagesKey;
 	} break;
 
 	case dbiTryIPv6: {
@@ -1363,22 +1400,34 @@ bool _readSetting(quint32 blockId, QDataStream &stream, int version, ReadSetting
 		cSetLastUpdateCheck(v);
 	} break;
 
-	case dbiScale: {
+	case dbiScaleOld: {
 		qint32 v;
 		stream >> v;
 		if (!_checkStreamStatus(stream)) return false;
 
-		DBIScale s = cRealScale();
-		switch (v) {
-		case dbisAuto: s = dbisAuto; break;
-		case dbisOne: s = dbisOne; break;
-		case dbisOneAndQuarter: s = dbisOneAndQuarter; break;
-		case dbisOneAndHalf: s = dbisOneAndHalf; break;
-		case dbisTwo: s = dbisTwo; break;
-		}
-		if (cRetina()) s = dbisOne;
-		cSetConfigScale(s);
-		cSetRealScale(s);
+		SetScaleChecked([&] {
+			constexpr auto kAuto = 0;
+			constexpr auto kOne = 1;
+			constexpr auto kOneAndQuarter = 2;
+			constexpr auto kOneAndHalf = 3;
+			constexpr auto kTwo = 4;
+			switch (v) {
+			case kAuto: return kInterfaceScaleAuto;
+			case kOne: return 100;
+			case kOneAndQuarter: return 125;
+			case kOneAndHalf: return 150;
+			case kTwo: return 200;
+			}
+			return cConfigScale();
+		}());
+	} break;
+
+	case dbiScalePercent: {
+		qint32 v;
+		stream >> v;
+		if (!_checkStreamStatus(stream)) return false;
+
+		SetScaleChecked(v);
 	} break;
 
 	case dbiLangOld: {
@@ -1712,6 +1761,14 @@ bool _readSetting(quint32 blockId, QDataStream &stream, int version, ReadSetting
 		Global::SetVideoVolume(snap(v / 1e6, 0., 1.));
 	} break;
 
+	case dbiPlaybackSpeed: {
+		qint32 v;
+		stream >> v;
+		if (!_checkStreamStatus(stream)) return false;
+
+		Global::SetVoiceMsgPlaybackDoubled(v == 2);
+	} break;
+
 	default:
 	LOG(("App Error: unknown blockId in _readSetting: %1").arg(blockId));
 	return false;
@@ -1929,7 +1986,7 @@ void _writeUserSettings() {
 		? userDataInstance->serialize()
 		: QByteArray();
 
-	uint32 size = 22 * (sizeof(quint32) + sizeof(qint32));
+	uint32 size = 23 * (sizeof(quint32) + sizeof(qint32));
 	size += sizeof(quint32) + Serialize::stringSize(Global::AskDownloadPath() ? QString() : Global::DownloadPath()) + Serialize::bytearraySize(Global::AskDownloadPath() ? QByteArray() : Global::DownloadPathBookmark());
 
 	size += sizeof(quint32) + sizeof(qint32);
@@ -1962,7 +2019,6 @@ void _writeUserSettings() {
 	data.stream << quint32(dbiSuggestEmoji) << qint32(Global::SuggestEmoji() ? 1 : 0);
 	data.stream << quint32(dbiSuggestStickersByEmoji) << qint32(Global::SuggestStickersByEmoji() ? 1 : 0);
 	data.stream << quint32(dbiSoundNotify) << qint32(Global::SoundNotify());
-	data.stream << quint32(dbiIncludeMuted) << qint32(Global::IncludeMuted());
 	data.stream << quint32(dbiDesktopNotify) << qint32(Global::DesktopNotify());
 	data.stream << quint32(dbiNotifyView) << qint32(Global::NotifyView());
 	data.stream << quint32(dbiNativeNotifications) << qint32(Global::NativeNotifications());
@@ -1982,6 +2038,7 @@ void _writeUserSettings() {
 	if (!userData.isEmpty()) {
 		data.stream << quint32(dbiAuthSessionSettings) << userData;
 	}
+	data.stream << quint32(dbiPlaybackSpeed) << qint32(Global::VoiceMsgPlaybackDoubled() ? 2 : 1);
 
 	{
 		data.stream << quint32(dbiRecentEmoji) << recentEmojiPreloadData;
@@ -2278,6 +2335,7 @@ ReadMapState _readMap(const QByteArray &pass) {
 	_readUserSettings();
 	_readMtpData();
 
+	DEBUG_LOG(("selfSerialized set: %1").arg(selfSerialized.size()));
 	Messenger::Instance().setAuthSessionFromStorage(
 		std::move(StoredAuthSessionCache),
 		std::move(selfSerialized),
@@ -2325,10 +2383,12 @@ void _writeMap(WriteMapWhen when) {
 	uint32 mapSize = 0;
 	const auto self = [] {
 		if (!AuthSession::Exists()) {
+			DEBUG_LOG(("AuthSelf Warning: Session does not exist."));
 			return QByteArray();
 		}
 		const auto self = Auth().user();
 		if (self->phone().isEmpty()) {
+			DEBUG_LOG(("AuthSelf Error: Phone is empty."));
 			return QByteArray();
 		}
 		auto result = QByteArray();
@@ -2554,7 +2614,7 @@ void writeSettings() {
 	data.stream << quint32(dbiSeenTrayTooltip) << qint32(cSeenTrayTooltip());
 	data.stream << quint32(dbiAutoUpdate) << qint32(cAutoUpdate());
 	data.stream << quint32(dbiLastUpdateCheck) << qint32(cLastUpdateCheck());
-	data.stream << quint32(dbiScale) << qint32(cConfigScale());
+	data.stream << quint32(dbiScalePercent) << qint32(cConfigScale());
 	data.stream << quint32(dbiDcOptions) << dcOptionsSerialized;
 	data.stream << quint32(dbiLoggedPhoneNumber) << cLoggedPhoneNumber();
 	data.stream << quint32(dbiTxtDomainString) << Global::TxtDomainString();
@@ -2562,10 +2622,9 @@ void writeSettings() {
 
 	data.stream << quint32(dbiConnectionType) << qint32(dbictProxiesList);
 	data.stream << qint32(proxies.size());
-	const auto index = qint32(proxyIt - begin(proxies))
-		+ qint32(Global::UseProxyForCalls() ? proxies.size() : 0)
-		+ 1;
-	data.stream << (Global::UseProxy() ? index : -index);
+	data.stream << qint32(proxyIt - begin(proxies)) + 1;
+	data.stream << qint32(Global::ProxySettings());
+	data.stream << qint32(Global::UseProxyForCalls() ? 1 : 0);
 	for (const auto &proxy : proxies) {
 		data.stream << qint32(kProxyTypeShift + int(proxy.type));
 		data.stream << proxy.host << qint32(proxy.port) << proxy.user << proxy.password;
@@ -2579,6 +2638,9 @@ void writeSettings() {
 		<< quint32(Window::Theme::IsNightMode() ? 1 : 0);
 	if (_langPackKey) {
 		data.stream << quint32(dbiLangPackKey) << quint64(_langPackKey);
+	}
+	if (_languagesKey) {
+		data.stream << quint32(dbiLanguagesKey) << quint64(_languagesKey);
 	}
 
 	auto position = cWindowPos();
@@ -4050,7 +4112,7 @@ void readLangPack() {
 	auto data = QByteArray();
 	langpack.stream >> data;
 	if (langpack.stream.status() == QDataStream::Ok) {
-		Lang::Current().fillFromSerialized(data);
+		Lang::Current().fillFromSerialized(data, langpack.version);
 	}
 }
 
@@ -4066,6 +4128,98 @@ void writeLangPack() {
 
 	FileWriteDescriptor file(_langPackKey, FileOption::Safe);
 	file.writeEncrypted(data, SettingsKey);
+}
+
+void saveRecentLanguages(const std::vector<Lang::Language> &list) {
+	if (list.empty()) {
+		if (_languagesKey) {
+			clearKey(_languagesKey, FileOption::Safe);
+			_languagesKey = 0;
+			writeSettings();
+		}
+		return;
+	}
+
+	auto size = sizeof(qint32);
+	for (const auto &language : list) {
+		size += Serialize::stringSize(language.id)
+			+ Serialize::stringSize(language.pluralId)
+			+ Serialize::stringSize(language.baseId)
+			+ Serialize::stringSize(language.name)
+			+ Serialize::stringSize(language.nativeName);
+	}
+	if (!_languagesKey) {
+		_languagesKey = genKey(FileOption::Safe);
+		writeSettings();
+	}
+
+	EncryptedDescriptor data(size);
+	data.stream << qint32(list.size());
+	for (const auto &language : list) {
+		data.stream
+			<< language.id
+			<< language.pluralId
+			<< language.baseId
+			<< language.name
+			<< language.nativeName;
+	}
+
+	FileWriteDescriptor file(_languagesKey, FileOption::Safe);
+	file.writeEncrypted(data, SettingsKey);
+}
+
+void pushRecentLanguage(const Lang::Language &language) {
+	if (language.id.startsWith('#')) {
+		return;
+	}
+	auto list = readRecentLanguages();
+	list.erase(
+		ranges::remove_if(
+			list,
+			[&](const Lang::Language &v) { return (v.id == language.id); }),
+		end(list));
+	list.insert(list.begin(), language);
+
+	saveRecentLanguages(list);
+}
+
+void removeRecentLanguage(const QString &id) {
+	auto list = readRecentLanguages();
+	list.erase(
+		ranges::remove_if(
+			list,
+			[&](const Lang::Language &v) { return (v.id == id); }),
+		end(list));
+
+	saveRecentLanguages(list);
+}
+
+std::vector<Lang::Language> readRecentLanguages() {
+	FileReadDescriptor languages;
+	if (!_languagesKey || !readEncryptedFile(languages, _languagesKey, FileOption::Safe, SettingsKey)) {
+		return {};
+	}
+	qint32 count = 0;
+	languages.stream >> count;
+	if (count <= 0) {
+		return {};
+	}
+	auto result = std::vector<Lang::Language>();
+	result.reserve(count);
+	for (auto i = 0; i != count; ++i) {
+		auto language = Lang::Language();
+		languages.stream
+			>> language.id
+			>> language.pluralId
+			>> language.baseId
+			>> language.name
+			>> language.nativeName;
+		result.push_back(language);
+	}
+	if (languages.stream.status() != QDataStream::Ok) {
+		return {};
+	}
+	return result;
 }
 
 bool copyThemeColorsToPalette(const QString &path) {
@@ -4536,8 +4690,13 @@ void writeSelf() {
 
 void readSelf(const QByteArray &serialized, int32 streamVersion) {
 	QDataStream stream(serialized);
+	const auto user = Auth().user();
+	const auto wasLoadedStatus = std::exchange(
+		user->loadedStatus,
+		PeerData::NotLoaded);
 	const auto self = Serialize::readPeer(streamVersion, stream);
-	if (!self || !self->isSelf() || self != Auth().user()) {
+	if (!self || !self->isSelf() || self != user) {
+		user->loadedStatus = wasLoadedStatus;
 		return;
 	}
 

@@ -76,12 +76,7 @@ public:
 
 	void destroyData();
 
-	Dialogs::RowDescriptor chatListEntryBefore(
-		const Dialogs::RowDescriptor &which) const;
-	Dialogs::RowDescriptor chatListEntryAfter(
-		const Dialogs::RowDescriptor &which) const;
-
-	void scrollToPeer(not_null<History*> history, MsgId msgId);
+	void scrollToEntry(const Dialogs::RowDescriptor &entry);
 
 	Dialogs::IndexedList *contactsList();
 	Dialogs::IndexedList *dialogsList();
@@ -152,6 +147,7 @@ private:
 		const QVector<MTPDialog> &dialogs,
 		const QVector<MTPMessage> &messages);
 
+	void setupSupportLoadingLimit();
 	void setupConnectingWidget();
 	bool searchForPeersRequired(const QString &query) const;
 	void setSearchInChat(Dialogs::Key chat, UserData *from = nullptr);
@@ -166,6 +162,9 @@ private:
 	void updateForwardBar();
 	void checkUpdateStatus();
 
+	bool loadingBlockedByDate() const;
+	void refreshLoadMoreButton();
+
 	bool dialogsFailed(const RPCError &error, mtpRequestId req);
 	bool searchFailed(DialogsSearchRequestType type, const RPCError &error, mtpRequestId req);
 	bool peopleFailed(const RPCError &error, mtpRequestId req);
@@ -175,7 +174,8 @@ private:
 	QTimer _chooseByDragTimer;
 
 	bool _dialogsFull = false;
-	int32 _dialogsOffsetDate = 0;
+	TimeId _dialogsLoadTill = 0;
+	TimeId _dialogsOffsetDate = 0;
 	MsgId _dialogsOffsetId = 0;
 	PeerData *_dialogsOffsetPeer = nullptr;
 	mtpRequestId _dialogsRequestId = 0;
@@ -191,8 +191,9 @@ private:
 	object_ptr<Ui::IconButton> _lockUnlock;
 	object_ptr<Ui::ScrollArea> _scroll;
 	QPointer<DialogsInner> _inner;
-	class UpdateButton;
-	object_ptr<UpdateButton> _updateTelegram = { nullptr };
+	class BottomButton;
+	object_ptr<BottomButton> _updateTelegram = { nullptr };
+	object_ptr<BottomButton> _loadMoreChats = { nullptr };
 	base::unique_qptr<Window::ConnectingWidget> _connecting;
 
 	Animation _a_show;

@@ -26,6 +26,7 @@ public:
 
 	void setQueryChangedCallback(Fn<void(const QString &query)> callback);
 	void setSubmittedCallback(Fn<void(Qt::KeyboardModifiers)> callback);
+	void setCancelledCallback(Fn<void()> callback);
 	void setResizedCallback(Fn<void()> callback);
 
 	enum class AddItemWay {
@@ -68,8 +69,6 @@ private:
 
 // This class is hold in header because it requires Qt preprocessing.
 class MultiSelect::Inner : public TWidget {
-	Q_OBJECT
-
 public:
 	using ScrollCallback = Fn<void(int activeTop, int activeBottom)>;
 	Inner(QWidget *parent, const style::MultiSelect &st, Fn<QString()> placeholderFactory, ScrollCallback callback);
@@ -80,6 +79,7 @@ public:
 
 	void setQueryChangedCallback(Fn<void(const QString &query)> callback);
 	void setSubmittedCallback(Fn<void(Qt::KeyboardModifiers)> callback);
+	void setCancelledCallback(Fn<void()> callback);
 
 	void addItemInBunch(std::unique_ptr<Item> item);
 	void finishItemsBunch(AddItemWay way);
@@ -107,6 +107,7 @@ protected:
 
 private:
 	void submitted(Qt::KeyboardModifiers modifiers);
+	void cancelled();
 	void queryChanged();
 	void fieldFocused();
 	void computeItemsGeometry(int newWidth);
@@ -154,11 +155,11 @@ private:
 
 	Fn<void(const QString &query)> _queryChangedCallback;
 	Fn<void(Qt::KeyboardModifiers)> _submittedCallback;
+	Fn<void()> _cancelledCallback;
 	Fn<void(uint64 itemId)> _itemRemovedCallback;
 	Fn<void(int heightDelta)> _resizedCallback;
 
 };
-
 
 class MultiSelect::Item {
 public:

@@ -54,9 +54,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <optional>
 
 #include <range/v3/all.hpp>
-#ifdef Q_OS_WIN
-#include "platform/win/windows_range_v3_helpers.h"
-#endif // Q_OS_WIN
 
 // Ensures/Expects.
 #include <gsl/gsl_assert>
@@ -88,7 +85,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "ui/animation.h"
 #include "ui/twidget.h"
-#include "ui/images.h"
+#include "ui/image/image_location.h"
 #include "ui/text/text.h"
 
 #include "data/data_types.h"

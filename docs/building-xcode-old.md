@@ -75,7 +75,7 @@ Go to ***BuildPath*** and run
 
     git clone https://github.com/xiph/opus
     cd opus
-    git checkout v1.2.1
+    git checkout v1.3
     ./autogen.sh
     CFLAGS="-mmacosx-version-min=10.6" CPPFLAGS="-mmacosx-version-min=10.6" LDFLAGS="-mmacosx-version-min=10.6" ./configure --prefix=/usr/local/macold
     make -j4
@@ -102,8 +102,10 @@ Go to ***BuildPath*** and run
     cd ..
 
     git clone git://repo.or.cz/openal-soft.git
-    cd openal-soft/build
-    cmake -DLIBTYPE:STRING=STATIC -DCMAKE_OSX_DEPLOYMENT_TARGET:STRING=10.6 -DCMAKE_INSTALL_PREFIX:STRING=/usr/local/macold ..
+    cd openal-soft
+    git checkout openal-soft-1.19.1
+    cd build
+    LDFLAGS='-isysroot /' cmake -DLIBTYPE:STRING=STATIC -DCMAKE_OSX_DEPLOYMENT_TARGET:STRING=10.6 -DCMAKE_INSTALL_PREFIX:STRING=/usr/local/macold ..
     make -j4
     sudo make install
     cd ../..

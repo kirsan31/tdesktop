@@ -214,7 +214,10 @@ struct FileLoadResult {
 	QString thumbname;
 	UploadFileParts thumbparts;
 	QByteArray thumbmd5;
-	QPixmap thumb;
+	QImage thumb;
+
+	QImage goodThumbnail;
+	QByteArray goodThumbnailBytes;
 
 	MTPPhoto photo;
 	MTPDocument document;
@@ -259,6 +262,7 @@ struct FileMediaInformation {
 	};
 	struct Video {
 		bool isGifv = false;
+		bool supportsStreaming = false;
 		int duration = -1;
 		QImage thumbnail;
 	};

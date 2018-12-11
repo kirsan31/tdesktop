@@ -40,7 +40,7 @@ FFMPEG_PATH="$BUILD/ffmpeg"
 FFMPEG_CACHE_VERSION="3"
 
 OPENAL_PATH="$BUILD/openal-soft"
-OPENAL_CACHE_VERSION="3"
+OPENAL_CACHE_VERSION="4"
 
 GYP_DEFINES=""
 
@@ -472,10 +472,12 @@ buildOpenAL() {
     rm -rf "$EXTERNAL/openal-soft"
   fi
   cd $OPENAL_PATH
-  rm -rf *
+  sudo rm -rf *
 
   cd "$EXTERNAL"
   git clone https://github.com/kcat/openal-soft.git
+  cd openal-soft
+  git checkout openal-soft-1.19.1
 
   cd "$EXTERNAL/openal-soft/build"
   cmake \
@@ -673,6 +675,8 @@ buildTelegram() {
 
   cd "$UPSTREAM/Telegram/gyp"
   "$GYP_PATH/gyp" \
+      -Dapi_id=17349 \
+      -Dapi_hash=344583e45741c457fe1862106095a5eb \
       -Dbuild_defines=${GYP_DEFINES:1} \
       -Dlinux_path_xkbcommon=$XKB_PATH \
       -Dlinux_path_va=$VA_PATH \

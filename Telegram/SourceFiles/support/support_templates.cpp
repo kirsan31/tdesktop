@@ -7,7 +7,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "support/support_templates.h"
 
+#include "ui/toast/toast.h"
 #include "data/data_session.h"
+#include "core/shortcuts.h"
 #include "auth_session.h"
 
 namespace Support {
@@ -45,6 +47,10 @@ QString NormalizeQuestion(const QString &question) {
 	return result;
 }
 
+QString NormalizeKey(const QString &query) {
+	return TextUtilities::RemoveAccents(query.trimmed().toLower());
+}
+
 struct FileResult {
 	TemplatesFile result;
 	QStringList errors;
@@ -60,9 +66,9 @@ enum class ReadState {
 
 template <typename StateChange, typename LineCallback>
 void ReadByLine(
-		const QByteArray &blob,
-		StateChange &&stateChange,
-		LineCallback &&lineCallback) {
+	const QByteArray &blob,
+	StateChange &&stateChange,
+	LineCallback &&lineCallback) {
 	using State = ReadState;
 	auto state = State::None;
 	auto hadKeys = false;
@@ -128,7 +134,10 @@ QString ReadByLineGetUrl(const QByteArray &blob, Callback &&callback) {
 		switch (state) {
 		case State::Keys:
 			if (!line.isEmpty()) {
-				question.keys.push_back(line);
+				question.originalKeys.push_back(line);
+				if (const auto norm = NormalizeKey(line); !norm.isEmpty()) {
+					question.normalizedKeys.push_back(norm);
+				}
 			}
 			break;
 		case State::Value:
@@ -278,7 +287,7 @@ TemplatesIndex ComputeIndex(const TemplatesData &data) {
 	for (const auto &[path, file] : data.files) {
 		for (const auto &[normalized, question] : file.questions) {
 			const auto id = std::make_pair(path, normalized);
-			for (const auto &key : question.keys) {
+			for (const auto &key : question.normalizedKeys) {
 				pushString(id, key, kWeightStep * kWeightStep);
 			}
 			pushString(id, question.question, kWeightStep);
@@ -335,7 +344,8 @@ void MoveKeys(TemplatesFile &to, const TemplatesFile &from) {
 	const auto &existing = from.questions;
 	for (auto &[normalized, question] : to.questions) {
 		if (const auto i = existing.find(normalized); i != end(existing)) {
-			question.keys = i->second.keys;
+			question.originalKeys = i->second.originalKeys;
+			question.normalizedKeys = i->second.normalizedKeys;
 		}
 	}
 }
@@ -347,7 +357,7 @@ Delta ComputeDelta(const TemplatesFile &was, const TemplatesFile &now) {
 		if (i == end(was.questions)) {
 			result.added.push_back(&question);
 		} else {
-			result.keys.emplace(normalized, i->second.keys);
+			result.keys.emplace(normalized, i->second.originalKeys);
 			if (i->second.value != question.value) {
 				result.changed.push_back(&question);
 			}
@@ -368,7 +378,7 @@ QString FormatUpdateNotification(const QString &path, const Delta &delta) {
 		for (const auto question : delta.added) {
 			result += qsl("Q: %1\nK: %2\nA: %3\n\n"
 			).arg(question->question
-			).arg(question->keys.join(qsl(", "))
+			).arg(question->originalKeys.join(qsl(", "))
 			).arg(question->value.trimmed());
 		}
 	}
@@ -390,10 +400,10 @@ QString FormatUpdateNotification(const QString &path, const Delta &delta) {
 }
 
 QString UpdateFile(
-		const QString &path,
-		const QByteArray &content,
-		const QString &url,
-		const Delta &delta) {
+	const QString &path,
+	const QByteArray &content,
+	const QString &url,
+	const Delta &delta) {
 	auto result = QString();
 	const auto full = cWorkingDir() + "TEMPLATES/" + path;
 	const auto old = full + qstr(".old");
@@ -416,8 +426,22 @@ QString UpdateFile(
 	return result;
 }
 
+int CountMaxKeyLength(const TemplatesData &data) {
+	auto result = 0;
+	for (const auto &[path, file] : data.files) {
+		for (const auto &[normalized, question] : file.questions) {
+			for (const auto &key : question.normalizedKeys) {
+				accumulate_max(result, key.size());
+			}
+		}
+	}
+	return result;
+}
+
 } // namespace
 } // namespace details
+
+using namespace details;
 
 struct Templates::Updates {
 	QNetworkAccessManager manager;
@@ -425,10 +449,31 @@ struct Templates::Updates {
 };
 
 Templates::Templates(not_null<AuthSession*> session) : _session(session) {
-	reload();
+	load();
+	Shortcuts::Requests(
+	) | rpl::start_with_next([=](not_null<Shortcuts::Request*> request) {
+		using Command = Shortcuts::Command;
+		request->check(
+			Command::SupportReloadTemplates
+		) && request->handle([=] {
+			reload();
+			return true;
+		});
+	}, _lifetime);
 }
 
 void Templates::reload() {
+	_reloadToastSubscription = errors(
+	) | rpl::start_with_next([=](QStringList errors) {
+		Ui::Toast::Show(errors.isEmpty()
+			? "Templates reloaded!"
+			: ("Errors:\n\n" + errors.join("\n\n")));
+	});
+
+	load();
+}
+
+void Templates::load() {
 	if (_reloadAfterRead) {
 		return;
 	} else if (_reading.alive() || _updates) {
@@ -436,11 +481,11 @@ void Templates::reload() {
 		return;
 	}
 
-	auto [left, right] = base::make_binary_guard();
+	auto[left, right] = base::make_binary_guard();
 	_reading = std::move(left);
 	crl::async([=, guard = std::move(right)]() mutable {
-		auto result = details::ReadFiles(cWorkingDir() + "TEMPLATES");
-		result.index = details::ComputeIndex(result.result);
+		auto result = ReadFiles(cWorkingDir() + "TEMPLATES");
+		result.index = ComputeIndex(result.result);
 		crl::on_main([
 			=,
 			result = std::move(result),
@@ -449,7 +494,7 @@ void Templates::reload() {
 			if (!guard.alive()) {
 				return;
 			}
-			_data = std::move(result.result);
+			setData(std::move(result.result));
 			_index = std::move(result.index);
 			_errors.fire(std::move(result.errors));
 			crl::on_main(this, [=] {
@@ -461,6 +506,11 @@ void Templates::reload() {
 			});
 		});
 	});
+}
+
+void Templates::setData(TemplatesData &&data) {
+	_data = std::move(data);
+	_maxKeyLength = CountMaxKeyLength(_data);
 }
 
 void Templates::ensureUpdatesCreated() {
@@ -520,12 +570,12 @@ void Templates::updateRequestFinished(QNetworkReply *reply) {
 	LOG(("Got template from url '%1'"
 		).arg(reply->url().toDisplayString()));
 	const auto content = reply->readAll();
-	crl::async([=, weak = base::make_weak(this)] {
-		auto result = details::ReadFromBlob(content);
-		auto one = details::TemplatesData();
+	crl::async([=, weak = base::make_weak(this)]{
+		auto result = ReadFromBlob(content);
+		auto one = TemplatesData();
 		one.files.emplace(path, std::move(result.result));
-		auto index = details::ComputeIndex(one);
-		crl::on_main(weak, [
+		auto index = ComputeIndex(one);
+		crl::on_main(weak,[
 			=,
 			one = std::move(one),
 			errors = std::move(result.errors),
@@ -533,16 +583,16 @@ void Templates::updateRequestFinished(QNetworkReply *reply) {
 		]() mutable {
 			auto &existing = _data.files.at(path);
 			auto &parsed = one.files.at(path);
-			details::MoveKeys(parsed, existing);
-			details::ReplaceFileIndex(_index, details::ComputeIndex(one), path);
+			MoveKeys(parsed, existing);
+			ReplaceFileIndex(_index, ComputeIndex(one), path);
 			if (!errors.isEmpty()) {
 				_errors.fire(std::move(errors));
 			}
-			if (const auto delta = details::ComputeDelta(existing, parsed)) {
-				const auto text = details::FormatUpdateNotification(
+			if (const auto delta = ComputeDelta(existing, parsed)) {
+				const auto text = FormatUpdateNotification(
 					path,
 					delta);
-				const auto copy = details::UpdateFile(
+				const auto copy = UpdateFile(
 					path,
 					content,
 					existing.url,
@@ -555,7 +605,7 @@ void Templates::updateRequestFinished(QNetworkReply *reply) {
 			_updates->requests.erase(path);
 			checkUpdateFinished();
 		});
-	});
+		});
 }
 
 void Templates::checkUpdateFinished() {
@@ -566,6 +616,54 @@ void Templates::checkUpdateFinished() {
 	if (base::take(_reloadAfterRead)) {
 		reload();
 	}
+}
+
+auto Templates::matchExact(QString query) const
+-> std::optional<QuestionByKey> {
+	if (query.isEmpty() || query.size() > _maxKeyLength) {
+		return {};
+	}
+
+	query = NormalizeKey(query);
+
+	for (const auto &[path, file] : _data.files) {
+		for (const auto &[normalized, question] : file.questions) {
+			for (const auto &key : question.normalizedKeys) {
+				if (key == query) {
+					return QuestionByKey{ question, key };
+				}
+			}
+		}
+	}
+	return {};
+}
+
+auto Templates::matchFromEnd(QString query) const
+-> std::optional<QuestionByKey> {
+	if (query.size() > _maxKeyLength) {
+		query = query.mid(query.size() - _maxKeyLength);
+	}
+
+	const auto size = query.size();
+	auto queries = std::vector<QString>();
+	queries.reserve(size);
+	for (auto i = 0; i != size; ++i) {
+		queries.push_back(NormalizeKey(query.mid(size - i - 1)));
+	}
+
+	auto result = std::optional<QuestionByKey>();
+	for (const auto &[path, file] : _data.files) {
+		for (const auto &[normalized, question] : file.questions) {
+			for (const auto &key : question.normalizedKeys) {
+				if (key.size() <= queries.size()
+					&& queries[key.size() - 1] == key
+					&& (!result || result->key.size() <= key.size())) {
+					result = QuestionByKey{ question, key };
+				}
+			}
+		}
+	}
+	return result;
 }
 
 Templates::~Templates() = default;
@@ -584,13 +682,12 @@ auto Templates::query(const QString &text) const -> std::vector<Question> {
 	if (narrowed == end(_index.first)) {
 		return {};
 	}
-	using Id = details::TemplatesIndex::Id;
-	using Term = details::TemplatesIndex::Term;
+	using Id = TemplatesIndex::Id;
+	using Term = TemplatesIndex::Term;
 	const auto questionById = [&](const Id &id) {
 		return _data.files.at(id.first).questions.at(id.second);
 	};
 
-	using Pair = std::pair<Question, int>;
 	const auto computeWeight = [&](const Id &id) {
 		auto result = 0;
 		const auto full = _index.full.find(id);
@@ -619,20 +716,32 @@ auto Templates::query(const QString &text) const -> std::vector<Question> {
 		}
 		return result;
 	};
+	using Pair = std::pair<Id, int>;
 	const auto pairById = [&](const Id &id) {
-		return std::make_pair(questionById(id), computeWeight(id));
+		return std::make_pair(id, computeWeight(id));
+	};
+	const auto sorter = [](const Pair &a, const Pair &b) {
+		// weight DESC filename DESC question ASC
+		if (a.second > b.second) {
+			return true;
+		} else if (a.second < b.second) {
+			return false;
+		} else if (a.first.first > b.first.first) {
+			return true;
+		} else if (a.first.first < b.first.first) {
+			return false;
+		} else {
+			return (a.first.second < b.first.second);
+		}
 	};
 	const auto good = narrowed->second | ranges::view::transform(
 		pairById
 	) | ranges::view::filter([](const Pair &pair) {
 		return pair.second > 0;
-	}) | ranges::to_vector | ranges::action::sort(
-		std::greater<>(),
-		[](const Pair &pair) { return pair.second; }
-	);
-	return good | ranges::view::transform([](const Pair &pair) {
-		return pair.first;
-	}) | ranges::view::take(details::kQueryLimit) | ranges::to_vector;
+	}) | ranges::to_vector | ranges::action::stable_sort(sorter);
+	return good | ranges::view::transform([&](const Pair &pair) {
+		return questionById(pair.first);
+	}) | ranges::view::take(kQueryLimit) | ranges::to_vector;
 }
 
 } // namespace Support

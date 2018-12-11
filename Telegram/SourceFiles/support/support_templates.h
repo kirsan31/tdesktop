@@ -16,7 +16,8 @@ namespace details {
 
 struct TemplatesQuestion {
 	QString question;
-	QStringList keys;
+	QStringList originalKeys;
+	QStringList normalizedKeys;
 	QString value;
 };
 
@@ -52,15 +53,27 @@ public:
 		return _errors.events();
 	}
 
+	struct QuestionByKey {
+		Question question;
+		QString key;
+	};
+	std::optional<QuestionByKey> matchExact(QString text) const;
+	std::optional<QuestionByKey> matchFromEnd(QString text) const;
+	int maxKeyLength() const {
+		return _maxKeyLength;
+	}
+
 	~Templates();
 
 private:
 	struct Updates;
 
+	void load();
 	void update();
 	void ensureUpdatesCreated();
 	void updateRequestFinished(QNetworkReply *reply);
 	void checkUpdateFinished();
+	void setData(details::TemplatesData &&data);
 
 	not_null<AuthSession*> _session;
 
@@ -69,8 +82,13 @@ private:
 	rpl::event_stream<QStringList> _errors;
 	base::binary_guard _reading;
 	bool _reloadAfterRead = false;
+	rpl::lifetime _reloadToastSubscription;
+
+	int _maxKeyLength = 0;
 
 	std::unique_ptr<Updates> _updates;
+
+	rpl::lifetime _lifetime;
 
 };
 

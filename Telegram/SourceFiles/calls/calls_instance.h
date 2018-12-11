@@ -18,17 +18,9 @@ class Track;
 
 namespace Calls {
 
-enum class PeerToPeer {
-	DefaultContacts,
-	DefaultEveryone,
-	Everyone,
-	Contacts,
-	Nobody,
-};
-
 class Panel;
 
-class Instance : private MTP::Sender, private Call::Delegate, private base::Subscriber {
+class Instance : private MTP::Sender, private Call::Delegate, private base::Subscriber, public base::has_weak_ptr {
 public:
 	Instance();
 
@@ -64,6 +56,7 @@ private:
 	void createCall(not_null<UserData*> user, Call::Type type);
 	void destroyCall(not_null<Call*> call);
 	void destroyCurrentPanel();
+	void requestMicrophonePermissionOrFail(Fn<void()> onSuccess) override;
 
 	void refreshDhConfig();
 	void refreshServerConfig();

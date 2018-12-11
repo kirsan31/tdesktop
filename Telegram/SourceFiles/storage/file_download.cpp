@@ -22,13 +22,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 namespace Storage {
 
-Downloader::Downloader()
-: _delayedLoadersDestroyer([this] { _delayedDestroyedLoaders.clear(); }) {
-}
-
-void Downloader::delayedDestroyLoader(std::unique_ptr<FileLoader> loader) {
-	_delayedDestroyedLoaders.push_back(std::move(loader));
-	_delayedLoadersDestroyer.call();
+Downloader::Downloader() {
 }
 
 void Downloader::clearPriorities() {
@@ -63,12 +57,7 @@ int Downloader::chooseDcIndexForRequest(MTP::DcId dcId) const {
 	return result;
 }
 
-Downloader::~Downloader() {
-	// The file loaders have pointer to downloader and they cancel
-	// requests in destructor where they use that pointer, so all
-	// of them need to be destroyed before any internal state of Downloader.
-	_delayedDestroyedLoaders.clear();
-}
+Downloader::~Downloader() = default;
 
 } // namespace Storage
 
@@ -127,6 +116,31 @@ FileLoader::FileLoader(
 	Expects(!_filename.isEmpty() || (_size <= Storage::kMaxFileInMemory));
 }
 
+void FileLoader::finishWithBytes(const QByteArray &data) {
+	_data = data;
+	_localStatus = LocalStatus::Loaded;
+	if (!_filename.isEmpty() && _toCache == LoadToCacheAsWell) {
+		if (!_fileIsOpen) _fileIsOpen = _file.open(QIODevice::WriteOnly);
+		if (!_fileIsOpen) {
+			cancel(true);
+			return;
+		}
+		if (_file.write(_data) != qint64(_data.size())) {
+			cancel(true);
+			return;
+		}
+	}
+
+	_finished = true;
+	if (_fileIsOpen) {
+		_file.close();
+		_fileIsOpen = false;
+		Platform::File::PostprocessDownloaded(
+			QFileInfo(_file).absoluteFilePath());
+	}
+	_downloader->taskFinished().notify();
+}
+
 QByteArray FileLoader::imageFormat(const QSize &shrinkBox) const {
 	if (_imageFormat.isEmpty() && _locationType == UnknownFileLocation) {
 		readImage(shrinkBox);
@@ -134,11 +148,11 @@ QByteArray FileLoader::imageFormat(const QSize &shrinkBox) const {
 	return _imageFormat;
 }
 
-QPixmap FileLoader::imagePixmap(const QSize &shrinkBox) const {
-	if (_imagePixmap.isNull() && _locationType == UnknownFileLocation) {
+QImage FileLoader::imageData(const QSize &shrinkBox) const {
+	if (_imageData.isNull() && _locationType == UnknownFileLocation) {
 		readImage(shrinkBox);
 	}
-	return _imagePixmap;
+	return _imageData;
 }
 
 void FileLoader::readImage(const QSize &shrinkBox) const {
@@ -146,9 +160,9 @@ void FileLoader::readImage(const QSize &shrinkBox) const {
 	auto image = App::readImage(_data, &format, false);
 	if (!image.isNull()) {
 		if (!shrinkBox.isEmpty() && (image.width() > shrinkBox.width() || image.height() > shrinkBox.height())) {
-			_imagePixmap = App::pixmapFromImageInPlace(image.scaled(shrinkBox, Qt::KeepAspectRatio, Qt::SmoothTransformation));
+			_imageData = image.scaled(shrinkBox, Qt::KeepAspectRatio, Qt::SmoothTransformation);
 		} else {
-			_imagePixmap = App::pixmapFromImageInPlace(std::move(image));
+			_imageData = std::move(image);
 		}
 		_imageFormat = format;
 	}
@@ -177,13 +191,19 @@ void FileLoader::permitLoadFromCloud() {
 	_fromCloud = LoadFromCloudOrLocal;
 }
 
-void FileLoader::loadNext() {
-	if (_queue->queriesCount >= _queue->queriesLimit) {
+void FileLoader::notifyAboutProgress() {
+	const auto queue = _queue;
+	emit progress(this);
+	LoadNextFromQueue(queue);
+}
+
+void FileLoader::LoadNextFromQueue(not_null<FileLoaderQueue*> queue) {
+	if (queue->queriesCount >= queue->queriesLimit) {
 		return;
 	}
-	for (auto i = _queue->start; i;) {
+	for (auto i = queue->start; i;) {
 		if (i->loadPart()) {
-			if (_queue->queriesCount >= _queue->queriesLimit) {
+			if (queue->queriesCount >= queue->queriesLimit) {
 				return;
 			}
 		} else {
@@ -222,43 +242,19 @@ FileLoader::~FileLoader() {
 void FileLoader::localLoaded(
 		const StorageImageSaved &result,
 		const QByteArray &imageFormat,
-		const QPixmap &imagePixmap) {
+		const QImage &imageData) {
 	_localLoading.kill();
 	if (result.data.isEmpty()) {
 		_localStatus = LocalStatus::NotFound;
 		start(true);
 		return;
 	}
-	_data = result.data;
-	if (!imagePixmap.isNull()) {
+	if (!imageData.isNull()) {
 		_imageFormat = imageFormat;
-		_imagePixmap = imagePixmap;
+		_imageData = imageData;
 	}
-	_localStatus = LocalStatus::Loaded;
-	if (!_filename.isEmpty() && _toCache == LoadToCacheAsWell) {
-		if (!_fileIsOpen) _fileIsOpen = _file.open(QIODevice::WriteOnly);
-		if (!_fileIsOpen) {
-			cancel(true);
-			return;
-		}
-		if (_file.write(_data) != qint64(_data.size())) {
-			cancel(true);
-			return;
-		}
-	}
-
-	_finished = true;
-	if (_fileIsOpen) {
-		_file.close();
-		_fileIsOpen = false;
-		Platform::File::PostprocessDownloaded(
-			QFileInfo(_file).absoluteFilePath());
-	}
-	_downloader->taskFinished().notify();
-
-	emit progress(this);
-
-	loadNext();
+	finishWithBytes(result.data);
+	notifyAboutProgress();
 }
 
 void FileLoader::start(bool loadFirst, bool prior) {
@@ -389,7 +385,7 @@ void FileLoader::loadLocal(const Storage::Cache::Key &key) {
 			localLoaded(
 				StorageImageSaved(std::move(value)),
 				format,
-				App::pixmapFromImageInPlace(std::move(image)));
+				std::move(image));
 		});
 	};
 	Auth().data().cache().get(key, [=, callback = std::move(done)](
@@ -424,12 +420,14 @@ bool FileLoader::tryLoadLocal() {
 		return true;
 	}
 
+	const auto weak = make_weak(this);
 	if (const auto key = cacheKey()) {
 		loadLocal(*key);
 		emit progress(this);
 	}
-
-	if (_localStatus != LocalStatus::NotTried) {
+	if (!weak) {
+		return false;
+	} else if (_localStatus != LocalStatus::NotTried) {
 		return _finished;
 	} else if (_localLoading.alive()) {
 		_localStatus = LocalStatus::Loading;
@@ -456,16 +454,18 @@ void FileLoader::cancel(bool fail) {
 	_data = QByteArray();
 	removeFromQueue();
 
+	const auto queue = _queue;
+	const auto weak = make_weak(this);
 	if (fail) {
 		emit failed(this, started);
 	} else {
 		emit progress(this);
 	}
-
-	_filename = QString();
-	_file.setFileName(_filename);
-
-	loadNext();
+	if (weak) {
+		_filename = QString();
+		_file.setFileName(_filename);
+	}
+	LoadNextFromQueue(queue);
 }
 
 void FileLoader::startLoading(bool loadFirst, bool prior) {
@@ -897,8 +897,7 @@ void mtpFileLoader::getCdnFileHashesDone(const MTPVector<MTPFileHash> &result, m
 				|| !weak) {
 				return;
 			} else if (_finished) {
-				emit progress(this);
-				loadNext();
+				notifyAboutProgress();
 				return;
 			}
 		} break;
@@ -907,9 +906,12 @@ void mtpFileLoader::getCdnFileHashesDone(const MTPVector<MTPFileHash> &result, m
 		}
 	}
 	if (someMoreChecked) {
-		emit progress(this);
-		loadNext();
-		return requestMoreCdnFileHashes();
+		const auto weak = make_weak(this);
+		notifyAboutProgress();
+		if (weak) {
+			requestMoreCdnFileHashes();
+		}
+		return;
 	}
 	LOG(("API Error: Could not find cdnFileHash for offset %1 after getCdnFileHashes request.").arg(offset));
 	cancel(true);
@@ -1025,8 +1027,7 @@ bool mtpFileLoader::feedPart(int offset, bytes::const_span buffer) {
 
 void mtpFileLoader::partLoaded(int offset, bytes::const_span buffer) {
 	if (feedPart(offset, buffer)) {
-		emit progress(this);
-		loadNext();
+		notifyAboutProgress();
 	}
 }
 
@@ -1247,9 +1248,7 @@ void webFileLoader::onFinished(const QByteArray &data) {
 	}
 	_downloader->taskFinished().notify();
 
-	emit progress(this);
-
-	loadNext();
+	notifyAboutProgress();
 }
 
 void webFileLoader::onError() {

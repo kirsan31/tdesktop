@@ -67,11 +67,6 @@ void activateBotCommand(
 	int row,
 	int column);
 void searchByHashtag(const QString &tag, PeerData *inPeer);
-void openPeerByName(
-	const QString &username,
-	MsgId msgId = ShowAtUnreadMsgId,
-	const QString &startToken = QString());
-void joinGroupByHash(const QString &hash);
 void showSettings();
 
 void activateClickHandler(ClickHandlerPtr handler, ClickContext context);
@@ -102,7 +97,6 @@ void showMediaPreview(
 	Data::FileOrigin origin,
 	not_null<DocumentData*> document);
 void showMediaPreview(Data::FileOrigin origin, not_null<PhotoData*> photo);
-void hideMediaPreview();
 
 template <typename BoxType>
 QPointer<BoxType> show(
@@ -286,6 +280,7 @@ DeclareVar(int32, WebFileDcId);
 DeclareVar(QString, TxtDomainString);
 DeclareVar(bool, PhoneCallsEnabled);
 DeclareVar(bool, BlockedMode);
+DeclareVar(int32, CaptionLengthMax);
 DeclareRefVar(base::Observable<void>, PhoneCallsEnabledChanged);
 
 typedef QMap<PeerId, MsgId> HiddenPinnedMessagesMap;
@@ -303,10 +298,10 @@ DeclareVar(bool, ReplaceEmoji);
 DeclareVar(bool, SuggestEmoji);
 DeclareVar(bool, SuggestStickersByEmoji);
 DeclareRefVar(base::Observable<void>, ReplaceEmojiChanged);
+DeclareVar(bool, VoiceMsgPlaybackDoubled);
 DeclareVar(bool, SoundNotify);
 DeclareVar(bool, DesktopNotify);
 DeclareVar(bool, RestoreSoundNotifyFromTray);
-DeclareVar(bool, IncludeMuted);
 DeclareVar(DBINotifyView, NotifyView);
 DeclareVar(bool, NativeNotifications);
 DeclareVar(int, NotificationsCount);
@@ -316,7 +311,7 @@ DeclareVar(bool, NotificationsDemoIsShown);
 DeclareVar(bool, TryIPv6);
 DeclareVar(std::vector<ProxyData>, ProxiesList);
 DeclareVar(ProxyData, SelectedProxy);
-DeclareVar(bool, UseProxy);
+DeclareVar(ProxyData::Settings, ProxySettings);
 DeclareVar(bool, UseProxyForCalls);
 DeclareRefVar(base::Observable<void>, ConnectionTypeChanged);
 
