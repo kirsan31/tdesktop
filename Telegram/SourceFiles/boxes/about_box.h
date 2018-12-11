@@ -28,7 +28,7 @@ private:
 	void showVersionHistory();
 
 	object_ptr<Ui::LinkButton> _version;
-	object_ptr<Ui::FlatLabel> _text1;
+//	object_ptr<Ui::FlatLabel> _text1;
 	object_ptr<Ui::FlatLabel> _text2;
 	object_ptr<Ui::FlatLabel> _text3;
 

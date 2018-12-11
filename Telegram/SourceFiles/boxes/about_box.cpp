@@ -21,8 +21,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 AboutBox::AboutBox(QWidget *parent)
 : _version(this, lng_about_version(lt_version, currentVersionText()), st::aboutVersionLink)
-, _text1(this, lang(lng_about_text_1), Ui::FlatLabel::InitType::Rich, st::aboutLabel)
-, _text2(this, lang(lng_about_text_2), Ui::FlatLabel::InitType::Rich, st::aboutLabel)
+//, _text1(this, lang(lng_about_text_1), Ui::FlatLabel::InitType::Rich, st::aboutLabel)
+, _text2(this, lang(lng_about_text_2).replace(qsl("https://github.com/telegramdesktop/tdesktop"),qsl("https://github.com/kirsan31/tdesktop")), Ui::FlatLabel::InitType::Rich, st::aboutLabel)
 , _text3(this, st::aboutLabel) {
 }
 
@@ -40,21 +40,21 @@ void AboutBox::prepare() {
 	};
 
 	_text3->setRichText(lng_about_text_3(lt_faq_open, qsl("[a href=\"%1\"]").arg(telegramFaqLink()), lt_faq_close, qsl("[/a]")));
-	_text1->setClickHandlerFilter(linkFilter);
+//	_text1->setClickHandlerFilter(linkFilter);
 	_text2->setClickHandlerFilter(linkFilter);
 	_text3->setClickHandlerFilter(linkFilter);
 
 	_version->setClickedCallback([this] { showVersionHistory(); });
 
-	setDimensions(st::aboutWidth, st::aboutTextTop + _text1->height() + st::aboutSkip + _text2->height() + st::aboutSkip + _text3->height());
+	setDimensions(st::aboutWidth, st::aboutTextTop + /*_text1->height()*/ + st::aboutSkip + _text2->height() + st::aboutSkip + _text3->height());
 }
 
 void AboutBox::resizeEvent(QResizeEvent *e) {
 	BoxContent::resizeEvent(e);
 
 	_version->moveToLeft(st::boxPadding.left(), st::aboutVersionTop);
-	_text1->moveToLeft(st::boxPadding.left(), st::aboutTextTop);
-	_text2->moveToLeft(st::boxPadding.left(), _text1->y() + _text1->height() + st::aboutSkip);
+//	_text1->moveToLeft(st::boxPadding.left(), st::aboutTextTop);
+	_text2->moveToLeft(st::boxPadding.left(), st::aboutTextTop);
 	_text3->moveToLeft(st::boxPadding.left(), _text2->y() + _text2->height() + st::aboutSkip);
 }
 
