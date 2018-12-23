@@ -20,7 +20,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "platform/platform_specific.h"
 #include "history/history.h"
 #include "history/history_item.h"
-#include "history/history_media_types.h"
 #include "window/window_controller.h"
 #include "storage/cache/storage_cache_database.h"
 #include "boxes/confirm_box.h"
@@ -1493,7 +1492,7 @@ bool IsExecutableName(const QString &filepath) {
 	static const auto kExtensions = [] {
 		const auto joined =
 #ifdef Q_OS_MAC
-			qsl("action app bin command csh osx workflow");
+			qsl("action app bin command csh osx workflow terminal");
 #elif defined Q_OS_LINUX // Q_OS_MAC
 			qsl("bin csh ksh out run");
 #else // Q_OS_MAC || Q_OS_LINUX

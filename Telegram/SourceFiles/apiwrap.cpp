@@ -10,6 +10,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_drafts.h"
 #include "data/data_photo.h"
 #include "data/data_web_page.h"
+#include "data/data_poll.h"
 #include "data/data_feed.h"
 #include "data/data_media_types.h"
 #include "data/data_sparse_ids.h"
@@ -30,7 +31,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "boxes/add_contact_box.h"
 #include "history/history.h"
 #include "history/history_message.h"
-#include "history/history_media_types.h"
 #include "history/history_item_components.h"
 #include "history/feed/history_feed_section.h"
 #include "storage/localstorage.h"
@@ -2773,7 +2773,7 @@ void ApiWrap::gotWebPages(ChannelData *channel, const MTPmessages_Messages &msgs
 
 	auto indices = base::flat_map<uint64, int>(); // copied from feedMsgs
 	for (auto i = 0, l = v->size(); i != l; ++i) {
-		const auto msgId = idFromMessage(v->at(i));
+		const auto msgId = IdFromMessage(v->at(i));
 		indices.emplace((uint64(uint32(msgId)) << 32) | uint64(i), i);
 	}
 
@@ -2797,7 +2797,7 @@ void ApiWrap::gotWebPages(ChannelData *channel, const MTPmessages_Messages &msgs
 			++i;
 		}
 	}
-	_session->data().sendWebPageGameNotifications();
+	_session->data().sendWebPageGamePollNotifications();
 }
 
 void ApiWrap::stickersSaveOrder() {
@@ -3434,8 +3434,8 @@ void ApiWrap::requestMessageAfterDate(
 		if (auto list = getMessagesList()) {
 			App::feedMsgs(*list, NewMessageExisting);
 			for (auto &message : *list) {
-				if (dateFromMessage(message) >= offsetDate) {
-					callback(idFromMessage(message));
+				if (DateFromMessage(message) >= offsetDate) {
+					callback(IdFromMessage(message));
 					return;
 				}
 			}
@@ -4302,7 +4302,14 @@ void ApiWrap::sendFiles(
 		TextWithTags &&caption,
 		std::shared_ptr<SendingAlbum> album,
 		const SendOptions &options) {
-	if (list.files.size() > 1 && !caption.text.isEmpty()) {
+	const auto isSticker = [&] {
+		if (list.files.empty() || type != SendMediaType::File) {
+			return false;
+		}
+		return list.files.front().mime == qstr("image/webp");
+	};
+	if ((list.files.size() > 1 || isSticker())
+		&& !caption.text.isEmpty()) {
 		auto message = MessageToSend(options.history);
 		message.textWithTags = std::move(caption);
 		message.replyTo = options.replyTo;
@@ -5327,6 +5334,121 @@ void ApiWrap::saveSelfDestruct(int days) {
 void ApiWrap::setSelfDestructDays(int days) {
 	_selfDestructDays = days;
 	_selfDestructChanges.fire_copy(days);
+}
+
+void ApiWrap::createPoll(
+		const PollData &data,
+		const SendOptions &options,
+		FnMut<void()> done,
+		FnMut<void(const RPCError &error)> fail) {
+	sendAction(options);
+
+	const auto history = options.history;
+	const auto peer = history->peer;
+	auto sendFlags = MTPmessages_SendMedia::Flags(0);
+	if (options.replyTo) {
+		sendFlags |= MTPmessages_SendMedia::Flag::f_reply_to_msg_id;
+	}
+	const auto channelPost = peer->isChannel() && !peer->isMegagroup();
+	const auto silentPost = channelPost
+		&& _session->data().notifySilentPosts(peer);
+	if (silentPost) {
+		sendFlags |= MTPmessages_SendMedia::Flag::f_silent;
+	}
+
+	const auto replyTo = options.replyTo;
+	history->sendRequestId = request(MTPmessages_SendMedia(
+		MTP_flags(sendFlags),
+		peer->input,
+		MTP_int(replyTo),
+		MTP_inputMediaPoll(PollDataToMTP(&data)),
+		MTP_string(QString()),
+		MTP_long(rand_value<uint64>()),
+		MTPReplyMarkup(),
+		MTPVector<MTPMessageEntity>()
+	)).done([=, done = std::move(done)](const MTPUpdates &result) mutable {
+		applyUpdates(result);
+		done();
+	}).fail([=, fail = std::move(fail)](const RPCError &error) mutable {
+		fail(error);
+	}).afterRequest(history->sendRequestId
+	).send();
+}
+
+void ApiWrap::sendPollVotes(
+		FullMsgId itemId,
+		const std::vector<QByteArray> &options) {
+	if (_pollVotesRequestIds.contains(itemId)) {
+		return;
+	}
+	const auto item = App::histItemById(itemId);
+	const auto media = item ? item->media() : nullptr;
+	const auto poll = media ? media->poll() : nullptr;
+	if (!item) {
+		return;
+	}
+
+	const auto showSending = poll && !options.empty();
+	const auto hideSending = [=] {
+		if (showSending) {
+			if (const auto item = App::histItemById(itemId)) {
+				poll->sendingVote = QByteArray();
+				_session->data().requestItemRepaint(item);
+			}
+		}
+	};
+	if (showSending) {
+		poll->sendingVote = options.front();
+		_session->data().requestItemRepaint(item);
+	}
+
+	auto prepared = QVector<MTPbytes>();
+	prepared.reserve(options.size());
+	ranges::transform(
+		options,
+		ranges::back_inserter(prepared),
+		[](const QByteArray &option) { return MTP_bytes(option); });
+	const auto requestId = request(MTPmessages_SendVote(
+		item->history()->peer->input,
+		MTP_int(item->id),
+		MTP_vector<MTPbytes>(prepared)
+	)).done([=](const MTPUpdates &result) {
+		_pollVotesRequestIds.erase(itemId);
+		hideSending();
+		applyUpdates(result);
+	}).fail([=](const RPCError &error) {
+		_pollVotesRequestIds.erase(itemId);
+		hideSending();
+	}).send();
+	_pollVotesRequestIds.emplace(itemId, requestId);
+}
+
+void ApiWrap::closePoll(FullMsgId itemId) {
+	if (_pollCloseRequestIds.contains(itemId)) {
+		return;
+	}
+	const auto item = App::histItemById(itemId);
+	const auto media = item ? item->media() : nullptr;
+	const auto poll = media ? media->poll() : nullptr;
+	if (!poll) {
+		return;
+	}
+
+	const auto requestId = request(MTPmessages_EditMessage(
+		MTP_flags(MTPmessages_EditMessage::Flag::f_media),
+		item->history()->peer->input,
+		MTP_int(item->id),
+		MTPstring(),
+		MTP_inputMediaPoll(PollDataToMTP(poll)),
+		MTPReplyMarkup(),
+		MTPVector<MTPMessageEntity>()
+	)).done([=](const MTPUpdates &result) {
+		_pollCloseRequestIds.erase(itemId);
+		applyUpdates(result);
+	}).fail([=](const RPCError &error) {
+		_pollCloseRequestIds.erase(itemId);
+	}).send();
+	_pollCloseRequestIds.emplace(itemId, requestId);
 }
 
 void ApiWrap::readServerHistory(not_null<History*> history) {

@@ -1066,6 +1066,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_in_dlg_file" = "File";
 "lng_in_dlg_sticker" = "Sticker";
 "lng_in_dlg_sticker_emoji" = "{emoji} Sticker";
+"lng_in_dlg_poll" = "Poll";
 
 "lng_ban_user" = "Ban User";
 "lng_delete_all_from" = "Delete all from this user";
@@ -1828,6 +1829,26 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_launch_exe_warning" = "This file has a {extension} extension.\nAre you sure you want to run it?";
 "lng_launch_exe_sure" = "Run";
 "lng_launch_exe_dont_ask" = "Don't ask me again";
+
+"lng_polls_anonymous" = "Anonymous Poll";
+"lng_polls_closed" = "Final results";
+"lng_polls_votes_count#one" = "{count} vote";
+"lng_polls_votes_count#other" = "{count} votes";
+"lng_polls_votes_none" = "No votes";
+"lng_polls_retract" = "Retract vote";
+"lng_polls_stop" = "Stop poll";
+"lng_polls_stop_warning" = "If you stop this poll now, nobody will be able to vote in it anymore. This action cannot be undone.";
+"lng_polls_stop_sure" = "Stop";
+"lng_polls_create" = "Create poll";
+"lng_polls_create_title" = "New poll";
+"lng_polls_create_question" = "Question";
+"lng_polls_create_question_placeholder" = "Ask a question";
+"lng_polls_create_options" = "Poll options";
+"lng_polls_create_option_add" = "Add an option...";
+"lng_polls_create_limit#one" = "You can add {count} more option.";
+"lng_polls_create_limit#other" = "You can add {count} more options.";
+"lng_polls_create_maximum" = "You have added the maximum number of options.";
+"lng_polls_create_button" = "Create";
 
 // Wnd specific
 

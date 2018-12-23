@@ -10,7 +10,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/view/history_view_element.h"
 #include "history/admin_log/history_admin_log_section.h"
 #include "history/history_message.h"
-#include "history/history_media_types.h"
 #include "history/history_service.h"
 #include "history/history_item_components.h"
 #include "history/history_inner_widget.h"
@@ -33,6 +32,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "storage/storage_feed_messages.h"
 #include "data/data_channel_admins.h"
 #include "data/data_feed.h"
+#include "data/data_photo.h"
 #include "ui/image/image.h"
 #include "ui/text_options.h"
 #include "core/crash_reports.h"
@@ -154,7 +154,7 @@ void Histories::remove(const PeerId &peer) {
 HistoryItem *Histories::addNewMessage(
 		const MTPMessage &msg,
 		NewMessageType type) {
-	auto peer = peerFromMessage(msg);
+	auto peer = PeerFromMessage(msg);
 	if (!peer) return nullptr;
 
 	auto result = App::history(peer)->addNewMessage(msg, type);
@@ -750,7 +750,7 @@ bool History::updateSendActionNeedsAnimating(TimeMs ms, bool force) {
 HistoryItem *History::createItem(
 		const MTPMessage &message,
 		bool detachExistingItem) {
-	const auto messageId = idFromMessage(message);
+	const auto messageId = IdFromMessage(message);
 	if (!messageId) {
 		return nullptr;
 	}

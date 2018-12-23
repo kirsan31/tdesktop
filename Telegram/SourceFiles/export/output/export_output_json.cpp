@@ -459,6 +459,9 @@ QByteArray SerializeMessage(
 			}()));
 		}
 		pushBare("values", SerializeArray(context, list));
+	}, [&](const ActionContactSignUp &data) {
+		pushActor();
+		pushAction("joined_telegram");
 	}, [](std::nullopt_t) {});
 
 	if (!message.action.content) {
@@ -570,6 +573,29 @@ QByteArray SerializeMessage(
 			{ "receipt_message_id", (data.receiptMsgId
 				? NumberToString(data.receiptMsgId)
 				: QByteArray()) }
+		}));
+	}, [&](const Poll &data) {
+		context.nesting.push_back(Context::kObject);
+		const auto answers = ranges::view::all(
+			data.answers
+		) | ranges::view::transform([&](const Poll::Answer &answer) {
+			context.nesting.push_back(Context::kArray);
+			auto result = SerializeObject(context, {
+				{ "text", SerializeString(answer.text) },
+				{ "voters", NumberToString(answer.votes) },
+				{ "chosen", answer.my ? "true" : "false" },
+			});
+			context.nesting.pop_back();
+			return result;
+		}) | ranges::to_vector;
+		const auto serialized = SerializeArray(context, answers);
+		context.nesting.pop_back();
+
+		pushBare("poll", SerializeObject(context, {
+			{ "question", SerializeString(data.question) },
+			{ "closed", data.closed ? "true" : "false" },
+			{ "total_voters", NumberToString(data.totalVotes) },
+			{ "answers", serialized }
 		}));
 	}, [](const UnsupportedMedia &data) {
 		Unexpected("Unsupported message.");

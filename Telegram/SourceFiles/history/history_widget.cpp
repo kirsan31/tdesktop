@@ -26,11 +26,14 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "inline_bots/inline_bot_result.h"
 #include "data/data_drafts.h"
 #include "data/data_session.h"
+#include "data/data_web_page.h"
+#include "data/data_document.h"
+#include "data/data_photo.h"
 #include "data/data_media_types.h"
 #include "history/history.h"
 #include "history/history_item.h"
 #include "history/history_message.h"
-#include "history/history_media_types.h"
+#include "history/media/history_media.h"
 #include "history/history_drag_area.h"
 #include "history/history_inner_widget.h"
 #include "history/history_item_components.h"
@@ -2285,10 +2288,10 @@ void HistoryWidget::messagesReceived(PeerData *peer, const MTPmessages_Messages 
 	}
 
 	const auto ExtractFirstId = [&] {
-		return histList->empty() ? -1 : idFromMessage(histList->front());
+		return histList->empty() ? -1 : IdFromMessage(histList->front());
 	};
 	const auto ExtractLastId = [&] {
-		return histList->empty() ? -1 : idFromMessage(histList->back());
+		return histList->empty() ? -1 : IdFromMessage(histList->back());
 	};
 	const auto PeerString = [](PeerId peerId) {
 		if (peerIsUser(peerId)) {
@@ -2782,8 +2785,7 @@ void HistoryWidget::saveEditMsg() {
 			MTP_string(sending.text),
 			MTPInputMedia(),
 			MTPnullMarkup,
-			sentEntities,
-			MTP_inputGeoPointEmpty()),
+			sentEntities),
 		rpcDone(&HistoryWidget::saveEditMsgDone, _history),
 		rpcFail(&HistoryWidget::saveEditMsgFail, _history));
 }
@@ -5989,7 +5991,7 @@ void HistoryWidget::gotPreview(QString links, const MTPMessageMedia &result, mtp
 				: nullptr;
 			updatePreview();
 		}
-		Auth().data().sendWebPageGameNotifications();
+		Auth().data().sendWebPageGamePollNotifications();
 	} else if (result.type() == mtpc_messageMediaEmpty) {
 		_previewCache.insert(links, 0);
 		if (links == _previewLinks && !_previewCancelled) {

@@ -13,12 +13,15 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/crash_reports.h"
 #include "history/history.h"
 #include "history/history_message.h"
-#include "history/history_media_types.h"
+#include "history/media/history_media.h"
+#include "history/media/history_media_sticker.h"
+#include "history/media/history_media_web_page.h"
 #include "history/history_item_components.h"
 #include "history/history_item_text.h"
 #include "history/view/history_view_message.h"
 #include "history/view/history_view_service_message.h"
 #include "history/view/history_view_cursor_state.h"
+#include "history/view/history_view_context_menu.h"
 #include "ui/widgets/popup_menu.h"
 #include "ui/image/image.h"
 #include "ui/text_options.h"
@@ -39,6 +42,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "lang/lang_keys.h"
 #include "data/data_session.h"
 #include "data/data_media_types.h"
+#include "data/data_document.h"
+#include "data/data_poll.h"
+#include "data/data_photo.h"
 
 namespace {
 
@@ -1625,28 +1631,28 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 		} else {
 			addItemActions(item);
 			if (item && !isUponSelected) {
-				auto mediaHasTextForCopy = false;
-				if (auto media = (view ? view->media() : nullptr)) {
-					mediaHasTextForCopy = media->hasTextForCopy();
-					if (media->type() == MediaTypeWebPage && static_cast<HistoryWebPage*>(media)->attach()) {
-						media = static_cast<HistoryWebPage*>(media)->attach();
+				const auto media = (view ? view->media() : nullptr);
+				const auto mediaHasTextForCopy = media && media->hasTextForCopy();
+				if (const auto document = media ? media->getDocument() : nullptr) {
+					if (document->sticker()) {
+						_menu->addAction(lang(lng_context_save_image), App::LambdaDelayed(st::defaultDropdownMenu.menu.ripple.hideDuration, this, [=] {
+							saveDocumentToFile(itemId, document);
+						}));
 					}
-					if (media->type() == MediaTypeSticker) {
-						if (auto document = media->getDocument()) {
-							if (document->sticker() && document->sticker()->set.type() != mtpc_inputStickerSetEmpty) {
-								_menu->addAction(lang(document->isStickerSetInstalled() ? lng_context_pack_info : lng_context_pack_add), [=] {
-									showStickerPackInfo(document);
-								});
-								_menu->addAction(lang(Stickers::IsFaved(document) ? lng_faved_stickers_remove : lng_faved_stickers_add), [=] {
-									Auth().api().toggleFavedSticker(
-										document,
-										itemId,
-										!Stickers::IsFaved(document));
+				}
+				if (const auto media = item->media()) {
+					if (const auto poll = media->poll()) {
+						if (!poll->closed) {
+							if (poll->voted()) {
+								_menu->addAction(lang(lng_polls_retract), [=] {
+									Auth().api().sendPollVotes(itemId, {});
 								});
 							}
-							_menu->addAction(lang(lng_context_save_image), App::LambdaDelayed(st::defaultDropdownMenu.menu.ripple.hideDuration, this, [=] {
-								saveDocumentToFile(itemId, document);
-							}));
+							if (item->canStopPoll()) {
+								_menu->addAction(lang(lng_polls_stop), [=] {
+									HistoryView::StopPoll(itemId);
+								});
+							}
 						}
 					}
 				}

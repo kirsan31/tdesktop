@@ -17,31 +17,31 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_abstract_structure.h"
 #include "data/data_media_types.h"
 #include "data/data_session.h"
+#include "data/data_document.h"
 #include "history/history.h"
 #include "history/history_location_manager.h"
-#include "history/history_media_types.h"
 #include "history/history_item_components.h"
 #include "history/view/history_view_service_message.h"
 #include "media/media_audio.h"
 #include "ui/image/image.h"
 #include "inline_bots/inline_bot_layout_item.h"
+#include "core/crash_reports.h"
+#include "core/update_checker.h"
+#include "window/themes/window_theme.h"
+#include "window/notifications_manager.h"
+#include "platform/platform_notifications_manager.h"
+#include "storage/file_upload.h"
+#include "storage/localstorage.h"
+#include "storage/storage_facade.h"
+#include "storage/storage_shared_media.h"
 #include "messenger.h"
 #include "application.h"
-#include "storage/file_upload.h"
 #include "mainwindow.h"
 #include "mainwidget.h"
-#include "storage/localstorage.h"
 #include "apiwrap.h"
 #include "numbers.h"
 #include "observer_peer.h"
 #include "auth_session.h"
-#include "core/crash_reports.h"
-#include "core/update_checker.h"
-#include "storage/storage_facade.h"
-#include "storage/storage_shared_media.h"
-#include "window/themes/window_theme.h"
-#include "window/notifications_manager.h"
-#include "platform/platform_notifications_manager.h"
 
 #ifdef OS_MAC_OLD
 #include <libexif/exif-data.h>
@@ -874,22 +874,20 @@ namespace App {
 		return false;
 	}
 
-	void updateEditedMessage(const MTPMessage &m) {
-		auto apply = [](const auto &data) {
-			auto peerId = peerFromMTP(data.vto_id);
-			if (data.has_from_id() && peerId == Auth().userPeerId()) {
-				peerId = peerFromUser(data.vfrom_id);
+	void updateEditedMessage(const MTPMessage &message) {
+		message.match([](const MTPDmessageEmpty &) {
+		}, [](const auto &message) {
+			auto peerId = peerFromMTP(message.vto_id);
+			if (message.has_from_id() && peerId == Auth().userPeerId()) {
+				peerId = peerFromUser(message.vfrom_id);
 			}
-			if (auto existing = App::histItemById(peerToChannel(peerId), data.vid.v)) {
-				existing->applyEdition(data);
+			const auto existing = App::histItemById(
+				peerToChannel(peerId),
+				message.vid.v);
+			if (existing) {
+				existing->applyEdition(message);
 			}
-		};
-
-		if (m.type() == mtpc_message) { // apply message edit
-			apply(m.c_message());
-		} else if (m.type() == mtpc_messageService) {
-			apply(m.c_messageService());
-		}
+		});
 	}
 
 	void addSavedGif(DocumentData *doc) {
@@ -932,7 +930,7 @@ namespace App {
 					}
 				}
 			}
-			const auto msgId = idFromMessage(msg);
+			const auto msgId = IdFromMessage(msg);
 			indices.emplace((uint64(uint32(msgId)) << 32) | uint64(i), i);
 		}
 		for (const auto [position, index] : indices) {
