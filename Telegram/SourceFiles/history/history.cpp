@@ -512,8 +512,11 @@ Data::Draft *History::createCloudDraft(const Data::Draft *fromDraft) {
 	return cloudDraft();
 }
 
-bool History::skipCloudDraft(const QString &text, TimeId date) const {
-	if (date > 0 && date <= _lastSentDraftTime + kSkipCloudDraftsFor) {
+bool History::skipCloudDraft(const QString &text, MsgId replyTo, TimeId date) const {
+	if (Data::draftStringIsEmpty(text)
+		&& !replyTo
+		&& date > 0
+		&& date <= _lastSentDraftTime + kSkipCloudDraftsFor) {
 		return true;
 	} else if (_lastSentDraftText && *_lastSentDraftText == text) {
 		return true;
@@ -1029,7 +1032,7 @@ void History::addUnreadMentionsSlice(const MTPmessages_Messages &result) {
 	if (messages) {
 		for (auto &message : *messages) {
 			if (auto item = addToHistory(message)) {
-				if (item->mentionsMe() && item->isMediaUnread()) {
+				if (item->isUnreadMention()) {
 					_unreadMentions.insert(item->id);
 					added = true;
 				}

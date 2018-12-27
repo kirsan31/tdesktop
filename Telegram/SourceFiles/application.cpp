@@ -103,10 +103,13 @@ Application::Application(
 		char **argv)
 : QApplication(argc, argv)
 , _mainThreadId(QThread::currentThreadId())
-, _launcher(launcher)
-, _updateChecker(Core::UpdaterDisabled()
-	? nullptr
-	: std::make_unique<Core::UpdateChecker>()) {
+, _launcher(launcher) {
+}
+
+int Application::execute() {
+	if (!Core::UpdaterDisabled()) {
+		_updateChecker = std::make_unique<Core::UpdateChecker>();
+	}
 	const auto d = QFile::encodeName(QDir(cWorkingDir()).absolutePath());
 	char h[33] = { 0 };
 	hashMd5Hex(d.constData(), d.size(), h);
@@ -134,6 +137,8 @@ Application::Application(
         LOG(("Connecting local socket to %1...").arg(_localServerName));
 		_localSocket.connectToServer(_localServerName);
 	}
+
+	return exec();
 }
 
 Application::~Application() = default;
@@ -390,7 +395,20 @@ void Application::refreshGlobalProxy() {
 
 void Application::postponeCall(FnMut<void()> &&callable) {
 	Expects(callable != nullptr);
-	Expects(_eventNestingLevel > _loopNestingLevel);
+	Expects(_eventNestingLevel >= _loopNestingLevel);
+
+	// _loopNestingLevel == _eventNestingLevel means that we had a
+	// native event in a nesting loop that didn't get a notify() call
+	// after. That means we already have exited the nesting loop and
+	// there must not be any postponed calls with that nesting level.
+	if (_loopNestingLevel == _eventNestingLevel) {
+		Assert(_postponedCalls.empty()
+			|| _postponedCalls.back().loopNestingLevel < _loopNestingLevel);
+		Assert(!_previousLoopNestingLevels.empty());
+
+		_loopNestingLevel = _previousLoopNestingLevels.back();
+		_previousLoopNestingLevels.pop_back();
+	}
 
 	_postponedCalls.push_back({
 		_loopNestingLevel,
@@ -398,12 +416,11 @@ void Application::postponeCall(FnMut<void()> &&callable) {
 	});
 }
 
-bool Application::notify(QObject *receiver, QEvent *e) {
-	if (QThread::currentThreadId() != _mainThreadId) {
-		return QApplication::notify(receiver, e);
-	}
+void Application::incrementEventNestingLevel() {
 	++_eventNestingLevel;
-	const auto result = QApplication::notify(receiver, e);
+}
+
+void Application::decrementEventNestingLevel() {
 	if (_eventNestingLevel == _loopNestingLevel) {
 		_loopNestingLevel = _previousLoopNestingLevels.back();
 		_previousLoopNestingLevels.pop_back();
@@ -411,7 +428,22 @@ bool Application::notify(QObject *receiver, QEvent *e) {
 	const auto processTillLevel = _eventNestingLevel - 1;
 	processPostponedCalls(processTillLevel);
 	_eventNestingLevel = processTillLevel;
-	return result;
+}
+
+void Application::registerEnterFromEventLoop() {
+	if (_eventNestingLevel > _loopNestingLevel) {
+		_previousLoopNestingLevels.push_back(_loopNestingLevel);
+		_loopNestingLevel = _eventNestingLevel;
+	}
+}
+
+bool Application::notify(QObject *receiver, QEvent *e) {
+	if (QThread::currentThreadId() != _mainThreadId) {
+		return QApplication::notify(receiver, e);
+	}
+
+	const auto wrap = createEventNestingLevel();
+	return QApplication::notify(receiver, e);
 }
 
 void Application::processPostponedCalls(int level) {
@@ -430,11 +462,32 @@ bool Application::nativeEventFilter(
 		const QByteArray &eventType,
 		void *message,
 		long *result) {
-	if (_eventNestingLevel > _loopNestingLevel) {
-		_previousLoopNestingLevels.push_back(_loopNestingLevel);
-		_loopNestingLevel = _eventNestingLevel;
-	}
+	registerEnterFromEventLoop();
 	return false;
+}
+
+void Application::activateWindowDelayed(not_null<QWidget*> widget) {
+	if (_delayedActivationsPaused) {
+		return;
+	} else if (std::exchange(_windowForDelayedActivation, widget.get())) {
+		return;
+	}
+	crl::on_main(this, [=] {
+		if (const auto widget = base::take(_windowForDelayedActivation)) {
+			if (!widget->isHidden()) {
+				widget->activateWindow();
+			}
+		}
+	});
+}
+
+void Application::pauseDelayedWindowActivations() {
+	_windowForDelayedActivation = nullptr;
+	_delayedActivationsPaused = true;
+}
+
+void Application::resumeDelayedWindowActivations() {
+	_delayedActivationsPaused = false;
 }
 
 void Application::closeApplication() {

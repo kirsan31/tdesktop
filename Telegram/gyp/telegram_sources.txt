@@ -8,8 +8,10 @@
 <(src_loc)/boxes/abstract_box.h
 <(src_loc)/boxes/add_contact_box.cpp
 <(src_loc)/boxes/add_contact_box.h
-<(src_loc)/boxes/autolock_box.cpp
-<(src_loc)/boxes/autolock_box.h
+<(src_loc)/boxes/auto_lock_box.cpp
+<(src_loc)/boxes/auto_lock_box.h
+<(src_loc)/boxes/auto_download_box.cpp
+<(src_loc)/boxes/auto_download_box.h
 <(src_loc)/boxes/background_box.cpp
 <(src_loc)/boxes/background_box.h
 <(src_loc)/boxes/calendar_box.cpp
@@ -138,6 +140,8 @@
 <(src_loc)/core/version.h
 <(src_loc)/data/data_abstract_structure.cpp
 <(src_loc)/data/data_abstract_structure.h
+<(src_loc)/data/data_auto_download.cpp
+<(src_loc)/data/data_auto_download.h
 <(src_loc)/data/data_channel_admins.cpp
 <(src_loc)/data/data_channel_admins.h
 <(src_loc)/data/data_document.cpp

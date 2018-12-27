@@ -603,7 +603,8 @@ bool HistoryMessage::isTooOldForEdit(TimeId now) const {
 bool HistoryMessage::allowsEdit(TimeId now) const {
 	return canStopPoll()
 		&& !isTooOldForEdit(now)
-		&& (!_media || _media->allowsEdit());
+		&& (!_media || _media->allowsEdit())
+		&& !isUnsupportedMessage();
 }
 
 bool HistoryMessage::uploading() const {
@@ -920,7 +921,7 @@ void HistoryMessage::updateSentMedia(const MTPMessageMedia *media) {
 }
 
 void HistoryMessage::addToUnreadMentions(UnreadMentionType type) {
-	if (IsServerMsgId(id) && mentionsMe() && isMediaUnread()) {
+	if (IsServerMsgId(id) && isUnreadMention()) {
 		if (history()->addToUnreadMentions(id, type)) {
 			Notify::peerUpdatedDelayed(
 				history()->peer,
@@ -930,7 +931,7 @@ void HistoryMessage::addToUnreadMentions(UnreadMentionType type) {
 }
 
 void HistoryMessage::eraseFromUnreadMentions() {
-	if (mentionsMe() && isMediaUnread()) {
+	if (isUnreadMention()) {
 		history()->eraseFromUnreadMentions(id);
 	}
 }

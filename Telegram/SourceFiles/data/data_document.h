@@ -84,7 +84,7 @@ public:
 
 	void automaticLoad(
 		Data::FileOrigin origin,
-		const HistoryItem *item); // auto load sticker or video
+		const HistoryItem *item);
 	void automaticLoadSettingsChanged();
 
 	enum FilePathResolveType {
@@ -106,6 +106,7 @@ public:
 		LoadFromCloudSetting fromCloud = LoadFromCloudOrLocal,
 		bool autoLoading = false);
 	void cancel();
+	bool cancelled() const;
 	float64 progress() const;
 	int32 loadOffset() const;
 	bool uploading() const;

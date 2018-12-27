@@ -640,46 +640,51 @@ void DocumentData::unload() {
 void DocumentData::automaticLoad(
 		Data::FileOrigin origin,
 		const HistoryItem *item) {
-	if (loaded() || status != FileReady) return;
-
-	if (saveToCache() && _loader != CancelledMtpFileLoader) {
-		if (type == StickerDocument) {
-			save(origin, QString(), _actionOnLoad, _actionOnLoadMsgId);
-		} else if (isAnimation()) {
-			bool loadFromCloud = false;
-			if (item) {
-				if (item->history()->peer->isUser()) {
-					loadFromCloud = !(cAutoDownloadGif() & dbiadNoPrivate);
-				} else {
-					loadFromCloud = !(cAutoDownloadGif() & dbiadNoGroups);
-				}
-			} else { // if load at least anywhere
-				loadFromCloud = !(cAutoDownloadGif() & dbiadNoPrivate) || !(cAutoDownloadGif() & dbiadNoGroups);
-			}
-			save(origin, QString(), _actionOnLoad, _actionOnLoadMsgId, loadFromCloud ? LoadFromCloudOrLocal : LoadFromLocalOnly, true);
-		} else if (isVoiceMessage()) {
-			if (item) {
-				bool loadFromCloud = false;
-				if (item->history()->peer->isUser()) {
-					loadFromCloud = !(cAutoDownloadAudio() & dbiadNoPrivate);
-				} else {
-					loadFromCloud = !(cAutoDownloadAudio() & dbiadNoGroups);
-				}
-				save(origin, QString(), _actionOnLoad, _actionOnLoadMsgId, loadFromCloud ? LoadFromCloudOrLocal : LoadFromLocalOnly, true);
-			}
-		}
+	if (status != FileReady || loaded() || cancelled()) {
+		return;
+	} else if (!item && type != StickerDocument && !isAnimation()) {
+		return;
 	}
+	const auto toCache = saveToCache();
+	if (!toCache && Global::AskDownloadPath()) {
+		// We need a filename, but we're supposed to ask user for it.
+		// No automatic download in this case.
+		return;
+	}
+	const auto filename = toCache
+		? QString()
+		: documentSaveFilename(this);
+	const auto shouldLoadFromCloud = item
+		? Data::AutoDownload::Should(
+			Auth().settings().autoDownload(),
+			item->history()->peer,
+			this)
+		: Data::AutoDownload::Should(
+			Auth().settings().autoDownload(),
+			this);
+	const auto loadFromCloud = shouldLoadFromCloud
+		? LoadFromCloudOrLocal
+		: LoadFromLocalOnly;
+	save(
+		origin,
+		filename,
+		_actionOnLoad,
+		_actionOnLoadMsgId,
+		loadFromCloud,
+		true);
 }
 
 void DocumentData::automaticLoadSettingsChanged() {
-	if (loaded() || status != FileReady || (!isAnimation() && !isVoiceMessage()) || !saveToCache() || _loader != CancelledMtpFileLoader) {
+	if (!cancelled() || status != FileReady || loaded()) {
 		return;
 	}
 	_loader = nullptr;
 }
 
 void DocumentData::performActionOnLoad() {
-	if (_actionOnLoad == ActionOnLoadNone) return;
+	if (_actionOnLoad == ActionOnLoadNone) {
+		return;
+	}
 
 	auto loc = location(true);
 	auto already = loc.name();
@@ -804,7 +809,7 @@ bool DocumentData::loaded(FilePathResolveType type) const {
 
 void DocumentData::destroyLoader(mtpFileLoader *newValue) const {
 	const auto loader = std::exchange(_loader, newValue);
-	if (_loader == CancelledMtpFileLoader) {
+	if (cancelled()) {
 		loader->cancel();
 	}
 	loader->stop();
@@ -812,7 +817,7 @@ void DocumentData::destroyLoader(mtpFileLoader *newValue) const {
 }
 
 bool DocumentData::loading() const {
-	return _loader && _loader != CancelledMtpFileLoader;
+	return _loader && !cancelled();
 }
 
 QString DocumentData::loadingFilePath() const {
@@ -888,7 +893,7 @@ void DocumentData::save(
 		return;
 	}
 
-	if (_loader == CancelledMtpFileLoader) {
+	if (cancelled()) {
 		_loader = nullptr;
 	}
 	if (_loader) {
@@ -901,7 +906,9 @@ void DocumentData::save(
 	_actionOnLoad = action;
 	_actionOnLoadMsgId = actionMsgId;
 	if (_loader) {
-		if (fromCloud == LoadFromCloudOrLocal) _loader->permitLoadFromCloud();
+		if (fromCloud == LoadFromCloudOrLocal) {
+			_loader->permitLoadFromCloud();
+		}
 	} else {
 		status = FileReady;
 		if (hasWebLocation()) {
@@ -936,6 +943,8 @@ void DocumentData::save(
 
 		_loader->connect(_loader, SIGNAL(progress(FileLoader*)), App::main(), SLOT(documentLoadProgress(FileLoader*)));
 		_loader->connect(_loader, SIGNAL(failed(FileLoader*,bool)), App::main(), SLOT(documentLoadFailed(FileLoader*,bool)));
+	}
+	if (loading()) {
 		_loader->start();
 	}
 	_session->data().notifyDocumentLayoutChanged(this);
@@ -948,11 +957,13 @@ void DocumentData::cancel() {
 
 	destroyLoader(CancelledMtpFileLoader);
 	_session->data().notifyDocumentLayoutChanged(this);
-	if (auto main = App::main()) {
-		main->documentLoadProgress(this);
-	}
+	App::main()->documentLoadProgress(this);
 
 	_actionOnLoad = ActionOnLoadNone;
+}
+
+bool DocumentData::cancelled() const {
+	return (_loader == CancelledMtpFileLoader);
 }
 
 VoiceWaveform documentWaveformDecode(const QByteArray &encoded5bit) {

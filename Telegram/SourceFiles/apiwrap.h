@@ -391,6 +391,7 @@ public:
 		FullMsgId itemId,
 		const std::vector<QByteArray> &options);
 	void closePoll(FullMsgId itemId);
+	void reloadPollResults(not_null<HistoryItem*> item);
 
 	~ApiWrap();
 
@@ -756,5 +757,6 @@ private:
 
 	base::flat_map<FullMsgId, mtpRequestId> _pollVotesRequestIds;
 	base::flat_map<FullMsgId, mtpRequestId> _pollCloseRequestIds;
+	base::flat_map<FullMsgId, mtpRequestId> _pollReloadRequestIds;
 
 };

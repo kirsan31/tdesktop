@@ -477,15 +477,15 @@ void RegisterCustomScheme() {
 #endif // !TDESKTOP_DISABLE_REGISTER_CUSTOM_SCHEME
 }
 
-PermissionStatus GetPermissionStatus(PermissionType type){
+PermissionStatus GetPermissionStatus(PermissionType type) {
 	return PermissionStatus::Granted;
 }
 
-void RequestPermission(PermissionType type, Fn<void(PermissionStatus)> resultCallback){
+void RequestPermission(PermissionType type, Fn<void(PermissionStatus)> resultCallback) {
 	resultCallback(PermissionStatus::Granted);
 }
 
-void OpenSystemSettingsForPermission(PermissionType type){
+void OpenSystemSettingsForPermission(PermissionType type) {
 }
 
 namespace ThirdParty {

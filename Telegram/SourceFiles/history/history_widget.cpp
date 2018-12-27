@@ -112,13 +112,10 @@ ApiWrap::RequestMessageDataCallback replyEditMessageDataCallback() {
 	};
 }
 
-void ActivateWindowDelayed(not_null<Window::Controller*> controller) {
+void ActivateWindow(not_null<Window::Controller*> controller) {
 	const auto window = controller->window();
-	const auto weak = make_weak(window.get());
 	window->activateWindow();
-	crl::on_main(window, [=] {
-		window->activateWindow();
-	});
+	Core::App().activateWindowDelayed(window);
 }
 
 void InsertEmojiToField(not_null<Ui::InputField*> field, EmojiPtr emoji) {
@@ -353,11 +350,11 @@ HistoryWidget::HistoryWidget(
 
 	_attachDragDocument->setDroppedCallback([this](const QMimeData *data) {
 		confirmSendingFiles(data, CompressConfirm::No);
-		ActivateWindowDelayed(this->controller());
+		ActivateWindow(this->controller());
 	});
 	_attachDragPhoto->setDroppedCallback([this](const QMimeData *data) {
 		confirmSendingFiles(data, CompressConfirm::Yes);
-		ActivateWindowDelayed(this->controller());
+		ActivateWindow(this->controller());
 	});
 
 	connect(&_updateEditTimeLeftDisplay, SIGNAL(timeout()), this, SLOT(updateField()));
@@ -1247,7 +1244,7 @@ void HistoryWidget::onRecordDone(
 		qint32 samples) {
 	if (!canWriteMessage() || result.isEmpty()) return;
 
-	ActivateWindowDelayed(controller());
+	ActivateWindow(controller());
 	const auto duration = samples / Media::Player::kDefaultFrequency;
 	auto options = ApiWrap::SendOptions(_history);
 	options.replyTo = replyToId();
@@ -2176,7 +2173,7 @@ void HistoryWidget::newUnreadMsg(
 			destroyUnreadBar();
 		}
 		if (App::wnd()->doWeReadServerHistory()) {
-			if (item->mentionsMe() && item->isMediaUnread()) {
+			if (item->isUnreadMention() && !item->isUnreadMedia()) {
 				Auth().api().markMediaRead(item);
 			}
 			Auth().api().readServerHistoryForce(history);
@@ -3914,7 +3911,7 @@ void HistoryWidget::updateFieldSize() {
 }
 
 void HistoryWidget::clearInlineBot() {
-	if (_inlineBot) {
+	if (_inlineBot || _inlineLookingUpBot) {
 		_inlineBot = nullptr;
 		_inlineLookingUpBot = false;
 		inlineBotChanged();
@@ -4107,7 +4104,7 @@ bool HistoryWidget::confirmSendingFiles(
 		}
 	}));
 
-	ActivateWindowDelayed(controller());
+	ActivateWindow(controller());
 	const auto shown = Ui::show(std::move(box));
 	shown->setCloseByOutsideClick(false);
 
@@ -4198,7 +4195,7 @@ bool HistoryWidget::confirmSendingFiles(
 void HistoryWidget::uploadFiles(
 		Storage::PreparedList &&list,
 		SendMediaType type) {
-	ActivateWindowDelayed(controller());
+	ActivateWindow(controller());
 
 	uploadFilesAfterConfirmation(
 		std::move(list),
@@ -6556,8 +6553,9 @@ void HistoryWidget::drawPinnedBar(Painter &p) {
 
 	int32 left = st::msgReplyBarSkip + st::msgReplyBarSkip;
 	if (_pinnedBar->msg) {
-		if (_pinnedBar->msg->media() && _pinnedBar->msg->media()->hasReplyPreview()) {
-			if (const auto image = _pinnedBar->msg->media()->replyPreview()) {
+		const auto media = _pinnedBar->msg->media();
+		if (media && media->hasReplyPreview()) {
+			if (const auto image = media->replyPreview()) {
 				QRect to(left, top, st::msgReplyBarSize.height(), st::msgReplyBarSize.height());
 				p.drawPixmap(to.x(), to.y(), image->pixSingle(_pinnedBar->msg->fullId(), image->width() / cIntRetinaFactor(), image->height() / cIntRetinaFactor(), to.width(), to.height(), ImageRoundRadius::Small));
 			}
@@ -6565,7 +6563,7 @@ void HistoryWidget::drawPinnedBar(Painter &p) {
 		}
 		p.setPen(st::historyReplyNameFg);
 		p.setFont(st::msgServiceNameFont);
-		p.drawText(left, top + st::msgServiceNameFont->ascent, lang(lng_pinned_message));
+		p.drawText(left, top + st::msgServiceNameFont->ascent, lang((media && media->poll()) ? lng_pinned_poll : lng_pinned_message));
 
 		p.setPen(st::historyComposeAreaFg);
 		p.setTextPalette(st::historyComposeAreaPalette);

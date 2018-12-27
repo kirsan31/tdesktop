@@ -7,37 +7,24 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "boxes/connection_box.h"
 
-#include "data/data_photo.h"
-#include "data/data_document.h"
 #include "boxes/confirm_box.h"
 #include "lang/lang_keys.h"
 #include "storage/localstorage.h"
 #include "base/qthelp_url.h"
-#include "mainwidget.h"
 #include "messenger.h"
-#include "mainwindow.h"
-#include "auth_session.h"
-#include "data/data_session.h"
-#include "mtproto/connection.h"
 #include "ui/widgets/checkbox.h"
 #include "ui/widgets/buttons.h"
 #include "ui/widgets/input_fields.h"
 #include "ui/widgets/labels.h"
 #include "ui/widgets/dropdown_menu.h"
-#include "ui/wrap/fade_wrap.h"
-#include "ui/wrap/padding_wrap.h"
 #include "ui/wrap/slide_wrap.h"
 #include "ui/wrap/vertical_layout.h"
 #include "ui/toast/toast.h"
 #include "ui/effects/radial_animation.h"
 #include "ui/text_options.h"
-#include "history/history_location_manager.h"
-#include "settings/settings_common.h"
-#include "application.h"
 #include "styles/style_boxes.h"
 #include "styles/style_chat_helpers.h"
 #include "styles/style_info.h"
-#include "styles/style_settings.h"
 
 namespace {
 
@@ -936,102 +923,6 @@ void ProxyBox::addLabel(
 
 } // namespace
 
-AutoDownloadBox::AutoDownloadBox(QWidget *parent) {
-}
-
-void AutoDownloadBox::prepare() {
-	setupContent();
-}
-
-void AutoDownloadBox::setupContent() {
-	using namespace Settings;
-
-	setTitle(langFactory(lng_media_auto_title));
-
-	auto wrap = object_ptr<Ui::VerticalLayout>(this);
-	const auto content = wrap.data();
-	setInnerWidget(object_ptr<Ui::OverrideMargins>(
-		this,
-		std::move(wrap)));
-
-	using pair = std::pair<Ui::Checkbox*, Ui::Checkbox*>;
-	const auto pairValue = [](pair checkboxes) {
-		return (checkboxes.first->checked() ? 0 : dbiadNoPrivate)
-			| (checkboxes.second->checked() ? 0 : dbiadNoGroups);
-	};
-	const auto enabledSomething = [](int32 oldValue, int32 newValue) {
-		return (uint32(oldValue) & ~uint32(newValue)) != 0;
-	};
-	const auto addCheckbox = [&](int32 value, DBIAutoDownloadFlags flag) {
-		const auto label = (flag == dbiadNoPrivate)
-			? lng_media_auto_private_chats
-			: lng_media_auto_groups;
-		return content->add(
-			object_ptr<Ui::Checkbox>(
-				content,
-				lang(label),
-				!(value & flag),
-				st::settingsSendType),
-			st::settingsSendTypePadding);
-	};
-	const auto addPair = [&](int32 value) {
-		const auto first = addCheckbox(value, dbiadNoPrivate);
-		const auto second = addCheckbox(value, dbiadNoGroups);
-		return pair(first, second);
-	};
-
-	AddSubsectionTitle(content, lng_media_photo_title);
-	const auto photo = addPair(cAutoDownloadPhoto());
-	AddSkip(content);
-
-	AddSkip(content);
-	AddSubsectionTitle(content, lng_media_audio_title);
-	const auto audio = addPair(cAutoDownloadAudio());
-	AddSkip(content);
-
-	AddSkip(content);
-	AddSubsectionTitle(content, lng_media_gif_title);
-	const auto gif = addPair(cAutoDownloadGif());
-	AddSkip(content);
-
-	addButton(langFactory(lng_connection_save), [=] {
-		const auto photoValue = pairValue(photo);
-		const auto audioValue = pairValue(audio);
-		const auto gifValue = pairValue(gif);
-		const auto photosEnabled = enabledSomething(
-			cAutoDownloadPhoto(),
-			photoValue);
-		const auto audioEnabled = enabledSomething(
-			cAutoDownloadAudio(),
-			audioValue);
-		const auto gifEnabled = enabledSomething(
-			cAutoDownloadGif(),
-			gifValue);
-		const auto photosChanged = (cAutoDownloadPhoto() != photoValue);
-		const auto documentsChanged = (cAutoDownloadAudio() != audioValue)
-			|| (cAutoDownloadGif() != gifValue);
-		cSetAutoDownloadAudio(audioValue);
-		cSetAutoDownloadGif(gifValue);
-		cSetAutoDownloadPhoto(photoValue);
-		if (photosChanged || documentsChanged) {
-			Local::writeUserSettings();
-		}
-		if (photosEnabled) {
-			Auth().data().photoLoadSettingsChanged();
-		}
-		if (audioEnabled) {
-			Auth().data().voiceLoadSettingsChanged();
-		}
-		if (gifEnabled) {
-			Auth().data().animationLoadSettingsChanged();
-		}
-		closeBox();
-	});
-	addButton(langFactory(lng_cancel), [=] { closeBox(); });
-
-	setDimensionsToContent(st::boxWideWidth, content);
-}
-
 ProxiesBoxController::ProxiesBoxController()
 : _saveTimer([] { Local::writeSettings(); }) {
 	_list = ranges::view::all(
@@ -1491,7 +1382,7 @@ void ProxiesBoxController::share(const ProxyData &proxy) {
 			? "&pass=" + qthelp::url_encode(proxy.password) : "")
 		+ ((proxy.type == Type::Mtproto && !proxy.password.isEmpty())
 			? "&secret=" + proxy.password : "");
-	Application::clipboard()->setText(link);
+	QApplication::clipboard()->setText(link);
 	Ui::Toast::Show(lang(lng_username_copied));
 }
 

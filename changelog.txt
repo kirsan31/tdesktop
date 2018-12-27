@@ -1,3 +1,17 @@
+1.5.6 beta (27.12.18)
+
+- Fix crash on macOS.
+
+1.5.5 beta (27.12.18)
+
+- Support for auto-download of files and music.
+- Improved auto-download settings.
+- Bug fixes and other minor improvements.
+
+1.5.4 (24.12.18)
+
+- Bug fixes and other minor improvements.
+
 1.5.3 (23.12.18)
 
 - Create polls in groups and channels - right from the chat menu.

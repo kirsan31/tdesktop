@@ -11,6 +11,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_poll.h"
 #include "ui/toast/toast.h"
 #include "ui/wrap/vertical_layout.h"
+#include "ui/wrap/slide_wrap.h"
 #include "ui/widgets/input_fields.h"
 #include "ui/widgets/shadow.h"
 #include "ui/widgets/labels.h"
@@ -25,7 +26,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 namespace {
 
 constexpr auto kQuestionLimit = 255;
-constexpr auto kMaxOptionsCount = 10;
+constexpr auto kMaxOptionsCount = PollData::kMaxOptions;
 constexpr auto kOptionLimit = 100;
 constexpr auto kWarnQuestionLimit = 80;
 constexpr auto kWarnOptionLimit = 30;
@@ -56,6 +57,9 @@ private:
 
 		void toggleRemoveAlways(bool toggled);
 
+		void show(anim::type animated);
+		void destroy(FnMut<void()> done);
+
 		//[[nodisacrd]] bool hasShadow() const;
 		//void destroyShadow();
 
@@ -75,6 +79,21 @@ private:
 
 		[[nodiscard]] rpl::producer<Qt::MouseButton> removeClicks() const;
 
+		inline bool operator<(const Option &other) const {
+			return field() < other.field();
+		}
+
+		friend inline bool operator<(
+				const Option &option,
+				Ui::InputField *field) {
+			return option.field() < field;
+		}
+		friend inline bool operator<(
+				Ui::InputField *field,
+				const Option &option) {
+			return field < option.field();
+		}
+
 	private:
 		Option() = default;
 
@@ -82,7 +101,7 @@ private:
 		void createRemove();
 		void createWarning();
 
-		base::unique_qptr<Ui::InputField> _field;
+		base::unique_qptr<Ui::SlideWrap<Ui::InputField>> _field;
 		base::unique_qptr<Ui::PlainShadow> _shadow;
 		base::unique_qptr<Ui::CrossButton> _remove;
 		rpl::variable<bool> *_removeAlways = nullptr;
@@ -97,12 +116,15 @@ private:
 	void checkLastOption();
 	void validateState();
 	void fixAfterErase();
+	void destroy(Option &&option);
+	void removeDestroyed(not_null<Ui::InputField*> field);
 	int findField(not_null<Ui::InputField*> field) const;
 
 	not_null<QWidget*> _outer;
 	not_null<Ui::VerticalLayout*> _container;
 	int _position = 0;
 	std::vector<Option> _list;
+	std::set<Option, std::less<>> _destroyed;
 	rpl::variable<bool> _valid = false;
 	rpl::variable<int> _usedCount = 0;
 	rpl::event_stream<not_null<QWidget*>> _scrollToWidget;
@@ -157,13 +179,14 @@ Options::Option Options::Option::Create(
 	auto result = Option();
 	const auto field = container->insert(
 		position,
-		object_ptr<Ui::InputField>(
+		object_ptr<Ui::SlideWrap<Ui::InputField>>(
 			container,
-			st::createPollOptionField,
-			Ui::InputField::Mode::MultiLine,
-			langFactory(lng_polls_create_option_add)));
-	InitField(outer, field);
-	field->setMaxLength(kOptionLimit + kErrorLimit);
+			object_ptr<Ui::InputField>(
+				container,
+				st::createPollOptionField,
+				langFactory(lng_polls_create_option_add))));
+	InitField(outer, field->entity());
+	field->entity()->setMaxLength(kOptionLimit + kErrorLimit);
 	result._field.reset(field);
 
 	result.createShadow();
@@ -182,9 +205,9 @@ void Options::Option::createShadow() {
 	if (_shadow) {
 		return;
 	}
-	const auto value = Ui::CreateChild<Ui::PlainShadow>(_field.get());
+	const auto value = Ui::CreateChild<Ui::PlainShadow>(field().get());
 	value->show();
-	_field->sizeValue(
+	field()->sizeValue(
 	) | rpl::start_with_next([=](QSize size) {
 		const auto left = st::createPollFieldPadding.left();
 		value->setGeometry(
@@ -203,11 +226,11 @@ void Options::Option::createShadow() {
 void Options::Option::createRemove() {
 	using namespace rpl::mappers;
 
-	const auto field = _field.get();
+	const auto field = this->field();
 	auto &lifetime = field->lifetime();
 
 	const auto remove = Ui::CreateChild<Ui::CrossButton>(
-		field,
+		field.get(),
 		st::createPollOptionRemove);
 	remove->hide(anim::type::instant);
 
@@ -240,7 +263,7 @@ void Options::Option::createRemove() {
 void Options::Option::createWarning() {
 	using namespace rpl::mappers;
 
-	const auto field = _field.get();
+	const auto field = this->field();
 	const auto warning = CreateWarningLabel(
 		field,
 		field,
@@ -262,31 +285,31 @@ void Options::Option::createWarning() {
 }
 
 bool Options::Option::isEmpty() const {
-	return _field->getLastText().trimmed().isEmpty();
+	return field()->getLastText().trimmed().isEmpty();
 }
 
 bool Options::Option::isGood() const {
-	return !_field->getLastText().trimmed().isEmpty() && !isTooLong();
+	return !field()->getLastText().trimmed().isEmpty() && !isTooLong();
 }
 
 bool Options::Option::isTooLong() const {
-	return (_field->getLastText().size() > kOptionLimit);
+	return (field()->getLastText().size() > kOptionLimit);
 }
 
 bool Options::Option::hasFocus() const {
-	return _field->hasFocus();
+	return field()->hasFocus();
 }
 
 void Options::Option::setFocus() const {
-	FocusAtEnd(_field);
+	FocusAtEnd(field());
 }
 
 void Options::Option::clearValue() {
-	_field->setText(QString());
+	field()->setText(QString());
 }
 
 void Options::Option::setPlaceholder() const {
-	_field->setPlaceholder(langFactory(lng_polls_create_option_add));
+	field()->setPlaceholder(langFactory(lng_polls_create_option_add));
 }
 
 void Options::Option::toggleRemoveAlways(bool toggled) {
@@ -294,16 +317,16 @@ void Options::Option::toggleRemoveAlways(bool toggled) {
 }
 
 not_null<Ui::InputField*> Options::Option::field() const {
-	return _field.get();
+	return _field->entity();
 }
 
 void Options::Option::removePlaceholder() const {
-	_field->setPlaceholder(nullptr);
+	field()->setPlaceholder(nullptr);
 }
 
 PollAnswer Options::Option::toPollAnswer(char id) const {
 	return PollAnswer{
-		_field->getLastText().trimmed(),
+		field()->getLastText().trimmed(),
 		QByteArray(1, id)
 	};
 }
@@ -343,6 +366,23 @@ rpl::producer<not_null<QWidget*>> Options::scrollToWidget() const {
 
 rpl::producer<> Options::backspaceInFront() const {
 	return _backspaceInFront.events();
+}
+
+void Options::Option::show(anim::type animated) {
+	_field->hide(anim::type::instant);
+	_field->show(animated);
+}
+
+void Options::Option::destroy(FnMut<void()> done) {
+	if (anim::Disabled() || _field->isHidden()) {
+		Ui::PostponeCall(std::move(done));
+		return;
+	}
+	_field->hide(anim::type::normal);
+	App::CallDelayed(
+		st::slideWrapDuration * 2,
+		_field.get(),
+		std::move(done));
 }
 
 std::vector<PollAnswer> Options::toPollAnswers() const {
@@ -406,8 +446,17 @@ void Options::removeEmptyTail() {
 	if (focusLast) {
 		emptyItem->setFocus();
 	}
+	for (auto i = emptyItem + 1; i != end; ++i) {
+		destroy(std::move(*i));
+	}
 	_list.erase(emptyItem + 1, end);
 	fixAfterErase();
+}
+
+void Options::destroy(Option &&option) {
+	const auto field = option.field();
+	option.destroy([=] { removeDestroyed(field); });
+	_destroyed.emplace(std::move(option));
 }
 
 void Options::fixAfterErase() {
@@ -435,7 +484,7 @@ void Options::addEmptyOption() {
 	_list.push_back(Option::Create(
 		_outer,
 		_container,
-		_position + _list.size()));
+		_position + _list.size() + _destroyed.size()));
 	const auto field = _list.back().field();
 	QObject::connect(field, &Ui::InputField::submitted, [=] {
 		const auto index = findField(field);
@@ -483,13 +532,21 @@ void Options::addEmptyOption() {
 			if (item->hasFocus()) {
 				(item + 1)->setFocus();
 			}
+			destroy(std::move(*item));
 			_list.erase(item);
 			fixAfterErase();
 			validateState();
 		}));
 	}, field->lifetime());
 
+	_list.back().show((_list.size() == 1)
+		? anim::type::instant
+		: anim::type::normal);
 	//fixShadows();
+}
+
+void Options::removeDestroyed(not_null<Ui::InputField*> field) {
+	_destroyed.erase(_destroyed.find(field));
 }
 
 void Options::validateState() {
@@ -507,7 +564,6 @@ int Options::findField(not_null<Ui::InputField*> field) const {
 		&Option::field) - begin(_list);
 
 	Ensures(result >= 0 && result < _list.size());
-
 	return result;
 }
 
@@ -589,7 +645,10 @@ object_ptr<Ui::RpWidget> CreatePollBox::setupContent() {
 	const auto options = lifetime().make_state<Options>(
 		getDelegate()->outerContainer(),
 		container);
-	auto limit = options->usedCount() | rpl::map([=](int count) {
+	auto limit = options->usedCount() | rpl::after_next([=](int count) {
+		setCloseByEscape(!count);
+		setCloseByOutsideClick(!count);
+	}) | rpl::map([=](int count) {
 		return (count < kMaxOptionsCount)
 			? lng_polls_create_limit(lt_count, kMaxOptionsCount - count)
 			: lang(lng_polls_create_maximum);
@@ -667,7 +726,4 @@ void CreatePollBox::prepare() {
 	const auto inner = setInnerWidget(setupContent());
 
 	setDimensionsToContent(st::boxWideWidth, inner);
-
-	setCloseByEscape(false);
-	setCloseByOutsideClick(false);
 }
