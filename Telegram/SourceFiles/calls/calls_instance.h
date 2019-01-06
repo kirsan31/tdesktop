@@ -28,6 +28,7 @@ public:
 	void handleUpdate(const MTPDupdatePhoneCall &update);
 	void showInfoPanel(not_null<Call*> call);
 	void showInfoPanel();
+	Call* currentCall();
 
 	base::Observable<Call*> &currentCallChanged() {
 		return _currentCallChanged;
