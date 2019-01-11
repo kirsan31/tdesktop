@@ -7,24 +7,19 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #pragma once
 
-#include "styles/style_widgets.h"
-#include "ui/rp_widget.h"
+#include "boxes/abstract_box.h"
 
 namespace Ui {
+namespace Emoji {
 
-class LevelMeter : public RpWidget {
+class ManageSetsBox : public BoxContent {
 public:
-	LevelMeter(QWidget *parent, const style::LevelMeter& st);
-
-	void setValue(float value);
+	explicit ManageSetsBox(QWidget*);
 
 protected:
-	void paintEvent(QPaintEvent *e) override;
-
-private:
-	const style::LevelMeter &_st;
-	float _value = 0.0f;
+	void prepare() override;
 
 };
 
+} // namespace Emoji
 } // namespace Ui

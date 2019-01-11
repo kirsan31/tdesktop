@@ -55,7 +55,7 @@ public:
 	void createDialog(Dialogs::Key key);
 	void removeDialog(Dialogs::Key key);
 	void repaintDialogRow(Dialogs::Mode list, not_null<Dialogs::Row*> row);
-	void repaintDialogRow(not_null<History*> history, MsgId messageId);
+	void repaintDialogRow(Dialogs::RowDescriptor row);
 
 	void dragLeft();
 
@@ -88,14 +88,13 @@ public:
 
 	void searchInChat(Dialogs::Key key, UserData *from);
 
-	void onFilterUpdate(QString newFilter, bool force = false);
+	void applyFilterUpdate(QString newFilter, bool force = false);
 	void onHashtagFilterUpdate(QStringRef newFilter);
 
 	PeerData *updateFromParentDrag(QPoint globalPosition);
 
-	void setLoadMoreCallback(Fn<void()> callback) {
-		_loadMoreCallback = std::move(callback);
-	}
+	void setLoadMoreCallback(Fn<void()> callback);
+	[[nodiscard]] rpl::producer<> listBottomReached() const;
 
 	base::Observable<UserData*> searchFromUserChanged;
 
@@ -140,6 +139,13 @@ private:
 	using HashtagResults = std::vector<std::unique_ptr<HashtagResult>>;
 	struct PeerSearchResult;
 	using PeerSearchResults = std::vector<std::unique_ptr<PeerSearchResult>>;
+
+	enum class JumpSkip {
+		PreviousOrBegin,
+		NextOrEnd,
+		PreviousOrOriginal,
+		NextOrOriginal,
+	};
 
 	struct ChosenRow {
 		Dialogs::Key key;
@@ -189,8 +195,8 @@ private:
 	void setupShortcuts();
 	Dialogs::RowDescriptor computeJump(
 		const Dialogs::RowDescriptor &to,
-		int skipDirection);
-	bool jumpToDialogRow(const Dialogs::RowDescriptor &to);
+		JumpSkip skip);
+	bool jumpToDialogRow(Dialogs::RowDescriptor to);
 
 	Dialogs::RowDescriptor chatListEntryBefore(
 		const Dialogs::RowDescriptor &which) const;
@@ -216,8 +222,9 @@ private:
 	void updateSearchResult(not_null<PeerData*> peer);
 	void updateDialogRow(
 		Dialogs::RowDescriptor row,
-		QRect updateRect,
+		QRect updateRect = QRect(),
 		UpdateRowSections sections = UpdateRowSection::All);
+	void fillSupportSearchMenu(not_null<Ui::PopupMenu*> menu);
 
 	int dialogsOffset() const;
 	int proxyPromotedCount() const;
@@ -362,9 +369,10 @@ private:
 	UserData *_searchFromUser = nullptr;
 	Text _searchInChatText;
 	Text _searchFromUserText;
-	Dialogs::Key _menuKey;
+	Dialogs::RowDescriptor _menuRow;
 
 	Fn<void()> _loadMoreCallback;
+	rpl::event_stream<> _listBottomReached;
 
 	base::unique_qptr<Ui::PopupMenu> _menu;
 

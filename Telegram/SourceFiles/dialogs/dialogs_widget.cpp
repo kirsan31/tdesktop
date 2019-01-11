@@ -165,13 +165,20 @@ DialogsWidget::DialogsWidget(QWidget *parent, not_null<Window::Controller*> cont
 	connect(_inner, SIGNAL(cancelSearchInChat()), this, SLOT(onCancelSearchInChat()));
 	subscribe(_inner->searchFromUserChanged, [this](UserData *user) {
 		setSearchInChat(_searchInChat, user);
-		onFilterUpdate(true);
+		applyFilterUpdate(true);
 	});
 	connect(_scroll, SIGNAL(geometryChanged()), _inner, SLOT(onParentGeometryChanged()));
 	connect(_scroll, SIGNAL(scrolled()), this, SLOT(onListScroll()));
-	connect(_filter, SIGNAL(cancelled()), this, SLOT(onCancel()));
-	connect(_filter, SIGNAL(changed()), this, SLOT(onFilterUpdate()));
-	connect(_filter, SIGNAL(cursorPositionChanged(int,int)), this, SLOT(onFilterCursorMoved(int,int)));
+	connect(_filter, &Ui::FlatInput::cancelled, [=] {
+		onCancel();
+	});
+	connect(_filter, &Ui::FlatInput::changed, [=] {
+		applyFilterUpdate();
+	});
+	connect(
+		_filter,
+		&Ui::FlatInput::cursorPositionChanged,
+		[=](int from, int to) { onFilterCursorMoved(from, to); });
 
 	if (!Core::UpdaterDisabled()) {
 		Core::UpdateChecker checker;
@@ -219,6 +226,10 @@ DialogsWidget::DialogsWidget(QWidget *parent, not_null<Window::Controller*> cont
 			loadDialogs();
 		}
 	});
+	_inner->listBottomReached(
+	) | rpl::start_with_next([=] {
+		loadMoreBlockedByDateChats();
+	}, lifetime());
 
 	_filter->setFocusPolicy(Qt::StrongFocus);
 	_filter->customUpDown(true);
@@ -226,7 +237,7 @@ DialogsWidget::DialogsWidget(QWidget *parent, not_null<Window::Controller*> cont
 	updateJumpToDateVisibility(true);
 	updateSearchFromVisibility(true);
 	setupConnectingWidget();
-	setupSupportLoadingLimit();
+	setupSupportMode();
 }
 
 void DialogsWidget::setupConnectingWidget() {
@@ -235,14 +246,27 @@ void DialogsWidget::setupConnectingWidget() {
 		Window::AdaptiveIsOneColumn());
 }
 
-void DialogsWidget::setupSupportLoadingLimit() {
+void DialogsWidget::setupSupportMode() {
 	if (!Auth().supportMode()) {
 		return;
 	}
+
 	Auth().settings().supportChatsTimeSliceValue(
 	) | rpl::start_with_next([=](int seconds) {
 		_dialogsLoadTill = seconds ? std::max(unixtime() - seconds, 0) : 0;
 		refreshLoadMoreButton();
+	}, lifetime());
+
+	Auth().settings().supportAllSearchResultsValue(
+	) | rpl::filter([=] {
+		return !_searchQuery.isEmpty();
+	}) | rpl::start_with_next([=] {
+		_searchTimer.stop();
+		_searchCache.clear();
+		_searchQueries.clear();
+		_searchQuery = QString();
+		_scroll->scrollToY(0);
+		onSearchMessages();
 	}, lifetime());
 }
 
@@ -295,10 +319,8 @@ void DialogsWidget::repaintDialogRow(
 	_inner->repaintDialogRow(list, row);
 }
 
-void DialogsWidget::repaintDialogRow(
-		not_null<History*> history,
-		MsgId messageId) {
-	_inner->repaintDialogRow(history, messageId);
+void DialogsWidget::repaintDialogRow(Dialogs::RowDescriptor row) {
+	_inner->repaintDialogRow(row);
 }
 
 void DialogsWidget::dialogsToUp() {
@@ -395,7 +417,7 @@ void DialogsWidget::animationCallback() {
 		updateJumpToDateVisibility(true);
 		updateSearchFromVisibility(true);
 
-		onFilterUpdate();
+		applyFilterUpdate();
 		if (App::wnd()) App::wnd()->setInnerFocus();
 	}
 }
@@ -513,20 +535,26 @@ void DialogsWidget::refreshLoadMoreButton() {
 			st::dialogsLoadMore,
 			st::dialogsLoadMore);
 		_loadMoreChats->addClickHandler([=] {
-			if (_loadMoreChats->isDisabled()) {
-				return;
-			}
-			const auto max = Auth().settings().supportChatsTimeSlice();
-			_dialogsLoadTill = _dialogsOffsetDate
-				? (_dialogsOffsetDate - max)
-				: (unixtime() - max);
-			loadDialogs();
+			loadMoreBlockedByDateChats();
 		});
 		updateControlsGeometry();
 	}
 	const auto loading = !loadingBlockedByDate();
 	_loadMoreChats->setDisabled(loading);
 	_loadMoreChats->setText(loading ? "Loading..." : "Load more");
+}
+
+void DialogsWidget::loadMoreBlockedByDateChats() {
+	if (!_loadMoreChats
+		|| _loadMoreChats->isDisabled()
+		|| _loadMoreChats->isHidden()) {
+		return;
+	}
+	const auto max = Auth().settings().supportChatsTimeSlice();
+	_dialogsLoadTill = _dialogsOffsetDate
+		? (_dialogsOffsetDate - max)
+		: (unixtime() - max);
+	loadDialogs();
 }
 
 void DialogsWidget::pinnedDialogsReceived(
@@ -741,7 +769,7 @@ void DialogsWidget::searchMessages(
 		}
 		_filter->setText(query);
 		_filter->updatePlaceholder();
-		onFilterUpdate(true);
+		applyFilterUpdate(true);
 		_searchTimer.stop();
 		onSearchMessages();
 
@@ -1115,15 +1143,21 @@ void DialogsWidget::onListScroll() {
 	_inner->setVisibleTopBottom(scrollTop, scrollTop + _scroll->height());
 }
 
-void DialogsWidget::onFilterUpdate(bool force) {
-	if (_a_show.animating() && !force) return;
+void DialogsWidget::applyFilterUpdate(bool force) {
+	if (_a_show.animating() && !force) {
+		return;
+	}
 
 	auto filterText = _filter->getLastText();
-	_inner->onFilterUpdate(filterText, force);
+	_inner->applyFilterUpdate(filterText, force);
 	if (filterText.isEmpty() && !_searchFromUser) {
 		clearSearchCache();
 	}
 	_cancelSearch->toggle(!filterText.isEmpty(), anim::type::normal);
+	if (_loadMoreChats) {
+		_loadMoreChats->setVisible(filterText.isEmpty());
+		updateControlsGeometry();
+	}
 	updateJumpToDateVisibility();
 
 	if (filterText.isEmpty()) {
@@ -1146,7 +1180,7 @@ void DialogsWidget::onFilterUpdate(bool force) {
 void DialogsWidget::searchInChat(Dialogs::Key chat) {
 	onCancelSearch();
 	setSearchInChat(chat);
-	onFilterUpdate(true);
+	applyFilterUpdate(true);
 }
 
 void DialogsWidget::setSearchInChat(Dialogs::Key chat, UserData *from) {
@@ -1202,7 +1236,7 @@ void DialogsWidget::showSearchFrom() {
 			crl::guard(this, [=](not_null<UserData*> user) {
 				Ui::hideLayer();
 				setSearchInChat(chat, user);
-				onFilterUpdate(true);
+				applyFilterUpdate(true);
 			}),
 			crl::guard(this, [=] { _filter->setFocus(); }));
 	}
@@ -1239,7 +1273,7 @@ void DialogsWidget::onCompleteHashtag(QString tag) {
 				r = t.mid(0, start + 1) + tag + ' ' + t.mid(cur);
 				_filter->setText(r);
 				_filter->setCursorPosition(start + 1 + tag.size() + 1);
-				onFilterUpdate(true);
+				applyFilterUpdate(true);
 				return;
 			}
 			break;
@@ -1248,7 +1282,7 @@ void DialogsWidget::onCompleteHashtag(QString tag) {
 	}
 	_filter->setText(t.mid(0, cur) + '#' + tag + ' ' + t.mid(cur));
 	_filter->setCursorPosition(cur + 1 + tag.size() + 1);
-	onFilterUpdate(true);
+	applyFilterUpdate(true);
 }
 
 void DialogsWidget::resizeEvent(QResizeEvent *e) {
@@ -1320,7 +1354,7 @@ void DialogsWidget::updateControlsGeometry() {
 	auto newScrollTop = _scroll->scrollTop() + addToScroll;
 	auto scrollHeight = height() - scrollTop;
 	const auto putBottomButton = [&](object_ptr<BottomButton> &button) {
-		if (button) {
+		if (button && !button->isHidden()) {
 			const auto buttonHeight = button->height();
 			scrollHeight -= buttonHeight;
 			button->setGeometry(
@@ -1451,7 +1485,6 @@ void DialogsWidget::scrollToEntry(const Dialogs::RowDescriptor &entry) {
 
 void DialogsWidget::removeDialog(Dialogs::Key key) {
 	_inner->removeDialog(key);
-	onFilterUpdate();
 }
 
 Dialogs::IndexedList *DialogsWidget::contactsList() {
@@ -1488,7 +1521,7 @@ bool DialogsWidget::onCancelSearch() {
 	_inner->clearFilter();
 	_filter->clear();
 	_filter->updatePlaceholder();
-	onFilterUpdate();
+	applyFilterUpdate();
 	return clearing;
 }
 
@@ -1512,7 +1545,7 @@ void DialogsWidget::onCancelSearchInChat() {
 	_inner->clearFilter();
 	_filter->clear();
 	_filter->updatePlaceholder();
-	onFilterUpdate();
+	applyFilterUpdate();
 	if (!Adaptive::OneColumn() && !App::main()->selectingPeer()) {
 		emit cancelled();
 	}

@@ -12,6 +12,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 namespace Ui {
 namespace Emoji {
+namespace internal {
+
+[[nodiscard]] QString SetDataPath(int id);
+
+} // namespace internal
 
 constexpr auto kRecentLimit = 42;
 
@@ -19,6 +24,22 @@ void Init();
 void Clear();
 
 void ClearIrrelevantCache();
+
+struct Set {
+	int id = 0;
+	int postId = 0;
+	int size = 0;
+	QString name;
+	QString previewPath;
+};
+
+// Thread safe, callback is called on main thread.
+void SwitchToSet(int id, Fn<void(bool)> callback);
+
+std::vector<Set> Sets();
+int CurrentSetId();
+bool SetIsReady(int id);
+rpl::producer<> Updated();
 
 int GetSizeNormal();
 int GetSizeLarge();
@@ -137,24 +158,6 @@ void AddRecent(EmojiPtr emoji);
 
 const QPixmap &SinglePixmap(EmojiPtr emoji, int fontHeight);
 void Draw(QPainter &p, EmojiPtr emoji, int size, int x, int y);
-
-class Instance {
-public:
-	explicit Instance(int size);
-
-	bool cached() const;
-	void draw(QPainter &p, EmojiPtr emoji, int x, int y);
-
-private:
-	void readCache();
-	void generateCache();
-	void pushSprite(QImage &&data);
-
-	int _size = 0;
-	std::vector<QPixmap> _sprites;
-	base::binary_guard _generating;
-
-};
 
 } // namespace Emoji
 } // namespace Ui

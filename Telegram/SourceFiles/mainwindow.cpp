@@ -17,6 +17,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/widgets/popup_menu.h"
 #include "ui/widgets/buttons.h"
 #include "ui/widgets/shadow.h"
+#include "ui/emoji_config.h"
 #include "lang/lang_cloud_manager.h"
 #include "lang/lang_instance.h"
 #include "lang/lang_keys.h"
@@ -92,6 +93,11 @@ MainWindow::MainWindow() {
 	Messenger::Instance().lockChanges(
 	) | rpl::start_with_next([=] {
 		updateGlobalMenu();
+	}, lifetime());
+
+	Ui::Emoji::Updated(
+	) | rpl::start_with_next([=] {
+		Ui::ForceFullRepaint(this);
 	}, lifetime());
 
 	setAttribute(Qt::WA_NoSystemBackground);
@@ -832,6 +838,8 @@ QImage MainWindow::iconWithCounter(int size, int count, style::color bg, style::
 	if (layer) {
 		if (size != 16 && size != 20 && size != 24) size = 32;
 
+		// platform/linux/main_window_linux depends on count used the same
+		// way for all the same (count % 1000) values.
 		QString cnt = (count < 1000) ? QString("%1").arg(count) : QString("..%1").arg(count % 100, 2, 10, QChar('0'));
 		QImage result(size, size, QImage::Format_ARGB32);
 		int32 cntSize = cnt.size();
