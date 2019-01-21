@@ -11,9 +11,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "chat_helpers/stickers.h"
 #include "dialogs/dialogs_key.h"
 #include "data/data_groups.h"
+#include "data/data_notify_settings.h"
 #include "history/history_location_manager.h"
 #include "base/timer.h"
 
+class Image;
 class HistoryItem;
 class BoxContent;
 struct WebPageCollage;
@@ -49,6 +51,8 @@ class Feed;
 enum class FeedUpdateFlag;
 struct FeedUpdate;
 
+struct WallPaper;
+
 class Session final {
 public:
 	using ViewElement = HistoryView::Element;
@@ -59,6 +63,8 @@ public:
 	AuthSession &session() const {
 		return *_session;
 	}
+
+	void clear();
 
 	void startExport(PeerData *peer = nullptr);
 	void startExport(const MTPInputPeer &singlePeer);
@@ -76,6 +82,41 @@ public:
 	void forgetPassportCredentials();
 
 	Storage::Cache::Database &cache();
+
+	[[nodiscard]] not_null<PeerData*> peer(PeerId id);
+	[[nodiscard]] not_null<UserData*> user(UserId id);
+	[[nodiscard]] not_null<ChatData*> chat(ChatId id);
+	[[nodiscard]] not_null<ChannelData*> channel(ChannelId id);
+
+	[[nodiscard]] PeerData *peerLoaded(PeerId id) const;
+	[[nodiscard]] UserData *userLoaded(UserId id) const;
+	[[nodiscard]] ChatData *chatLoaded(ChatId id) const;
+	[[nodiscard]] ChannelData *channelLoaded(ChannelId id) const;
+
+	not_null<UserData*> user(const MTPUser &data);
+	not_null<PeerData*> chat(const MTPChat &data);
+
+	// Returns last user, if there were any.
+	UserData *processUsers(const MTPVector<MTPUser> &data);
+	PeerData *processChats(const MTPVector<MTPChat> &data);
+
+	void applyMaximumChatVersions(const MTPVector<MTPChat> &data);
+
+	void enumerateUsers(Fn<void(not_null<UserData*>)> action) const;
+	void enumerateGroups(Fn<void(not_null<PeerData*>)> action) const;
+	void enumerateChannels(Fn<void(not_null<ChannelData*>)> action) const;
+	[[nodiscard]] PeerData *peerByUsername(const QString &username) const;
+
+	not_null<History*> history(PeerId peerId);
+	History *historyLoaded(PeerId peerId) const;
+	not_null<History*> history(not_null<const PeerData*> peer);
+	History *historyLoaded(const PeerData *peer);
+
+	void registerSendAction(
+		not_null<History*> history,
+		not_null<UserData*> user,
+		const MTPSendMessageAction &action,
+		TimeId when);
 
 	[[nodiscard]] base::Variable<bool> &contactsLoaded() {
 		return _contactsLoaded;
@@ -228,6 +269,13 @@ public:
 	MessageIdsList itemsToIds(const HistoryItemsList &items) const;
 	MessageIdsList itemOrItsGroup(not_null<HistoryItem*> item) const;
 
+	void applyUpdate(const MTPDupdateMessagePoll &update);
+	void applyUpdate(const MTPDupdateChatParticipants &update);
+	void applyUpdate(const MTPDupdateChatParticipantAdd &update);
+	void applyUpdate(const MTPDupdateChatParticipantDelete &update);
+	void applyUpdate(const MTPDupdateChatParticipantAdmin &update);
+	void applyUpdate(const MTPDupdateChatDefaultBannedRights &update);
+
 	int pinnedDialogsCount() const;
 	const std::deque<Dialogs::Key> &pinnedDialogsOrder() const;
 	void setPinnedDialog(const Dialogs::Key &key, bool pinned);
@@ -246,6 +294,34 @@ public:
 	void requestDocumentViewRepaint(not_null<const DocumentData*> document);
 	void markMediaRead(not_null<const DocumentData*> document);
 	void requestPollViewRepaint(not_null<const PollData*> poll);
+
+	HistoryItem *addNewMessage(const MTPMessage &data, NewMessageType type);
+
+	struct SendActionAnimationUpdate {
+		not_null<History*> history;
+		int width = 0;
+		int height = 0;
+		bool textUpdated = false;
+	};
+	[[nodiscard]] auto sendActionAnimationUpdated() const
+		-> rpl::producer<SendActionAnimationUpdate>;
+	void updateSendActionAnimation(SendActionAnimationUpdate &&update);
+
+	void updateSendActionAnimation();
+
+	int unreadBadge() const;
+	bool unreadBadgeMuted() const;
+	int unreadBadgeIgnoreOne(History *history) const;
+	bool unreadBadgeMutedIgnoreOne(History *history) const;
+	int unreadOnlyMutedBadge() const;
+
+	void unreadIncrement(int count, bool muted);
+	void unreadMuteChanged(int count, bool muted);
+	void unreadEntriesChanged(
+		int withUnreadDelta,
+		int mutedWithUnreadDelta);
+
+	void selfDestructIn(not_null<HistoryItem*> item, TimeMs delay);
 
 	not_null<PhotoData*> photo(PhotoId id);
 	not_null<PhotoData*> photo(const MTPPhoto &data);
@@ -333,7 +409,6 @@ public:
 	not_null<PollData*> poll(PollId id);
 	not_null<PollData*> poll(const MTPPoll &data);
 	not_null<PollData*> poll(const MTPDmessageMediaPoll &data);
-	void applyPollUpdate(const MTPDupdateMessagePoll &update);
 
 	not_null<LocationData*> location(const LocationCoords &coords);
 
@@ -452,11 +527,30 @@ public:
 		return _groups;
 	}
 
+	bool updateWallpapers(const MTPaccount_WallPapers &data);
+	const std::vector<WallPaper> &wallpapers() const;
+	int32 wallpapersHash() const;
+
+	void clearLocalStorage();
+
 private:
 	void suggestStartExport();
 
 	void setupContactViewsViewer();
 	void setupChannelLeavingViewer();
+
+	void checkSelfDestructItems();
+	int computeUnreadBadge(
+		int full,
+		int muted,
+		int entriesFull,
+		int entriesMuted) const;
+	bool computeUnreadBadgeMuted(
+		int full,
+		int muted,
+		int entriesFull,
+		int entriesMuted) const;
+
 	void photoApplyFields(
 		not_null<PhotoData*> photo,
 		const MTPPhoto &data);
@@ -542,7 +636,6 @@ private:
 	void unmuteByFinished();
 	void unmuteByFinishedDelayed(TimeMs delay);
 	void updateNotifySettingsLocal(not_null<PeerData*> peer);
-	void sendNotifySettingsUpdates();
 
 	template <typename Method>
 	void enumerateItemViews(
@@ -553,6 +646,10 @@ private:
 		const TextWithEntities &message,
 		const MTPMessageMedia &media,
 		TimeId date);
+
+	void step_typings(TimeMs ms, bool timer);
+
+	void setWallpapers(const QVector<MTPWallPaper> &data, int32 hash);
 
 	not_null<AuthSession*> _session;
 
@@ -602,25 +699,37 @@ private:
 	Stickers::Order _archivedStickerSetsOrder;
 	Stickers::SavedGifs _savedGifs;
 
+	int _unreadFull = 0;
+	int _unreadMuted = 0;
+	int _unreadEntriesFull = 0;
+	int _unreadEntriesMuted = 0;
+
+	base::Timer _selfDestructTimer;
+	std::vector<FullMsgId> _selfDestructItems;
+
+	// When typing in this history started.
+	base::flat_map<not_null<History*>, TimeMs> _sendActions;
+	BasicAnimation _a_sendActions;
+
 	std::unordered_map<
 		PhotoId,
 		std::unique_ptr<PhotoData>> _photos;
-	std::map<
+	std::unordered_map<
 		not_null<const PhotoData*>,
 		base::flat_set<not_null<HistoryItem*>>> _photoItems;
 	std::unordered_map<
 		DocumentId,
 		std::unique_ptr<DocumentData>> _documents;
-	std::map<
+	std::unordered_map<
 		not_null<const DocumentData*>,
 		base::flat_set<not_null<HistoryItem*>>> _documentItems;
 	std::unordered_map<
 		WebPageId,
 		std::unique_ptr<WebPageData>> _webpages;
-	std::map<
+	std::unordered_map<
 		not_null<const WebPageData*>,
 		base::flat_set<not_null<HistoryItem*>>> _webpageItems;
-	std::map<
+	std::unordered_map<
 		not_null<const WebPageData*>,
 		base::flat_set<not_null<ViewElement*>>> _webpageViews;
 	std::unordered_map<
@@ -632,16 +741,16 @@ private:
 	std::unordered_map<
 		GameId,
 		std::unique_ptr<GameData>> _games;
-	std::map<
+	std::unordered_map<
 		not_null<const GameData*>,
 		base::flat_set<not_null<ViewElement*>>> _gameViews;
-	std::map<
+	std::unordered_map<
 		not_null<const PollData*>,
 		base::flat_set<not_null<ViewElement*>>> _pollViews;
-	std::map<
+	std::unordered_map<
 		UserId,
 		base::flat_set<not_null<HistoryItem*>>> _contactItems;
-	std::map<
+	std::unordered_map<
 		UserId,
 		base::flat_set<not_null<ViewElement*>>> _contactViews;
 	base::flat_map<
@@ -656,7 +765,7 @@ private:
 	base::flat_map<FeedId, std::unique_ptr<Feed>> _feeds;
 	rpl::variable<FeedId> _defaultFeedId = FeedId();
 	Groups _groups;
-	std::map<
+	std::unordered_map<
 		not_null<const HistoryItem*>,
 		std::vector<not_null<ViewElement*>>> _views;
 
@@ -671,6 +780,9 @@ private:
 	std::unordered_set<not_null<const PeerData*>> _mutedPeers;
 	base::Timer _unmuteByFinishedTimer;
 
+	std::unordered_map<PeerId, std::unique_ptr<PeerData>> _peers;
+	std::unordered_map<PeerId, std::unique_ptr<History>> _histories;
+
 	MessageIdsList _mimeForwardIds;
 
 	using CredentialsWithGeneration = std::pair<
@@ -679,6 +791,11 @@ private:
 	std::unique_ptr<CredentialsWithGeneration> _passportCredentials;
 
 	rpl::event_stream<> _newAuthorizationChecks;
+
+	rpl::event_stream<SendActionAnimationUpdate> _sendActionAnimationUpdate;
+
+	std::vector<WallPaper> _wallpapers;
+	int32 _wallpapersHash = 0;
 
 	rpl::lifetime _lifetime;
 

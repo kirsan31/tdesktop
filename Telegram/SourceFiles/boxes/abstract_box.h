@@ -103,10 +103,13 @@ public:
 	void clearButtons() {
 		getDelegate()->clearButtons();
 	}
-	QPointer<Ui::RoundButton> addButton(Fn<QString()> textFactory, Fn<void()> clickCallback);
-	QPointer<Ui::RoundButton> addLeftButton(Fn<QString()> textFactory, Fn<void()> clickCallback);
-	QPointer<Ui::IconButton> addTopButton(const style::IconButton &st, Fn<void()> clickCallback) {
+	QPointer<Ui::RoundButton> addButton(Fn<QString()> textFactory, Fn<void()> clickCallback = nullptr);
+	QPointer<Ui::RoundButton> addLeftButton(Fn<QString()> textFactory, Fn<void()> clickCallback = nullptr);
+	QPointer<Ui::IconButton> addTopButton(const style::IconButton &st, Fn<void()> clickCallback = nullptr) {
 		return getDelegate()->addTopButton(st, std::move(clickCallback));
+	}
+	QPointer<Ui::RoundButton> addButton(Fn<QString()> textFactory, const style::RoundButton &st) {
+		return getDelegate()->addButton(std::move(textFactory), nullptr, st);
 	}
 	QPointer<Ui::RoundButton> addButton(Fn<QString()> textFactory, Fn<void()> clickCallback, const style::RoundButton &st) {
 		return getDelegate()->addButton(std::move(textFactory), std::move(clickCallback), st);
@@ -344,4 +347,46 @@ enum CreatingGroupType {
 	CreatingGroupNone,
 	CreatingGroupGroup,
 	CreatingGroupChannel,
+};
+
+class BoxPointer {
+public:
+	BoxPointer() = default;
+	BoxPointer(const BoxPointer &other) = default;
+	BoxPointer(BoxPointer &&other) : _value(base::take(other._value)) {
+	}
+	BoxPointer &operator=(const BoxPointer &other) {
+		if (_value != other._value) {
+			destroy();
+			_value = other._value;
+		}
+		return *this;
+	}
+	BoxPointer &operator=(BoxPointer &&other) {
+		if (_value != other._value) {
+			destroy();
+			_value = base::take(other._value);
+		}
+		return *this;
+	}
+	BoxPointer &operator=(BoxContent *other) {
+		if (_value != other) {
+			destroy();
+			_value = other;
+		}
+		return *this;
+	}
+	~BoxPointer() {
+		destroy();
+	}
+
+private:
+	void destroy() {
+		if (const auto value = base::take(_value)) {
+			value->closeBox();
+		}
+	}
+
+	QPointer<BoxContent> _value;
+
 };

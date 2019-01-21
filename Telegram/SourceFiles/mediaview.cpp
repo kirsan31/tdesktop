@@ -25,6 +25,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/history_message.h"
 #include "data/data_media_types.h"
 #include "data/data_session.h"
+#include "data/data_channel.h"
+#include "data/data_chat.h"
+#include "data/data_user.h"
 #include "window/themes/window_theme_preview.h"
 #include "window/window_peer_menu.h"
 #include "observer_peer.h"
@@ -464,7 +467,7 @@ void MediaView::updateActions() {
 			return _userPhotosData && _fullIndex && _fullCount;
 		} else if (_photo && _photo->peer && _photo->peer->userpicPhotoId() == _photo->id) {
 			if (auto chat = _photo->peer->asChat()) {
-				return chat->canEdit();
+				return chat->canEditInformation();
 			} else if (auto channel = _photo->peer->asChannel()) {
 				return channel->canEditInformation();
 			}
@@ -903,7 +906,7 @@ void MediaView::onSaveAs() {
 			}));
 	}
 	activateWindow();
-	Sandbox::setActiveWindow(this);
+	Core::App().setActiveWindow(this);
 	setFocus();
 }
 
@@ -1774,7 +1777,7 @@ void MediaView::displayFinished() {
 		show();
 		psShowOverAll(this);
 		activateWindow();
-		Sandbox::setActiveWindow(this);
+		Core::App().setActiveWindow(this);
 		setFocus();
 	}
 }
@@ -1837,7 +1840,7 @@ void MediaView::initThemePreview() {
 
 		Window::Theme::CurrentData current;
 		current.backgroundId = Window::Theme::Background()->id();
-		current.backgroundImage = Window::Theme::Background()->pixmap().toImage();
+		current.backgroundImage = Window::Theme::Background()->createCurrentImage();
 		current.backgroundTiled = Window::Theme::Background()->tile();
 
 		const auto path = _doc->location().name();

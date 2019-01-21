@@ -18,8 +18,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/history_message.h"
 #include "history/history.h"
 #include "media/media_clip_reader.h"
-#include "styles/style_dialogs.h"
-#include "styles/style_history.h"
 #include "ui/effects/ripple_animation.h"
 #include "ui/text_options.h"
 #include "storage/file_upload.h"
@@ -37,6 +35,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_messages.h"
 #include "data/data_media_types.h"
 #include "data/data_feed.h"
+#include "data/data_channel.h"
+#include "data/data_chat.h"
+#include "data/data_user.h"
+#include "styles/style_dialogs.h"
+#include "styles/style_history.h"
 
 namespace {
 
@@ -172,13 +175,13 @@ TimeId HistoryItem::date() const {
 }
 
 void HistoryItem::finishEdition(int oldKeyboardTop) {
-	Auth().data().requestItemViewRefresh(this);
-	invalidateChatsListEntry();
-	if (const auto group = Auth().data().groups().find(this)) {
+	_history->owner().requestItemViewRefresh(this);
+	invalidateChatListEntry();
+	if (const auto group = _history->owner().groups().find(this)) {
 		const auto leader = group->items.back();
 		if (leader != this) {
-			Auth().data().requestItemViewRefresh(leader);
-			leader->invalidateChatsListEntry();
+			_history->owner().requestItemViewRefresh(leader);
+			leader->invalidateChatListEntry();
 		}
 	}
 
@@ -195,7 +198,7 @@ void HistoryItem::setGroupId(MessageGroupId groupId) {
 	Expects(!_groupId);
 
 	_groupId = groupId;
-	Auth().data().groups().registerMessage(this);
+	_history->owner().groups().registerMessage(this);
 }
 
 HistoryMessageReplyMarkup *HistoryItem::inlineReplyMarkup() {
@@ -214,7 +217,7 @@ ReplyKeyboard *HistoryItem::inlineReplyKeyboard() {
 	return nullptr;
 }
 
-void HistoryItem::invalidateChatsListEntry() {
+void HistoryItem::invalidateChatListEntry() {
 	if (const auto main = App::main()) {
 		// #TODO feeds search results
 		main->repaintDialogRow({ history(), fullId() });
@@ -305,7 +308,7 @@ void HistoryItem::addLogEntryOriginal(
 	Expects(isLogEntry());
 
 	AddComponents(HistoryMessageLogEntryOriginal::Bit());
-	Get<HistoryMessageLogEntryOriginal>()->page = Auth().data().webpage(
+	Get<HistoryMessageLogEntryOriginal>()->page = _history->owner().webpage(
 		localId,
 		label,
 		content);
@@ -330,7 +333,6 @@ UserData *HistoryItem::getMessageBot() const {
 };
 
 void HistoryItem::destroy() {
-	const auto history = this->history();
 	if (isLogEntry()) {
 		Assert(!mainView());
 	} else {
@@ -338,13 +340,13 @@ void HistoryItem::destroy() {
 		eraseFromUnreadMentions();
 		if (IsServerMsgId(id)) {
 			if (const auto types = sharedMediaTypes()) {
-				Auth().storage().remove(Storage::SharedMediaRemoveOne(
-					history->peer->id,
+				_history->session().storage().remove(Storage::SharedMediaRemoveOne(
+					_history->peer->id,
 					types,
 					id));
 			}
 		} else {
-			Auth().api().cancelLocalItem(this);
+			_history->session().api().cancelLocalItem(this);
 		}
 		_history->itemRemoved(this);
 	}
@@ -353,14 +355,14 @@ void HistoryItem::destroy() {
 
 void HistoryItem::refreshMainView() {
 	if (const auto view = mainView()) {
-		Auth().data().notifyHistoryChangeDelayed(_history);
+		_history->owner().notifyHistoryChangeDelayed(_history);
 		view->refreshInBlock();
 	}
 }
 
 void HistoryItem::removeMainView() {
 	if (const auto view = mainView()) {
-		Auth().data().notifyHistoryChangeDelayed(_history);
+		_history->owner().notifyHistoryChangeDelayed(_history);
 		view->removeFromBlock();
 	}
 }
@@ -378,14 +380,14 @@ void HistoryItem::indexAsNewItem() {
 		addToUnreadMentions(UnreadMentionType::New);
 		CrashReports::ClearAnnotation("addToUnreadMentions");
 		if (const auto types = sharedMediaTypes()) {
-			Auth().storage().add(Storage::SharedMediaAddNew(
+			_history->session().storage().add(Storage::SharedMediaAddNew(
 				history()->peer->id,
 				types,
 				id));
 		}
 		if (const auto channel = history()->peer->asChannel()) {
 			if (const auto feed = channel->feed()) {
-				Auth().storage().add(Storage::FeedMessagesAddNew(
+				_history->session().storage().add(Storage::FeedMessagesAddNew(
 					feed->id(),
 					position()));
 			}
@@ -409,8 +411,8 @@ void HistoryItem::setRealId(MsgId newId) {
 		}
 	}
 
-	Auth().data().notifyItemIdChange({ this, oldId });
-	Auth().data().requestItemRepaint(this);
+	_history->owner().notifyItemIdChange({ this, oldId });
+	_history->owner().requestItemRepaint(this);
 }
 
 bool HistoryItem::isPinned() const {
@@ -460,7 +462,7 @@ bool HistoryItem::canDelete() const {
 	}
 	auto channel = _history->peer->asChannel();
 	if (!channel) {
-		return !(_flags & MTPDmessage_ClientFlag::f_is_group_migrate);
+		return !(_flags & MTPDmessage_ClientFlag::f_is_group_essential);
 	}
 
 	if (id == 1) {
@@ -504,7 +506,9 @@ bool HistoryItem::canDeleteForEveryone(TimeId now) const {
 	}
 	if (!out()) {
 		if (const auto chat = peer->asChat()) {
-			if (!chat->amCreator() && (!chat->amAdmin() || !chat->adminsEnabled())) {
+			if (!chat->amCreator()
+				&& !(chat->adminRights()
+					& ChatAdminRight::f_delete_messages)) {
 				return false;
 			}
 		} else if (peer->isUser()) {
@@ -702,7 +706,7 @@ QString HistoryItem::notificationText() const {
 QString HistoryItem::inDialogsText(DrawInDialog way) const {
 	auto getText = [this]() {
 		if (_media) {
-			return _media->chatsListText();
+			return _media->chatListText();
 		} else if (!emptyText()) {
 			return TextUtilities::Clean(_text.originalText());
 		}
@@ -749,10 +753,10 @@ void HistoryItem::drawInDialog(
 }
 
 HistoryItem::~HistoryItem() {
-	Auth().data().notifyItemRemoved(this);
+	_history->owner().notifyItemRemoved(this);
 	App::historyUnregItem(this);
 	if (id < 0 && !App::quitting()) {
-		Auth().uploader().cancel(fullId());
+		_history->session().uploader().cancel(fullId());
 	}
 }
 

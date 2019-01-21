@@ -9,15 +9,16 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "history/media/history_media_common.h"
 #include "layout.h"
-#include "auth_session.h"
 #include "history/history_item_components.h"
 #include "history/history_item.h"
+#include "history/history.h"
 #include "history/view/history_view_element.h"
 #include "history/view/history_view_cursor_state.h"
 #include "ui/image/image.h"
 #include "ui/grouped_layout.h"
 #include "data/data_session.h"
 #include "data/data_document.h"
+#include "data/data_file_origin.h"
 #include "styles/style_history.h"
 
 namespace {
@@ -501,7 +502,7 @@ void HistoryVideo::parentTextUpdated() {
 	_caption = (_parent->media() == this)
 		? createCaption(_parent->data())
 		: Text();
-	Auth().data().requestViewResize(_parent);
+	history()->owner().requestViewResize(_parent);
 }
 
 void HistoryVideo::updateStatusText() const {

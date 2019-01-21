@@ -41,6 +41,7 @@ enum class InputSubmitSettings {
 };
 
 class FlatInput : public TWidgetHelper<QLineEdit>, private base::Subscriber {
+	// The Q_OBJECT meta info is used for qobject_cast!
 	Q_OBJECT
 
 public:
@@ -224,22 +225,11 @@ public:
 	void setInstantReplaces(const InstantReplaces &replaces);
 	void setInstantReplacesEnabled(rpl::producer<bool> enabled);
 	void setMarkdownReplacesEnabled(rpl::producer<bool> enabled);
-	void commitInstantReplacement(
-		int from,
-		int till,
-		const QString &with,
-		std::optional<QString> checkOriginal = std::nullopt);
-	bool commitMarkdownReplacement(
-		int from,
-		int till,
-		const QString &tag,
-		const QString &edge = QString());
+	void commitInstantReplacement(int from, int till, const QString &with);
 	void commitMarkdownLinkEdit(
 		EditLinkSelection selection,
 		const QString &text,
 		const QString &link);
-	void toggleSelectionMarkdown(const QString &tag);
-	void clearSelectionMarkdown();
 	static bool IsValidMarkdownLink(const QString &link);
 
 	const QString &getLastText() const {
@@ -407,6 +397,20 @@ private:
 	EditLinkSelection editLinkSelection(QContextMenuEvent *e) const;
 	void editMarkdownLink(EditLinkSelection selection);
 
+	void commitInstantReplacement(
+		int from,
+		int till,
+		const QString &with,
+		std::optional<QString> checkOriginal,
+		bool checkIfInMonospace);
+	bool commitMarkdownReplacement(
+		int from,
+		int till,
+		const QString &tag,
+		const QString &edge = QString());
+	void toggleSelectionMarkdown(const QString &tag);
+	void clearSelectionMarkdown();
+
 	bool revertFormatReplace();
 
 	void highlightMarkdown();
@@ -493,6 +497,7 @@ private:
 class MaskedInputField
 	: public RpWidgetWrap<QLineEdit>
 	, private base::Subscriber {
+	// The Q_OBJECT meta info is used for qobject_cast!
 	Q_OBJECT
 
 	using Parent = RpWidgetWrap<QLineEdit>;

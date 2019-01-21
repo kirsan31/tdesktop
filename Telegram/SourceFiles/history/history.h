@@ -27,6 +27,7 @@ class AuthSession;
 
 namespace Data {
 struct Draft;
+class Session;
 } // namespace Data
 
 namespace Dialogs {
@@ -48,91 +49,21 @@ enum NewMessageType : char {
 	NewMessageExisting,
 };
 
-class Histories {
-public:
-	Histories();
-
-	void registerSendAction(
-		not_null<History*> history,
-		not_null<UserData*> user,
-		const MTPSendMessageAction &action,
-		TimeId when);
-	void step_typings(TimeMs ms, bool timer);
-
-	History *find(PeerId peerId) const;
-	not_null<History*> findOrInsert(PeerId peerId);
-
-	void clear();
-	void remove(const PeerId &peer);
-
-	HistoryItem *addNewMessage(const MTPMessage &msg, NewMessageType type);
-
-	// When typing in this history started.
-	typedef QMap<History*, TimeMs> TypingHistories;
-	TypingHistories typing;
-	BasicAnimation _a_typings;
-
-	int unreadBadge() const;
-	bool unreadBadgeMuted() const;
-	int unreadBadgeIgnoreOne(History *history) const;
-	bool unreadBadgeMutedIgnoreOne(History *history) const;
-	int unreadOnlyMutedBadge() const;
-
-	void unreadIncrement(int count, bool muted);
-	void unreadMuteChanged(int count, bool muted);
-	void unreadEntriesChanged(
-		int withUnreadDelta,
-		int mutedWithUnreadDelta);
-
-	struct SendActionAnimationUpdate {
-		History *history;
-		int width;
-		int height;
-		bool textUpdated;
-	};
-	base::Observable<SendActionAnimationUpdate> &sendActionAnimationUpdated() {
-		return _sendActionAnimationUpdated;
-	}
-	void selfDestructIn(not_null<HistoryItem*> item, TimeMs delay);
-
-private:
-	void checkSelfDestructItems();
-	int computeUnreadBadge(
-		int full,
-		int muted,
-		int entriesFull,
-		int entriesMuted) const;
-	bool computeUnreadBadgeMuted(
-		int full,
-		int muted,
-		int entriesFull,
-		int entriesMuted) const;
-
-	std::unordered_map<PeerId, std::unique_ptr<History>> _map;
-
-	int _unreadFull = 0;
-	int _unreadMuted = 0;
-	int _unreadEntriesFull = 0;
-	int _unreadEntriesMuted = 0;
-	base::Observable<SendActionAnimationUpdate> _sendActionAnimationUpdated;
-
-	base::Timer _selfDestructTimer;
-	std::vector<FullMsgId> _selfDestructItems;
-
-};
-
 enum class UnreadMentionType {
 	New, // when new message is added to history
 	Existing, // when some messages slice was received
 };
 
-class History : public Dialogs::Entry {
+class History final : public Dialogs::Entry {
 public:
 	using Element = HistoryView::Element;
 
-	History(const PeerId &peerId);
+	History(not_null<Data::Session*> owner, PeerId peerId);
 	History(const History &) = delete;
 	History &operator=(const History &) = delete;
+
+	Data::Session &owner() const;
+	AuthSession &session() const;
 
 	ChannelId channelId() const;
 	bool isChannel() const;
@@ -146,6 +77,8 @@ public:
 
 	bool isEmpty() const;
 	bool isDisplayedEmpty() const;
+	Element *findFirstNonEmpty() const;
+	Element *findLastNonEmpty() const;
 	bool hasOrphanMediaGroupPart() const;
 	bool removeOrphanMediaGroupPart();
 	QVector<MsgId> collectMessagesFromUserToDelete(
@@ -261,6 +194,7 @@ public:
 		int unreadCount,
 		MsgId maxInboxRead,
 		MsgId maxOutboxRead);
+	void dialogEntryApplied();
 
 	MsgId minMsgId() const;
 	MsgId maxMsgId() const;
@@ -352,16 +286,21 @@ public:
 	int chatListUnreadCount() const override;
 	bool chatListUnreadMark() const override;
 	bool chatListMutedBadge() const override;
-	HistoryItem *chatsListItem() const override;
-	const QString &chatsListName() const override;
-	const base::flat_set<QString> &chatsListNameWords() const override;
-	const base::flat_set<QChar> &chatsListFirstLetters() const override;
+	HistoryItem *chatListMessage() const override;
+	bool chatListMessageKnown() const override;
+	void requestChatListMessage() override;
+	const QString &chatListName() const override;
+	const base::flat_set<QString> &chatListNameWords() const override;
+	const base::flat_set<QChar> &chatListFirstLetters() const override;
 	void loadUserpic() override;
 	void paintUserpic(
 		Painter &p,
 		int x,
 		int y,
 		int size) const override;
+
+	void setFakeChatListMessageFrom(const MTPmessages_Messages &data);
+	void checkChatListMessageRemoved(not_null<HistoryItem*> item);
 
 	void forgetScrollState() {
 		scrollTopItem = nullptr;
@@ -480,6 +419,12 @@ private:
 	void checkLastMessage();
 	void setLastMessage(HistoryItem *item);
 
+	void refreshChatListMessage();
+	void setChatListMessage(HistoryItem *item);
+	std::optional<HistoryItem*> computeChatListMessageFromLast() const;
+	void setChatListMessageFromLast();
+	void setFakeChatListMessage();
+
 	// Add all items to the unread mentions if we were not loaded at bottom and now are.
 	void checkAddAllToUnreadMentions();
 
@@ -501,6 +446,7 @@ private:
 
 	void viewReplaced(not_null<const Element*> was, Element *now);
 
+	not_null<Data::Session*> _owner;
 	Flags _flags = 0;
 	bool _mute = false;
 	int _width = 0;
@@ -517,6 +463,12 @@ private:
 	std::optional<int> _unreadMentionsCount;
 	base::flat_set<MsgId> _unreadMentions;
 	std::optional<HistoryItem*> _lastMessage;
+
+	// This almost always is equal to _lastMessage. The only difference is
+	// for a group that migrated to a supergroup. Then _lastMessage can
+	// be a migrate message, but _chatListMessage should be the one before.
+	std::optional<HistoryItem*> _chatListMessage;
+
 	bool _unreadMark = false;
 
 	// A pointer to the block that is currently being built.

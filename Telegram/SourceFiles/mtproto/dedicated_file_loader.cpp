@@ -7,7 +7,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "mtproto/dedicated_file_loader.h"
 
-#include "mtproto/session.h"
 #include "auth_session.h"
 #include "messenger.h"
 
@@ -110,7 +109,9 @@ void WeakInstance::die() {
 		if (instance) {
 			instance->cancel(requestId);
 		}
-		fail(MTP::internal::rpcClientError("UNAVAILABLE"));
+		fail(RPCError::Local(
+			"UNAVAILABLE",
+			"MTP instance is not available."));
 	}
 }
 
@@ -125,7 +126,9 @@ bool WeakInstance::removeRequest(mtpRequestId requestId) {
 void WeakInstance::reportUnavailable(
 		Fn<void(const RPCError &error)> callback) {
 	InvokeQueued(this, [=] {
-		callback(MTP::internal::rpcClientError("UNAVAILABLE"));
+		callback(RPCError::Local(
+			"UNAVAILABLE",
+			"MTP instance is not available."));
 	});
 }
 
@@ -406,22 +409,13 @@ void ResolveChannel(
 
 std::optional<MTPMessage> GetMessagesElement(
 		const MTPmessages_Messages &list) {
-	const auto get = [](auto &&data) -> std::optional<MTPMessage> {
+	return list.match([&](const MTPDmessages_messagesNotModified &) {
+		return std::optional<MTPMessage>(std::nullopt);
+	}, [&](const auto &data) {
 		return data.vmessages.v.isEmpty()
 			? std::nullopt
-			: base::make_optional(data.vmessages.v[0]);
-	};
-	switch (list.type()) {
-	case mtpc_messages_messages:
-		return get(list.c_messages_messages());
-	case mtpc_messages_messagesSlice:
-		return get(list.c_messages_messagesSlice());
-	case mtpc_messages_channelMessages:
-		return get(list.c_messages_channelMessages());
-	case mtpc_messages_messagesNotModified:
-		return std::nullopt;
-	default: Unexpected("Type of messages.Messages (GetMessagesElement)");
-	}
+			: std::make_optional(data.vmessages.v[0]);
+	});
 }
 
 void StartDedicatedLoader(

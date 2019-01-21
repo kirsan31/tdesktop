@@ -30,6 +30,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "calls/calls_instance.h"
 #include "data/data_peer_values.h"
 #include "data/data_feed.h"
+#include "data/data_session.h"
+#include "data/data_channel.h"
+#include "data/data_chat.h"
+#include "data/data_user.h"
 #include "support/support_helper.h"
 #include "observer_peer.h"
 #include "apiwrap.h"
@@ -96,13 +100,14 @@ TopBarWidget::TopBarWidget(
 	if (Adaptive::OneColumn()) {
 		createUnreadBadge();
 	}
-	subscribe(
-		App::histories().sendActionAnimationUpdated(),
-		[this](const Histories::SendActionAnimationUpdate &update) {
-			if (update.history == _activeChat.history()) {
-				this->update();
-			}
-		});
+	Auth().data().sendActionAnimationUpdated(
+	) | rpl::start_with_next([=](
+			const Data::Session::SendActionAnimationUpdate &update) {
+		if (update.history == _activeChat.history()) {
+			this->update();
+		}
+	}, lifetime());
+
 	using UpdateFlag = Notify::PeerUpdate::Flag;
 	auto flags = UpdateFlag::UserHasCalls
 		| UpdateFlag::UserOnlineChanged
@@ -305,7 +310,7 @@ void TopBarWidget::paintTopBar(Painter &p, TimeMs ms) {
 
 	p.setPen(st::dialogsNameFg);
 	if (const auto feed = _activeChat.feed()) {
-		auto text = feed->chatsListName(); // TODO feed name emoji
+		auto text = feed->chatListName(); // TODO feed name emoji
 		auto textWidth = st::historySavedFont->width(text);
 		if (namewidth < textWidth) {
 			text = st::historySavedFont->elided(text, namewidth);
@@ -696,8 +701,8 @@ void TopBarWidget::updateUnreadBadge() {
 	if (!_unreadBadge) return;
 
 	const auto history = _activeChat.history();
-	const auto active = !App::histories().unreadBadgeMutedIgnoreOne(history);
-	const auto counter = App::histories().unreadBadgeIgnoreOne(history);
+	const auto active = !Auth().data().unreadBadgeMutedIgnoreOne(history);
+	const auto counter = Auth().data().unreadBadgeIgnoreOne(history);
 	const auto text = [&] {
 		if (!counter) {
 			return QString();
@@ -753,7 +758,7 @@ void TopBarWidget::updateOnlineDisplay() {
 			const auto self = Auth().user();
 			auto online = 0;
 			auto onlyMe = true;
-			for (const auto [user, v] : chat->participants) {
+			for (const auto user : chat->participants) {
 				if (user->onlineTill > now) {
 					++online;
 					if (onlyMe && user != self) onlyMe = false;
@@ -821,7 +826,7 @@ void TopBarWidget::updateOnlineDisplayTimer() {
 	if (const auto user = _activeChat.peer()->asUser()) {
 		handleUser(user);
 	} else if (auto chat = _activeChat.peer()->asChat()) {
-		for (const auto [user, v] : chat->participants) {
+		for (const auto user : chat->participants) {
 			handleUser(user);
 		}
 	} else if (_activeChat.peer()->isChannel()) {

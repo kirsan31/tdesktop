@@ -102,6 +102,8 @@ public:
 
 	static ImagePtr Blank();
 
+	QImage original() const;
+
 	const QPixmap &pix(
 		Data::FileOrigin origin,
 		int32 w = 0,
@@ -171,11 +173,7 @@ public:
 		int32 w,
 		int32 h = 0) const;
 
-	void automaticLoad(Data::FileOrigin origin, const HistoryItem *item) {
-		if (!loaded()) {
-			_source->automaticLoad(origin, item);
-		}
-	}
+	void automaticLoad(Data::FileOrigin origin, const HistoryItem *item);
 	void automaticLoadSettingsChanged() {
 		_source->automaticLoadSettingsChanged();
 	}
@@ -207,21 +205,13 @@ public:
 		_source->setInformation(size, width, height);
 	}
 	void load(
-			Data::FileOrigin origin,
-			bool loadFirst = false,
-			bool prior = true) {
-		if (!loaded()) {
-			_source->load(origin, loadFirst, prior);
-		}
-	}
+		Data::FileOrigin origin,
+		bool loadFirst = false,
+		bool prior = true);
 	void loadEvenCancelled(
-			Data::FileOrigin origin,
-			bool loadFirst = false,
-			bool prior = true) {
-		if (!loaded()) {
-			_source->loadEvenCancelled(origin, loadFirst, prior);
-		}
-	}
+		Data::FileOrigin origin,
+		bool loadFirst = false,
+		bool prior = true);
 	const StorageImageLocation &location() const {
 		return _source->location();
 	}

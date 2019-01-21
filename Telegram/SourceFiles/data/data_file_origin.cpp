@@ -19,7 +19,7 @@ struct FileReferenceAccumulator {
 	}
 	void push(const MTPFileLocation &data) {
 		data.match([&](const MTPDfileLocation &data) {
-			result.emplace(SimpleFileLocationId(
+			result.data.emplace(SimpleFileLocationId(
 				data.vvolume_id.v,
 				data.vdc_id.v,
 				data.vlocal_id.v), data.vfile_reference.v);
@@ -27,7 +27,8 @@ struct FileReferenceAccumulator {
 		});
 	}
 	void push(const MTPPhotoSize &data) {
-		data.match([](const MTPDphotoSizeEmpty &data) {
+		data.match([](const MTPDphotoSizeEmpty &) {
+		}, [](const MTPDphotoStrippedSize &) {
 		}, [&](const auto &data) {
 			push(data.vlocation);
 		});
@@ -42,11 +43,18 @@ struct FileReferenceAccumulator {
 	}
 	void push(const MTPDocument &data) {
 		data.match([&](const MTPDdocument &data) {
-			push(data.vthumb);
-			result.emplace(
+			for (const auto &thumb : data.vthumbs.v) {
+				push(thumb);
+			}
+			result.data.emplace(
 				DocumentFileLocationId(data.vid.v),
 				data.vfile_reference.v);
 		}, [](const MTPDdocumentEmpty &data) {
+		});
+	}
+	void push(const MTPWallPaper &data) {
+		data.match([&](const MTPDwallPaper &data) {
+			push(data.vdocument);
 		});
 	}
 	void push(const MTPUserProfilePhoto &data) {
@@ -231,6 +239,10 @@ UpdatedFileReferences GetFileReferences(
 }
 
 UpdatedFileReferences GetFileReferences(const MTPmessages_SavedGifs &data) {
+	return GetFileReferencesHelper(data);
+}
+
+UpdatedFileReferences GetFileReferences(const MTPWallPaper &data) {
 	return GetFileReferencesHelper(data);
 }
 

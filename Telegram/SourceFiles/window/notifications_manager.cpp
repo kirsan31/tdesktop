@@ -16,6 +16,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/feed/history_feed_section.h"
 #include "lang/lang_keys.h"
 #include "data/data_session.h"
+#include "data/data_channel.h"
 #include "window/window_controller.h"
 #include "mainwindow.h"
 #include "mainwidget.h"
@@ -32,14 +33,12 @@ constexpr auto kMinimalAlertDelay = TimeMs(500);
 
 } // namespace
 
-System::System(AuthSession *session) : _authSession(session) {
+System::System(AuthSession *session)
+: _authSession(session)
+, _waitTimer([=] { showNext(); }) {
 	createManager();
 
-	_waitTimer.setTimeoutHandler([this] {
-		showNext();
-	});
-
-	subscribe(settingsChanged(), [this](ChangeType type) {
+	subscribe(settingsChanged(), [=](ChangeType type) {
 		if (type == ChangeType::DesktopEnabled) {
 			App::wnd()->updateTrayMenu();
 			clearAll();
@@ -123,7 +122,7 @@ void System::schedule(History *history, HistoryItem *item) {
 	}
 	if (haveSetting) {
 		if (!_waitTimer.isActive() || _waitTimer.remainingTime() > delay) {
-			_waitTimer.start(delay);
+			_waitTimer.callOnce(delay);
 		}
 	}
 }
@@ -149,7 +148,7 @@ void System::clearFromHistory(History *history) {
 	_waiters.remove(history);
 	_settingWaiters.remove(history);
 
-	_waitTimer.stop();
+	_waitTimer.cancel();
 	showNext();
 }
 
@@ -208,7 +207,7 @@ void System::checkDelayed() {
 			++i;
 		}
 	}
-	_waitTimer.stop();
+	_waitTimer.cancel();
 	showNext();
 }
 
@@ -258,7 +257,7 @@ void System::showNext() {
 
 	if (_waiters.isEmpty() || !Global::DesktopNotify() || Platform::Notifications::SkipToast()) {
 		if (nextAlert) {
-			_waitTimer.start(nextAlert - ms);
+			_waitTimer.callOnce(nextAlert - ms);
 		}
 		return;
 	}
@@ -305,7 +304,7 @@ void System::showNext() {
 					next = nextAlert;
 					nextAlert = 0;
 				}
-				_waitTimer.start(next - ms);
+				_waitTimer.callOnce(next - ms);
 				break;
 			} else {
 				auto forwardedItem = notifyItem->Has<HistoryMessageForwarded>() ? notifyItem : nullptr; // forwarded notify grouping
@@ -365,7 +364,7 @@ void System::showNext() {
 		}
 	}
 	if (nextAlert) {
-		_waitTimer.start(nextAlert - ms);
+		_waitTimer.callOnce(nextAlert - ms);
 	}
 }
 

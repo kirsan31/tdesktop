@@ -265,26 +265,35 @@ void BackgroundRow::updateImage() {
 		Painter p(&back);
 		PainterHighQualityEnabler hq(p);
 
-		const auto &pix = Window::Theme::Background()->pixmap();
-		const auto sx = (pix.width() > pix.height())
-			? ((pix.width() - pix.height()) / 2)
-			: 0;
-		const auto sy = (pix.height() > pix.width())
-			? ((pix.height() - pix.width()) / 2)
-			: 0;
-		const auto s = (pix.width() > pix.height())
-			? pix.height()
-			: pix.width();
-		p.drawPixmap(
-			0,
-			0,
-			st::settingsBackgroundThumb,
-			st::settingsBackgroundThumb,
-			pix,
-			sx,
-			sy,
-			s,
-			s);
+		if (const auto color = Window::Theme::Background()->color()) {
+			p.fillRect(
+				0,
+				0,
+				st::settingsBackgroundThumb,
+				st::settingsBackgroundThumb,
+				*color);
+		} else {
+			const auto &pix = Window::Theme::Background()->pixmap();
+			const auto sx = (pix.width() > pix.height())
+				? ((pix.width() - pix.height()) / 2)
+				: 0;
+			const auto sy = (pix.height() > pix.width())
+				? ((pix.height() - pix.width()) / 2)
+				: 0;
+			const auto s = (pix.width() > pix.height())
+				? pix.height()
+				: pix.width();
+			p.drawPixmap(
+				0,
+				0,
+				st::settingsBackgroundThumb,
+				st::settingsBackgroundThumb,
+				pix,
+				sx,
+				sy,
+				s,
+				s);
+		}
 	}
 	Images::prepareRound(back, ImageRoundRadius::Small);
 	_background = App::pixmapFromImageInPlace(std::move(back));
@@ -358,7 +367,7 @@ void DefaultTheme::checkedChangedHook(anim::type animated) {
 }
 
 void ChooseFromFile(not_null<QWidget*> parent) {
-	const auto imgExtensions = cImgExtensions();
+	const auto &imgExtensions = cImgExtensions();
 	auto filters = QStringList(
 		qsl("Theme files (*.tdesktop-theme *.tdesktop-palette *")
 		+ imgExtensions.join(qsl(" *"))
@@ -401,7 +410,7 @@ void ChooseFromFile(not_null<QWidget*> parent) {
 		}
 
 		Window::Theme::Background()->setImage(
-			Window::Theme::kCustomBackground,
+			{ Window::Theme::kCustomBackground },
 			std::move(image));
 		Window::Theme::Background()->setTile(false);
 	};

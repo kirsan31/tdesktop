@@ -168,6 +168,10 @@ void FileLoader::readImage(const QSize &shrinkBox) const {
 	}
 }
 
+Data::FileOrigin FileLoader::fileOrigin() const {
+	return Data::FileOrigin();
+}
+
 float64 FileLoader::currentProgress() const {
 	if (_finished) return 1.;
 	if (!fullSize()) return 0.;
@@ -243,7 +247,7 @@ void FileLoader::localLoaded(
 		const StorageImageSaved &result,
 		const QByteArray &imageFormat,
 		const QImage &imageData) {
-	_localLoading.kill();
+	_localLoading = nullptr;
 	if (result.data.isEmpty()) {
 		_localStatus = LocalStatus::NotFound;
 		start(true);
@@ -379,7 +383,7 @@ void FileLoader::loadLocal(const Storage::Cache::Key &key) {
 			format = std::move(format),
 			guard = std::move(guard)
 		]() mutable {
-			if (!guard.alive()) {
+			if (!guard) {
 				return;
 			}
 			localLoaded(
@@ -429,7 +433,7 @@ bool FileLoader::tryLoadLocal() {
 		return false;
 	} else if (_localStatus != LocalStatus::NotTried) {
 		return _finished;
-	} else if (_localLoading.alive()) {
+	} else if (_localLoading) {
 		_localStatus = LocalStatus::Loading;
 		return true;
 	}
@@ -592,19 +596,19 @@ Data::FileOrigin mtpFileLoader::fileOrigin() const {
 }
 
 void mtpFileLoader::refreshFileReferenceFrom(
-		const Data::UpdatedFileReferences &data,
+		const Data::UpdatedFileReferences &updates,
 		int requestId,
 		const QByteArray &current) {
 	const auto updated = [&] {
 		if (_location) {
-			const auto i = data.find(Data::SimpleFileLocationId(
+			const auto i = updates.data.find(Data::SimpleFileLocationId(
 				_location->volume(),
 				_location->dc(),
 				_location->local()));
-			return (i == end(data)) ? QByteArray() : i->second;
+			return (i == end(updates.data)) ? QByteArray() : i->second;
 		}
-		const auto i = data.find(_id);
-		return (i == end(data)) ? QByteArray() : i->second;
+		const auto i = updates.data.find(_id);
+		return (i == end(updates.data)) ? QByteArray() : i->second;
 	}();
 	if (updated.isEmpty() || updated == current) {
 		cancel(true);
@@ -941,7 +945,7 @@ int mtpFileLoader::finishSentRequestGetOffset(mtpRequestId requestId) {
 bool mtpFileLoader::feedPart(int offset, bytes::const_span buffer) {
 	Expects(!_finished);
 
-	if (buffer.size()) {
+	if (!buffer.empty()) {
 		if (_fileIsOpen) {
 			auto fsize = _file.size();
 			if (offset < fsize) {
@@ -974,7 +978,7 @@ bool mtpFileLoader::feedPart(int offset, bytes::const_span buffer) {
 			}
 		}
 	}
-	if (!buffer.size() || (buffer.size() % 1024)) { // bad next offset
+	if (buffer.empty() || (buffer.size() % 1024)) { // bad next offset
 		_lastComplete = true;
 	}
 	if (_sentRequests.empty()
@@ -1436,18 +1440,18 @@ void WebLoadManager::onFailed(QNetworkReply *reply) {
 }
 
 void WebLoadManager::onProgress(qint64 already, qint64 size) {
-	QNetworkReply *reply = qobject_cast<QNetworkReply*>(QObject::sender());
+	const auto reply = qobject_cast<QNetworkReply*>(QObject::sender());
 	if (!reply) return;
 
-	Replies::iterator j = _replies.find(reply);
+	const auto j = _replies.find(reply);
 	if (j == _replies.cend()) { // handled already
 		return;
 	}
-	webFileLoaderPrivate *loader = j.value();
+	const auto loader = j.value();
 
-	WebReplyProcessResult result = WebReplyProcessProgress;
-	QVariant statusCode = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute);
-	int32 status = statusCode.isValid() ? statusCode.toInt() : 200;
+	auto result = WebReplyProcessProgress;
+	const auto statusCode = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute);
+	const auto status = statusCode.isValid() ? statusCode.toInt() : 200;
 	if (status != 200 && status != 206 && status != 416) {
 		if (status == 301 || status == 302) {
 			QString loc = reply->header(QNetworkRequest::LocationHeader).toString();
@@ -1486,20 +1490,19 @@ void WebLoadManager::onProgress(qint64 already, qint64 size) {
 }
 
 void WebLoadManager::onMeta() {
-	QNetworkReply *reply = qobject_cast<QNetworkReply*>(QObject::sender());
+	const auto reply = qobject_cast<QNetworkReply*>(QObject::sender());
 	if (!reply) return;
 
-	Replies::iterator j = _replies.find(reply);
+	const auto j = _replies.find(reply);
 	if (j == _replies.cend()) { // handled already
 		return;
 	}
-	webFileLoaderPrivate *loader = j.value();
+	const auto loader = j.value();
 
-	typedef QList<QNetworkReply::RawHeaderPair> Pairs;
-	Pairs pairs = reply->rawHeaderPairs();
-	for (Pairs::iterator i = pairs.begin(), e = pairs.end(); i != e; ++i) {
+	const auto pairs = reply->rawHeaderPairs();
+	for (auto i = pairs.begin(), e = pairs.end(); i != e; ++i) {
 		if (QString::fromUtf8(i->first).toLower() == "content-range") {
-			QRegularExpressionMatch m = QRegularExpression(qsl("/(\\d+)([^\\d]|$)")).match(QString::fromUtf8(i->second));
+			const auto m = QRegularExpression(qsl("/(\\d+)([^\\d]|$)")).match(QString::fromUtf8(i->second));
 			if (m.hasMatch()) {
 				loader->setProgress(qMax(qint64(loader->data().size()), loader->already()), m.captured(1).toLongLong());
 				if (!handleReplyResult(loader, WebReplyProcessProgress)) {

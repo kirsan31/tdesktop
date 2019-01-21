@@ -122,13 +122,12 @@ void SessionData::clear(Instance *instance) {
 Session::Session(not_null<Instance*> instance, ShiftedDcId shiftedDcId) : QObject()
 , _instance(instance)
 , data(this)
-, dcWithShift(shiftedDcId) {
+, dcWithShift(shiftedDcId)
+, sender([=] { needToResumeAndSend(); }) {
 	connect(&timeouter, SIGNAL(timeout()), this, SLOT(checkRequestsByTimer()));
 	timeouter.start(1000);
 
 	refreshOptions();
-
-	connect(&sender, SIGNAL(timeout()), this, SLOT(needToResumeAndSend()));
 }
 
 void Session::start() {
@@ -156,8 +155,11 @@ void Session::createDcData() {
 	connect(dc.get(), SIGNAL(connectionWasInited()), this, SLOT(connectionWasInitedForDC()), Qt::QueuedConnection);
 }
 
-bool Session::rpcErrorOccured(mtpRequestId requestId, const RPCFailHandlerPtr &onFail, const RPCError &err) { // return true if need to clean request data
-	return _instance->rpcErrorOccured(requestId, onFail, err);
+bool Session::rpcErrorOccured(
+		mtpRequestId requestId,
+		const RPCFailHandlerPtr &onFail,
+		const RPCError &error) { // return true if need to clean request data
+	return _instance->rpcErrorOccured(requestId, onFail, error);
 }
 
 void Session::restart() {
@@ -244,10 +246,10 @@ void Session::sendAnything(qint64 msCanWait) {
 	if (msWait) {
 		DEBUG_LOG(("MTP Info: dcWithShift %1 can wait for %2ms from current %3").arg(dcWithShift).arg(msWait).arg(msSendCall));
 		msSendCall = ms;
-		sender.start(msWait);
+		sender.callOnce(msWait);
 	} else {
 		DEBUG_LOG(("MTP Info: dcWithShift %1 stopped send timer, can wait for %2ms from current %3").arg(dcWithShift).arg(msWait).arg(msSendCall));
-		sender.stop();
+		sender.cancel();
 		msSendCall = 0;
 		needToResumeAndSend();
 	}
@@ -616,10 +618,6 @@ void Session::tryToReceive() {
 
 Session::~Session() {
 	Assert(_connection == nullptr);
-}
-
-MTPrpcError rpcClientError(const QString &type, const QString &description) {
-	return MTP_rpc_error(MTP_int(0), MTP_string(("CLIENT_" + type + (description.length() ? (": " + description) : "")).toUtf8().constData()));
 }
 
 } // namespace internal

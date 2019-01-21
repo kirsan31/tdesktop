@@ -20,6 +20,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_drafts.h"
 #include "data/data_feed.h"
 #include "data/data_session.h"
+#include "data/data_channel.h"
+#include "data/data_chat.h"
+#include "data/data_user.h"
 #include "lang/lang_keys.h"
 #include "mainwindow.h"
 #include "mainwidget.h"
@@ -91,10 +94,12 @@ DialogsInner::DialogsInner(QWidget *parent, not_null<Window::Controller*> contro
 
 	subscribe(Auth().downloaderTaskFinished(), [this] { update(); });
 	subscribe(Auth().data().contactsLoaded(), [this](bool) { refresh(); });
+
 	Auth().data().itemRemoved(
 	) | rpl::start_with_next(
 		[this](auto item) { itemRemoved(item); },
 		lifetime());
+
 	Auth().data().itemRepaintRequest(
 	) | rpl::start_with_next([=](auto item) {
 		const auto history = item->history();
@@ -107,13 +112,21 @@ DialogsInner::DialogsInner(QWidget *parent, not_null<Window::Controller*> contro
 			}
 		}
 	}, lifetime());
-	subscribe(App::histories().sendActionAnimationUpdated(), [this](const Histories::SendActionAnimationUpdate &update) {
-		auto updateRect = Dialogs::Layout::RowPainter::sendActionAnimationRect(update.width, update.height, getFullWidth(), update.textUpdated);
+
+	Auth().data().sendActionAnimationUpdated(
+	) | rpl::start_with_next([=](
+			const Data::Session::SendActionAnimationUpdate &update) {
+		using RowPainter = Dialogs::Layout::RowPainter;
+		const auto updateRect = RowPainter::sendActionAnimationRect(
+			update.width,
+			update.height,
+			getFullWidth(),
+			update.textUpdated);
 		updateDialogRow(
 			Dialogs::RowDescriptor(update.history, FullMsgId()),
 			updateRect,
 			UpdateRowSection::Default | UpdateRowSection::Filtered);
-	});
+	}, lifetime());
 
 	subscribe(Window::Theme::Background(), [=](const Window::Theme::BackgroundUpdate &data) {
 		if (data.paletteChanged()) {
@@ -126,8 +139,9 @@ DialogsInner::DialogsInner(QWidget *parent, not_null<Window::Controller*> contro
 		| UpdateFlag::NameChanged
 		| UpdateFlag::PhotoChanged
 		| UpdateFlag::UserIsContact
-		| UpdateFlag::UserOccupiedChanged;
-	subscribe(Notify::PeerUpdated(), Notify::PeerUpdatedHandler(changes, [this](const Notify::PeerUpdate &update) {
+		| UpdateFlag::UserOccupiedChanged
+		| UpdateFlag::MigrationChanged;
+	subscribe(Notify::PeerUpdated(), Notify::PeerUpdatedHandler(changes, [=](const Notify::PeerUpdate &update) {
 		if (update.flags & UpdateFlag::ChatPinnedChanged) {
 			stopReorderPinned();
 		}
@@ -141,6 +155,11 @@ DialogsInner::DialogsInner(QWidget *parent, not_null<Window::Controller*> contro
 		if (update.flags & UpdateFlag::UserIsContact) {
 			if (const auto user = update.peer->asUser()) {
 				userIsContactUpdated(user);
+			}
+		}
+		if (update.flags & UpdateFlag::MigrationChanged) {
+			if (const auto chat = update.peer->asChat()) {
+				handleChatMigration(chat);
 			}
 		}
 	}));
@@ -160,6 +179,22 @@ DialogsInner::DialogsInner(QWidget *parent, not_null<Window::Controller*> contro
 	refresh();
 
 	setupShortcuts();
+}
+
+void DialogsInner::handleChatMigration(not_null<ChatData*> chat) {
+	const auto channel = chat->migrateTo();
+	if (!channel) {
+		return;
+	}
+
+	if (const auto from = chat->owner().historyLoaded(chat)) {
+		if (const auto to = chat->owner().historyLoaded(channel)) {
+			if (to->inChatList(Dialogs::Mode::All)
+				&& from->inChatList(Dialogs::Mode::All)) {
+				removeDialog(from);
+			}
+		}
+	}
 }
 
 int DialogsInner::dialogsOffset() const {
@@ -1263,14 +1298,14 @@ void DialogsInner::createDialog(Dialogs::Key key) {
 
 	const auto from = dialogsOffset() + changed.movedFrom * st::dialogsRowHeight;
 	const auto to = dialogsOffset() + changed.movedTo * st::dialogsRowHeight;
-	if (!_dragging) {
+	if (!_dragging && from != to) {
 		// Don't jump in chats list scroll position while dragging.
 		emit dialogMoved(from, to);
 	}
 
 	if (creating) {
 		refresh();
-	} else if (_state == State::Default && changed.movedFrom != changed.movedTo) {
+	} else if (_state == State::Default && from != to) {
 		update(0, qMin(from, to), getFullWidth(), qAbs(from - to) + st::dialogsRowHeight);
 	}
 }
@@ -1667,7 +1702,7 @@ void DialogsInner::applyFilterUpdate(QString newFilter, bool force) {
 					+ (toFilterContacts ? toFilterContacts->size() : 0));
 				if (toFilter) {
 					for (const auto row : *toFilter) {
-						const auto &nameWords = row->entry()->chatsListNameWords();
+						const auto &nameWords = row->entry()->chatListNameWords();
 						auto nb = nameWords.cbegin(), ne = nameWords.cend(), ni = nb;
 						for (fi = fb; fi != fe; ++fi) {
 							auto filterWord = *fi;
@@ -1687,7 +1722,7 @@ void DialogsInner::applyFilterUpdate(QString newFilter, bool force) {
 				}
 				if (toFilterContacts) {
 					for (const auto row : *toFilterContacts) {
-						const auto &nameWords = row->entry()->chatsListNameWords();
+						const auto &nameWords = row->entry()->chatListNameWords();
 						auto nb = nameWords.cbegin(), ne = nameWords.cend(), ni = nb;
 						for (fi = fb; fi != fe; ++fi) {
 							auto filterWord = *fi;
@@ -1840,7 +1875,7 @@ void DialogsInner::applyDialog(const MTPDdialog &dialog) {
 	history->applyDialog(dialog);
 
 	if (!history->useProxyPromotion() && !history->isPinnedDialog()) {
-		const auto date = history->chatsListTimeId();
+		const auto date = history->chatListTimeId();
 		if (date != 0) {
 			addSavedPeersAfter(ParseDateTime(date));
 		}
@@ -1863,7 +1898,7 @@ void DialogsInner::applyDialog(const MTPDdialog &dialog) {
 //	feed->applyDialog(dialog);
 //
 //	if (!feed->useProxyPromotion() && !feed->isPinnedDialog()) {
-//		const auto date = feed->chatsListDate();
+//		const auto date = feed->chatListDate();
 //		if (!date.isNull()) {
 //			addSavedPeersAfter(date);
 //		}
@@ -1878,7 +1913,7 @@ void DialogsInner::addSavedPeersAfter(const QDateTime &date) {
 		saved.remove(lastDate, lastPeer);
 
 		const auto history = App::history(lastPeer);
-		history->setChatsListTimeId(ServerTimeFromParsed(lastDate));
+		history->setChatListTimeId(ServerTimeFromParsed(lastDate));
 		_contactsNoDialogs->del(history);
 	}
 }
@@ -1913,15 +1948,14 @@ bool DialogsInner::searchReceived(
 	auto isGlobalSearch = (type == DialogsSearchFromStart || type == DialogsSearchFromOffset);
 	auto isMigratedSearch = (type == DialogsSearchMigratedFromStart || type == DialogsSearchMigratedFromOffset);
 
-	auto unknownUnreadCounts = std::vector<not_null<History*>>();
 	TimeId lastDateFound = 0;
-	for_const (auto message, messages) {
+	for (const auto &message : messages) {
 		auto msgId = IdFromMessage(message);
 		auto peerId = PeerFromMessage(message);
 		auto lastDate = DateFromMessage(message);
 		if (const auto peer = App::peerLoaded(peerId)) {
 			if (lastDate) {
-				const auto item = App::histories().addNewMessage(
+				const auto item = Auth().data().addNewMessage(
 					message,
 					NewMessageExisting);
 				const auto history = item->history();
@@ -1931,7 +1965,7 @@ bool DialogsInner::searchReceived(
 							_searchInChat,
 							item));
 					if (uniquePeers && !history->unreadCountKnown()) {
-						unknownUnreadCounts.push_back(history);
+						history->session().api().requestDialogEntry(history);
 					}
 				}
 				lastDateFound = lastDate;
@@ -1966,9 +2000,6 @@ bool DialogsInner::searchReceived(
 
 	refresh();
 
-	if (!unknownUnreadCounts.empty()) {
-		Auth().api().requestDialogEntries(std::move(unknownUnreadCounts));
-	}
 	return lastDateFound != 0;
 }
 
@@ -2088,16 +2119,15 @@ void DialogsInner::notify_historyMuteUpdated(History *history) {
 			return;
 		}
 
-		int from = dialogsOffset() + changed.movedFrom * st::dialogsRowHeight;
-		int to = dialogsOffset() + changed.movedTo * st::dialogsRowHeight;
-		if (!_dragging) {
+		const auto from = dialogsOffset() + changed.movedFrom * st::dialogsRowHeight;
+		const auto to = dialogsOffset() + changed.movedTo * st::dialogsRowHeight;
+		if (!_dragging && from != to) {
 			// Don't jump in chats list scroll position while dragging.
 			emit dialogMoved(from, to);
 		}
-
 		if (creating) {
 			refresh();
-		} else if (_state == State::Default && changed.movedFrom != changed.movedTo) {
+		} else if (_state == State::Default && from != to) {
 			update(0, qMin(from, to), getFullWidth(), qAbs(from - to) + st::dialogsRowHeight);
 		}
 	}
@@ -2198,7 +2228,7 @@ void DialogsInner::refreshSearchInChatLabel() {
 			}
 			return peer->name;
 		} else if (const auto feed = _searchInChat.feed()) {
-			return feed->chatsListName();
+			return feed->chatListName();
 		}
 		return QString();
 	}();

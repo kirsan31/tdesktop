@@ -60,12 +60,52 @@ struct FileOriginSavedGifs {
 	}
 };
 
-using FileOrigin = base::optional_variant<
-	FileOriginMessage,
-	FileOriginUserPhoto,
-	FileOriginPeerPhoto,
-	FileOriginStickerSet,
-	FileOriginSavedGifs>;
+struct FileOriginWallpaper {
+	FileOriginWallpaper(uint64 paperId, uint64 accessHash)
+	: paperId(paperId)
+	, accessHash(accessHash) {
+	}
+
+	uint64 paperId = 0;
+	uint64 accessHash = 0;
+
+	inline bool operator<(const FileOriginWallpaper &other) const {
+		return paperId < other.paperId;
+	}
+};
+
+struct FileOrigin {
+	using Variant = base::optional_variant<
+		FileOriginMessage,
+		FileOriginUserPhoto,
+		FileOriginPeerPhoto,
+		FileOriginStickerSet,
+		FileOriginSavedGifs,
+		FileOriginWallpaper>;
+
+	FileOrigin() = default;
+	FileOrigin(FileOriginMessage data) : data(data) {
+	}
+	FileOrigin(FileOriginUserPhoto data) : data(data) {
+	}
+	FileOrigin(FileOriginPeerPhoto data) : data(data) {
+	}
+	FileOrigin(FileOriginStickerSet data) : data(data) {
+	}
+	FileOrigin(FileOriginSavedGifs data) : data(data) {
+	}
+	FileOrigin(FileOriginWallpaper data) : data(data) {
+	}
+
+	explicit operator bool() const {
+		return data.has_value();
+	}
+	inline bool operator<(const FileOrigin &other) const {
+		return data < other.data;
+	}
+
+	Variant data;
+};
 
 // Volume_id, dc_id, local_id.
 struct SimpleFileLocationId {
@@ -84,7 +124,9 @@ using DocumentFileLocationId = uint64;
 using FileLocationId = base::variant<
 	SimpleFileLocationId,
 	DocumentFileLocationId>;
-using UpdatedFileReferences = std::map<FileLocationId, QByteArray>;
+struct UpdatedFileReferences {
+	std::map<FileLocationId, QByteArray> data;
+};
 
 UpdatedFileReferences GetFileReferences(const MTPmessages_Messages &data);
 UpdatedFileReferences GetFileReferences(const MTPphotos_Photos &data);
@@ -96,5 +138,6 @@ UpdatedFileReferences GetFileReferences(
 	const MTPmessages_FavedStickers &data);
 UpdatedFileReferences GetFileReferences(const MTPmessages_StickerSet &data);
 UpdatedFileReferences GetFileReferences(const MTPmessages_SavedGifs &data);
+UpdatedFileReferences GetFileReferences(const MTPWallPaper &data);
 
 } // namespace Data

@@ -9,6 +9,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "data/data_photo.h"
 #include "data/data_document.h"
+#include "data/data_channel.h"
+#include "data/data_user.h"
 #include "styles/style_chat_helpers.h"
 #include "ui/widgets/buttons.h"
 #include "ui/widgets/shadow.h"
@@ -56,7 +58,7 @@ Inner::Inner(QWidget *parent, not_null<Window::Controller*> controller) : TWidge
 			update();
 		}
 	});
-	subscribe(Notify::PeerUpdated(), Notify::PeerUpdatedHandler(Notify::PeerUpdate::Flag::ChannelRightsChanged, [this](const Notify::PeerUpdate &update) {
+	subscribe(Notify::PeerUpdated(), Notify::PeerUpdatedHandler(Notify::PeerUpdate::Flag::RightsChanged, [this](const Notify::PeerUpdate &update) {
 		if (update.peer == _inlineQueryPeer) {
 			auto isRestricted = (_restrictedLabel != nullptr);
 			if (isRestricted != isRestrictedView()) {
@@ -78,10 +80,13 @@ void Inner::visibleTopBottomUpdated(
 }
 
 void Inner::checkRestrictedPeer() {
-	if (auto megagroup = _inlineQueryPeer ? _inlineQueryPeer->asMegagroup() : nullptr) {
-		if (megagroup->restricted(ChannelRestriction::f_send_inline)) {
+	if (_inlineQueryPeer) {
+		const auto errorKey = Data::RestrictionErrorKey(
+			_inlineQueryPeer,
+			ChatRestriction::f_send_inline);
+		if (errorKey) {
 			if (!_restrictedLabel) {
-				_restrictedLabel.create(this, lang(lng_restricted_send_inline), Ui::FlatLabel::InitType::Simple, st::stickersRestrictedLabel);
+				_restrictedLabel.create(this, lang(*errorKey), Ui::FlatLabel::InitType::Simple, st::stickersRestrictedLabel);
 				_restrictedLabel->show();
 				_restrictedLabel->move(st::inlineResultsLeft - st::buttonRadius, st::stickerPanPadding);
 				if (_switchPmButton) {

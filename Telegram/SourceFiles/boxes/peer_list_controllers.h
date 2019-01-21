@@ -114,9 +114,13 @@ private:
 
 };
 
-class ContactsBoxController : public PeerListController, protected base::Subscriber {
+class ContactsBoxController
+	: public PeerListController
+	, protected base::Subscriber {
 public:
-	ContactsBoxController(std::unique_ptr<PeerListSearchController> searchController = std::make_unique<PeerListGlobalSearchController>());
+	ContactsBoxController(
+		std::unique_ptr<PeerListSearchController> searchController
+		= std::make_unique<PeerListGlobalSearchController>());
 
 	void prepare() override final;
 	std::unique_ptr<PeerListRow> createSearchRow(not_null<PeerData*> peer) override final;
@@ -133,69 +137,6 @@ private:
 	void rebuildRows();
 	void checkForEmptyRows();
 	bool appendRow(not_null<UserData*> user);
-
-};
-
-class EditChatAdminsBoxController : public PeerListController, private base::Subscriber {
-public:
-	static void Start(not_null<ChatData*> chat);
-
-	EditChatAdminsBoxController(not_null<ChatData*> chat);
-
-	bool allAreAdmins() const;
-
-	void prepare() override;
-	void rowClicked(not_null<PeerListRow*> row) override;
-
-private:
-	void createAllAdminsCheckbox();
-	void rebuildRows();
-	std::unique_ptr<PeerListRow> createRow(not_null<UserData*> user);
-
-	not_null<ChatData*> _chat;
-	int _adminsUpdatedSubscription = 0;
-
-	class LabeledCheckbox;
-	QPointer<LabeledCheckbox> _allAdmins;
-
-};
-
-class AddParticipantsBoxController : public ContactsBoxController {
-public:
-	static void Start(not_null<ChatData*> chat);
-	static void Start(not_null<ChannelData*> channel);
-	static void Start(
-		not_null<ChannelData*> channel,
-		base::flat_set<not_null<UserData*>> &&alreadyIn);
-
-	AddParticipantsBoxController(PeerData *peer);
-	AddParticipantsBoxController(
-		not_null<ChannelData*> channel,
-		base::flat_set<not_null<UserData*>> &&alreadyIn);
-
-	using ContactsBoxController::ContactsBoxController;
-
-	void rowClicked(not_null<PeerListRow*> row) override;
-	void itemDeselectedHook(not_null<PeerData*> peer) override;
-
-protected:
-	void prepareViewHook() override;
-	std::unique_ptr<PeerListRow> createRow(not_null<UserData*> user) override;
-
-private:
-	static void Start(
-		not_null<ChannelData*> channel,
-		base::flat_set<not_null<UserData*>> &&alreadyIn,
-		bool justCreated);
-
-	int alreadyInCount() const;
-	bool isAlreadyIn(not_null<UserData*> user) const;
-	int fullCount() const;
-	void updateTitle();
-	bool inviteSelectedUsers(not_null<PeerData*> chat) const;
-
-	PeerData *_peer = nullptr;
-	base::flat_set<not_null<UserData*>> _alreadyIn;
 
 };
 

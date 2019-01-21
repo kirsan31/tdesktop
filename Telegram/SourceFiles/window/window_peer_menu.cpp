@@ -13,11 +13,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "boxes/add_contact_box.h"
 #include "boxes/report_box.h"
 #include "boxes/create_poll_box.h"
-#include "boxes/peer_list_controllers.h"
+#include "boxes/peers/add_participants_box.h"
 #include "boxes/peers/manage_peer_box.h"
 #include "boxes/peers/edit_peer_info_box.h"
 #include "ui/toast/toast.h"
-#include "core/tl_help.h"
 #include "auth_session.h"
 #include "apiwrap.h"
 #include "mainwidget.h"
@@ -34,6 +33,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_session.h"
 #include "data/data_feed.h"
 #include "data/data_poll.h"
+#include "data/data_channel.h"
+#include "data/data_chat.h"
+#include "data/data_user.h"
 #include "dialogs/dialogs_key.h"
 
 namespace Window {
@@ -105,11 +107,7 @@ History *FindWastedPin() {
 }
 
 void AddChatMembers(not_null<ChatData*> chat) {
-	if (chat->count >= Global::ChatSizeMax() && chat->amCreator()) {
-		Ui::show(Box<ConvertToSupergroupBox>(chat));
-	} else {
-		AddParticipantsBoxController::Start(chat);
-	}
+	AddParticipantsBoxController::Start(chat);
 }
 
 bool PinnedLimitReached(Dialogs::Key key) {
@@ -119,7 +117,7 @@ bool PinnedLimitReached(Dialogs::Key key) {
 		return false;
 	}
 	// Some old chat, that was converted, maybe is still pinned.
-	if (auto wasted = FindWastedPin()) {
+	if (const auto wasted = FindWastedPin()) {
 		Auth().data().setPinnedDialog(wasted, false);
 		Auth().data().setPinnedDialog(key, true);
 		Auth().api().savePinnedOrder();
@@ -354,15 +352,18 @@ void Filler::addUserActions(not_null<UserData*> user) {
 
 void Filler::addChatActions(not_null<ChatData*> chat) {
 	if (_source != PeerMenuSource::ChatsList) {
-		if (chat->canEdit()) {
-			_addAction(
-				lang(lng_manage_group_title),
-				[chat] { Ui::show(Box<EditPeerInfoBox>(chat)); });
+		if (ManagePeerBox::Available(chat)) {
+			const auto text = lang(lng_manage_group_title);
+			_addAction(text, [=] {
+				Ui::show(Box<ManagePeerBox>(chat));
+			});
+		}
+		if (chat->canAddMembers()) {
 			_addAction(
 				lang(lng_profile_add_participant),
 				[chat] { AddChatMembers(chat); });
 		}
-		if (chat->canWrite()) {
+		if (chat->canSendPolls()) {
 			_addAction(
 				lang(lng_polls_create),
 				[=] { PeerMenuCreatePoll(chat); });
@@ -392,7 +393,7 @@ void Filler::addChannelActions(not_null<ChannelData*> channel) {
 	}
 	if (_source != PeerMenuSource::ChatsList) {
 		if (ManagePeerBox::Available(channel)) {
-			auto text = lang(isGroup
+			const auto text = lang(isGroup
 				? lng_manage_group_title
 				: lng_manage_channel_title);
 			_addAction(text, [channel] {
@@ -404,7 +405,7 @@ void Filler::addChannelActions(not_null<ChannelData*> channel) {
 				lang(lng_channel_add_members),
 				[channel] { PeerMenuAddChannelMembers(channel); });
 		}
-		if (channel->canWrite()) {
+		if (channel->canSendPolls()) {
 			_addAction(
 				lang(lng_polls_create),
 				[=] { PeerMenuCreatePoll(channel); });
@@ -692,14 +693,16 @@ void PeerMenuAddChannelMembers(not_null<ChannelData*> channel) {
 			LayerOption::KeepOther);
 		return;
 	}
-	auto callback = [channel](const MTPchannels_ChannelParticipants &result) {
+	auto callback = [=](const MTPchannels_ChannelParticipants &result) {
 		Auth().api().parseChannelParticipants(channel, result, [&](
 				int availableCount,
 				const QVector<MTPChannelParticipant> &list) {
 			auto already = (
 				list
-			) | ranges::view::transform([&](auto &&p) {
-				return TLHelp::ReadChannelParticipantUserId(p);
+			) | ranges::view::transform([](const MTPChannelParticipant &p) {
+				return p.match([](const auto &data) {
+					return data.vuser_id.v;
+				});
 			}) | ranges::view::transform([](UserId userId) {
 				return App::userLoaded(userId);
 			}) | ranges::view::filter([](UserData *user) {

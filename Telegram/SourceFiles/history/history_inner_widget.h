@@ -23,6 +23,7 @@ struct TextState;
 struct StateRequest;
 enum class CursorState : char;
 enum class PointState : char;
+class EmptyPainter;
 } // namespace HistoryView
 
 namespace Window {
@@ -38,7 +39,7 @@ class HistoryInner
 	: public Ui::RpWidget
 	, public Ui::AbstractTooltipShower
 	, private base::Subscriber {
-	// The Q_OBJECT meta info is used for qobject_cast to HistoryInner!
+	// The Q_OBJECT meta info is used for qobject_cast!
 	Q_OBJECT
 
 public:
@@ -54,6 +55,7 @@ public:
 	void messagesReceivedDown(PeerData *peer, const QVector<MTPMessage> &messages);
 
 	TextWithEntities getSelectedText() const;
+	void paintEmpty(Painter &p, int width, int height);
 
 	void touchScrollUpdated(const QPoint &screenPos);
 
@@ -292,18 +294,18 @@ private:
 
 	not_null<Window::Controller*> _controller;
 
-	not_null<PeerData*> _peer;
-	not_null<History*> _history;
+	const not_null<PeerData*> _peer;
+	const not_null<History*> _history;
 	History *_migrated = nullptr;
 	int _contentWidth = 0;
 	int _historyPaddingTop = 0;
 
-	// with migrated history we perhaps do not need to display first _history message
-	// (if last _migrated message and first _history message are both isGroupMigrate)
-	// or at least we don't need to display first _history date (just skip it by height)
+	// With migrated history we perhaps do not need to display
+	// the first _history message date (just skip it by height).
 	int _historySkipHeight = 0;
 
 	std::unique_ptr<BotAbout> _botAbout;
+	std::unique_ptr<HistoryView::EmptyPainter> _emptyPainter;
 
 	HistoryWidget *_widget = nullptr;
 	Ui::ScrollArea *_scroll = nullptr;

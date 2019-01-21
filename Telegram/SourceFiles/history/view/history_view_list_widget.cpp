@@ -27,14 +27,13 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "window/window_peer_menu.h"
 #include "auth_session.h"
 #include "ui/widgets/popup_menu.h"
-#include "core/tl_help.h"
-#include "base/overload.h"
 #include "lang/lang_keys.h"
-#include "boxes/edit_participant_box.h"
+#include "boxes/peers/edit_participant_box.h"
 #include "data/data_session.h"
 #include "data/data_feed.h"
 #include "data/data_media_types.h"
 #include "data/data_document.h"
+#include "data/data_peer.h"
 #include "styles/style_history.h"
 
 namespace HistoryView {

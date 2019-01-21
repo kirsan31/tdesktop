@@ -18,13 +18,15 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_peer_values.h"
 #include "data/data_shared_media.h"
 #include "data/data_feed.h"
+#include "data/data_channel.h"
+#include "data/data_chat.h"
+#include "data/data_user.h"
 #include "data/data_session.h"
 
 namespace Info {
 namespace Profile {
 
-rpl::producer<TextWithEntities> NameValue(
-		not_null<PeerData*> peer) {
+rpl::producer<TextWithEntities> NameValue(not_null<PeerData*> peer) {
 	return Notify::PeerUpdateValue(
 		peer,
 		Notify::PeerUpdate::Flag::NameChanged
@@ -33,8 +35,7 @@ rpl::producer<TextWithEntities> NameValue(
 	}) | WithEmptyEntities();
 }
 
-rpl::producer<TextWithEntities> PhoneValue(
-		not_null<UserData*> user) {
+rpl::producer<TextWithEntities> PhoneValue(not_null<UserData*> user) {
 	return Notify::PeerUpdateValue(
 			user,
 			Notify::PeerUpdate::Flag::UserPhoneChanged
@@ -43,23 +44,20 @@ rpl::producer<TextWithEntities> PhoneValue(
 	}) | WithEmptyEntities();
 }
 
-auto PlainBioValue(
-		not_null<UserData*> user) {
+auto PlainBioValue(not_null<UserData*> user) {
 	return Notify::PeerUpdateValue(
-			user,
-			Notify::PeerUpdate::Flag::AboutChanged
+		user,
+		Notify::PeerUpdate::Flag::AboutChanged
 	) | rpl::map([user] { return user->about(); });
 }
 
-rpl::producer<TextWithEntities> BioValue(
-		not_null<UserData*> user) {
+rpl::producer<TextWithEntities> BioValue(not_null<UserData*> user) {
 	return PlainBioValue(user)
 		| ToSingleLine()
 		| WithEmptyEntities();
 }
 
-auto PlainUsernameValue(
-		not_null<PeerData*> peer) {
+auto PlainUsernameValue(not_null<PeerData*> peer) {
 	return Notify::PeerUpdateValue(
 			peer,
 			Notify::PeerUpdate::Flag::UsernameChanged
@@ -68,8 +66,7 @@ auto PlainUsernameValue(
 	});
 }
 
-rpl::producer<TextWithEntities> UsernameValue(
-		not_null<UserData*> user) {
+rpl::producer<TextWithEntities> UsernameValue(not_null<UserData*> user) {
 	return PlainUsernameValue(
 		user
 	) | rpl::map([](QString &&username) {
@@ -79,24 +76,19 @@ rpl::producer<TextWithEntities> UsernameValue(
 	}) | WithEmptyEntities();
 }
 
-rpl::producer<QString> PlainAboutValue(
-		not_null<PeerData*> peer) {
-	if (auto channel = peer->asChannel()) {
-		return Notify::PeerUpdateValue(
-				channel,
-				Notify::PeerUpdate::Flag::AboutChanged
-		) | rpl::map([channel] { return channel->about(); });
-	} else if (auto user = peer->asUser()) {
-		if (user->botInfo) {
-			return PlainBioValue(user);
+rpl::producer<QString> PlainAboutValue(not_null<PeerData*> peer) {
+	if (const auto user = peer->asUser()) {
+		if (!user->botInfo) {
+			return rpl::single(QString());
 		}
 	}
-	return rpl::single(QString());
+	return Notify::PeerUpdateValue(
+		peer,
+		Notify::PeerUpdate::Flag::AboutChanged
+	) | rpl::map([=] { return peer->about(); });
 }
 
-
-rpl::producer<TextWithEntities> AboutValue(
-		not_null<PeerData*> peer) {
+rpl::producer<TextWithEntities> AboutValue(not_null<PeerData*> peer) {
 	auto flags = TextParseLinks
 		| TextParseMentions
 		| TextParseHashtags;
@@ -112,8 +104,7 @@ rpl::producer<TextWithEntities> AboutValue(
 	});
 }
 
-rpl::producer<QString> LinkValue(
-		not_null<PeerData*> peer) {
+rpl::producer<QString> LinkValue(not_null<PeerData*> peer) {
 	return PlainUsernameValue(
 		peer
 	) | rpl::map([](QString &&username) {
@@ -123,8 +114,7 @@ rpl::producer<QString> LinkValue(
 	});
 }
 
-rpl::producer<bool> NotificationsEnabledValue(
-		not_null<PeerData*> peer) {
+rpl::producer<bool> NotificationsEnabledValue(not_null<PeerData*> peer) {
 	return rpl::merge(
 		Notify::PeerUpdateValue(
 			peer,
@@ -136,16 +126,14 @@ rpl::producer<bool> NotificationsEnabledValue(
 	}) | rpl::distinct_until_changed();
 }
 
-rpl::producer<bool> IsContactValue(
-		not_null<UserData*> user) {
+rpl::producer<bool> IsContactValue(not_null<UserData*> user) {
 	return Notify::PeerUpdateValue(
 			user,
 			Notify::PeerUpdate::Flag::UserIsContact
 	) | rpl::map([user] { return user->isContact(); });
 }
 
-rpl::producer<bool> CanInviteBotToGroupValue(
-		not_null<UserData*> user) {
+rpl::producer<bool> CanInviteBotToGroupValue(not_null<UserData*> user) {
 	if (!user->botInfo) {
 		return rpl::single(false);
 	}
@@ -157,8 +145,7 @@ rpl::producer<bool> CanInviteBotToGroupValue(
 	});
 }
 
-rpl::producer<bool> CanShareContactValue(
-		not_null<UserData*> user) {
+rpl::producer<bool> CanShareContactValue(not_null<UserData*> user) {
 	return Notify::PeerUpdateValue(
 			user,
 			Notify::PeerUpdate::Flag::UserCanShareContact
@@ -167,38 +154,36 @@ rpl::producer<bool> CanShareContactValue(
 	});
 }
 
-rpl::producer<bool> CanAddContactValue(
-		not_null<UserData*> user) {
+rpl::producer<bool> CanAddContactValue(not_null<UserData*> user) {
 	using namespace rpl::mappers;
 	return rpl::combine(
-			IsContactValue(user),
-			CanShareContactValue(user),
-			!_1 && _2);
+		IsContactValue(user),
+		CanShareContactValue(user),
+		!_1 && _2);
 }
 
-rpl::producer<bool> AmInChannelValue(
-		not_null<ChannelData*> channel) {
+rpl::producer<bool> AmInChannelValue(not_null<ChannelData*> channel) {
 	return Notify::PeerUpdateValue(
 		channel,
 		Notify::PeerUpdate::Flag::ChannelAmIn
 	) | rpl::map([channel] { return channel->amIn(); });
 }
 
-rpl::producer<int> MembersCountValue(
-		not_null<PeerData*> peer) {
-	if (auto chat = peer->asChat()) {
+rpl::producer<int> MembersCountValue(not_null<PeerData*> peer) {
+	using Flag = Notify::PeerUpdate::Flag;
+	if (const auto chat = peer->asChat()) {
 		return Notify::PeerUpdateValue(
 			peer,
-			Notify::PeerUpdate::Flag::MembersChanged
+			Flag::MembersChanged
 		) | rpl::map([chat] {
 			return chat->amIn()
 				? std::max(chat->count, int(chat->participants.size()))
 				: 0;
 		});
-	} else if (auto channel = peer->asChannel()) {
+	} else if (const auto channel = peer->asChannel()) {
 		return Notify::PeerUpdateValue(
-				channel,
-				Notify::PeerUpdate::Flag::MembersChanged
+			channel,
+			Flag::MembersChanged
 		) | rpl::map([channel] {
 			return channel->membersCount();
 		});
@@ -206,39 +191,48 @@ rpl::producer<int> MembersCountValue(
 	Unexpected("User in MembersCountViewer().");
 }
 
-rpl::producer<int> AdminsCountValue(
-		not_null<ChannelData*> channel) {
+rpl::producer<int> AdminsCountValue(not_null<PeerData*> peer) {
 	using Flag = Notify::PeerUpdate::Flag;
-	return Notify::PeerUpdateValue(
-		channel,
-		Flag::AdminsChanged | Flag::ChannelRightsChanged
-	) | rpl::map([channel] {
-		return channel->canViewAdmins()
-			? channel->adminsCount()
-			: 0;
-	});
+	if (const auto chat = peer->asChat()) {
+		return Notify::PeerUpdateValue(
+			chat,
+			Flag::AdminsChanged | Flag::RightsChanged
+		) | rpl::map([=] {
+			return chat->participants.empty()
+				? 0
+				: int(chat->admins.size() + 1); // + creator
+		});
+	} else if (const auto channel = peer->asChannel()) {
+		return Notify::PeerUpdateValue(
+			channel,
+			Flag::AdminsChanged | Flag::RightsChanged
+		) | rpl::map([=] {
+			return channel->canViewAdmins()
+				? channel->adminsCount()
+				: 0;
+		});
+	}
+	Unexpected("User in AdminsCountValue().");
 }
 
-rpl::producer<int> RestrictedCountValue(
-		not_null<ChannelData*> channel) {
+rpl::producer<int> RestrictedCountValue(not_null<ChannelData*> channel) {
 	using Flag = Notify::PeerUpdate::Flag;
 	return Notify::PeerUpdateValue(
 		channel,
-		Flag::BannedUsersChanged | Flag::ChannelRightsChanged
-	) | rpl::map([channel] {
+		Flag::BannedUsersChanged | Flag::RightsChanged
+	) | rpl::map([=] {
 		return channel->canViewBanned()
 			? channel->restrictedCount()
 			: 0;
 	});
 }
 
-rpl::producer<int> KickedCountValue(
-		not_null<ChannelData*> channel) {
+rpl::producer<int> KickedCountValue(not_null<ChannelData*> channel) {
 	using Flag = Notify::PeerUpdate::Flag;
 	return Notify::PeerUpdateValue(
 		channel,
-		Flag::BannedUsersChanged | Flag::ChannelRightsChanged
-	) | rpl::map([channel] {
+		Flag::BannedUsersChanged | Flag::RightsChanged
+	) | rpl::map([=] {
 		return channel->canViewBanned()
 			? channel->kickedCount()
 			: 0;
@@ -266,8 +260,7 @@ rpl::producer<int> SharedMediaCountValue(
 	return rpl::single(0) | rpl::then(std::move(updated));
 }
 
-rpl::producer<int> CommonGroupsCountValue(
-		not_null<UserData*> user) {
+rpl::producer<int> CommonGroupsCountValue(not_null<UserData*> user) {
 	return Notify::PeerUpdateValue(
 		user,
 		Notify::PeerUpdate::Flag::UserCommonChatsChanged
@@ -276,28 +269,26 @@ rpl::producer<int> CommonGroupsCountValue(
 	});
 }
 
-rpl::producer<bool> CanAddMemberValue(
-		not_null<PeerData*> peer) {
+rpl::producer<bool> CanAddMemberValue(not_null<PeerData*> peer) {
 	if (auto chat = peer->asChat()) {
 		return Notify::PeerUpdateValue(
 			chat,
-			Notify::PeerUpdate::Flag::ChatCanEdit
-		) | rpl::map([chat] {
-			return chat->canEdit();
+			Notify::PeerUpdate::Flag::RightsChanged
+		) | rpl::map([=] {
+			return chat->canAddMembers();
 		});
 	} else if (auto channel = peer->asChannel()) {
 		return Notify::PeerUpdateValue(
 			channel,
-			Notify::PeerUpdate::Flag::ChannelRightsChanged
-		) | rpl::map([channel] {
+			Notify::PeerUpdate::Flag::RightsChanged
+		) | rpl::map([=] {
 			return channel->canAddMembers();
 		});
 	}
 	return rpl::single(false);
 }
 
-rpl::producer<bool> VerifiedValue(
-		not_null<PeerData*> peer) {
+rpl::producer<bool> VerifiedValue(not_null<PeerData*> peer) {
 	if (auto user = peer->asUser()) {
 		return Data::PeerFlagValue(user, MTPDuser::Flag::f_verified);
 	} else if (auto channel = peer->asChannel()) {
@@ -308,8 +299,7 @@ rpl::producer<bool> VerifiedValue(
 	return rpl::single(false);
 }
 
-rpl::producer<int> FeedChannelsCountValue(
-		not_null<Data::Feed*> feed) {
+rpl::producer<int> FeedChannelsCountValue(not_null<Data::Feed*> feed) {
 	using Flag = Data::FeedUpdateFlag;
 	return rpl::single(
 		Data::FeedUpdate{ feed, Flag::Channels }
@@ -323,7 +313,6 @@ rpl::producer<int> FeedChannelsCountValue(
 		return int(feed->channels().size());
 	}) | rpl::distinct_until_changed();
 }
-
 
 } // namespace Profile
 } // namespace Info

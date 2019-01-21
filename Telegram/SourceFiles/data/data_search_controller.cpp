@@ -10,6 +10,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "auth_session.h"
 #include "data/data_session.h"
 #include "data/data_messages.h"
+#include "data/data_channel.h"
 #include "history/history.h"
 #include "history/history_item.h"
 
@@ -149,8 +150,8 @@ SearchResult ParseSearchResult(
 
 	auto addType = NewMessageExisting;
 	result.messageIds.reserve(messages->size());
-	for (auto &message : *messages) {
-		if (auto item = App::histories().addNewMessage(message, addType)) {
+	for (const auto &message : *messages) {
+		if (auto item = Auth().data().addNewMessage(message, addType)) {
 			auto itemId = item->id;
 			if ((type == Storage::SharedMediaType::kCount)
 				|| item->sharedMediaTypes().test(type)) {

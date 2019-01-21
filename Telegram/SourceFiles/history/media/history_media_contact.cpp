@@ -10,16 +10,17 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "lang/lang_keys.h"
 #include "layout.h"
 #include "mainwindow.h"
-#include "auth_session.h"
 #include "boxes/add_contact_box.h"
 #include "history/history_item_components.h"
 #include "history/history_item.h"
+#include "history/history.h"
 #include "history/view/history_view_element.h"
 #include "history/view/history_view_cursor_state.h"
 #include "window/window_controller.h"
 #include "ui/empty_userpic.h"
 #include "ui/text_options.h"
 #include "data/data_session.h"
+#include "data/data_user.h"
 #include "data/data_media_types.h"
 #include "styles/style_history.h"
 
@@ -67,7 +68,7 @@ HistoryContact::HistoryContact(
 , _fname(first)
 , _lname(last)
 , _phone(App::formatPhone(phone)) {
-	Auth().data().registerContactView(userId, parent);
+	history()->owner().registerContactView(userId, parent);
 
 	_name.setText(
 		st::semiboldTextStyle,
@@ -77,14 +78,14 @@ HistoryContact::HistoryContact(
 }
 
 HistoryContact::~HistoryContact() {
-	Auth().data().unregisterContactView(_userId, _parent);
+	history()->owner().unregisterContactView(_userId, _parent);
 }
 
 void HistoryContact::updateSharedContactUserId(UserId userId) {
 	if (_userId != userId) {
-		Auth().data().unregisterContactView(_userId, _parent);
+		history()->owner().unregisterContactView(_userId, _parent);
 		_userId = userId;
-		Auth().data().registerContactView(_userId, _parent);
+		history()->owner().registerContactView(_userId, _parent);
 	}
 }
 

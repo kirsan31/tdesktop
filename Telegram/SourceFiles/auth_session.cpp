@@ -16,6 +16,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "storage/storage_facade.h"
 #include "storage/serialize_common.h"
 #include "data/data_session.h"
+#include "data/data_user.h"
 #include "window/notifications_manager.h"
 #include "window/themes/window_theme.h"
 #include "platform/platform_specific.h"
@@ -377,8 +378,7 @@ AuthSession &Auth() {
 }
 
 AuthSession::AuthSession(const MTPUser &user)
-: _user(App::user(user.match([](const auto &data) { return data.vid.v; })))
-, _autoLockTimer([this] { checkAutoLock(); })
+: _autoLockTimer([this] { checkAutoLock(); })
 , _api(std::make_unique<ApiWrap>(this))
 , _calls(std::make_unique<Calls::Instance>())
 , _downloader(std::make_unique<Storage::Downloader>())
@@ -386,13 +386,9 @@ AuthSession::AuthSession(const MTPUser &user)
 , _storage(std::make_unique<Storage::Facade>())
 , _notifications(std::make_unique<Window::Notifications::System>(this))
 , _data(std::make_unique<Data::Session>(this))
+, _user(_data->user(user))
 , _changelogs(Core::Changelogs::Create(this))
-, _supportHelper(
-	(Support::ValidateAccount(user)
-		? std::make_unique<Support::Helper>(this)
-		: nullptr)) {
-	App::feedUser(user);
-
+, _supportHelper(Support::Helper::Create(this)) {
 	_saveDataTimer.setCallback([=] {
 		Local::writeUserSettings();
 	});
@@ -441,6 +437,14 @@ bool AuthSession::Exists() {
 
 base::Observable<void> &AuthSession::downloaderTaskFinished() {
 	return downloader().taskFinished();
+}
+
+UserId AuthSession::userId() const {
+	return _user->bareId();
+}
+
+PeerId AuthSession::userPeerId() const {
+	return _user->id;
 }
 
 bool AuthSession::validateSelf(const MTPUser &user) {
@@ -515,4 +519,7 @@ Support::Templates& AuthSession::supportTemplates() const {
 	return supportHelper().templates();
 }
 
-AuthSession::~AuthSession() = default;
+AuthSession::~AuthSession() {
+	ClickHandler::clearActive();
+	ClickHandler::unpressed();
+}

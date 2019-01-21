@@ -31,14 +31,15 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/widgets/popup_menu.h"
 #include "ui/image/image.h"
 #include "core/file_utilities.h"
-#include "core/tl_help.h"
-#include "base/overload.h"
 #include "lang/lang_keys.h"
-#include "boxes/edit_participant_box.h"
+#include "boxes/peers/edit_participant_box.h"
+#include "boxes/peers/edit_participants_box.h"
 #include "data/data_session.h"
 #include "data/data_photo.h"
 #include "data/data_document.h"
 #include "data/data_media_types.h"
+#include "data/data_channel.h"
+#include "data/data_user.h"
 
 namespace AdminLog {
 namespace {
@@ -386,20 +387,22 @@ void InnerWidget::requestAdmins() {
 		MTP_int(kMaxChannelAdmins),
 		MTP_int(participantsHash)
 	)).done([this](const MTPchannels_ChannelParticipants &result) {
-		auto readCanEdit = base::overload([](const MTPDchannelParticipantAdmin &v) {
-			return v.is_can_edit();
-		}, [](auto &&) {
-			return false;
-		});
 		Auth().api().parseChannelParticipants(_channel, result, [&](
 				int availableCount,
 				const QVector<MTPChannelParticipant> &list) {
 			auto filtered = (
 				list
 			) | ranges::view::transform([&](const MTPChannelParticipant &p) {
-				return std::make_pair(
-					TLHelp::ReadChannelParticipantUserId(p),
-					TLHelp::VisitChannelParticipant(p, readCanEdit));
+				const auto userId = p.match([](const auto &data) {
+					return data.vuser_id.v;
+				});
+				const auto canEdit = p.match([](
+						const MTPDchannelParticipantAdmin &data) {
+					return data.is_can_edit();
+				}, [](const auto &) {
+					return false;
+				});
+				return std::make_pair(userId, canEdit);
 			}) | ranges::view::transform([&](auto &&pair) {
 				return std::make_pair(
 					App::userLoaded(pair.first),
@@ -409,9 +412,9 @@ void InnerWidget::requestAdmins() {
 			});
 
 			for (auto [user, canEdit] : filtered) {
-				_admins.push_back(user);
+				_admins.emplace_back(user);
 				if (canEdit) {
-					_adminsCanEdit.push_back(user);
+					_adminsCanEdit.emplace_back(user);
 				}
 			}
 		});
@@ -528,8 +531,13 @@ void InnerWidget::saveState(not_null<SectionMemento*> memento) {
 	memento->setAdminsCanEdit(std::move(_adminsCanEdit));
 	memento->setSearchQuery(std::move(_searchQuery));
 	if (!_filterChanged) {
-		memento->setItems(std::move(_items), std::move(_itemsByIds), _upLoaded, _downLoaded);
-		memento->setIdManager(std::move(_idManager));
+		memento->setItems(
+			base::take(_items),
+			base::take(_eventIds),
+			_upLoaded,
+			_downLoaded);
+		memento->setIdManager(base::take(_idManager));
+		base::take(_itemsByData);
 	}
 	_upLoaded = _downLoaded = true; // Don't load or handle anything anymore.
 }
@@ -538,8 +546,9 @@ void InnerWidget::restoreState(not_null<SectionMemento*> memento) {
 	_items = memento->takeItems();
 	for (auto &item : _items) {
 		item.refreshView(this);
+		_itemsByData.emplace(item->data(), item.get());
 	}
-	_itemsByIds = memento->takeItemsByIds();
+	_eventIds = memento->takeEventIds();
 	if (auto manager = memento->takeIdManager()) {
 		_idManager = std::move(manager);
 	}
@@ -612,38 +621,40 @@ void InnerWidget::addEvents(Direction direction, const QVector<MTPChannelAdminLo
 	// When loading items down we add them to a new vector and copy _items after them.
 	auto newItemsForDownDirection = std::vector<OwnedItem>();
 	auto oldItemsCount = _items.size();
-	auto &addToItems = (direction == Direction::Up) ? _items : newItemsForDownDirection;
+	auto &addToItems = (direction == Direction::Up)
+		? _items
+		: newItemsForDownDirection;
 	addToItems.reserve(oldItemsCount + events.size() * 2);
-	for_const (auto &event, events) {
-		Assert(event.type() == mtpc_channelAdminLogEvent);
-		const auto &data = event.c_channelAdminLogEvent();
-		const auto id = data.vid.v;
-		if (_itemsByIds.find(id) != _itemsByIds.cend()) {
-			continue;
-		}
-
-		auto count = 0;
-		const auto addOne = [&](OwnedItem item) {
-			_itemsByIds.emplace(id, item.get());
-			_itemsByData.emplace(item->data(), item.get());
-			addToItems.push_back(std::move(item));
-			++count;
-		};
-		GenerateItems(
-			this,
-			_history,
-			_idManager.get(),
-			data,
-			addOne);
-		if (count > 1) {
-			// Reverse the inner order of the added messages, because we load events
-			// from bottom to top but inside one event they go from top to bottom.
-			auto full = addToItems.size();
-			auto from = full - count;
-			for (auto i = 0, toReverse = count / 2; i != toReverse; ++i) {
-				std::swap(addToItems[from + i], addToItems[full - i - 1]);
+	for (const auto &event : events) {
+		event.match([&](const MTPDchannelAdminLogEvent &data) {
+			const auto id = data.vid.v;
+			if (_eventIds.find(id) != _eventIds.end()) {
+				return;
 			}
-		}
+
+			auto count = 0;
+			const auto addOne = [&](OwnedItem item) {
+				_eventIds.emplace(id);
+				_itemsByData.emplace(item->data(), item.get());
+				addToItems.push_back(std::move(item));
+				++count;
+			};
+			GenerateItems(
+				this,
+				_history,
+				_idManager.get(),
+				data,
+				addOne);
+			if (count > 1) {
+				// Reverse the inner order of the added messages, because we load events
+				// from bottom to top but inside one event they go from top to bottom.
+				auto full = addToItems.size();
+				auto from = full - count;
+				for (auto i = 0, toReverse = count / 2; i != toReverse; ++i) {
+					std::swap(addToItems[from + i], addToItems[full - i - 1]);
+				}
+			}
+		});
 	}
 	auto newItemsCount = _items.size() + ((direction == Direction::Up) ? 0 : newItemsForDownDirection.size());
 	if (newItemsCount != oldItemsCount) {
@@ -660,11 +671,11 @@ void InnerWidget::addEvents(Direction direction, const QVector<MTPChannelAdminLo
 }
 
 void InnerWidget::updateMinMaxIds() {
-	if (_itemsByIds.empty() || _filterChanged) {
+	if (_eventIds.empty() || _filterChanged) {
 		_maxId = _minId = 0;
 	} else {
-		_maxId = (--_itemsByIds.end())->first;
-		_minId = _itemsByIds.begin()->first;
+		_maxId = *_eventIds.rbegin();
+		_minId = *_eventIds.begin();
 		if (_minId == 1) {
 			_upLoaded = true;
 		}
@@ -706,7 +717,7 @@ int InnerWidget::resizeGetHeight(int newWidth) {
 
 	const auto resizeAllItems = (_itemsWidth != newWidth);
 	auto newHeight = 0;
-	for (auto &item : base::reversed(_items)) {
+	for (const auto &item : ranges::view::reverse(_items)) {
 		item->setY(newHeight);
 		if (item->pendingResize() || resizeAllItems) {
 			newHeight += item->resizeGetHeight(newWidth);
@@ -834,7 +845,8 @@ void InnerWidget::clearAfterFilterChange() {
 	_selectedText = TextSelection();
 	_filterChanged = false;
 	_items.clear();
-	_itemsByIds.clear();
+	_eventIds.clear();
+	_itemsByData.clear();
 	_idManager = nullptr;
 	_idManager = _history->adminLogIdManager();
 	updateEmptyText();
@@ -1127,11 +1139,13 @@ void InnerWidget::suggestRestrictUser(not_null<UserData*> user) {
 		}
 	}
 	_menu->addAction(lang(lng_context_restrict_user), [=] {
-		auto editRestrictions = [=](bool hasAdminRights, const MTPChannelBannedRights &currentRights) {
+		auto editRestrictions = [=](bool hasAdminRights, const MTPChatBannedRights &currentRights) {
 			auto weak = QPointer<InnerWidget>(this);
 			auto weakBox = std::make_shared<QPointer<EditRestrictedBox>>();
 			auto box = Box<EditRestrictedBox>(_channel, user, hasAdminRights, currentRights);
-			box->setSaveCallback([user, weak, weakBox](const MTPChannelBannedRights &oldRights, const MTPChannelBannedRights &newRights) {
+			box->setSaveCallback([=](
+					const MTPChatBannedRights &oldRights,
+					const MTPChatBannedRights &newRights) {
 				if (weak) {
 					weak->restrictUser(user, oldRights, newRights);
 				}
@@ -1144,9 +1158,12 @@ void InnerWidget::suggestRestrictUser(not_null<UserData*> user) {
 				LayerOption::KeepOther);
 		};
 		if (base::contains(_admins, user)) {
-			editRestrictions(true, MTP_channelBannedRights(MTP_flags(0), MTP_int(0)));
+			editRestrictions(true, MTP_chatBannedRights(MTP_flags(0), MTP_int(0)));
 		} else {
-			request(MTPchannels_GetParticipant(_channel->inputChannel, user->inputUser)).done([=](const MTPchannels_ChannelParticipant &result) {
+			request(MTPchannels_GetParticipant(
+				_channel->inputChannel,
+				user->inputUser
+			)).done([=](const MTPchannels_ChannelParticipant &result) {
 				Expects(result.type() == mtpc_channels_channelParticipant);
 
 				auto &participant = result.c_channels_channelParticipant();
@@ -1158,13 +1175,13 @@ void InnerWidget::suggestRestrictUser(not_null<UserData*> user) {
 				} else {
 					auto hasAdminRights = (type == mtpc_channelParticipantAdmin)
 						|| (type == mtpc_channelParticipantCreator);
-					auto bannedRights = MTP_channelBannedRights(
+					auto bannedRights = MTP_chatBannedRights(
 						MTP_flags(0),
 						MTP_int(0));
 					editRestrictions(hasAdminRights, bannedRights);
 				}
 			}).fail([=](const RPCError &error) {
-				auto bannedRights = MTP_channelBannedRights(
+				auto bannedRights = MTP_chatBannedRights(
 					MTP_flags(0),
 					MTP_int(0));
 				editRestrictions(false, bannedRights);
@@ -1173,20 +1190,24 @@ void InnerWidget::suggestRestrictUser(not_null<UserData*> user) {
 	});
 }
 
-void InnerWidget::restrictUser(not_null<UserData*> user, const MTPChannelBannedRights &oldRights, const MTPChannelBannedRights &newRights) {
-	auto weak = QPointer<InnerWidget>(this);
-	MTP::send(MTPchannels_EditBanned(_channel->inputChannel, user->inputUser, newRights), rpcDone([megagroup = _channel.get(), user, weak, oldRights, newRights](const MTPUpdates &result) {
-		Auth().api().applyUpdates(result);
-		megagroup->applyEditBanned(user, oldRights, newRights);
-		if (weak) {
-			weak->restrictUserDone(user, newRights);
-		}
-	}));
+void InnerWidget::restrictUser(
+		not_null<UserData*> user,
+		const MTPChatBannedRights &oldRights,
+		const MTPChatBannedRights &newRights) {
+	const auto done = [=](const MTPChatBannedRights &newRights) {
+		restrictUserDone(user, newRights);
+	};
+	const auto callback = SaveRestrictedCallback(
+		_channel,
+		user,
+		crl::guard(this, done),
+		nullptr);
+	callback(oldRights, newRights);
 }
 
-void InnerWidget::restrictUserDone(not_null<UserData*> user, const MTPChannelBannedRights &rights) {
-	Expects(rights.type() == mtpc_channelBannedRights);
-	if (rights.c_channelBannedRights().vflags.v) {
+void InnerWidget::restrictUserDone(not_null<UserData*> user, const MTPChatBannedRights &rights) {
+	Expects(rights.type() == mtpc_chatBannedRights);
+	if (rights.c_chatBannedRights().vflags.v) {
 		_admins.erase(std::remove(_admins.begin(), _admins.end(), user), _admins.end());
 		_adminsCanEdit.erase(std::remove(_adminsCanEdit.begin(), _adminsCanEdit.end(), user), _adminsCanEdit.end());
 	}

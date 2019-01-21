@@ -9,6 +9,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "dialogs/dialogs_key.h"
 #include "data/data_drafts.h"
+#include "data/data_user.h"
 #include "history/history.h"
 #include "boxes/abstract_box.h"
 #include "ui/toast/toast.h"
@@ -280,6 +281,12 @@ Helper::Helper(not_null<AuthSession*> session)
 		setSupportName(
 			qsl("[rand^") + QString::number(Sandbox::UserTag()) + ']');
 	}).send();
+}
+
+std::unique_ptr<Helper> Helper::Create(not_null<AuthSession*> session) {
+	//return std::make_unique<Helper>(session); AssertIsDebug();
+	const auto valid = session->user()->phone().startsWith(qstr("424"));
+	return valid ? std::make_unique<Helper>(session) : nullptr;
 }
 
 void Helper::registerWindow(not_null<Window::Controller*> controller) {

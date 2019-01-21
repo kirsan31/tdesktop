@@ -22,7 +22,7 @@ bool ValidateFont(const QString &familyName, int flags = 0) {
 	checkFont.setStyleStrategy(QFont::PreferQuality);
 	auto realFamily = QFontInfo(checkFont).family();
 	if (realFamily.trimmed().compare(familyName, Qt::CaseInsensitive)) {
-		LOG(("Font Error: could not resolve '%1' font, got '%2' after feeding '%3'.").arg(familyName).arg(realFamily));
+		LOG(("Font Error: could not resolve '%1' font, got '%2'.").arg(familyName).arg(realFamily));
 		return false;
 	}
 
@@ -234,8 +234,7 @@ void ForceFullRepaint(not_null<QWidget*> widget) {
 }
 
 void PostponeCall(FnMut<void()> &&callable) {
-	const auto application = static_cast<Application*>(qApp);
-	application->postponeCall(std::move(callable));
+	Core::App().postponeCall(std::move(callable));
 }
 
 } // namespace Ui

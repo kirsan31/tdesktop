@@ -9,6 +9,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "data/data_session.h"
 #include "data/data_document.h"
+#include "data/data_file_origin.h"
 #include "media/media_clip_reader.h"
 #include "auth_session.h"
 
@@ -24,7 +25,7 @@ GoodThumbSource::GoodThumbSource(not_null<DocumentData*> document)
 }
 
 void GoodThumbSource::generate(base::binary_guard &&guard) {
-	if (!guard.alive()) {
+	if (!guard) {
 		return;
 	}
 	const auto data = _document->data();
@@ -73,7 +74,7 @@ void GoodThumbSource::ready(
 		image = std::move(image),
 		bytes = std::move(bytesForCache)
 	]() mutable {
-		if (!guard.alive()) {
+		if (!guard) {
 			return;
 		}
 		if (image.isNull()) {
@@ -161,7 +162,7 @@ bool GoodThumbSource::displayLoading() {
 }
 
 void GoodThumbSource::cancel() {
-	_loading.kill();
+	_loading = nullptr;
 }
 
 float64 GoodThumbSource::progress() {

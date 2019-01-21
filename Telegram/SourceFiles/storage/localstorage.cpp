@@ -13,6 +13,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "storage/storage_clear_legacy.h"
 #include "chat_helpers/stickers.h"
 #include "data/data_drafts.h"
+#include "data/data_user.h"
 #include "boxes/send_files_box.h"
 #include "window/themes/window_theme.h"
 #include "ui/widgets/input_fields.h"
@@ -1282,7 +1283,7 @@ bool _readSetting(quint32 blockId, QDataStream &stream, int version, ReadSetting
 		} else {
 			Global::SetProxiesList({});
 		}
-		Sandbox::refreshGlobalProxy();
+		Core::App().refreshGlobalProxy();
 	} break;
 
 	case dbiConnectionType: {
@@ -1382,7 +1383,7 @@ bool _readSetting(quint32 blockId, QDataStream &stream, int version, ReadSetting
 				Global::SetProxySettings(ProxyData::Settings::System);
 			}
 		}
-		Sandbox::refreshGlobalProxy();
+		Core::App().refreshGlobalProxy();
 	} break;
 
 	case dbiThemeKeyOld: {
@@ -3955,7 +3956,7 @@ void readSavedGifs() {
 	}
 }
 
-void writeBackground(int32 id, const QImage &img) {
+void writeBackground(const Data::WallPaper &paper, const QImage &img) {
 	if (!_working() || !_backgroundCanWrite) {
 		return;
 	}
@@ -3981,10 +3982,18 @@ void writeBackground(int32 id, const QImage &img) {
 		_writeMap(WriteMapWhen::Fast);
 	}
 	quint32 size = sizeof(qint32)
+		+ 2 * sizeof(quint64)
 		+ sizeof(quint32)
-		+ (bmp.isEmpty() ? 0 : (sizeof(quint32) + bmp.size()));
+		+ Serialize::stringSize(paper.slug)
+		+ Serialize::bytearraySize(bmp);
 	EncryptedDescriptor data(size);
-	data.stream << qint32(id) << bmp;
+	data.stream
+		<< qint32(Window::Theme::details::kLegacyBackgroundId)
+		<< quint64(paper.id)
+		<< quint64(paper.accessHash)
+		<< quint32(paper.flags.value())
+		<< paper.slug
+		<< bmp;
 
 	FileWriteDescriptor file(backgroundKey);
 	file.writeEncrypted(data);
@@ -4006,24 +4015,42 @@ bool readBackground() {
 	}
 
 	QByteArray bmpData;
-	qint32 id;
-	bg.stream >> id >> bmpData;
+	qint32 legacyId = 0;
+	quint64 id = 0;
+	quint64 accessHash = 0;
+	quint32 flags = 0;
+	QString slug;
+	bg.stream >> legacyId;
+	if (legacyId == Window::Theme::details::kLegacyBackgroundId) {
+		bg.stream
+			>> id
+			>> accessHash
+			>> flags
+			>> slug;
+	} else {
+		id = Window::Theme::details::FromLegacyBackgroundId(legacyId);
+		accessHash = 0;
+		if (id != Window::Theme::kCustomBackground) {
+			flags = static_cast<quint32>(MTPDwallPaper::Flag::f_default);
+		}
+	}
+	bg.stream >> bmpData;
 	auto oldEmptyImage = (bg.stream.status() != QDataStream::Ok);
 	if (oldEmptyImage
 		|| id == Window::Theme::kInitialBackground
 		|| id == Window::Theme::kDefaultBackground) {
 		_backgroundCanWrite = false;
 		if (oldEmptyImage || bg.version < 8005) {
-			Window::Theme::Background()->setImage(Window::Theme::kDefaultBackground);
+			Window::Theme::Background()->setImage({ Window::Theme::kDefaultBackground });
 			Window::Theme::Background()->setTile(false);
 		} else {
-			Window::Theme::Background()->setImage(id);
+			Window::Theme::Background()->setImage({ id });
 		}
 		_backgroundCanWrite = true;
 		return true;
 	} else if (id == Window::Theme::kThemeBackground && bmpData.isEmpty()) {
 		_backgroundCanWrite = false;
-		Window::Theme::Background()->setImage(id);
+		Window::Theme::Background()->setImage({ id });
 		_backgroundCanWrite = true;
 		return true;
 	}
@@ -4034,9 +4061,14 @@ bool readBackground() {
 #ifndef OS_MAC_OLD
 	reader.setAutoTransform(true);
 #endif // OS_MAC_OLD
-	if (reader.read(&image)) {
+	if (reader.read(&image) || Window::Theme::GetWallPaperColor(slug)) {
 		_backgroundCanWrite = false;
-		Window::Theme::Background()->setImage(id, std::move(image));
+		Window::Theme::Background()->setImage({
+			id,
+			accessHash,
+			MTPDwallPaper::Flags::from_raw(flags),
+			slug
+		}, std::move(image));
 		_backgroundCanWrite = true;
 		return true;
 	}

@@ -115,6 +115,7 @@ Toggle {
 	vsize: pixels;
 	vshift: pixels;
 	stroke: pixels;
+	lockIcon: icon;
 	rippleAreaPadding: pixels;
 }
 
@@ -525,6 +526,14 @@ InfoProfileButton {
 	toggleSkip: pixels;
 
 	ripple: RippleAnimation;
+}
+
+InfoProfileCountButton {
+	button: InfoProfileButton;
+	icon: icon;
+	iconPosition: point;
+	label: FlatLabel;
+	labelPosition: point;
 }
 
 PassportScanRow {

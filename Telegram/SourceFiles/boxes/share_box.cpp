@@ -29,6 +29,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "window/themes/window_theme.h"
 #include "boxes/peer_list_box.h"
 #include "chat_helpers/emoji_suggestions_widget.h"
+#include "data/data_channel.h"
+#include "data/data_user.h"
 #include "auth_session.h"
 #include "messenger.h"
 #include "styles/style_boxes.h"
@@ -964,7 +966,7 @@ void ShareBox::Inner::updateFilter(QString filter) {
 				if (toFilter) {
 					_filtered.reserve(toFilter->size());
 					for (const auto row : *toFilter) {
-						auto &nameWords = row->entry()->chatsListNameWords();
+						const auto &nameWords = row->entry()->chatListNameWords();
 						auto nb = nameWords.cbegin(), ne = nameWords.cend(), ni = nb;
 						for (fi = fb; fi != fe; ++fi) {
 							auto filterName = *fi;
@@ -1173,11 +1175,11 @@ void ShareGameScoreByHash(const QString &hash) {
 		} else {
 			auto requestChannelIds = MTP_vector<MTPInputChannel>(1, MTP_inputChannel(MTP_int(channelId), MTP_long(channelAccessHash)));
 			auto requestChannel = MTPchannels_GetChannels(requestChannelIds);
-			MTP::send(requestChannel, rpcDone([channelId, resolveMessageAndShareScore](const MTPmessages_Chats &result) {
-				if (auto chats = Api::getChatsFromMessagesChats(result)) {
-					App::feedChats(*chats);
-				}
-				if (auto channel = App::channelLoaded(channelId)) {
+			MTP::send(requestChannel, rpcDone([=](const MTPmessages_Chats &result) {
+				result.match([](const auto &data) {
+					App::feedChats(data.vchats);
+				});
+				if (const auto channel = App::channelLoaded(channelId)) {
 					resolveMessageAndShareScore(channel);
 				}
 			}));

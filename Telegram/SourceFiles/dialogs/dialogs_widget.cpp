@@ -26,17 +26,23 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "apiwrap.h"
 #include "messenger.h"
 #include "boxes/peer_list_box.h"
+#include "boxes/peers/edit_participants_box.h"
 #include "window/window_controller.h"
 #include "window/window_slide_animation.h"
 #include "window/window_connecting_widget.h"
-#include "profile/profile_channel_controllers.h"
 #include "storage/storage_media_prepare.h"
 #include "storage/localstorage.h"
 #include "data/data_session.h"
+#include "data/data_channel.h"
+#include "data/data_chat.h"
+#include "data/data_user.h"
 #include "styles/style_dialogs.h"
 #include "styles/style_window.h"
 
 namespace {
+
+constexpr auto kDialogsFirstLoad = 20;
+constexpr auto kDialogsPerPage = 500;
 
 QString SwitchToChooseFromQuery() {
 	return qsl("from:");
@@ -307,7 +313,7 @@ void DialogsWidget::createDialog(Dialogs::Key key) {
 		if (const auto migrated = App::historyLoaded(
 				history->peer->migrateFrom())) {
 			if (migrated->inChatList(Dialogs::Mode::All)) {
-				removeDialog(migrated);
+				_inner->removeDialog(migrated);
 			}
 		}
 	}
@@ -478,36 +484,29 @@ void DialogsWidget::updateDialogsOffset(
 	auto lastDate = TimeId(0);
 	auto lastPeer = PeerId(0);
 	auto lastMsgId = MsgId(0);
-	const auto fillFromDialog = [&](const auto &dialog) {
-		const auto peer = peerFromMTP(dialog.vpeer);
-		const auto msgId = dialog.vtop_message.v;
-		if (!peer || !msgId) {
-			return;
-		}
-		if (!lastPeer) {
-			lastPeer = peer;
-		}
-		if (!lastMsgId) {
-			lastMsgId = msgId;
-		}
-		for (auto j = messages.size(); j != 0;) {
-			const auto &message = messages[--j];
-			if (IdFromMessage(message) == msgId
-				&& PeerFromMessage(message) == peer) {
-				if (const auto date = DateFromMessage(message)) {
-					lastDate = date;
-				}
+	for (const auto &dialog : ranges::view::reverse(dialogs)) {
+		dialog.match([&](const auto &dialog) {
+			const auto peer = peerFromMTP(dialog.vpeer);
+			const auto messageId = dialog.vtop_message.v;
+			if (!peer || !messageId) {
 				return;
 			}
-		}
-	};
-	for (auto i = dialogs.size(); i != 0;) {
-		const auto &dialog = dialogs[--i];
-		switch (dialog.type()) {
-		case mtpc_dialog: fillFromDialog(dialog.c_dialog()); break;
-//		case mtpc_dialogFeed: fillFromDialog(dialog.c_dialogFeed()); break; // #feed
-		default: Unexpected("Type in DialogsWidget::updateDialogsOffset");
-		}
+			if (!lastPeer) {
+				lastPeer = peer;
+			}
+			if (!lastMsgId) {
+				lastMsgId = messageId;
+			}
+			for (const auto &message : ranges::view::reverse(messages)) {
+				if (IdFromMessage(message) == messageId
+					&& PeerFromMessage(message) == peer) {
+					if (const auto date = DateFromMessage(message)) {
+						lastDate = date;
+					}
+					return;
+				}
+			}
+		});
 		if (lastDate) {
 			break;
 		}
@@ -881,7 +880,7 @@ void DialogsWidget::loadDialogs() {
 	}
 
 	const auto firstLoad = !_dialogsOffsetDate;
-	const auto loadCount = firstLoad ? DialogsFirstLoad : DialogsPerPage;
+	const auto loadCount = firstLoad ? kDialogsFirstLoad : kDialogsPerPage;
 	const auto flags = MTPmessages_GetDialogs::Flag::f_exclude_pinned;
 	const auto feedId = 0;
 	const auto hash = 0;

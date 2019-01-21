@@ -7,21 +7,41 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #pragma once
 
+namespace Data {
+
+struct WallPaper {
+	WallPaperId id = WallPaperId();
+	uint64 accessHash = 0;
+	MTPDwallPaper::Flags flags;
+	QString slug;
+	ImagePtr thumb;
+	DocumentData *document = nullptr;
+};
+
+} // namespace Data
+
 namespace Window {
 namespace Theme {
-namespace internal {
+namespace details {
 
-constexpr int32 kUninitializedBackground = -999;
-constexpr int32 kTestingThemeBackground = -666;
-constexpr int32 kTestingDefaultBackground = -665;
-constexpr int32 kTestingEditorBackground = -664;
+constexpr auto FromLegacyBackgroundId(int32 legacyId) -> WallPaperId {
+	return uint64(0xFFFFFFFF00000000ULL) | uint64(uint32(legacyId));
+}
 
-} // namespace internal
+constexpr auto kUninitializedBackground = FromLegacyBackgroundId(-999);
+constexpr auto kTestingThemeBackground = FromLegacyBackgroundId(-666);
+constexpr auto kTestingDefaultBackground = FromLegacyBackgroundId(-665);
+constexpr auto kTestingEditorBackground = FromLegacyBackgroundId(-664);
+constexpr auto kLegacyBackgroundId = int32(-111);
 
-constexpr int32 kThemeBackground = -2;
-constexpr int32 kCustomBackground = -1;
-constexpr int32 kInitialBackground = 0;
-constexpr int32 kDefaultBackground = 105;
+} // namespace details
+
+constexpr auto kThemeBackground = details::FromLegacyBackgroundId(-2);
+constexpr auto kCustomBackground = details::FromLegacyBackgroundId(-1);
+constexpr auto kInitialBackground = details::FromLegacyBackgroundId(0);
+constexpr auto kDefaultBackground = details::FromLegacyBackgroundId(105);
+
+constexpr auto kMinimumTiledSize = 512;
 
 struct Cached {
 	QByteArray colors;
@@ -60,15 +80,17 @@ void ApplyDefaultWithPath(const QString &themePath);
 bool ApplyEditedPalette(const QString &path, const QByteArray &content);
 void KeepApplied();
 QString NightThemePath();
-bool IsNightMode();
+[[nodiscard]] bool IsNightMode();
 void SetNightModeValue(bool nightMode);
 void ToggleNightMode();
 void ToggleNightMode(const QString &themePath);
-bool IsNonDefaultBackground();
+[[nodiscard]] bool IsNonDefaultBackground();
 void Revert();
 
 bool LoadFromFile(const QString &file, Instance *out, QByteArray *outContent);
 bool IsPaletteTestingPath(const QString &path);
+
+[[nodiscard]] std::optional<QColor> GetWallPaperColor(const QString &slug);
 
 struct BackgroundUpdate {
 	enum class Type {
@@ -98,12 +120,12 @@ public:
 
 	// This method is setting the default (themed) image if none was set yet.
 	void start();
-	void setImage(int32 id, QImage &&image = QImage());
+	void setImage(const Data::WallPaper &paper, QImage &&image = QImage());
 	void setTile(bool tile);
 	void setTileDayValue(bool tile);
 	void setTileNightValue(bool tile);
 	void setThemeAbsolutePath(const QString &path);
-	QString themeAbsolutePath() const;
+	[[nodiscard]] QString themeAbsolutePath() const;
 	void reset();
 
 	void setTestingTheme(Instance &&theme);
@@ -111,16 +133,20 @@ public:
 	void setTestingDefaultTheme();
 	void revert();
 
-	int32 id() const;
-	const QPixmap &pixmap() const {
+	[[nodiscard]] WallPaperId id() const;
+	[[nodiscard]] const QPixmap &pixmap() const {
 		return _pixmap;
 	}
-	const QPixmap &pixmapForTiled() const {
+	[[nodiscard]] const QPixmap &pixmapForTiled() const {
 		return _pixmapForTiled;
 	}
-	bool tile() const;
-	bool tileDay() const;
-	bool tileNight() const;
+	[[nodiscard]] std::optional<QColor> color() const {
+		return _paperColor;
+	}
+	[[nodiscard]] QImage createCurrentImage() const;
+	[[nodiscard]] bool tile() const;
+	[[nodiscard]] bool tileDay() const;
+	[[nodiscard]] bool tileNight() const;
 
 private:
 	struct AdjustableColor {
@@ -134,16 +160,19 @@ private:
 	void saveForRevert();
 	void setPreparedImage(QImage &&image);
 	void writeNewBackgroundSettings();
+	void setPaper(const Data::WallPaper &paper);
 
+	[[nodiscard]] bool adjustPaletteRequired();
 	void adjustPaletteUsingBackground(const QImage &img);
+	void adjustPaletteUsingColor(QColor color);
 	void restoreAdjustableColors();
 
 	void setNightModeValue(bool nightMode);
-	bool nightMode() const;
+	[[nodiscard]] bool nightMode() const;
 	void toggleNightMode(std::optional<QString> themePath);
 	void keepApplied(const QString &path, bool write);
-	bool isNonDefaultThemeOrBackground();
-	bool isNonDefaultBackground();
+	[[nodiscard]] bool isNonDefaultThemeOrBackground();
+	[[nodiscard]] bool isNonDefaultBackground();
 
 	friend bool IsNightMode();
 	friend void SetNightModeValue(bool nightMode);
@@ -152,7 +181,8 @@ private:
 	friend void KeepApplied();
 	friend bool IsNonDefaultBackground();
 
-	int32 _id = internal::kUninitializedBackground;
+	Data::WallPaper _paper = { details::kUninitializedBackground };
+	std::optional<QColor> _paperColor;
 	QPixmap _pixmap;
 	QPixmap _pixmapForTiled;
 	bool _nightMode = false;
@@ -163,7 +193,7 @@ private:
 	QImage _themeImage;
 	bool _themeTile = false;
 
-	int32 _idForRevert = internal::kUninitializedBackground;
+	Data::WallPaper _paperForRevert = { details::kUninitializedBackground };
 	QImage _imageForRevert;
 	bool _tileForRevert = false;
 

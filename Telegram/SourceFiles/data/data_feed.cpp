@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_feed.h"
 
 #include "data/data_session.h"
+#include "data/data_channel.h"
 #include "dialogs/dialogs_key.h"
 #include "history/history.h"
 #include "history/history_item.h"
@@ -30,12 +31,20 @@ namespace Data {
 //		data.vid.v));
 //}
 
-Feed::Feed(FeedId id, not_null<Data::Session*> parent)
+Feed::Feed(not_null<Data::Session*> owner, FeedId id)
 : Entry(this)
 , _id(id)
-, _parent(parent)
+, _owner(owner)
 , _name(lang(lng_feed_name)) {
 	indexNameParts();
+}
+
+Data::Session &Feed::owner() const {
+	return *_owner;
+}
+
+AuthSession &Feed::session() const {
+	return _owner->session();
 }
 
 FeedId Feed::id() const {
@@ -73,17 +82,17 @@ void Feed::registerOne(not_null<ChannelData*> channel) {
 	if (!base::contains(_channels, history)) {
 		const auto invisible = (_channels.size() < 2);
 		_channels.push_back(history);
-		_parent->session().storage().invalidate(
+		session().storage().invalidate(
 			Storage::FeedMessagesInvalidate(_id));
 
-		if (history->lastMessageKnown()) {
-			if (const auto last = history->lastMessage()) {
-				if (justUpdateLastMessage(last)) {
+		if (history->chatListMessageKnown()) {
+			if (const auto last = history->chatListMessage()) {
+				if (justUpdateChatListMessage(last)) {
 					updateChatListEntry();
 				}
 			}
-		} else if (lastMessageKnown()) {
-			_parent->session().api().requestDialogEntry(history);
+		} else if (chatListMessageKnown()) {
+			history->requestChatListMessage();
 		}
 		if (unreadCountKnown()) {
 			if (history->unreadCountKnown()) {
@@ -95,7 +104,7 @@ void Feed::registerOne(not_null<ChannelData*> channel) {
 					unreadCountChanged(count, history->mute() ? count : 0);
 				}
 			} else if (!_settingChannels) {
-				_parent->session().api().requestDialogEntry(this);
+				session().api().requestDialogEntry(this);
 			}
 		}
 		if (invisible && _channels.size() > 1) {
@@ -106,7 +115,7 @@ void Feed::registerOne(not_null<ChannelData*> channel) {
 		} else {
 			history->updateChatListExistence();
 		}
-		_parent->notifyFeedUpdated(this, FeedUpdateFlag::Channels);
+		_owner->notifyFeedUpdated(this, FeedUpdateFlag::Channels);
 	}
 }
 
@@ -116,13 +125,13 @@ void Feed::unregisterOne(not_null<ChannelData*> channel) {
 	if (i != end(_channels)) {
 		const auto visible = (_channels.size() > 1);
 		_channels.erase(i, end(_channels));
-		_parent->session().storage().remove(
+		session().storage().remove(
 			Storage::FeedMessagesRemoveAll(_id, channel->bareId()));
 
-		if (lastMessageKnown()) {
-			if (const auto last = lastMessage()) {
+		if (chatListMessageKnown()) {
+			if (const auto last = chatListMessage()) {
 				if (last->history() == history) {
-					recountLastMessage();
+					recountChatListMessage();
 				}
 			}
 		}
@@ -132,7 +141,7 @@ void Feed::unregisterOne(not_null<ChannelData*> channel) {
 					unreadCountChanged(delta, history->mute() ? delta : 0);
 				}
 			} else {
-				_parent->session().api().requestDialogEntry(this);
+				session().api().requestDialogEntry(this);
 			}
 		}
 		if (visible && _channels.size() < 2) {
@@ -143,14 +152,14 @@ void Feed::unregisterOne(not_null<ChannelData*> channel) {
 		} else {
 			history->updateChatListExistence();
 		}
-		_parent->notifyFeedUpdated(this, FeedUpdateFlag::Channels);
+		_owner->notifyFeedUpdated(this, FeedUpdateFlag::Channels);
 	}
 }
 
-void Feed::updateLastMessage(not_null<HistoryItem*> item) {
-	if (justUpdateLastMessage(item)) {
-		if (_lastMessage && *_lastMessage) {
-			setChatsListTimeId((*_lastMessage)->date());
+void Feed::updateChatListMessage(not_null<HistoryItem*> item) {
+	if (justUpdateChatListMessage(item)) {
+		if (_chatListMessage && *_chatListMessage) {
+			setChatListTimeId((*_chatListMessage)->date());
 		}
 	}
 }
@@ -205,7 +214,7 @@ bool Feed::channelsLoaded() const {
 void Feed::setChannelsLoaded(bool loaded) {
 	if (_channelsLoaded != loaded) {
 		_channelsLoaded = loaded;
-		_parent->notifyFeedUpdated(this, FeedUpdateFlag::Channels);
+		_owner->notifyFeedUpdated(this, FeedUpdateFlag::Channels);
 	}
 }
 
@@ -248,72 +257,70 @@ void Feed::changeChannelsList(
 	// We assume the last message was correct before requesting the list.
 	// So we save it and don't allow channels from the list to change it.
 	// After that we restore it.
-	const auto oldLastMessage = base::take(_lastMessage);
+	const auto oldChatListMessage = base::take(_chatListMessage);
 	for (const auto channel : add) {
-		_lastMessage = std::nullopt;
+		_chatListMessage = std::nullopt;
 		channel->setFeed(this);
 	}
-	_lastMessage = oldLastMessage;
+	_chatListMessage = oldChatListMessage;
 }
 
-bool Feed::justUpdateLastMessage(not_null<HistoryItem*> item) {
-	if (!_lastMessage) {
+bool Feed::justUpdateChatListMessage(not_null<HistoryItem*> item) {
+	if (!_chatListMessage) {
 		return false;
-	} else if (*_lastMessage
-		&& item->position() <= (*_lastMessage)->position()) {
+	} else if (*_chatListMessage
+		&& item->position() <= (*_chatListMessage)->position()) {
 		return false;
 	}
-	_lastMessage = item;
+	_chatListMessage = item;
 	return true;
 }
 
 void Feed::messageRemoved(not_null<HistoryItem*> item) {
-	if (lastMessage() == item) {
-		recountLastMessage();
+	if (chatListMessage() == item) {
+		recountChatListMessage();
 	}
 }
 
 void Feed::historyCleared(not_null<History*> history) {
-	if (const auto last = lastMessage()) {
+	if (const auto last = chatListMessage()) {
 		if (last->history() == history) {
 			messageRemoved(last);
 		}
 	}
 }
 
-void Feed::recountLastMessage() {
-	_lastMessage = std::nullopt;
+void Feed::requestChatListMessage() {
+	if (!chatListMessageKnown()) {
+		session().api().requestDialogEntry(this);
+	}
+}
+
+void Feed::recountChatListMessage() {
+	_chatListMessage = std::nullopt;
 	for (const auto history : _channels) {
-		if (!history->lastMessageKnown()) {
-			_parent->session().api().requestDialogEntry(this);
+		if (!history->chatListMessageKnown()) {
+			requestChatListMessage();
 			return;
 		}
 	}
-	setLastMessageFromChannels();
+	setChatListMessageFromChannels();
 }
 
-void Feed::setLastMessageFromChannels() {
-	_lastMessage = nullptr;
+void Feed::setChatListMessageFromChannels() {
+	_chatListMessage = nullptr;
 	for (const auto history : _channels) {
-		if (const auto last = history->lastMessage()) {
-			justUpdateLastMessage(last);
+		if (const auto last = history->chatListMessage()) {
+			justUpdateChatListMessage(last);
 		}
 	}
-	updateChatsListDate();
+	updateChatListDate();
 }
 
-void Feed::updateChatsListDate() {
-	if (_lastMessage && *_lastMessage) {
-		setChatsListTimeId((*_lastMessage)->date());
+void Feed::updateChatListDate() {
+	if (_chatListMessage && *_chatListMessage) {
+		setChatListTimeId((*_chatListMessage)->date());
 	}
-}
-
-HistoryItem *Feed::lastMessage() const {
-	return _lastMessage ? *_lastMessage : nullptr;
-}
-
-bool Feed::lastMessageKnown() const {
-	return !!_lastMessage;
 }
 
 int Feed::unreadCount() const {
@@ -340,17 +347,17 @@ bool Feed::unreadCountKnown() const {
 //		addChannel(channelId.v);
 //	}
 //
-//	_lastMessage = nullptr;
+//	_chatListMessage = nullptr;
 //	if (const auto peerId = peerFromMTP(data.vpeer)) {
 //		if (const auto channelId = peerToChannel(peerId)) {
 //			addChannel(channelId);
 //			const auto fullId = FullMsgId(channelId, data.vtop_message.v);
 //			if (const auto item = App::histItemById(fullId)) {
-//				justUpdateLastMessage(item);
+//				justUpdateChatListMessage(item);
 //			}
 //		}
 //	}
-//	updateChatsListDate();
+//	updateChatListDate();
 //
 //	setUnreadCounts(
 //		data.vunread_count.v,
@@ -369,15 +376,15 @@ void Feed::changedInChatListHook(Dialogs::Mode list, bool added) {
 		const auto nonMutedCount = count - mutedCount;
 		const auto mutedDelta = added ? mutedCount : -mutedCount;
 		const auto nonMutedDelta = added ? nonMutedCount : -nonMutedCount;
-		App::histories().unreadIncrement(nonMutedDelta, false);
-		App::histories().unreadIncrement(mutedDelta, true);
+		Auth().data().unreadIncrement(nonMutedDelta, false);
+		Auth().data().unreadIncrement(mutedDelta, true);
 
 		const auto fullMuted = (nonMutedCount == 0);
 		const auto entriesWithUnreadDelta = added ? 1 : -1;
 		const auto mutedEntriesWithUnreadDelta = fullMuted
 			? entriesWithUnreadDelta
 			: 0;
-		App::histories().unreadEntriesChanged(
+		Auth().data().unreadEntriesChanged(
 			entriesWithUnreadDelta,
 			mutedEntriesWithUnreadDelta);
 	}
@@ -402,11 +409,11 @@ void Feed::updateUnreadCounts(PerformUpdate &&performUpdate) {
 		const auto nowFullMuted = (nowUnreadMutedCount > 0)
 			&& (nowUnreadCount == nowUnreadMutedCount);
 
-		App::histories().unreadIncrement(
+		Auth().data().unreadIncrement(
 			(nowUnreadCount - nowUnreadMutedCount)
 			- (wasUnreadCount - wasUnreadMutedCount),
 			false);
-		App::histories().unreadIncrement(
+		Auth().data().unreadIncrement(
 			nowUnreadMutedCount - wasUnreadMutedCount,
 			true);
 
@@ -420,7 +427,7 @@ void Feed::updateUnreadCounts(PerformUpdate &&performUpdate) {
 			: (wasFullMuted && !nowFullMuted)
 			? -1
 			: 0;
-		App::histories().unreadEntriesChanged(
+		Auth().data().unreadEntriesChanged(
 			entriesDelta,
 			mutedEntriesDelta);
 	}
@@ -492,19 +499,23 @@ bool Feed::chatListMutedBadge() const {
 	return _unreadCount ? (*_unreadCount <= _unreadMutedCount) : false;
 }
 
-HistoryItem *Feed::chatsListItem() const {
-	return lastMessage();
+HistoryItem *Feed::chatListMessage() const {
+	return _chatListMessage ? *_chatListMessage : nullptr;
 }
 
-const QString &Feed::chatsListName() const {
+bool Feed::chatListMessageKnown() const {
+	return _chatListMessage.has_value();
+}
+
+const QString &Feed::chatListName() const {
 	return _name;
 }
 
-const base::flat_set<QString> &Feed::chatsListNameWords() const {
+const base::flat_set<QString> &Feed::chatListNameWords() const {
 	return _nameWords;
 }
 
-const base::flat_set<QChar> &Feed::chatsListFirstLetters() const {
+const base::flat_set<QChar> &Feed::chatListFirstLetters() const {
 	return _nameFirstLetters;
 }
 

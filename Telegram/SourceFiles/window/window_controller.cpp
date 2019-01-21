@@ -17,6 +17,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "media/player/media_player_round_controller.h"
 #include "data/data_session.h"
 #include "data/data_feed.h"
+#include "data/data_channel.h"
+#include "data/data_chat.h"
 #include "passport/passport_form_controller.h"
 #include "core/shortcuts.h"
 #include "boxes/calendar_box.h"
@@ -405,14 +407,14 @@ void Controller::showJumpToDate(Dialogs::Key chat, QDate requestedDate) {
 						return history->blocks.front()->messages.front()->dateTime().date();
 					}
 				}
-			} else if (history->chatsListTimeId() != 0) {
-				return ParseDateTime(history->chatsListTimeId()).date();
+			} else if (history->chatListTimeId() != 0) {
+				return ParseDateTime(history->chatListTimeId()).date();
 			}
 		} else if (const auto feed = chat.feed()) {
 			/*if (chatScrollPosition(feed)) { // #TODO feeds save position
 
-			} else */if (feed->chatsListTimeId() != 0) {
-				return ParseDateTime(feed->chatsListTimeId()).date();
+			} else */if (feed->chatListTimeId() != 0) {
+				return ParseDateTime(feed->chatListTimeId()).date();
 			}
 		}
 		return QDate::currentDate();
@@ -422,12 +424,12 @@ void Controller::showJumpToDate(Dialogs::Key chat, QDate requestedDate) {
 			if (const auto channel = history->peer->migrateTo()) {
 				history = App::historyLoaded(channel);
 			}
-			if (history && history->chatsListTimeId() != 0) {
-				return ParseDateTime(history->chatsListTimeId()).date();
+			if (history && history->chatListTimeId() != 0) {
+				return ParseDateTime(history->chatListTimeId()).date();
 			}
 		} else if (const auto feed = chat.feed()) {
-			if (feed->chatsListTimeId() != 0) {
-				return ParseDateTime(feed->chatsListTimeId()).date();
+			if (feed->chatListTimeId() != 0) {
+				return ParseDateTime(feed->chatListTimeId()).date();
 			}
 		}
 		return QDate::currentDate();

@@ -200,6 +200,10 @@ public:
 	void handleAppActivated();
 	void handleAppDeactivated();
 
+	void switchDebugMode();
+	void switchWorkMode();
+	void switchTestMode();
+
 	void call_handleUnreadCounterUpdate();
 	void call_handleDelayedPeerUpdates();
 	void call_handleObservables();
@@ -212,17 +216,13 @@ protected:
 	bool eventFilter(QObject *object, QEvent *event) override;
 
 public slots:
-	void onAllKeysDestroyed();
-
-	void onSwitchDebugMode();
-	void onSwitchWorkMode();
-	void onSwitchTestMode();
-
 	void killDownloadSessions();
 	void onAppStateChanged(Qt::ApplicationState state);
 
 private:
 	void destroyMtpKeys(MTP::AuthKeysList &&keys);
+	void allKeysDestroyed();
+
 	void startLocalStorage();
 	void startShortcuts();
 
@@ -239,8 +239,8 @@ private:
 
 	not_null<Core::Launcher*> _launcher;
 
-	QMap<MTP::DcId, TimeMs> killDownloadSessionTimes;
-	SingleTimer killDownloadSessionsTimer;
+	base::flat_map<MTP::DcId, TimeMs> _killDownloadSessionTimes;
+	base::Timer _killDownloadSessionsTimer;
 
 	// Some fields are just moved from the declaration.
 	struct Private;

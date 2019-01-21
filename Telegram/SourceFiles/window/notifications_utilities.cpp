@@ -9,6 +9,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "platform/platform_specific.h"
 #include "messenger.h"
+#include "data/data_peer.h"
 #include "styles/style_window.h"
 
 namespace Window {
@@ -20,8 +21,9 @@ constexpr int kNotifyDeletePhotoAfterMs = 60000;
 
 } // namespace
 
-CachedUserpics::CachedUserpics(Type type) : _type(type) {
-	connect(&_clearTimer, SIGNAL(timeout()), this, SLOT(onClear()));
+CachedUserpics::CachedUserpics(Type type)
+: _type(type)
+, _clearTimer([=] { onClear(); }) {
 	QDir().mkpath(cWorkingDir() + qsl("tdata/temp"));
 }
 
@@ -86,7 +88,7 @@ void CachedUserpics::clearInMs(int ms) {
 			return;
 		}
 	}
-	_clearTimer.start(ms);
+	_clearTimer.callOnce(ms);
 }
 
 void CachedUserpics::onClear() {

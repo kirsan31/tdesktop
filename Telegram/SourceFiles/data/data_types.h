@@ -82,6 +82,12 @@ class PeerData;
 class UserData;
 class ChatData;
 class ChannelData;
+class BotCommand;
+struct BotInfo;
+
+namespace Data {
+class Feed;
+} // namespace Data
 
 using UserId = int32;
 using ChatId = int32;
@@ -264,6 +270,7 @@ using DocumentId = uint64;
 using WebPageId = uint64;
 using GameId = uint64;
 using PollId = uint64;
+using WallPaperId = uint64;
 constexpr auto CancelledWebPageId = WebPageId(0xFFFFFFFFFFFFFFFFULL);
 
 using PreparedPhotoThumbs = QMap<char, QImage>;
@@ -302,8 +309,9 @@ enum DocumentType {
 	StickerDocument = 3,
 	AnimatedDocument = 4,
 	VoiceDocument = 5,
-	RoundVideoDocument = 6,
-	HtmlDocument = 7,
+	RoundVideoDocument = 6,	
+	WallPaperDocument = 7,
+        HtmlDocument = 88,
 };
 
 using MediaKey = QPair<uint64, uint64>;

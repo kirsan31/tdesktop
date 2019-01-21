@@ -26,7 +26,22 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "observer_peer.h"
 #include "storage/file_download.h"
 #include "data/data_peer_values.h"
+#include "data/data_chat.h"
 #include "window/themes/window_theme.h"
+
+auto PaintUserpicCallback(
+	not_null<PeerData*> peer,
+	bool respectSavedMessagesChat)
+-> Fn<void(Painter &p, int x, int y, int outerWidth, int size)> {
+	if (respectSavedMessagesChat && peer->isSelf()) {
+		return [](Painter &p, int x, int y, int outerWidth, int size) {
+			Ui::EmptyUserpic::PaintSavedMessages(p, x, y, outerWidth, size);
+		};
+	}
+	return [=](Painter &p, int x, int y, int outerWidth, int size) {
+		peer->paintUserpicLeft(p, x, y, outerWidth, size);
+	};
+}
 
 PeerListBox::PeerListBox(
 	QWidget*,
@@ -303,12 +318,15 @@ int PeerListBox::peerListSelectedRowsCount() {
 	return _select ? _select->entity()->getItemsCount() : 0;
 }
 
-std::vector<not_null<PeerData*>> PeerListBox::peerListCollectSelectedRows() {
-	auto result = std::vector<not_null<PeerData*>> {};
-	auto items = _select ? _select->entity()->getItems() : QVector<uint64> {};
+auto PeerListBox::peerListCollectSelectedRows()
+-> std::vector<not_null<PeerData*>> {
+	auto result = std::vector<not_null<PeerData*>>();
+	auto items = _select
+		? _select->entity()->getItems()
+		: QVector<uint64>();
 	if (!items.empty()) {
 		result.reserve(items.size());
-		for_const (auto itemId, items) {
+		for (const auto itemId : items) {
 			result.push_back(App::peer(itemId));
 		}
 	}

@@ -11,7 +11,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/timer.h"
 #include "base/flat_map.h"
 #include "base/flat_set.h"
-#include "core/single_timer.h"
 #include "mtproto/sender.h"
 #include "chat_helpers/stickers.h"
 #include "data/data_messages.h"
@@ -23,6 +22,11 @@ struct SendingAlbum;
 enum class SendMediaType;
 struct FileLoadTo;
 class mtpFileLoader;
+
+namespace Data {
+struct UpdatedFileReferences;
+struct WallPaper;
+} // namespace Data
 
 namespace InlineBots {
 class Result;
@@ -43,14 +47,6 @@ struct CloudPasswordState;
 
 namespace Api {
 
-inline const MTPVector<MTPChat> *getChatsFromMessagesChats(const MTPmessages_Chats &chats) {
-	switch (chats.type()) {
-	case mtpc_messages_chats: return &chats.c_messages_chats().vchats;
-	case mtpc_messages_chatsSlice: return &chats.c_messages_chatsSlice().vchats;
-	}
-	return nullptr;
-}
-
 template <typename IntRange>
 inline int32 CountHash(IntRange &&range) {
 	uint32 acc = 0;
@@ -62,7 +58,7 @@ inline int32 CountHash(IntRange &&range) {
 
 } // namespace Api
 
-class ApiWrap : private MTP::Sender, private base::Subscriber {
+class ApiWrap : public MTP::Sender, private base::Subscriber {
 public:
 	ApiWrap(not_null<AuthSession*> session);
 
@@ -87,16 +83,22 @@ public:
 	void requestDialogEntry(
 		not_null<History*> history,
 		Fn<void()> callback = nullptr);
-	void requestDialogEntries(std::vector<not_null<History*>> histories);
+	void dialogEntryApplied(not_null<History*> history);
 	//void applyFeedSources(const MTPDchannels_feedSources &data); // #feed
 	//void setFeedChannels(
 	//	not_null<Data::Feed*> feed,
 	//	const std::vector<not_null<ChannelData*>> &channels);
 	void changeDialogUnreadMark(not_null<History*> history, bool unread);
 	//void changeDialogUnreadMark(not_null<Data::Feed*> feed, bool unread); // #feed
+	void requestFakeChatListMessage(not_null<History*> history);
 
-	void requestFullPeer(PeerData *peer);
-	void requestPeer(PeerData *peer);
+	void requestWallPaper(
+		const QString &slug,
+		Fn<void(const Data::WallPaper &)> done,
+		Fn<void(const RPCError &)> fail);
+
+	void requestFullPeer(not_null<PeerData*> peer);
+	void requestPeer(not_null<PeerData*> peer);
 	void requestPeers(const QList<PeerData*> &peers);
 	void requestLastParticipants(not_null<ChannelData*> channel);
 	void requestBots(not_null<ChannelData*> channel);
@@ -134,24 +136,37 @@ public:
 	void requestChannelMembersForAdd(
 		not_null<ChannelData*> channel,
 		Fn<void(const MTPchannels_ChannelParticipants&)> callback);
-	void processFullPeer(PeerData *peer, const MTPmessages_ChatFull &result);
-	void processFullPeer(UserData *user, const MTPUserFull &result);
+	void processFullPeer(
+		not_null<PeerData*> peer,
+		const MTPmessages_ChatFull &result);
+	void processFullPeer(
+		not_null<UserData*> user,
+		const MTPUserFull &result);
+
+	void migrateChat(
+		not_null<ChatData*> chat,
+		FnMut<void(not_null<ChannelData*>)> done,
+		FnMut<void(const RPCError &)> fail = nullptr);
 
 	void markMediaRead(const base::flat_set<not_null<HistoryItem*>> &items);
 	void markMediaRead(not_null<HistoryItem*> item);
 
-	void requestSelfParticipant(ChannelData *channel);
+	void requestSelfParticipant(not_null<ChannelData*> channel);
 	void kickParticipant(not_null<ChatData*> chat, not_null<UserData*> user);
 	void kickParticipant(
 		not_null<ChannelData*> channel,
 		not_null<UserData*> user,
-		const MTPChannelBannedRights &currentRights);
+		const MTPChatBannedRights &currentRights);
 	void unblockParticipant(
 		not_null<ChannelData*> channel,
 		not_null<UserData*> user);
 	void deleteAllFromUser(
 		not_null<ChannelData*> channel,
 		not_null<UserData*> from);
+	void saveDefaultRestrictions(
+		not_null<PeerData*> peer,
+		const MTPChatBannedRights &rights,
+		Fn<void(bool)> callback = nullptr);
 
 	void requestWebPageDelayed(WebPageData *page);
 	void clearWebPageRequest(WebPageData *page);
@@ -209,12 +224,9 @@ public:
 	void jumpToDate(Dialogs::Key chat, const QDate &date);
 
 	void preloadEnoughUnreadMentions(not_null<History*> history);
-	void checkForUnreadMentions(const base::flat_set<MsgId> &possiblyReadMentions, ChannelData *channel = nullptr);
-
-	void editChatAdmins(
-		not_null<ChatData*> chat,
-		bool adminsEnabled,
-		base::flat_set<not_null<UserData*>> &&admins);
+	void checkForUnreadMentions(
+		const base::flat_set<MsgId> &possiblyReadMentions,
+		ChannelData *channel = nullptr);
 
 	using SliceType = Data::LoadDirection;
 	void requestSharedMedia(
@@ -358,6 +370,11 @@ public:
 	rpl::producer<Core::CloudPasswordState> passwordState() const;
 	std::optional<Core::CloudPasswordState> passwordStateCurrent() const;
 
+	void reloadContactSignupSilent();
+	rpl::producer<bool> contactSignupSilent() const;
+	std::optional<bool> contactSignupSilentCurrent() const;
+	void saveContactSignupSilent(bool silent);
+
 	void saveSelfBio(const QString &text, FnMut<void()> done);
 
 	struct Privacy {
@@ -413,10 +430,6 @@ private:
 		TimeMs received = 0;
 	};
 
-	using SimpleFileLocationId = Data::SimpleFileLocationId;
-	using DocumentFileLocationId = Data::DocumentFileLocationId;
-	using FileLocationId = Data::FileLocationId;
-
 	void updatesReceived(const MTPUpdates &updates);
 	void checkQuitPreventFinished();
 
@@ -431,13 +444,18 @@ private:
 	QVector<MTPInputMessage> collectMessageIds(const MessageDataRequests &requests);
 	MessageDataRequests *messageDataRequests(ChannelData *channel, bool onlyExisting = false);
 	void applyPeerDialogs(const MTPmessages_PeerDialogs &dialogs);
-	void historyDialogEntryApplied(not_null<History*> history);
 	void applyFeedDialogs(
 		not_null<Data::Feed*> feed,
 		const MTPmessages_Dialogs &dialogs);
 
-	void gotChatFull(PeerData *peer, const MTPmessages_ChatFull &result, mtpRequestId req);
-	void gotUserFull(UserData *user, const MTPUserFull &result, mtpRequestId req);
+	void gotChatFull(
+		not_null<PeerData*> peer,
+		const MTPmessages_ChatFull &result,
+		mtpRequestId req);
+	void gotUserFull(
+		not_null<UserData*> user,
+		const MTPUserFull &result,
+		mtpRequestId req);
 	void applyLastParticipantsList(
 		not_null<ChannelData*> channel,
 		int availableCount,
@@ -481,9 +499,6 @@ private:
 	void requestSavedGifs(TimeId now);
 	void readFeaturedSets();
 
-	void cancelEditChatAdmins(not_null<ChatData*> chat);
-	void saveChatAdmins(not_null<ChatData*> chat);
-	void sendSaveChatAdminsRequests(not_null<ChatData*> chat);
 	void refreshChannelAdmins(
 		not_null<ChannelData*> channel,
 		const QVector<MTPChannelParticipant> &participants);
@@ -587,6 +602,13 @@ private:
 
 	void setSelfDestructDays(int days);
 
+	void migrateDone(
+		not_null<PeerData*> peer,
+		not_null<ChannelData*> channel);
+	void migrateFail(not_null<PeerData*> peer, const RPCError &error);
+
+	void sendDialogRequests();
+
 	not_null<AuthSession*> _session;
 
 	MessageDataRequests _messageDataRequests;
@@ -615,7 +637,11 @@ private:
 		not_null<UserData*>>;
 	base::flat_map<KickRequest, mtpRequestId> _kickRequests;
 
-	QMap<ChannelData*, mtpRequestId> _selfParticipantRequests;
+	base::flat_map<
+		not_null<PeerData*>,
+		mtpRequestId> _defaultRestrictionsRequests;
+
+	base::flat_set<not_null<ChannelData*>> _selfParticipantRequests;
 
 	base::flat_map<
 		not_null<ChannelData*>,
@@ -657,18 +683,12 @@ private:
 	base::flat_map<
 		not_null<History*>,
 		std::vector<Fn<void()>>> _dialogRequests;
+	base::flat_map<
+		not_null<History*>,
+		std::vector<Fn<void()>>> _dialogRequestsPending;
+	base::flat_set<not_null<History*>> _fakeChatListRequests;
 
 	base::flat_map<not_null<History*>, mtpRequestId> _unreadMentionsRequests;
-
-	base::flat_map<
-		not_null<ChatData*>,
-		mtpRequestId> _chatAdminsEnabledRequests;
-	base::flat_map<
-		not_null<ChatData*>,
-		base::flat_set<not_null<UserData*>>> _chatAdminsToSave;
-	base::flat_map<
-		not_null<ChatData*>,
-		base::flat_set<mtpRequestId>> _chatAdminsSaveRequests;
 
 	base::flat_map<std::tuple<
 		not_null<PeerData*>,
@@ -738,6 +758,14 @@ private:
 	FnMut<void(const MTPChatInvite &result)> _checkInviteDone;
 	FnMut<void(const RPCError &error)> _checkInviteFail;
 
+	struct MigrateCallbacks {
+		FnMut<void(not_null<ChannelData*>)> done;
+		FnMut<void(const RPCError&)> fail;
+	};
+	base::flat_map<
+		not_null<PeerData*>,
+		std::vector<MigrateCallbacks>> _migrateCallbacks;
+
 	std::vector<FnMut<void(const MTPUser &)>> _supportContactCallbacks;
 
 	base::flat_map<FullMsgId, not_null<PeerData*>> _peerPhotoUploads;
@@ -761,5 +789,14 @@ private:
 	base::flat_map<FullMsgId, mtpRequestId> _pollVotesRequestIds;
 	base::flat_map<FullMsgId, mtpRequestId> _pollCloseRequestIds;
 	base::flat_map<FullMsgId, mtpRequestId> _pollReloadRequestIds;
+
+	mtpRequestId _wallPaperRequestId = 0;
+	QString _wallPaperSlug;
+	Fn<void(const Data::WallPaper &)> _wallPaperDone;
+	Fn<void(const RPCError &)> _wallPaperFail;
+
+	mtpRequestId _contactSignupSilentRequestId = 0;
+	std::optional<bool> _contactSignupSilent;
+	rpl::event_stream<bool> _contactSignupSilentChanges;
 
 };

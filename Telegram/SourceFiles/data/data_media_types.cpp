@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "data/data_media_types.h"
 
+#include "history/history.h"
 #include "history/history_item.h"
 #include "history/history_location_manager.h"
 #include "history/view/history_view_element.h"
@@ -34,8 +35,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_game.h"
 #include "data/data_web_page.h"
 #include "data/data_poll.h"
+#include "data/data_channel.h"
 #include "lang/lang_keys.h"
-#include "auth_session.h"
 #include "layout.h"
 
 namespace Data {
@@ -63,7 +64,9 @@ Call ComputeCallData(const MTPDmessageActionPhoneCall &call) {
 	return result;
 }
 
-Invoice ComputeInvoiceData(const MTPDmessageMediaInvoice &data) {
+Invoice ComputeInvoiceData(
+		not_null<HistoryItem*> item,
+		const MTPDmessageMediaInvoice &data) {
 	auto result = Invoice();
 	result.isTest = data.is_test();
 	result.amount = data.vtotal_amount.v;
@@ -74,7 +77,7 @@ Invoice ComputeInvoiceData(const MTPDmessageMediaInvoice &data) {
 		result.receiptMsgId = data.vreceipt_msg_id.v;
 	}
 	if (data.has_photo()) {
-		result.photo = Auth().data().photoFromWeb(data.vphoto);
+		result.photo = item->history()->owner().photoFromWeb(data.vphoto);
 	}
 	return result;
 }
@@ -184,7 +187,7 @@ bool Media::canBeGrouped() const {
 	return false;
 }
 
-QString Media::chatsListText() const {
+QString Media::chatListText() const {
 	auto result = notificationText();
 	return result.isEmpty()
 		? QString()
@@ -219,7 +222,7 @@ bool Media::forwardedBecomesUnread() const {
 	return false;
 }
 
-QString Media::errorTextForForward(not_null<ChannelData*> channel) const {
+QString Media::errorTextForForward(not_null<PeerData*> peer) const {
 	return QString();
 }
 
@@ -241,7 +244,7 @@ MediaPhoto::MediaPhoto(
 	not_null<PhotoData*> photo)
 : Media(parent)
 , _photo(photo) {
-	Auth().data().registerPhotoItem(_photo, parent);
+	parent->history()->owner().registerPhotoItem(_photo, parent);
 }
 
 MediaPhoto::MediaPhoto(
@@ -251,11 +254,11 @@ MediaPhoto::MediaPhoto(
 : Media(parent)
 , _photo(photo)
 , _chat(chat) {
-	Auth().data().registerPhotoItem(_photo, parent);
+	parent->history()->owner().registerPhotoItem(_photo, parent);
 }
 
 MediaPhoto::~MediaPhoto() {
-	Auth().data().unregisterPhotoItem(_photo, parent());
+	parent()->history()->owner().unregisterPhotoItem(_photo, parent());
 }
 
 std::unique_ptr<Media> MediaPhoto::clone(not_null<HistoryItem*> parent) {
@@ -301,7 +304,7 @@ QString MediaPhoto::notificationText() const {
 	//return WithCaptionNotificationText(lang(lng_in_dlg_album), _caption);
 }
 
-QString MediaPhoto::chatsListText() const {
+QString MediaPhoto::chatListText() const {
 	return WithCaptionDialogsText(
 		lang(lng_in_dlg_photo),
 		parent()->originalText().text);
@@ -322,12 +325,11 @@ bool MediaPhoto::allowsEditCaption() const {
 	return true;
 }
 
-QString MediaPhoto::errorTextForForward(
-		not_null<ChannelData*> channel) const {
-	if (channel->restricted(ChannelRestriction::f_send_media)) {
-		return lang(lng_restricted_send_media);
-	}
-	return QString();
+QString MediaPhoto::errorTextForForward(not_null<PeerData*> peer) const {
+	const auto errorKey = Data::RestrictionErrorKey(
+		peer,
+		ChatRestriction::f_send_media);
+	return errorKey ? lang(*errorKey) : QString();
 }
 
 bool MediaPhoto::updateInlineResultMedia(const MTPMessageMedia &media) {
@@ -336,7 +338,7 @@ bool MediaPhoto::updateInlineResultMedia(const MTPMessageMedia &media) {
 	}
 	auto &data = media.c_messageMediaPhoto();
 	if (data.has_photo() && !data.has_ttl_seconds()) {
-		const auto photo = Auth().data().photo(data.vphoto);
+		const auto photo = parent()->history()->owner().photo(data.vphoto);
 		if (photo == _photo) {
 			return true;
 		} else {
@@ -362,7 +364,7 @@ bool MediaPhoto::updateSentMedia(const MTPMessageMedia &media) {
 		return false;
 	}
 	const auto &photo = mediaPhoto.vphoto;
-	Auth().data().photoConvert(_photo, photo);
+	parent()->history()->owner().photoConvert(_photo, photo);
 
 	if (photo.type() != mtpc_photo) {
 		return false;
@@ -374,7 +376,7 @@ bool MediaPhoto::updateSentMedia(const MTPMessageMedia &media) {
 		const MTPFileLocation *location = nullptr;
 		QByteArray bytes;
 	};
-	const auto saveImageToCache = [](
+	const auto saveImageToCache = [&](
 			const ImagePtr &image,
 			SizeData size) {
 		Expects(size.location != nullptr);
@@ -394,7 +396,7 @@ bool MediaPhoto::updateSentMedia(const MTPMessageMedia &media) {
 			LOG(("App Error: Bad photo data for saving to cache."));
 			return;
 		}
-		Auth().data().cache().putIfEmpty(
+		parent()->history()->owner().cache().putIfEmpty(
 			Data::StorageCacheKey(key),
 			Storage::Cache::Database::TaggedValue(
 				std::move(size.bytes),
@@ -423,6 +425,9 @@ bool MediaPhoto::updateSentMedia(const MTPMessageMedia &media) {
 				qba(data.vbytes)
 			};
 		}, [](const MTPDphotoSizeEmpty &) {
+			return SizeData();
+		}, [](const MTPDphotoStrippedSize &data) {
+			// No need to save stripped images to local cache.
 			return SizeData();
 		});
 		if (!size.location || size.location->type() != mtpc_fileLocation) {
@@ -471,7 +476,7 @@ MediaFile::MediaFile(
 : Media(parent)
 , _document(document)
 , _emoji(document->sticker() ? document->sticker()->alt : QString()) {
-	Auth().data().registerDocumentItem(_document, parent);
+	parent->history()->owner().registerDocumentItem(_document, parent);
 
 	if (!_emoji.isEmpty()) {
 		if (const auto emoji = Ui::Emoji::Find(_emoji)) {
@@ -481,7 +486,9 @@ MediaFile::MediaFile(
 }
 
 MediaFile::~MediaFile() {
-	Auth().data().unregisterDocumentItem(_document, parent());
+	parent()->history()->owner().unregisterDocumentItem(
+		_document,
+		parent());
 }
 
 std::unique_ptr<Media> MediaFile::clone(not_null<HistoryItem*> parent) {
@@ -532,9 +539,9 @@ Image *MediaFile::replyPreview() const {
 	return _document->getReplyPreview(parent()->fullId());
 }
 
-QString MediaFile::chatsListText() const {
+QString MediaFile::chatListText() const {
 	if (const auto sticker = _document->sticker()) {
-		return Media::chatsListText();
+		return Media::chatListText();
 	}
 	const auto type = [&] {
 		if (_document->isVideoMessage()) {
@@ -642,24 +649,31 @@ bool MediaFile::forwardedBecomesUnread() const {
 		|| _document->isVideoMessage();
 }
 
-QString MediaFile::errorTextForForward(
-		not_null<ChannelData*> channel) const {
+QString MediaFile::errorTextForForward(not_null<PeerData*> peer) const {
 	if (const auto sticker = _document->sticker()) {
-		if (channel->restricted(ChannelRestriction::f_send_stickers)) {
-			return lang(lng_restricted_send_stickers);
+		if (const auto key = Data::RestrictionErrorKey(
+				peer,
+				ChatRestriction::f_send_stickers)) {
+			return lang(*key);
 		}
 	} else if (_document->isAnimation()) {
 		if (_document->isVideoMessage()) {
-			if (channel->restricted(ChannelRestriction::f_send_media)) {
-				return lang(lng_restricted_send_media);
+			if (const auto key = Data::RestrictionErrorKey(
+					peer,
+					ChatRestriction::f_send_media)) {
+				return lang(*key);
 			}
 		} else {
-			if (channel->restricted(ChannelRestriction::f_send_gifs)) {
-				return lang(lng_restricted_send_gifs);
+			if (const auto key = Data::RestrictionErrorKey(
+					peer,
+					ChatRestriction::f_send_gifs)) {
+				return lang(*key);
 			}
 		}
-	} else if (channel->restricted(ChannelRestriction::f_send_media)) {
-		return lang(lng_restricted_send_media);
+	} else if (const auto key = Data::RestrictionErrorKey(
+			peer,
+			ChatRestriction::f_send_media)) {
+		return lang(*key);
 	}
 	return QString();
 }
@@ -670,7 +684,8 @@ bool MediaFile::updateInlineResultMedia(const MTPMessageMedia &media) {
 	}
 	auto &data = media.c_messageMediaDocument();
 	if (data.has_document() && !data.has_ttl_seconds()) {
-		const auto document = Auth().data().document(data.vdocument);
+		const auto document = parent()->history()->owner().document(
+			data.vdocument);
 		if (document == _document) {
 			return false;
 		} else {
@@ -695,7 +710,7 @@ bool MediaFile::updateSentMedia(const MTPMessageMedia &media) {
 			"or with ttl_seconds in updateSentMedia()"));
 		return false;
 	}
-	Auth().data().documentConvert(_document, data.vdocument);
+	parent()->history()->owner().documentConvert(_document, data.vdocument);
 
 	if (const auto good = _document->goodThumbnail()) {
 		auto bytes = good->bytesForCache();
@@ -703,7 +718,7 @@ bool MediaFile::updateSentMedia(const MTPMessageMedia &media) {
 			if (length > Storage::kMaxFileInMemory) {
 				LOG(("App Error: Bad thumbnail data for saving to cache."));
 			} else {
-				Auth().data().cache().putIfEmpty(
+				parent()->history()->owner().cache().putIfEmpty(
 					_document->goodThumbnailCacheKey(),
 					Storage::Cache::Database::TaggedValue(
 						std::move(bytes),
@@ -739,7 +754,7 @@ MediaContact::MediaContact(
 	const QString &lastName,
 	const QString &phoneNumber)
 : Media(parent) {
-	Auth().data().registerContactItem(userId, parent);
+	parent->history()->owner().registerContactItem(userId, parent);
 
 	_contact.userId = userId;
 	_contact.firstName = firstName;
@@ -748,7 +763,9 @@ MediaContact::MediaContact(
 }
 
 MediaContact::~MediaContact() {
-	Auth().data().unregisterContactItem(_contact.userId, parent());
+	parent()->history()->owner().unregisterContactItem(
+		_contact.userId,
+		parent());
 }
 
 std::unique_ptr<Media> MediaContact::clone(not_null<HistoryItem*> parent) {
@@ -793,9 +810,13 @@ bool MediaContact::updateSentMedia(const MTPMessageMedia &media) {
 		return false;
 	}
 	if (_contact.userId != media.c_messageMediaContact().vuser_id.v) {
-		Auth().data().unregisterContactItem(_contact.userId, parent());
+		parent()->history()->owner().unregisterContactItem(
+			_contact.userId,
+			parent());
 		_contact.userId = media.c_messageMediaContact().vuser_id.v;
-		Auth().data().registerContactItem(_contact.userId, parent());
+		parent()->history()->owner().registerContactItem(
+			_contact.userId,
+			parent());
 	}
 	return true;
 }
@@ -823,7 +844,7 @@ MediaLocation::MediaLocation(
 	const QString &title,
 	const QString &description)
 : Media(parent)
-, _location(Auth().data().location(coords))
+, _location(parent->history()->owner().location(coords))
 , _title(title)
 , _description(description) {
 }
@@ -840,7 +861,7 @@ LocationData *MediaLocation::location() const {
 	return _location;
 }
 
-QString MediaLocation::chatsListText() const {
+QString MediaLocation::chatListText() const {
 	return WithCaptionDialogsText(lang(lng_maps_point), _title);
 }
 
@@ -970,11 +991,11 @@ MediaWebPage::MediaWebPage(
 	not_null<WebPageData*> page)
 : Media(parent)
 , _page(page) {
-	Auth().data().registerWebPageItem(_page, parent);
+	parent->history()->owner().registerWebPageItem(_page, parent);
 }
 
 MediaWebPage::~MediaWebPage() {
-	Auth().data().unregisterWebPageItem(_page, parent());
+	parent()->history()->owner().unregisterWebPageItem(_page, parent());
 }
 
 std::unique_ptr<Media> MediaWebPage::clone(not_null<HistoryItem*> parent) {
@@ -1011,7 +1032,7 @@ Image *MediaWebPage::replyPreview() const {
 	return nullptr;
 }
 
-QString MediaWebPage::chatsListText() const {
+QString MediaWebPage::chatListText() const {
 	return notificationText();
 }
 
@@ -1101,12 +1122,11 @@ TextWithEntities MediaGame::clipboardText() const {
 	return TextWithEntities();
 }
 
-QString MediaGame::errorTextForForward(
-		not_null<ChannelData*> channel) const {
-	if (channel->restricted(ChannelRestriction::f_send_games)) {
-		return lang(lng_restricted_send_inline);
-	}
-	return QString();
+QString MediaGame::errorTextForForward(not_null<PeerData*> peer) const {
+	const auto errorKey = Data::RestrictionErrorKey(
+		peer,
+		ChatRestriction::f_send_games);
+	return errorKey ? lang(*errorKey) : QString();
 }
 
 bool MediaGame::consumeMessageText(const TextWithEntities &text) {
@@ -1126,7 +1146,8 @@ bool MediaGame::updateSentMedia(const MTPMessageMedia &media) {
 	if (media.type() != mtpc_messageMediaGame) {
 		return false;
 	}
-	Auth().data().gameConvert(_game, media.c_messageMediaGame().vgame);
+	parent()->history()->owner().gameConvert(
+		_game, media.c_messageMediaGame().vgame);
 	return true;
 }
 
@@ -1140,7 +1161,7 @@ MediaInvoice::MediaInvoice(
 	not_null<HistoryItem*> parent,
 	const MTPDmessageMediaInvoice &data)
 : Media(parent)
-, _invoice(ComputeInvoiceData(data)) {
+, _invoice(ComputeInvoiceData(parent, data)) {
 }
 
 MediaInvoice::MediaInvoice(
@@ -1233,11 +1254,18 @@ TextWithEntities MediaPoll::clipboardText() const {
 		+ ranges::accumulate(
 			ranges::view::all(
 				_poll->answers
-			) | ranges::view::transform(
-				[](const PollAnswer &answer) { return "\n- " + answer.text; }
-			),
+			) | ranges::view::transform([](const PollAnswer &answer) {
+				return "\n- " + answer.text;
+			}),
 			QString());
 	return { text, EntitiesInText() };
+}
+
+QString MediaPoll::errorTextForForward(not_null<PeerData*> peer) const {
+	const auto errorKey = Data::RestrictionErrorKey(
+		peer,
+		ChatRestriction::f_send_polls);
+	return errorKey ? lang(*errorKey) : QString();
 }
 
 bool MediaPoll::updateInlineResultMedia(const MTPMessageMedia &media) {

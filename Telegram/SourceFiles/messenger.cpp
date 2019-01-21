@@ -10,6 +10,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_photo.h"
 #include "data/data_document.h"
 #include "data/data_session.h"
+#include "data/data_user.h"
 #include "base/timer.h"
 #include "core/update_checker.h"
 #include "core/shortcuts.h"
@@ -79,6 +80,7 @@ struct Messenger::Private {
 Messenger::Messenger(not_null<Core::Launcher*> launcher)
 : QObject()
 , _launcher(launcher)
+, _killDownloadSessionsTimer([=] { killDownloadSessions(); })
 , _private(std::make_unique<Private>())
 , _databases(std::make_unique<Storage::Databases>())
 , _langpack(std::make_unique<Lang::Instance>())
@@ -95,7 +97,7 @@ Messenger::Messenger(not_null<Core::Launcher*> launcher)
 
 	ThirdParty::start();
 	Global::start();
-	Sandbox::refreshGlobalProxy(); // Depends on Global::started().
+	Core::App().refreshGlobalProxy(); // Depends on Global::started().
 
 	startLocalStorage();
 
@@ -110,7 +112,7 @@ Messenger::Messenger(not_null<Core::Launcher*> launcher)
 	}
 
 	_translator = std::make_unique<Lang::Translator>();
-	QCoreApplication::instance()->installTranslator(_translator.get());
+	qApp->installTranslator(_translator.get());
 
 	style::startManager();
 	anim::startManager();
@@ -120,11 +122,9 @@ Messenger::Messenger(not_null<Core::Launcher*> launcher)
 
 	DEBUG_LOG(("Application Info: inited..."));
 
-	QCoreApplication::instance()->installNativeEventFilter(psNativeEventFilter());
+	QApplication::instance()->installNativeEventFilter(psNativeEventFilter());
 
 	cChangeTimeFormat(QLocale::system().timeFormat(QLocale::ShortFormat));
-
-	connect(&killDownloadSessionsTimer, SIGNAL(timeout()), this, SLOT(killDownloadSessions()));
 
 	DEBUG_LOG(("Application Info: starting app..."));
 
@@ -138,8 +138,12 @@ Messenger::Messenger(not_null<Core::Launcher*> launcher)
 	_mediaView = std::make_unique<MediaView>();
 	_window->setGeometry(currentGeometry);
 
-	QCoreApplication::instance()->installEventFilter(this);
-	Sandbox::connect(SIGNAL(applicationStateChanged(Qt::ApplicationState)), this, SLOT(onAppStateChanged(Qt::ApplicationState)));
+	qApp->installEventFilter(this);
+	connect(
+		qApp,
+		SIGNAL(applicationStateChanged(Qt::ApplicationState)),
+		this,
+		SLOT(onAppStateChanged(Qt::ApplicationState)));
 
 	DEBUG_LOG(("Application Info: window created..."));
 
@@ -302,13 +306,13 @@ bool Messenger::eventFilter(QObject *object, QEvent *e) {
 	} break;
 
 	case QEvent::ApplicationActivate: {
-		if (object == QCoreApplication::instance()) {
+		if (object == qApp) {
 			psUserActionDone();
 		}
 	} break;
 
 	case QEvent::FileOpen: {
-		if (object == QCoreApplication::instance()) {
+		if (object == qApp) {
 			auto url = QString::fromUtf8(static_cast<QFileOpenEvent*>(e)->url().toEncoded().trimmed());
 			if (url.startsWith(qstr("tg://"), Qt::CaseInsensitive)) {
 				cSetStartUrl(url.mid(0, 8192));
@@ -339,7 +343,7 @@ void Messenger::setCurrentProxy(
 			: ProxyData()));
 	Global::SetSelectedProxy(proxy);
 	Global::SetProxySettings(settings);
-	Sandbox::refreshGlobalProxy();
+	Core::App().refreshGlobalProxy();
 	if (_mtproto) {
 		_mtproto->restart();
 		if (previousKey != key(proxy)) {
@@ -577,13 +581,18 @@ void Messenger::destroyMtpKeys(MTP::AuthKeysList &&keys) {
 	destroyConfig.mainDcId = MTP::Instance::Config::kNoneMainDc;
 	destroyConfig.keys = std::move(keys);
 	_mtprotoForKeysDestroy = std::make_unique<MTP::Instance>(_dcOptions.get(), MTP::Instance::Mode::KeysDestroyer, std::move(destroyConfig));
-	connect(_mtprotoForKeysDestroy.get(), SIGNAL(allKeysDestroyed()), this, SLOT(onAllKeysDestroyed()));
+	connect(
+		_mtprotoForKeysDestroy.get(),
+		&MTP::Instance::allKeysDestroyed,
+		[=] { allKeysDestroyed(); });
 }
 
-void Messenger::onAllKeysDestroyed() {
+void Messenger::allKeysDestroyed() {
 	LOG(("MTP Info: all keys scheduled for destroy are destroyed."));
-	_mtprotoForKeysDestroy.reset();
-	Local::writeMtpData();
+	crl::on_main(this, [=] {
+		_mtprotoForKeysDestroy = nullptr;
+		Local::writeMtpData();
+	});
 }
 
 void Messenger::suggestMainDcId(MTP::DcId mainDcId) {
@@ -651,18 +660,19 @@ void Messenger::startLocalStorage() {
 }
 
 void Messenger::killDownloadSessionsStart(MTP::DcId dcId) {
-	if (killDownloadSessionTimes.constFind(dcId) == killDownloadSessionTimes.cend()) {
-		killDownloadSessionTimes.insert(dcId, getms() + MTPAckSendWaiting + MTPKillFileSessionTimeout);
+	if (!_killDownloadSessionTimes.contains(dcId)) {
+		_killDownloadSessionTimes.emplace(dcId, getms() + MTPAckSendWaiting + MTPKillFileSessionTimeout);
 	}
-	if (!killDownloadSessionsTimer.isActive()) {
-		killDownloadSessionsTimer.start(MTPAckSendWaiting + MTPKillFileSessionTimeout + 5);
+	if (!_killDownloadSessionsTimer.isActive()) {
+		_killDownloadSessionsTimer.callOnce(MTPAckSendWaiting + MTPKillFileSessionTimeout + 5);
 	}
 }
 
 void Messenger::killDownloadSessionsStop(MTP::DcId dcId) {
-	killDownloadSessionTimes.remove(dcId);
-	if (killDownloadSessionTimes.isEmpty() && killDownloadSessionsTimer.isActive()) {
-		killDownloadSessionsTimer.stop();
+	_killDownloadSessionTimes.erase(dcId);
+	if (_killDownloadSessionTimes.empty()
+		&& _killDownloadSessionsTimer.isActive()) {
+		_killDownloadSessionsTimer.cancel();
 	}
 }
 
@@ -723,25 +733,25 @@ void Messenger::call_handleObservables() {
 
 void Messenger::killDownloadSessions() {
 	auto ms = getms(), left = static_cast<TimeMs>(MTPAckSendWaiting) + MTPKillFileSessionTimeout;
-	for (auto i = killDownloadSessionTimes.begin(); i != killDownloadSessionTimes.end(); ) {
-		if (i.value() <= ms) {
+	for (auto i = _killDownloadSessionTimes.begin(); i != _killDownloadSessionTimes.end(); ) {
+		if (i->second <= ms) {
 			for (int j = 0; j < MTP::kDownloadSessionsCount; ++j) {
-				MTP::stopSession(MTP::downloadDcId(i.key(), j));
+				MTP::stopSession(MTP::downloadDcId(i->first, j));
 			}
-			i = killDownloadSessionTimes.erase(i);
+			i = _killDownloadSessionTimes.erase(i);
 		} else {
-			if (i.value() - ms < left) {
-				left = i.value() - ms;
+			if (i->second - ms < left) {
+				left = i->second - ms;
 			}
 			++i;
 		}
 	}
-	if (!killDownloadSessionTimes.isEmpty()) {
-		killDownloadSessionsTimer.start(left);
+	if (!_killDownloadSessionTimes.empty()) {
+		_killDownloadSessionsTimer.callOnce(left);
 	}
 }
 
-void Messenger::onSwitchDebugMode() {
+void Messenger::switchDebugMode() {
 	if (Logs::DebugEnabled()) {
 		Logs::SetDebugEnabled(false);
 		Sandbox::WriteDebugModeSetting();
@@ -754,14 +764,14 @@ void Messenger::onSwitchDebugMode() {
 	}
 }
 
-void Messenger::onSwitchWorkMode() {
+void Messenger::switchWorkMode() {
 	Global::SetDialogsModeEnabled(!Global::DialogsModeEnabled());
 	Global::SetDialogsMode(Dialogs::Mode::All);
 	Local::writeUserSettings();
 	App::restart();
 }
 
-void Messenger::onSwitchTestMode() {
+void Messenger::switchTestMode() {
 	if (cTestMode()) {
 		QFile(cWorkingDir() + qsl("tdata/withtestmode")).remove();
 		cSetTestMode(false);
@@ -786,19 +796,20 @@ void Messenger::authSessionCreate(const MTPUser &user) {
 void Messenger::authSessionDestroy() {
 	unlockTerms();
 
-	_authSession.reset();
+	_authSession = nullptr;
 	_private->storedAuthSession.reset();
 	_private->authSessionUserId = 0;
 	_private->authSessionUserSerialized = {};
 	authSessionChanged().notify(true);
+	Notify::unreadCounterUpdated();
 }
 
 int Messenger::unreadBadge() const {
-	return _authSession ? App::histories().unreadBadge() : 0;
+	return _authSession ? _authSession->data().unreadBadge() : 0;
 }
 
 bool Messenger::unreadBadgeMuted() const {
-	return _authSession ? App::histories().unreadBadgeMuted() : false;
+	return _authSession ? _authSession->data().unreadBadgeMuted() : false;
 }
 
 void Messenger::setInternalLinkDomain(const QString &domain) const {
@@ -953,7 +964,6 @@ Messenger::~Messenger() {
 	_mediaView.reset();
 
 	// Some MTP requests can be cancelled from data clearing.
-	App::clearHistories();
 	authSessionDestroy();
 
 	// The langpack manager should be destroyed before MTProto instance,
@@ -1021,7 +1031,7 @@ QWidget *Messenger::getFileDialogParent() {
 void Messenger::checkMediaViewActivation() {
 	if (_mediaView && !_mediaView->isHidden()) {
 		_mediaView->activateWindow();
-		Sandbox::setActiveWindow(_mediaView.get());
+		Core::App().setActiveWindow(_mediaView.get());
 		_mediaView->setFocus();
 	}
 }
@@ -1051,16 +1061,14 @@ void Messenger::loggedOut() {
 	Media::Player::mixer()->stopAndClear();
 	Global::SetVoiceMsgPlaybackDoubled(false);
 	Media::Player::mixer()->setVoicePlaybackDoubled(false);
-	if (const auto w = getActiveWindow()) {
-		w->tempDirDelete(Local::ClearManagerAll);
-		w->setupIntro();
+	if (const auto window = getActiveWindow()) {
+		window->tempDirDelete(Local::ClearManagerAll);
+		window->setupIntro();
 	}
-	App::histories().clear();
 	if (const auto session = authSession()) {
-		session->data().cache().close();
-		session->data().cache().clear();
+		session->data().clearLocalStorage();
+		authSessionDestroy();
 	}
-	authSessionDestroy();
 	if (_mediaView) {
 		hideMediaView();
 		_mediaView->clearData();
@@ -1114,7 +1122,7 @@ void Messenger::unregisterLeaveSubscription(QWidget *widget) {
 
 void Messenger::QuitAttempt() {
 	auto prevents = false;
-	if (!Sandbox::isSavingSession() && AuthSession::Exists()) {
+	if (AuthSession::Exists() && !Core::App().isSavingSession()) {
 		if (Auth().api().isQuitPrevent()) {
 			prevents = true;
 		}
@@ -1125,7 +1133,7 @@ void Messenger::QuitAttempt() {
 	if (prevents) {
 		Instance().quitDelayed();
 	} else {
-		QCoreApplication::quit();
+		QApplication::quit();
 	}
 }
 
@@ -1137,7 +1145,7 @@ void Messenger::quitPreventFinished() {
 
 void Messenger::quitDelayed() {
 	if (!_private->quitTimer.isActive()) {
-		_private->quitTimer.setCallback([] { QCoreApplication::quit(); });
+		_private->quitTimer.setCallback([] { QApplication::quit(); });
 		_private->quitTimer.callOnce(kQuitPreventTimeoutMs);
 	}
 }

@@ -12,6 +12,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_peer_values.h"
 #include "data/data_session.h"
 #include "data/data_feed.h"
+#include "data/data_channel.h"
+#include "data/data_user.h"
 #include "ui/wrap/vertical_layout.h"
 #include "ui/wrap/padding_wrap.h"
 #include "ui/wrap/slide_wrap.h"
@@ -38,7 +40,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "auth_session.h"
 #include "messenger.h"
 #include "apiwrap.h"
-#include "application.h"
 #include "styles/style_info.h"
 #include "styles/style_boxes.h"
 
@@ -291,7 +292,7 @@ object_ptr<Ui::RpWidget> DetailsFiller::setupInfo() {
 			auto link = Messenger::Instance().createInternalLinkFull(
 				peer->userName());
 			if (!link.isEmpty()) {
-				Application::clipboard()->setText(link);
+				QApplication::clipboard()->setText(link);
 				Ui::Toast::Show(lang(lng_username_copied));
 			}
 			return false;
