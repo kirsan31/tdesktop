@@ -19,10 +19,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "numbers.h"
 #include "auth_session.h"
 #include "messenger.h"
-#ifdef TDESKTOP_ENABLE_SONNET_SPELLCHECK
-#include <highlighter.h>
-#include <spellcheckdecorator.h>
-#endif
 
 namespace Ui {
 namespace {
@@ -773,9 +769,6 @@ const QString InputField::kTagPre = qsl("```");
 class InputField::Inner final : public QTextEdit {
 public:
 	Inner(not_null<InputField*> parent) : QTextEdit(parent) {
-#ifdef TDESKTOP_ENABLE_SONNET_SPELLCHECK
-		_SpellCheckDecorator = std::make_unique<Sonnet::SpellCheckDecorator>(this);
-#endif 
 	}
 
 protected:
@@ -815,9 +808,6 @@ private:
 	not_null<InputField*> outer() const {
 		return static_cast<InputField*>(parentWidget());
 	}
-#ifdef TDESKTOP_ENABLE_SONNET_SPELLCHECK
-	std::unique_ptr<Sonnet::SpellCheckDecorator> _SpellCheckDecorator;
-#endif 
 	friend class InputField;
 
 };
@@ -1254,6 +1244,10 @@ InputField::InputField(
 	if (!_lastTextWithTags.text.isEmpty()) {
 		setTextWithTags(_lastTextWithTags, HistoryAction::Clear);
 	}
+
+#ifdef TDESKTOP_ENABLE_SONNET_SPELLCHECK
+	_SpellCheckDecorator = std::make_unique<Sonnet::SpellCheckDecorator>(_inner.get());
+#endif 
 
 	startBorderAnimation();
 	startPlaceholderAnimation();
@@ -3243,9 +3237,8 @@ bool InputField::revertFormatReplace() {
 void InputField::contextMenuEventInner(QContextMenuEvent *e) {
 	if (const auto menu = _inner->createStandardContextMenu()) {
 		addMarkdownActions(menu, e);
-#ifdef TDESKTOP_ENABLE_SONNET_SPELLCHECK
-		auto h = _inner->_SpellCheckDecorator->highlighter();
-		if (h) {
+#ifdef TDESKTOP_ENABLE_SONNET_SPELLCHECK		
+		if (const auto h = _SpellCheckDecorator->highlighter()) {
 			menu->addSeparator();
 			menu->addAction(h->isActive() ? qsl("Disable spell checking") : qsl("Enable spell checking"), [=] {
 				h->setActive(!h->isActive());

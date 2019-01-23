@@ -9,6 +9,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "ui/rp_widget.h"
 #include "styles/style_widgets.h"
+#ifdef TDESKTOP_ENABLE_SONNET_SPELLCHECK
+#include <highlighter.h>
+#include <spellcheckdecorator.h>
+#endif
 
 class UserData;
 
@@ -491,6 +495,10 @@ private:
 
 	InstantReplaces _mutableInstantReplaces;
 	bool _instantReplacesEnabled = true;
+
+#ifdef TDESKTOP_ENABLE_SONNET_SPELLCHECK
+	std::unique_ptr<Sonnet::SpellCheckDecorator> _SpellCheckDecorator;
+#endif 
 
 };
 
