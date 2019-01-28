@@ -302,8 +302,7 @@ Panel::Panel(not_null<Call*> call)
 , _mute(this, st::callMuteToggle)
 , _name(this, st::callName)
 , _status(this, st::callStatus)
-, _signalBars(this, call, st::callPanelSignalBars) {
-        setParent((QWidget*)App::main());
+, _signalBars(this, call, st::callPanelSignalBars) {        
 	_decline->setDuration(st::callPanelDuration);
 	_cancel->setDuration(st::callPanelDuration);
 
@@ -311,17 +310,18 @@ Panel::Panel(not_null<Call*> call)
 	setWindowIcon(Window::CreateIcon());
 	initControls();
 	initLayout();
-	showAndActivate();
+
+	_visible = true;
+	show();
+	QApplication::alert(this); // signal in taskBar about call
 }
 
 void Panel::showAndActivate() {
 	toggleOpacityAnimation(true);
-	/*
 	raise();
-	setWindowState(windowState() | Qt::WindowActive);
+	setWindowState(windowState() & ~Qt::WindowMinimized | Qt::WindowActive);
 	activateWindow();
 	setFocus();
-	*/
 }
 
 void Panel::replaceCall(not_null<Call*> call) {
@@ -421,7 +421,7 @@ void Panel::reinitControls() {
 }
 
 void Panel::initLayout() {
-	setWindowFlags(Qt::WindowFlags(Qt::FramelessWindowHint) | Qt::NoDropShadowWindowHint | Qt::Dialog | Qt::WindowDoesNotAcceptFocus);
+	setWindowFlags(Qt::WindowFlags(Qt::FramelessWindowHint | Qt::WindowSystemMenuHint | Qt::WindowMinimizeButtonHint) | Qt::NoDropShadowWindowHint);
 	setAttribute(Qt::WA_MacAlwaysShowToolWindow);
 	setAttribute(Qt::WA_NoSystemBackground, true);
 	setAttribute(Qt::WA_TranslucentBackground, true);
@@ -439,7 +439,7 @@ void Panel::initLayout() {
 		refreshUserPhoto();
 	});
 	createDefaultCacheImage();
-
+	
 	Platform::InitOnTopPanel(this);
 }
 
@@ -460,25 +460,10 @@ void Panel::toggleOpacityAnimation(bool visible) {
 			_visible ? 1. : 0.,
 			st::callPanelDuration,
 			_visible ? anim::easeOutCirc : anim::easeInCirc);
-	}	
+	}
 
 	if (isHidden() && _visible) {
 		show();
-		// very very horrible but can't understand why simple "not to show panel" when no main window not working - panel then will showing with wrong size	
-		// simple show + hide do the job - sorry for this :(
-		if (visible)
-		{
-			QWidget * m = (QWidget*)App::main();
-			if (!m || !m->isVisible()) // no main window
-			{
-				_visible = false;
-				hide();
-			}
-			else if(m)
-			{
-				QApplication::alert(m); // signal in taskBar about call
-			}
-		}
 	}
 }
 
@@ -606,7 +591,6 @@ void Panel::initGeometry() {
 	setAttribute(Qt::WA_OpaquePaintEvent, !_useTransparency);
 	_padding = _useTransparency ? st::callShadow.extend : style::margins(st::lineWidth, st::lineWidth, st::lineWidth, st::lineWidth);
 	_contentTop = _padding.top() + st::callWidth;
-	auto screen = QApplication::desktop()->screenGeometry(center);
 	auto rect = QRect(0, 0, st::callWidth, st::callHeight);
 	setGeometry(rect.translated(center - rect.center()).marginsAdded(_padding));
 	createBottomImage();

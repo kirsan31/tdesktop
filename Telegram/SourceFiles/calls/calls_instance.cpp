@@ -113,7 +113,7 @@ void Instance::destroyCurrentPanel() {
 }
 
 void Instance::createCall(not_null<UserData*> user, Call::Type type) {
-	auto call = std::make_unique<Call>(getCallDelegate(), user, type);;
+	auto call = std::make_unique<Call>(getCallDelegate(), user, type);
 	if (_currentCall) {
 		_currentCallPanel->replaceCall(call.get());
 		std::swap(_currentCall, call);
@@ -203,12 +203,6 @@ void Instance::handleUpdate(const MTPDupdatePhoneCall& update) {
 
 void Instance::showInfoPanel(not_null<Call*> call) {
 	if (_currentCall.get() == call) {
-		_currentCallPanel->showAndActivate();
-	}
-}
-
-void Instance::showInfoPanel() {
-	if (_currentCall && _currentCallPanel) {
 		_currentCallPanel->showAndActivate();
 	}
 }
