@@ -3753,7 +3753,7 @@ void MainWidget::updateOnline(bool gotOtherOffline) {
 	if (this != App::main()) return;
 	InvokeQueued(this, [=] { session().checkAutoLock(); });
 
-	bool isOnline = App::wnd()->isActive();
+	bool isOnline = !App::quitting() && App::wnd()->isActive();
 	int updateIn = Global::OnlineUpdatePeriod();
 	if (isOnline) {
 		auto idle = psIdleTime();
@@ -3778,7 +3778,14 @@ void MainWidget::updateOnline(bool gotOtherOffline) {
 
 		_lastWasOnline = isOnline;
 		_lastSetOnline = ms;
-		_onlineRequest = MTP::send(MTPaccount_UpdateStatus(MTP_bool(!isOnline)));
+		if (!App::quitting()) {
+			_onlineRequest = MTP::send(MTPaccount_UpdateStatus(MTP_bool(!isOnline)));
+		} else {
+			_onlineRequest = MTP::send(
+				MTPaccount_UpdateStatus(MTP_bool(!isOnline)),
+				rpcDone(&MainWidget::updateStatusDone),
+				rpcFail(&MainWidget::updateStatusFail));
+		}
 
 		const auto self = session().user();
 		self->onlineTill = unixtime() + (isOnline ? (Global::OnlineUpdatePeriod() / 1000) : -1);
@@ -3794,6 +3801,27 @@ void MainWidget::updateOnline(bool gotOtherOffline) {
 		updateIn = qMin(updateIn, int(_lastSetOnline + Global::OnlineUpdatePeriod() - ms));
 	}
 	_onlineTimer.callOnce(updateIn);
+}
+
+void MainWidget::updateStatusDone(const MTPBool &result) {
+	Core::App().quitPreventFinished();
+}
+
+bool MainWidget::updateStatusFail(const RPCError &error) {
+	if (MTP::isDefaultHandledError(error)) {
+		return false;
+	}
+	Core::App().quitPreventFinished();
+	return true;
+}
+
+bool MainWidget::isQuitPrevent() {
+	if (!_lastWasOnline) {
+		return false;
+	}
+	LOG(("MainWidget prevents quit, sending offline status..."));
+	updateOnline();
+	return true;
 }
 
 void MainWidget::saveDraftToCloud() {
