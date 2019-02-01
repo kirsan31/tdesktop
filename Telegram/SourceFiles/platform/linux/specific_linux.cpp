@@ -9,7 +9,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "platform/linux/linux_libs.h"
 #include "lang/lang_keys.h"
-#include "application.h"
 #include "mainwidget.h"
 #include "mainwindow.h"
 #include "platform/linux/linux_desktop_environment.h"
@@ -91,11 +90,11 @@ void FallbackFontConfig() {
 namespace Platform {
 
 bool IsApplicationActive() {
-	return static_cast<QApplication*>(QApplication::instance())->activeWindow() != nullptr;
+	return QApplication::activeWindow() != nullptr;
 }
 
 void SetApplicationIcon(const QIcon &icon) {
-	qApp->setWindowIcon(icon);
+	QApplication::setWindowIcon(icon);
 }
 
 QString CurrentExecutablePath(int argc, char *argv[]) {
@@ -157,68 +156,6 @@ QAbstractNativeEventFilter *psNativeEventFilter() {
 }
 
 void psWriteDump() {
-}
-
-QString demanglestr(const QString &mangled) {
-	if (mangled.isEmpty()) return mangled;
-
-	QByteArray cmd = ("c++filt -n " + mangled).toUtf8();
-	FILE *f = popen(cmd.constData(), "r");
-	if (!f) return "BAD_SYMBOL_" + mangled;
-
-	QString result;
-	char buffer[4096] = { 0 };
-	while (!feof(f)) {
-		if (fgets(buffer, 4096, f) != NULL) {
-			result += buffer;
-		}
-	}
-	pclose(f);
-	return result.trimmed();
-}
-
-QStringList addr2linestr(uint64 *addresses, int count) {
-	QStringList result;
-	if (!count || cExeName().isEmpty()) return result;
-
-	result.reserve(count);
-	QByteArray cmd = "addr2line -e " + EscapeShell(QFile::encodeName(cExeDir() + cExeName()));
-	for (int i = 0; i < count; ++i) {
-		if (addresses[i]) {
-			cmd += qsl(" 0x%1").arg(addresses[i], 0, 16).toUtf8();
-		}
-	}
-	FILE *f = popen(cmd.constData(), "r");
-
-	QStringList addr2lineResult;
-	if (f) {
-		char buffer[4096] = {0};
-		while (!feof(f)) {
-			if (fgets(buffer, 4096, f) != NULL) {
-				addr2lineResult.push_back(QString::fromUtf8(buffer));
-			}
-		}
-		pclose(f);
-	}
-	for (int i = 0, j = 0; i < count; ++i) {
-		if (addresses[i]) {
-			if (j < addr2lineResult.size() && !addr2lineResult.at(j).isEmpty() && !addr2lineResult.at(j).startsWith(qstr("0x"))) {
-				QString res = addr2lineResult.at(j).trimmed();
-				if (int index = res.indexOf(qstr("/Telegram/"))) {
-					if (index > 0) {
-						res = res.mid(index + qstr("/Telegram/").size());
-					}
-				}
-				result.push_back(res);
-			} else {
-				result.push_back(QString());
-			}
-			++j;
-		} else {
-			result.push_back(QString());
-		}
-	}
-	return result;
 }
 
 bool _removeDirectory(const QString &path) { // from http://stackoverflow.com/questions/2256945/removing-a-non-empty-directory-programmatically-in-c-or-c

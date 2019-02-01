@@ -37,7 +37,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "mainwidget.h"
 #include "layout.h"
 #include "auth_session.h"
-#include "messenger.h"
+#include "core/application.h"
 #include "apiwrap.h"
 #include "lang/lang_keys.h"
 #include "data/data_session.h"
@@ -543,7 +543,8 @@ void HistoryInner::paintEvent(QPaintEvent *e) {
 	auto clip = e->rect();
 	auto ms = getms();
 
-	bool historyDisplayedEmpty = (_history->isDisplayedEmpty() && (!_migrated || _migrated->isDisplayedEmpty()));
+	const auto historyDisplayedEmpty = _history->isDisplayedEmpty()
+		&& (!_migrated || _migrated->isDisplayedEmpty());
 	bool noHistoryDisplayed = _firstLoading || historyDisplayedEmpty;
 	if (!_firstLoading && _botAbout && !_botAbout->info->text.isEmpty() && _botAbout->height > 0) {
 		if (clip.y() < _botAbout->rect.y() + _botAbout->rect.height() && clip.y() + clip.height() > _botAbout->rect.y()) {
@@ -561,6 +562,8 @@ void HistoryInner::paintEvent(QPaintEvent *e) {
 		}
 	} else if (historyDisplayedEmpty) {
 		paintEmpty(p, width(), height());
+	} else {
+		_emptyPainter = nullptr;
 	}
 	if (!noHistoryDisplayed) {
 		auto readMentions = base::flat_set<not_null<HistoryItem*>>();
@@ -1500,13 +1503,48 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 			});
 		}
 	};
-
+	const auto addPhotoActions = [&](not_null<PhotoData*> photo) {
+		_menu->addAction(lang(lng_context_save_image), App::LambdaDelayed(st::defaultDropdownMenu.menu.ripple.hideDuration, this, [=] {
+			savePhotoToFile(photo);
+		}));
+		_menu->addAction(lang(lng_context_copy_image), [=] {
+			copyContextImage(photo);
+		});
+	};
+	const auto addDocumentActions = [&](not_null<DocumentData*> document) {
+		if (document->loading()) {
+			_menu->addAction(lang(lng_context_cancel_download), [=] {
+				cancelContextDownload(document);
+			});
+			return;
+		}
+		const auto item = _dragStateItem;
+		const auto itemId = item ? item->fullId() : FullMsgId();
+		const auto lnkIsVideo = document->isVideoFile();
+		const auto lnkIsVoice = document->isVoiceMessage();
+		const auto lnkIsAudio = document->isAudioFile();
+		if (document->loaded() && document->isGifv()) {
+			if (!cAutoPlayGif()) {
+				_menu->addAction(lang(lng_context_open_gif), [=] {
+					openContextGif(itemId);
+				});
+			}
+			_menu->addAction(lang(lng_context_save_gif), [=] {
+				saveContextGif(itemId);
+			});
+		}
+		if (!document->filepath(DocumentData::FilePathResolveChecked).isEmpty()) {
+			_menu->addAction(lang((cPlatform() == dbipMac || cPlatform() == dbipMacOld) ? lng_context_show_in_finder : lng_context_show_in_folder), [=] {
+				showContextInFolder(document);
+			});
+		}
+		_menu->addAction(lang(lnkIsVideo ? lng_context_save_video : (lnkIsVoice ? lng_context_save_audio : (lnkIsAudio ? lng_context_save_audio_file : lng_context_save_file))), App::LambdaDelayed(st::defaultDropdownMenu.menu.ripple.hideDuration, this, [=] {
+			saveDocumentToFile(itemId, document);
+		}));
+	};
 	const auto link = ClickHandler::getActive();
 	auto lnkPhoto = dynamic_cast<PhotoClickHandler*>(link.get());
 	auto lnkDocument = dynamic_cast<DocumentClickHandler*>(link.get());
-	auto lnkIsVideo = lnkDocument ? lnkDocument->document()->isVideoFile() : false;
-	auto lnkIsVoice = lnkDocument ? lnkDocument->document()->isVoiceMessage() : false;
-	auto lnkIsAudio = lnkDocument ? lnkDocument->document()->isAudioFile() : false;
 	if (lnkPhoto || lnkDocument) {
 		const auto item = _dragStateItem;
 		const auto itemId = item ? item->fullId() : FullMsgId();
@@ -1519,39 +1557,9 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 		}
 		addItemActions(item);
 		if (lnkPhoto) {
-			const auto photo = lnkPhoto->photo();
-			_menu->addAction(lang(lng_context_save_image), App::LambdaDelayed(st::defaultDropdownMenu.menu.ripple.hideDuration, this, [=] {
-				savePhotoToFile(photo);
-			}));
-			_menu->addAction(lang(lng_context_copy_image), [=] {
-				copyContextImage(photo);
-			});
+			addPhotoActions(lnkPhoto->photo());
 		} else {
-			auto document = lnkDocument->document();
-			if (document->loading()) {
-				_menu->addAction(lang(lng_context_cancel_download), [=] {
-					cancelContextDownload(document);
-				});
-			} else {
-				if (document->loaded() && document->isGifv()) {
-					if (!cAutoPlayGif()) {
-						_menu->addAction(lang(lng_context_open_gif), [=] {
-							openContextGif(itemId);
-						});
-					}
-					_menu->addAction(lang(lng_context_save_gif), [=] {
-						saveContextGif(itemId);
-					});
-				}
-				if (!document->filepath(DocumentData::FilePathResolveChecked).isEmpty()) {
-					_menu->addAction(lang((cPlatform() == dbipMac || cPlatform() == dbipMacOld) ? lng_context_show_in_finder : lng_context_show_in_folder), [=] {
-						showContextInFolder(document);
-					});
-				}
-				_menu->addAction(lang(lnkIsVideo ? lng_context_save_video : (lnkIsVoice ? lng_context_save_audio : (lnkIsAudio ? lng_context_save_audio_file : lng_context_save_file))), App::LambdaDelayed(st::defaultDropdownMenu.menu.ripple.hideDuration, this, [=] {
-					saveDocumentToFile(itemId, document);
-				}));
-			}
+			addDocumentActions(lnkDocument->document());
 		}
 		if (item && item->hasDirectLink() && isUponSelected != 2 && isUponSelected != -2) {
 			_menu->addAction(lang(item->history()->peer->isMegagroup() ? lng_context_copy_link : lng_context_copy_post_link), [=] {
@@ -1768,7 +1776,7 @@ void HistoryInner::copySelectedText() {
 }
 
 void HistoryInner::savePhotoToFile(not_null<PhotoData*> photo) {
-	if (!photo->date || !photo->loaded()) return;
+	if (photo->isNull() || !photo->loaded()) return;
 
 	auto filter = qsl("JPEG Image (*.jpg);;") + FileDialog::AllFilesFilter();
 	FileDialog::GetWritePath(
@@ -1780,15 +1788,15 @@ void HistoryInner::savePhotoToFile(not_null<PhotoData*> photo) {
 			qsl(".jpg")),
 		crl::guard(this, [=](const QString &result) {
 			if (!result.isEmpty()) {
-				photo->full->pix(Data::FileOrigin()).toImage().save(result, "JPG");
+				photo->large()->original().save(result, "JPG");
 			}
 		}));
 }
 
 void HistoryInner::copyContextImage(not_null<PhotoData*> photo) {
-	if (!photo->date || !photo->loaded()) return;
+	if (photo->isNull() || !photo->loaded()) return;
 
-	QApplication::clipboard()->setPixmap(photo->full->pix(Data::FileOrigin()));
+	QApplication::clipboard()->setImage(photo->large()->original());
 }
 
 void HistoryInner::showStickerPackInfo(not_null<DocumentData*> document) {
@@ -1817,7 +1825,7 @@ void HistoryInner::openContextGif(FullMsgId itemId) {
 	if (const auto item = App::histItemById(itemId)) {
 		if (const auto media = item->media()) {
 			if (const auto document = media->document()) {
-				Messenger::Instance().showDocument(document, item);
+				Core::App().showDocument(document, item);
 			}
 		}
 	}

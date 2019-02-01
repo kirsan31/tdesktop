@@ -13,6 +13,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "media/player/media_player_float.h"
 #include "data/data_pts_waiter.h"
 
+class AuthSession;
 struct HistoryMessageMarkupButton;
 class MainWindow;
 class ConfirmBox;
@@ -26,7 +27,7 @@ struct PeerUpdate;
 } // namespace Notify
 
 namespace Data {
-struct WallPaper;
+class WallPaper;
 } // namespace Data
 
 namespace Dialogs {
@@ -97,6 +98,8 @@ public:
 
 	MainWidget(QWidget *parent, not_null<Window::Controller*> controller);
 
+	AuthSession &session() const;
+
 	bool isMainSectionShown() const;
 	bool isThirdSectionShown() const;
 
@@ -117,6 +120,7 @@ public:
 	void incrementSticker(DocumentData *sticker);
 
 	void activate();
+	void updateReceived(const mtpPrime *from, const mtpPrime *end);
 
 	void createDialog(Dialogs::Key key);
 	void removeDialog(Dialogs::Key key);
@@ -233,7 +237,7 @@ public:
 	bool chatBackgroundLoading();
 	float64 chatBackgroundProgress() const;
 	void checkChatBackground();
-	ImagePtr newBackgroundThumb();
+	Image *newBackgroundThumb();
 
 	void messageDataReceived(ChannelData *channel, MsgId msgId);
 	void updateBotKeyboard(History *h);
@@ -411,9 +415,6 @@ private:
 	void feedUpdate(const MTPUpdate &update);
 
 	void deleteHistoryPart(DeleteHistoryRequest request, const MTPmessages_AffectedHistory &result);
-
-	void updateReceived(const mtpPrime *from, const mtpPrime *end);
-	bool updateFail(const RPCError &e);
 
 	void usernameResolveDone(QPair<MsgId, QString> msgIdAndStartToken, const MTPcontacts_ResolvedPeer &result);
 	bool usernameResolveFail(QString name, const RPCError &error);

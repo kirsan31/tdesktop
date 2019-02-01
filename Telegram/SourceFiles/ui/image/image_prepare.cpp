@@ -49,6 +49,9 @@ QPixmap PixmapFast(QImage &&image) {
 }
 
 QImage prepareBlur(QImage img) {
+	if (img.isNull()) {
+		return img;
+	}
 	auto ratio = img.devicePixelRatio();
 	auto fmt = img.format();
 	if (fmt != QImage::Format_RGB32 && fmt != QImage::Format_ARGB32_Premultiplied) {
@@ -322,8 +325,10 @@ QImage prepare(QImage img, int w, int h, Images::Options options, int outerw, in
 			}
 			{
 				QPainter p(&result);
-				if (w < outerw || h < outerh) {
-					p.fillRect(0, 0, result.width(), result.height(), st::imageBg);
+				if (!(options & Images::Option::TransparentBackground)) {
+					if (w < outerw || h < outerh) {
+						p.fillRect(0, 0, result.width(), result.height(), st::imageBg);
+					}
 				}
 				p.drawImage((result.width() - img.width()) / (2 * cIntRetinaFactor()), (result.height() - img.height()) / (2 * cIntRetinaFactor()), img);
 			}

@@ -290,7 +290,7 @@ bool MediaPhoto::canBeGrouped() const {
 }
 
 bool MediaPhoto::hasReplyPreview() const {
-	return !_photo->thumb->isNull();
+	return !_photo->isNull();
 }
 
 Image *MediaPhoto::replyPreview() const {
@@ -338,7 +338,8 @@ bool MediaPhoto::updateInlineResultMedia(const MTPMessageMedia &media) {
 	}
 	auto &data = media.c_messageMediaPhoto();
 	if (data.has_photo() && !data.has_ttl_seconds()) {
-		const auto photo = parent()->history()->owner().photo(data.vphoto);
+		const auto photo = parent()->history()->owner().processPhoto(
+			data.vphoto);
 		if (photo == _photo) {
 			return true;
 		} else {
@@ -377,7 +378,7 @@ bool MediaPhoto::updateSentMedia(const MTPMessageMedia &media) {
 		QByteArray bytes;
 	};
 	const auto saveImageToCache = [&](
-			const ImagePtr &image,
+			not_null<Image*> image,
 			SizeData size) {
 		Expects(size.location != nullptr);
 
@@ -434,9 +435,9 @@ bool MediaPhoto::updateSentMedia(const MTPMessageMedia &media) {
 			continue;
 		}
 		if (size.letter == 's') {
-			saveImageToCache(_photo->thumb, size);
+			saveImageToCache(_photo->thumbnailSmall(), size);
 		} else if (size.letter == 'm') {
-			saveImageToCache(_photo->medium, size);
+			saveImageToCache(_photo->thumbnail(), size);
 		} else if (size.letter == 'x' && max < 1) {
 			max = 1;
 			maxSize = size;
@@ -449,7 +450,7 @@ bool MediaPhoto::updateSentMedia(const MTPMessageMedia &media) {
 		}
 	}
 	if (maxSize.location) {
-		saveImageToCache(_photo->full, maxSize);
+		saveImageToCache(_photo->large(), maxSize);
 	}
 	return true;
 }
@@ -532,7 +533,7 @@ bool MediaFile::canBeGrouped() const {
 }
 
 bool MediaFile::hasReplyPreview() const {
-	return !_document->thumb->isNull();
+	return _document->hasThumbnail();
 }
 
 Image *MediaFile::replyPreview() const {
@@ -684,7 +685,7 @@ bool MediaFile::updateInlineResultMedia(const MTPMessageMedia &media) {
 	}
 	auto &data = media.c_messageMediaDocument();
 	if (data.has_document() && !data.has_ttl_seconds()) {
-		const auto document = parent()->history()->owner().document(
+		const auto document = parent()->history()->owner().processDocument(
 			data.vdocument);
 		if (document == _document) {
 			return false;
@@ -1016,9 +1017,9 @@ WebPageData *MediaWebPage::webpage() const {
 
 bool MediaWebPage::hasReplyPreview() const {
 	if (const auto document = MediaWebPage::document()) {
-		return !document->thumb->isNull();
+		return document->hasThumbnail() && !document->isPatternWallPaper();
 	} else if (const auto photo = MediaWebPage::photo()) {
-		return !photo->thumb->isNull();
+		return !photo->isNull();
 	}
 	return false;
 }
@@ -1079,9 +1080,9 @@ std::unique_ptr<Media> MediaGame::clone(not_null<HistoryItem*> parent) {
 
 bool MediaGame::hasReplyPreview() const {
 	if (const auto document = _game->document) {
-		return !document->thumb->isNull();
+		return document->hasThumbnail();
 	} else if (const auto photo = _game->photo) {
-		return !photo->thumb->isNull();
+		return !photo->isNull();
 	}
 	return false;
 }
@@ -1181,7 +1182,7 @@ const Invoice *MediaInvoice::invoice() const {
 
 bool MediaInvoice::hasReplyPreview() const {
 	if (const auto photo = _invoice.photo) {
-		return !photo->thumb->isNull();
+		return !photo->isNull();
 	}
 	return false;
 }

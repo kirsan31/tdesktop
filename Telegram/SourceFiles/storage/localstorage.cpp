@@ -28,8 +28,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "lang/lang_cloud_manager.h"
 #include "media/media_audio.h"
 #include "mtproto/dc_options.h"
-#include "messenger.h"
-#include "application.h"
+#include "core/application.h"
 #include "apiwrap.h"
 #include "auth_session.h"
 #include "window/window_controller.h"
@@ -48,6 +47,12 @@ constexpr auto kThemeFileSizeLimit = 5 * 1024 * 1024;
 constexpr auto kFileLoaderQueueStopTimeout = TimeMs(5000);
 constexpr auto kDefaultStickerInstallDate = TimeId(1);
 constexpr auto kProxyTypeShift = 1024;
+constexpr auto kWriteMapTimeout = TimeMs(1000);
+constexpr auto kSavedBackgroundFormat = QImage::Format_ARGB32_Premultiplied;
+
+constexpr auto kWallPaperLegacySerializeTagId = int32(-111);
+constexpr auto kWallPaperSerializeTagId = int32(-112);
+constexpr auto kWallPaperSidesLimit = 10'000;
 
 constexpr auto kSinglePeerTypeUser = qint32(1);
 constexpr auto kSinglePeerTypeChat = qint32(2);
@@ -881,7 +886,7 @@ struct ReadSettingsContext {
 };
 
 void applyReadContext(ReadSettingsContext &&context) {
-	Messenger::Instance().dcOptions()->addFromOther(std::move(context.dcOptions));
+	Core::App().dcOptions()->addFromOther(std::move(context.dcOptions));
 	if (context.legacyLanguageId != Lang::kLegacyLanguageNone) {
 		Lang::Current().fillFromLegacy(context.legacyLanguageId, context.legacyLanguageFile);
 		writeLangPack();
@@ -1011,8 +1016,8 @@ bool _readSetting(quint32 blockId, QDataStream &stream, int version, ReadSetting
 		if (!_checkStreamStatus(stream)) return false;
 
 		DEBUG_LOG(("MTP Info: user found, dc %1, uid %2").arg(dcId).arg(userId));
-		Messenger::Instance().setMtpMainDcId(dcId);
-		Messenger::Instance().setAuthSessionUserId(userId);
+		Core::App().setMtpMainDcId(dcId);
+		Core::App().setAuthSessionUserId(userId);
 	} break;
 
 	case dbiKey: {
@@ -1021,7 +1026,7 @@ bool _readSetting(quint32 blockId, QDataStream &stream, int version, ReadSetting
 		auto key = Serialize::read<MTP::AuthKey::Data>(stream);
 		if (!_checkStreamStatus(stream)) return false;
 
-		Messenger::Instance().setMtpKey(dcId, key);
+		Core::App().setMtpKey(dcId, key);
 	} break;
 
 	case dbiMtpAuthorization: {
@@ -1029,7 +1034,7 @@ bool _readSetting(quint32 blockId, QDataStream &stream, int version, ReadSetting
 		stream >> serialized;
 		if (!_checkStreamStatus(stream)) return false;
 
-		Messenger::Instance().setMtpAuthorization(serialized);
+		Core::App().setMtpAuthorization(serialized);
 	} break;
 
 	case dbiAutoStart: {
@@ -2045,7 +2050,7 @@ void _writeUserSettings() {
 	}
 	auto userDataInstance = StoredAuthSessionCache
 		? StoredAuthSessionCache.get()
-		: Messenger::Instance().getAuthSessionSettings();
+		: Core::App().getAuthSessionSettings();
 	auto userData = userDataInstance
 		? userDataInstance->serialize()
 		: QByteArray();
@@ -2168,7 +2173,7 @@ void _writeMtpData() {
 		return;
 	}
 
-	auto mtpAuthorizationSerialized = Messenger::Instance().serializeMtpAuthorization();
+	auto mtpAuthorizationSerialized = Core::App().serializeMtpAuthorization();
 
 	quint32 size = sizeof(quint32) + Serialize::bytearraySize(mtpAuthorizationSerialized);
 
@@ -2402,7 +2407,7 @@ ReadMapState _readMap(const QByteArray &pass) {
 	_readMtpData();
 
 	DEBUG_LOG(("selfSerialized set: %1").arg(selfSerialized.size()));
-	Messenger::Instance().setAuthSessionFromStorage(
+	Core::App().setAuthSessionFromStorage(
 		std::move(StoredAuthSessionCache),
 		std::move(selfSerialized),
 		_oldMapVersion);
@@ -2640,7 +2645,7 @@ void writeSettings() {
 	}
 	settings.writeData(_settingsSalt);
 
-	auto dcOptionsSerialized = Messenger::Instance().dcOptions()->serialize();
+	auto dcOptionsSerialized = Core::App().dcOptions()->serialize();
 
 	quint32 size = 12 * (sizeof(quint32) + sizeof(qint32));
 	size += sizeof(quint32) + Serialize::bytearraySize(dcOptionsSerialized);
@@ -3753,6 +3758,7 @@ void importOldRecentStickers() {
 			attributes,
 			mime,
 			ImagePtr(),
+			ImagePtr(),
 			dc,
 			size,
 			StorageImageLocation());
@@ -3956,7 +3962,7 @@ void readSavedGifs() {
 	}
 }
 
-void writeBackground(const Data::WallPaper &paper, const QImage &img) {
+void writeBackground(const Data::WallPaper &paper, const QImage &image) {
 	if (!_working() || !_backgroundCanWrite) {
 		return;
 	}
@@ -3969,11 +3975,33 @@ void writeBackground(const Data::WallPaper &paper, const QImage &img) {
 	auto &backgroundKey = Window::Theme::IsNightMode()
 		? _backgroundKeyNight
 		: _backgroundKeyDay;
-	QByteArray bmp;
-	if (!img.isNull()) {
-		QBuffer buf(&bmp);
-		if (!img.save(&buf, "BMP")) {
-			return;
+	auto imageData = QByteArray();
+	if (!image.isNull()) {
+		const auto width = qint32(image.width());
+		const auto height = qint32(image.height());
+		const auto perpixel = (image.depth() >> 3);
+		const auto srcperline = image.bytesPerLine();
+		const auto srcsize = srcperline * height;
+		const auto dstperline = width * perpixel;
+		const auto dstsize = dstperline * height;
+		const auto copy = (image.format() != kSavedBackgroundFormat)
+			? image.convertToFormat(kSavedBackgroundFormat)
+			: image;
+		imageData.resize(2 * sizeof(qint32) + dstsize);
+
+		auto dst = bytes::make_detached_span(imageData);
+		bytes::copy(dst, bytes::object_as_span(&width));
+		dst = dst.subspan(sizeof(qint32));
+		bytes::copy(dst, bytes::object_as_span(&height));
+		dst = dst.subspan(sizeof(qint32));
+		const auto src = bytes::make_span(image.constBits(), srcsize);
+		if (srcsize == dstsize) {
+			bytes::copy(dst, src);
+		} else {
+			for (auto y = 0; y != height; ++y) {
+				bytes::copy(dst, src.subspan(y * srcperline, dstperline));
+				dst = dst.subspan(dstperline);
+			}
 		}
 	}
 	if (!backgroundKey) {
@@ -3981,19 +4009,15 @@ void writeBackground(const Data::WallPaper &paper, const QImage &img) {
 		_mapChanged = true;
 		_writeMap(WriteMapWhen::Fast);
 	}
+	const auto serialized = paper.serialize();
 	quint32 size = sizeof(qint32)
-		+ 2 * sizeof(quint64)
-		+ sizeof(quint32)
-		+ Serialize::stringSize(paper.slug)
-		+ Serialize::bytearraySize(bmp);
+		+ Serialize::bytearraySize(serialized)
+		+ Serialize::bytearraySize(imageData);
 	EncryptedDescriptor data(size);
 	data.stream
-		<< qint32(Window::Theme::details::kLegacyBackgroundId)
-		<< quint64(paper.id)
-		<< quint64(paper.accessHash)
-		<< quint32(paper.flags.value())
-		<< paper.slug
-		<< bmp;
+		<< qint32(kWallPaperSerializeTagId)
+		<< serialized
+		<< imageData;
 
 	FileWriteDescriptor file(backgroundKey);
 	file.writeEncrypted(data);
@@ -4014,61 +4038,103 @@ bool readBackground() {
 		return false;
 	}
 
-	QByteArray bmpData;
 	qint32 legacyId = 0;
-	quint64 id = 0;
-	quint64 accessHash = 0;
-	quint32 flags = 0;
-	QString slug;
 	bg.stream >> legacyId;
-	if (legacyId == Window::Theme::details::kLegacyBackgroundId) {
-		bg.stream
-			>> id
-			>> accessHash
-			>> flags
-			>> slug;
-	} else {
-		id = Window::Theme::details::FromLegacyBackgroundId(legacyId);
-		accessHash = 0;
-		if (id != Window::Theme::kCustomBackground) {
-			flags = static_cast<quint32>(MTPDwallPaper::Flag::f_default);
-		}
-	}
-	bg.stream >> bmpData;
-	auto oldEmptyImage = (bg.stream.status() != QDataStream::Ok);
-	if (oldEmptyImage
-		|| id == Window::Theme::kInitialBackground
-		|| id == Window::Theme::kDefaultBackground) {
-		_backgroundCanWrite = false;
-		if (oldEmptyImage || bg.version < 8005) {
-			Window::Theme::Background()->setImage({ Window::Theme::kDefaultBackground });
-			Window::Theme::Background()->setTile(false);
+	const auto paper = [&] {
+		if (legacyId == kWallPaperLegacySerializeTagId) {
+			quint64 id = 0;
+			quint64 accessHash = 0;
+			quint32 flags = 0;
+			QString slug;
+			bg.stream
+				>> id
+				>> accessHash
+				>> flags
+				>> slug;
+			return Data::WallPaper::FromLegacySerialized(
+				id,
+				accessHash,
+				flags,
+				slug);
+		} else if (legacyId == kWallPaperSerializeTagId) {
+			QByteArray serialized;
+			bg.stream >> serialized;
+			return Data::WallPaper::FromSerialized(serialized);
 		} else {
-			Window::Theme::Background()->setImage({ id });
+			return Data::WallPaper::FromLegacyId(legacyId);
 		}
-		_backgroundCanWrite = true;
-		return true;
-	} else if (id == Window::Theme::kThemeBackground && bmpData.isEmpty()) {
-		_backgroundCanWrite = false;
-		Window::Theme::Background()->setImage({ id });
-		_backgroundCanWrite = true;
-		return true;
+	}();
+	if (bg.stream.status() != QDataStream::Ok || !paper) {
+		return false;
 	}
 
-	QImage image;
-	QBuffer buf(&bmpData);
-	QImageReader reader(&buf);
-#ifndef OS_MAC_OLD
-	reader.setAutoTransform(true);
-#endif // OS_MAC_OLD
-	if (reader.read(&image) || Window::Theme::GetWallPaperColor(slug)) {
+	QByteArray imageData;
+	bg.stream >> imageData;
+	const auto isOldEmptyImage = (bg.stream.status() != QDataStream::Ok);
+	if (isOldEmptyImage
+		|| Data::IsLegacy1DefaultWallPaper(*paper)
+		|| Data::IsDefaultWallPaper(*paper)) {
 		_backgroundCanWrite = false;
-		Window::Theme::Background()->setImage({
-			id,
-			accessHash,
-			MTPDwallPaper::Flags::from_raw(flags),
-			slug
-		}, std::move(image));
+		if (isOldEmptyImage || bg.version < 8005) {
+			Window::Theme::Background()->set(Data::DefaultWallPaper());
+			Window::Theme::Background()->setTile(false);
+		} else {
+			Window::Theme::Background()->set(*paper);
+		}
+		_backgroundCanWrite = true;
+		return true;
+	} else if (Data::IsThemeWallPaper(*paper) && imageData.isEmpty()) {
+		_backgroundCanWrite = false;
+		Window::Theme::Background()->set(*paper);
+		_backgroundCanWrite = true;
+		return true;
+	}
+	auto image = QImage();
+	if (legacyId == kWallPaperSerializeTagId) {
+		const auto perpixel = 4;
+		auto src = bytes::make_span(imageData);
+		auto width = qint32();
+		auto height = qint32();
+		if (src.size() > 2 * sizeof(qint32)) {
+			bytes::copy(
+				bytes::object_as_span(&width),
+				src.subspan(0, sizeof(qint32)));
+			src = src.subspan(sizeof(qint32));
+			bytes::copy(
+				bytes::object_as_span(&height),
+				src.subspan(0, sizeof(qint32)));
+			src = src.subspan(sizeof(qint32));
+			if (width + height <= kWallPaperSidesLimit
+				&& src.size() == width * height * perpixel) {
+				image = QImage(
+					width,
+					height,
+					QImage::Format_ARGB32_Premultiplied);
+				if (!image.isNull()) {
+					const auto srcperline = width * perpixel;
+					const auto srcsize = srcperline * height;
+					const auto dstperline = image.bytesPerLine();
+					const auto dstsize = dstperline * height;
+					Assert(srcsize == dstsize);
+					bytes::copy(
+						bytes::make_span(image.bits(), dstsize),
+						src);
+				}
+			}
+		}
+	} else {
+		auto buffer = QBuffer(&imageData);
+		auto reader = QImageReader(&buffer);
+#ifndef OS_MAC_OLD
+		reader.setAutoTransform(true);
+#endif // OS_MAC_OLD
+		if (!reader.read(&image)) {
+			image = QImage();
+		}
+	}
+	if (!image.isNull() || paper->backgroundColor()) {
+		_backgroundCanWrite = false;
+		Window::Theme::Background()->set(*paper, std::move(image));
 		_backgroundCanWrite = true;
 		return true;
 	}
@@ -5045,7 +5111,7 @@ Manager::Manager() {
 
 void Manager::writeMap(bool fast) {
 	if (!_mapWriteTimer.isActive() || fast) {
-		_mapWriteTimer.start(fast ? 1 : WriteMapTimeout);
+		_mapWriteTimer.start(fast ? 1 : kWriteMapTimeout);
 	} else if (_mapWriteTimer.remainingTime() <= 0) {
 		mapWriteTimeout();
 	}
@@ -5057,7 +5123,7 @@ void Manager::writingMap() {
 
 void Manager::writeLocations(bool fast) {
 	if (!_locationsWriteTimer.isActive() || fast) {
-		_locationsWriteTimer.start(fast ? 1 : WriteMapTimeout);
+		_locationsWriteTimer.start(fast ? 1 : kWriteMapTimeout);
 	} else if (_locationsWriteTimer.remainingTime() <= 0) {
 		locationsWriteTimeout();
 	}

@@ -10,7 +10,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_boxes.h"
 #include "styles/style_dialogs.h"
 #include "lang/lang_keys.h"
-#include "messenger.h"
 #include "mtproto/sender.h"
 #include "base/flat_set.h"
 #include "boxes/confirm_box.h"
@@ -20,6 +19,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "boxes/peers/edit_participant_box.h"
 #include "boxes/peers/edit_participants_box.h"
 #include "core/file_utilities.h"
+#include "core/application.h"
 #include "chat_helpers/emoji_suggestions_widget.h"
 #include "ui/widgets/checkbox.h"
 #include "ui/widgets/buttons.h"
@@ -31,6 +31,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_channel.h"
 #include "data/data_chat.h"
 #include "data/data_user.h"
+#include "data/data_session.h"
 #include "mainwidget.h"
 #include "mainwindow.h"
 #include "apiwrap.h"
@@ -65,7 +66,7 @@ style::InputField CreateBioFieldStyle() {
 
 QString PeerFloodErrorText(PeerFloodType type) {
 	auto link = textcmdLink(
-		Messenger::Instance().createInternalLinkFull(qsl("spambot")),
+		Core::App().createInternalLinkFull(qsl("spambot")),
 		lang(lng_cant_more_info));
 	if (type == PeerFloodType::InviteGroup) {
 		return lng_cant_invite_not_contact(lt_more_info, link);
@@ -321,8 +322,9 @@ bool AddContactBox::onSaveUserFail(const RPCError &error) {
 	if (MTP::isDefaultHandledError(error)) return false;
 
 	_addRequest = 0;
-	QString err(error.type());
-	QString firstName = _first->getLastText().trimmed(), lastName = _last->getLastText().trimmed();
+	const auto &err = error.type();
+	const auto firstName = _first->getLastText().trimmed();
+	const auto lastName = _last->getLastText().trimmed();
 	if (err == "CHAT_TITLE_NOT_MODIFIED") {
 		_user->setName(firstName, lastName, _user->nameOrPhone, _user->username);
 		closeBox();
@@ -340,14 +342,14 @@ void AddContactBox::onImportDone(const MTPcontacts_ImportedContacts &res) {
 	if (!isBoxShown() || !App::main()) return;
 
 	const auto &d = res.c_contacts_importedContacts();
-	App::feedUsers(d.vusers);
+	Auth().data().processUsers(d.vusers);
 
 	const auto &v = d.vimported.v;
 	const auto user = [&]() -> UserData* {
 		if (!v.isEmpty()) {
 			auto &c = v.front().c_importedContact();
 			if (c.vclient_id.v == _contactId) {
-				return App::userLoaded(c.vuser_id.v);
+				return Auth().data().userLoaded(c.vuser_id.v);
 			}
 		}
 		return nullptr;
@@ -368,7 +370,7 @@ void AddContactBox::onImportDone(const MTPcontacts_ImportedContacts &res) {
 
 void AddContactBox::onSaveUserDone(const MTPcontacts_ImportedContacts &res) {
 	auto &d = res.c_contacts_importedContacts();
-	App::feedUsers(d.vusers);
+	Auth().data().processUsers(d.vusers);
 	closeBox();
 }
 
@@ -535,7 +537,7 @@ void GroupInfoBox::createGroup(
 					: std::nullopt;
 			}
 			| [](auto chats) {
-				return App::chat(chats->front().c_chat().vid.v);
+				return Auth().data().chat(chats->front().c_chat().vid.v);
 			}
 			| [&](not_null<ChatData*> chat) {
 				if (!image.isNull()) {
@@ -643,7 +645,7 @@ void GroupInfoBox::createChannel(const QString &title, const QString &descriptio
 					: std::nullopt;
 			}
 			| [](auto chats) {
-				return App::channel(chats->front().c_channel().vid.v);
+				return Auth().data().channel(chats->front().c_channel().vid.v);
 			}
 			| [&](not_null<ChannelData*> channel) {
 				auto image = _photo->takeResultImage();
@@ -1153,7 +1155,7 @@ void EditNameBox::save() {
 }
 
 void EditNameBox::saveSelfDone(const MTPUser &user) {
-	App::feedUsers(MTP_vector<MTPUser>(1, user));
+	_user->owner().processUsers(MTP_vector<MTPUser>(1, user));
 	closeBox();
 }
 
@@ -1194,7 +1196,7 @@ RevokePublicLinkBox::Inner::Inner(QWidget *parent, Fn<void()> revokeCallback) : 
 			return data.vchats.v;
 		});
 		for (const auto &chat : chats) {
-			if (const auto peer = App::feedChat(chat)) {
+			if (const auto peer = Auth().data().processChat(chat)) {
 				if (!peer->isChannel() || peer->userName().isEmpty()) {
 					continue;
 				}
@@ -1207,7 +1209,7 @@ RevokePublicLinkBox::Inner::Inner(QWidget *parent, Fn<void()> revokeCallback) : 
 					Ui::NameTextOptions());
 				row.status.setText(
 					st::defaultTextStyle,
-					Messenger::Instance().createInternalLink(
+					Core::App().createInternalLink(
 						textcmdLink(1, peer->userName())),
 					Ui::DialogTextOptions());
 				_rows.push_back(std::move(row));
@@ -1282,7 +1284,7 @@ void RevokePublicLinkBox::Inner::mouseReleaseEvent(QMouseEvent *e) {
 	setCursor((_selected || _pressed) ? style::cur_pointer : style::cur_default);
 	if (pressed && pressed == _selected) {
 		auto text_method = pressed->isMegagroup() ? lng_channels_too_much_public_revoke_confirm_group : lng_channels_too_much_public_revoke_confirm_channel;
-		auto text = text_method(lt_link, Messenger::Instance().createInternalLink(pressed->userName()), lt_group, pressed->name);
+		auto text = text_method(lt_link, Core::App().createInternalLink(pressed->userName()), lt_group, pressed->name);
 		auto confirmText = lang(lng_channels_too_much_public_revoke);
 		_weakRevokeConfirmBox = Ui::show(Box<ConfirmBox>(text, confirmText, crl::guard(this, [this, pressed]() {
 			if (_revokeRequestId) return;

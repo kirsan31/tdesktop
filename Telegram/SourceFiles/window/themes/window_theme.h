@@ -7,39 +7,103 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #pragma once
 
+class Image;
+
 namespace Data {
 
-struct WallPaper {
-	WallPaperId id = WallPaperId();
-	uint64 accessHash = 0;
-	MTPDwallPaper::Flags flags;
-	QString slug;
-	ImagePtr thumb;
-	DocumentData *document = nullptr;
+struct FileOrigin;
+
+class WallPaper {
+public:
+	explicit WallPaper(WallPaperId id);
+
+	void setLocalImageAsThumbnail(not_null<Image*> image);
+
+	[[nodiscard]] WallPaperId id() const;
+	[[nodiscard]] std::optional<QColor> backgroundColor() const;
+	[[nodiscard]] DocumentData *document() const;
+	[[nodiscard]] Image *thumbnail() const;
+	[[nodiscard]] bool isPattern() const;
+	[[nodiscard]] bool isDefault() const;
+	[[nodiscard]] bool isCreator() const;
+	[[nodiscard]] int patternIntensity() const;
+	[[nodiscard]] bool hasShareUrl() const;
+	[[nodiscard]] QString shareUrl() const;
+
+	void loadDocument() const;
+	void loadThumbnail() const;
+	[[nodiscard]] FileOrigin fileOrigin() const;
+
+	[[nodiscard]] WallPaper withUrlParams(
+		const QMap<QString, QString> &params) const;
+
+	[[nodiscard]] static std::optional<WallPaper> Create(
+		const MTPWallPaper &data);
+	[[nodiscard]] static std::optional<WallPaper> Create(
+		const MTPDwallPaper &data);
+
+	[[nodiscard]] QByteArray serialize() const;
+	[[nodiscard]] static std::optional<WallPaper> FromSerialized(
+		const QByteArray &serialized);
+	[[nodiscard]] static std::optional<WallPaper> FromLegacySerialized(
+		quint64 id,
+		quint64 accessHash,
+		quint32 flags,
+		QString slug);
+	[[nodiscard]] static std::optional<WallPaper> FromLegacyId(
+		qint32 legacyId);
+	[[nodiscard]] static std::optional<WallPaper> FromColorSlug(
+		const QString &slug);
+
+private:
+	static constexpr auto kDefaultIntensity = 40;
+
+	WallPaperId _id = WallPaperId();
+	uint64 _accessHash = 0;
+	MTPDwallPaper::Flags _flags;
+	QString _slug;
+
+	MTPDwallPaperSettings::Flags _settings;
+	std::optional<QColor> _backgroundColor;
+	int _intensity = kDefaultIntensity;
+
+	DocumentData *_document = nullptr;
+	Image *_thumbnail = nullptr;
+
 };
 
+[[nodiscard]] WallPaper ThemeWallPaper();
+[[nodiscard]] bool IsThemeWallPaper(const WallPaper &paper);
+[[nodiscard]] WallPaper CustomWallPaper();
+[[nodiscard]] bool IsCustomWallPaper(const WallPaper &paper);
+[[nodiscard]] WallPaper Legacy1DefaultWallPaper();
+[[nodiscard]] bool IsLegacy1DefaultWallPaper(const WallPaper &paper);
+[[nodiscard]] WallPaper DefaultWallPaper();
+[[nodiscard]] bool IsDefaultWallPaper(const WallPaper &paper);
+
+QColor PatternColor(QColor background);
+QImage PreparePatternImage(
+	QImage image,
+	QColor bg,
+	QColor fg,
+	int intensity);
+
+namespace details {
+
+[[nodiscard]] WallPaper UninitializedWallPaper();
+[[nodiscard]] bool IsUninitializedWallPaper(const WallPaper &paper);
+[[nodiscard]] WallPaper TestingThemeWallPaper();
+[[nodiscard]] bool IsTestingThemeWallPaper(const WallPaper &paper);
+[[nodiscard]] WallPaper TestingDefaultWallPaper();
+[[nodiscard]] bool IsTestingDefaultWallPaper(const WallPaper &paper);
+[[nodiscard]] WallPaper TestingEditorWallPaper();
+[[nodiscard]] bool IsTestingEditorWallPaper(const WallPaper &paper);
+
+} // namespace details
 } // namespace Data
 
 namespace Window {
 namespace Theme {
-namespace details {
-
-constexpr auto FromLegacyBackgroundId(int32 legacyId) -> WallPaperId {
-	return uint64(0xFFFFFFFF00000000ULL) | uint64(uint32(legacyId));
-}
-
-constexpr auto kUninitializedBackground = FromLegacyBackgroundId(-999);
-constexpr auto kTestingThemeBackground = FromLegacyBackgroundId(-666);
-constexpr auto kTestingDefaultBackground = FromLegacyBackgroundId(-665);
-constexpr auto kTestingEditorBackground = FromLegacyBackgroundId(-664);
-constexpr auto kLegacyBackgroundId = int32(-111);
-
-} // namespace details
-
-constexpr auto kThemeBackground = details::FromLegacyBackgroundId(-2);
-constexpr auto kCustomBackground = details::FromLegacyBackgroundId(-1);
-constexpr auto kInitialBackground = details::FromLegacyBackgroundId(0);
-constexpr auto kDefaultBackground = details::FromLegacyBackgroundId(105);
 
 constexpr auto kMinimumTiledSize = 512;
 
@@ -89,8 +153,8 @@ void Revert();
 
 bool LoadFromFile(const QString &file, Instance *out, QByteArray *outContent);
 bool IsPaletteTestingPath(const QString &path);
-
-[[nodiscard]] std::optional<QColor> GetWallPaperColor(const QString &slug);
+QColor CountAverageColor(const QImage &image);
+QColor AdjustedColor(QColor original, QColor background);
 
 struct BackgroundUpdate {
 	enum class Type {
@@ -120,7 +184,7 @@ public:
 
 	// This method is setting the default (themed) image if none was set yet.
 	void start();
-	void setImage(const Data::WallPaper &paper, QImage &&image = QImage());
+	void set(const Data::WallPaper &paper, QImage image = QImage());
 	void setTile(bool tile);
 	void setTileDayValue(bool tile);
 	void setTileNightValue(bool tile);
@@ -133,16 +197,16 @@ public:
 	void setTestingDefaultTheme();
 	void revert();
 
-	[[nodiscard]] WallPaperId id() const;
+	[[nodiscard]] WallPaperId id() const {
+		return _paper.id();
+	}
 	[[nodiscard]] const QPixmap &pixmap() const {
 		return _pixmap;
 	}
 	[[nodiscard]] const QPixmap &pixmapForTiled() const {
 		return _pixmapForTiled;
 	}
-	[[nodiscard]] std::optional<QColor> color() const {
-		return _paperColor;
-	}
+	[[nodiscard]] std::optional<QColor> colorForFill() const;
 	[[nodiscard]] QImage createCurrentImage() const;
 	[[nodiscard]] bool tile() const;
 	[[nodiscard]] bool tileDay() const;
@@ -158,12 +222,13 @@ private:
 
 	void ensureStarted();
 	void saveForRevert();
-	void setPreparedImage(QImage &&image);
+	void setPreparedImage(QImage original, QImage prepared);
+	void preparePixmaps(QImage image);
 	void writeNewBackgroundSettings();
 	void setPaper(const Data::WallPaper &paper);
 
 	[[nodiscard]] bool adjustPaletteRequired();
-	void adjustPaletteUsingBackground(const QImage &img);
+	void adjustPaletteUsingBackground(const QImage &image);
 	void adjustPaletteUsingColor(QColor color);
 	void restoreAdjustableColors();
 
@@ -181,8 +246,9 @@ private:
 	friend void KeepApplied();
 	friend bool IsNonDefaultBackground();
 
-	Data::WallPaper _paper = { details::kUninitializedBackground };
+	Data::WallPaper _paper = Data::details::UninitializedWallPaper();
 	std::optional<QColor> _paperColor;
+	QImage _original;
 	QPixmap _pixmap;
 	QPixmap _pixmapForTiled;
 	bool _nightMode = false;
@@ -193,8 +259,9 @@ private:
 	QImage _themeImage;
 	bool _themeTile = false;
 
-	Data::WallPaper _paperForRevert = { details::kUninitializedBackground };
-	QImage _imageForRevert;
+	Data::WallPaper _paperForRevert
+		= Data::details::UninitializedWallPaper();
+	QImage _originalForRevert;
 	bool _tileForRevert = false;
 
 	std::vector<AdjustableColor> _adjustableColors;

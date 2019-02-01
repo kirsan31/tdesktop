@@ -12,7 +12,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "mainwidget.h"
 #include "mainwindow.h"
 #include "apiwrap.h"
-#include "application.h"
 #include "history/history.h"
 #include "history/history_item.h"
 #include "ui/widgets/checkbox.h"
@@ -689,7 +688,7 @@ std::vector<not_null<UserData*>> ConfirmInviteBox::GetParticipants(
 	auto result = std::vector<not_null<UserData*>>();
 	result.reserve(v.size());
 	for (const auto &participant : v) {
-		if (const auto user = App::feedUser(participant)) {
+		if (const auto user = Auth().data().processUser(participant)) {
 			result.push_back(user);
 		}
 	}

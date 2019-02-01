@@ -21,7 +21,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "lang/lang_keys.h"
 #include "apiwrap.h"
 #include "mainwidget.h"
-#include "application.h"
 #include "mainwindow.h"
 #include "storage/localstorage.h"
 #include "observer_peer.h"
@@ -586,6 +585,7 @@ HistoryItem *History::addNewToLastBlock(
 		applyMessageChanges(item, msg);
 	}
 	const auto result = addNewItem(item, newUnreadMessage);
+	checkForLoadedAtTop(result);
 	if (type == NewMessageLast) {
 		// When we add just one last item, like we do while loading dialogs,
 		// we want to remove a single added grouped media, otherwise it will
@@ -597,6 +597,22 @@ HistoryItem *History::addNewToLastBlock(
 		removeOrphanMediaGroupPart();
 	}
 	return result;
+}
+
+void History::checkForLoadedAtTop(not_null<HistoryItem*> added) {
+	if (peer->isChat()) {
+		if (added->isGroupEssential() && !added->isGroupMigrate()) {
+			// We added the first message about group creation.
+			_loadedAtTop = true;
+			addEdgesToSharedMedia();
+		}
+	} else if (peer->isChannel()) {
+		if (added->id == 1) {
+			_loadedAtTop = true;
+			checkJoinedMessage();
+			addEdgesToSharedMedia();
+		}
+	}
 }
 
 HistoryItem *History::addToHistory(const MTPMessage &msg) {
@@ -749,9 +765,9 @@ void History::eraseFromUnreadMentions(MsgId msgId) {
 void History::addUnreadMentionsSlice(const MTPmessages_Messages &result) {
 	auto count = 0;
 	auto messages = (const QVector<MTPMessage>*)nullptr;
-	auto getMessages = [](auto &list) {
-		App::feedUsers(list.vusers);
-		App::feedChats(list.vchats);
+	auto getMessages = [&](auto &list) {
+		owner().processUsers(list.vusers);
+		owner().processChats(list.vchats);
 		return &list.vmessages.v;
 	};
 	switch (result.type()) {
@@ -935,12 +951,11 @@ void History::applyServiceChanges(
 	switch (action.type()) {
 	case mtpc_messageActionChatAddUser: {
 		auto &d = action.c_messageActionChatAddUser();
-		if (auto megagroup = peer->asMegagroup()) {
-			auto mgInfo = megagroup->mgInfo.get();
+		if (const auto megagroup = peer->asMegagroup()) {
+			const auto mgInfo = megagroup->mgInfo.get();
 			Assert(mgInfo != nullptr);
-			auto &v = d.vusers.v;
-			for (auto i = 0, l = v.size(); i != l; ++i) {
-				if (auto user = App::userLoaded(peerFromUser(v[i]))) {
+			for (const auto &userId : d.vusers.v) {
+				if (const auto user = owner().userLoaded(userId.v)) {
 					if (!base::contains(mgInfo->lastParticipants, user)) {
 						mgInfo->lastParticipants.push_front(user);
 						Notify::peerUpdatedDelayed(peer, Notify::PeerUpdate::Flag::MembersChanged);
@@ -986,12 +1001,12 @@ void History::applyServiceChanges(
 
 	case mtpc_messageActionChatDeleteUser: {
 		auto &d = action.c_messageActionChatDeleteUser();
-		auto uid = peerFromUser(d.vuser_id);
-		if (lastKeyboardFrom == uid) {
+		auto uid = d.vuser_id.v;
+		if (lastKeyboardFrom == peerFromUser(uid)) {
 			clearLastKeyboard();
 		}
 		if (auto megagroup = peer->asMegagroup()) {
-			if (auto user = App::userLoaded(uid)) {
+			if (auto user = owner().userLoaded(uid)) {
 				auto mgInfo = megagroup->mgInfo.get();
 				Assert(mgInfo != nullptr);
 				auto i = ranges::find(
@@ -1030,7 +1045,7 @@ void History::applyServiceChanges(
 		if (d.vphoto.type() == mtpc_photo) {
 			auto &sizes = d.vphoto.c_photo().vsizes.v;
 			if (!sizes.isEmpty()) {
-				auto photo = _owner->photo(d.vphoto.c_photo());
+				auto photo = _owner->processPhoto(d.vphoto.c_photo());
 				if (photo) photo->peer = peer;
 				auto &smallSize = sizes.front();
 				auto &bigSize = sizes.back();
@@ -1067,7 +1082,7 @@ void History::applyServiceChanges(
 		if (const auto chat = peer->asChat()) {
 			chat->addFlags(MTPDchat::Flag::f_deactivated);
 			const auto &d = action.c_messageActionChatMigrateTo();
-			if (const auto channel = App::channelLoaded(d.vchannel_id.v)) {
+			if (const auto channel = owner().channelLoaded(d.vchannel_id.v)) {
 				Data::ApplyMigration(chat, channel);
 			}
 		}
@@ -1077,7 +1092,7 @@ void History::applyServiceChanges(
 		if (const auto channel = peer->asChannel()) {
 			channel->addFlags(MTPDchannel::Flag::f_megagroup);
 			const auto &d = action.c_messageActionChannelMigrateFrom();
-			if (const auto chat = App::chatLoaded(d.vchat_id.v)) {
+			if (const auto chat = owner().chatLoaded(d.vchat_id.v)) {
 				Data::ApplyMigration(chat, channel);
 			}
 		}
@@ -1465,7 +1480,7 @@ void History::inboxRead(MsgId upTo) {
 	setInboxReadTill(upTo);
 	updateChatListEntry();
 	if (peer->migrateTo()) {
-		if (auto migrateTo = App::historyLoaded(peer->migrateTo()->id)) {
+		if (auto migrateTo = peer->owner().historyLoaded(peer->migrateTo()->id)) {
 			migrateTo->updateChatListEntry();
 		}
 	}
@@ -1882,7 +1897,7 @@ History *History::migrateSibling() const {
 		}
 		return PeerId(0);
 	}();
-	return App::historyLoaded(addFromId);
+	return owner().historyLoaded(addFromId);
 }
 
 int History::chatListUnreadCount() const {
@@ -1980,7 +1995,7 @@ bool History::loadedAtTop() const {
 bool History::isReadyFor(MsgId msgId) {
 	if (msgId < 0 && -msgId < ServerMaxMsgId && peer->migrateFrom()) {
 		// Old group history.
-		return App::history(peer->migrateFrom()->id)->isReadyFor(-msgId);
+		return owner().history(peer->migrateFrom()->id)->isReadyFor(-msgId);
 	}
 
 	if (msgId == ShowAtTheEndMsgId) {
@@ -1988,7 +2003,7 @@ bool History::isReadyFor(MsgId msgId) {
 	}
 	if (msgId == ShowAtUnreadMsgId) {
 		if (const auto migratePeer = peer->migrateFrom()) {
-			if (const auto migrated = App::historyLoaded(migratePeer)) {
+			if (const auto migrated = owner().historyLoaded(migratePeer)) {
 				if (migrated->unreadCount()) {
 					return migrated->isReadyFor(msgId);
 				}
@@ -2009,7 +2024,7 @@ bool History::isReadyFor(MsgId msgId) {
 
 void History::getReadyFor(MsgId msgId) {
 	if (msgId < 0 && -msgId < ServerMaxMsgId && peer->migrateFrom()) {
-		const auto migrated = App::history(peer->migrateFrom()->id);
+		const auto migrated = owner().history(peer->migrateFrom()->id);
 		migrated->getReadyFor(-msgId);
 		if (migrated->isEmpty()) {
 			unloadBlocks();
@@ -2018,7 +2033,7 @@ void History::getReadyFor(MsgId msgId) {
 	}
 	if (msgId == ShowAtUnreadMsgId) {
 		if (const auto migratePeer = peer->migrateFrom()) {
-			if (const auto migrated = App::historyLoaded(migratePeer)) {
+			if (const auto migrated = owner().historyLoaded(migratePeer)) {
 				if (migrated->unreadCount()) {
 					unloadBlocks();
 					migrated->getReadyFor(msgId);
@@ -2030,7 +2045,7 @@ void History::getReadyFor(MsgId msgId) {
 	if (!isReadyFor(msgId)) {
 		unloadBlocks();
 		if (const auto migratePeer = peer->migrateFrom()) {
-			if (const auto migrated = App::historyLoaded(migratePeer)) {
+			if (const auto migrated = owner().historyLoaded(migratePeer)) {
 				migrated->unloadBlocks();
 			}
 		}
@@ -2130,7 +2145,7 @@ auto History::computeChatListMessageFromLast() const
 	// about migration in the chats list and display the last
 	// non-migration message from the original legacy group.
 	const auto last = lastMessage();
-	if (!last || !last->isGroupEssential() || !last->isEmpty()) {
+	if (!last || !last->isGroupMigrate()) {
 		return _lastMessage;
 	}
 	if (const auto chat = peer->asChat()) {
@@ -2216,7 +2231,7 @@ void History::setFakeChatListMessageFrom(const MTPmessages_Messages &data) {
 		}
 	});
 	const auto last = lastMessage();
-	if (!last || !last->isGroupEssential() || !last->isEmpty()) {
+	if (!last || !last->isGroupMigrate()) {
 		// Last message is good enough.
 		return;
 	}
@@ -2239,7 +2254,7 @@ void History::setFakeChatListMessageFrom(const MTPmessages_Messages &data) {
 		return;
 	}
 	const auto item = owner().addNewMessage(*other, NewMessageExisting);
-	if (!item || (item->isGroupEssential() && item->isEmpty())) {
+	if (!item || item->isGroupMigrate()) {
 		// Not better than the last one.
 		return;
 	}
@@ -2287,6 +2302,10 @@ bool History::shouldBeInChatList() const {
 		} else if (const auto feed = channel->feed()) {
 			return !feed->needUpdateInChatList();
 		}
+	} else if (const auto chat = peer->asChat()) {
+		return chat->amIn()
+			|| !lastMessageKnown()
+			|| (lastMessage() != nullptr);
 	}
 	return true;
 }
@@ -2362,7 +2381,7 @@ void History::dialogEntryApplied() {
 		} else if (const auto channel = peer->asChannel()) {
 			const auto inviter = channel->inviter;
 			if (inviter != 0 && channel->amIn()) {
-				if (const auto from = App::userLoaded(inviter)) {
+				if (const auto from = owner().userLoaded(inviter)) {
 					unloadBlocks();
 					addNewerSlice(QVector<MTPMessage>());
 					insertJoinedMessage(true);
@@ -2380,7 +2399,7 @@ void History::dialogEntryApplied() {
 			if (inviter > 0
 				&& chatListTimeId() <= channel->inviteDate
 				&& channel->amIn()) {
-				if (const auto from = App::userLoaded(inviter)) {
+				if (const auto from = owner().userLoaded(inviter)) {
 					insertJoinedMessage(true);
 				}
 			}
@@ -2561,15 +2580,15 @@ bool History::isMegagroup() const {
 
 not_null<History*> History::migrateToOrMe() const {
 	if (const auto to = peer->migrateTo()) {
-		return App::history(to);
+		return owner().history(to);
 	}
-	// We could get it by App::history(peer), but we optimize.
+	// We could get it by owner().history(peer), but we optimize.
 	return const_cast<History*>(this);
 }
 
 History *History::migrateFrom() const {
 	if (const auto from = peer->migrateFrom()) {
-		return App::history(from);
+		return owner().history(from);
 	}
 	return nullptr;
 }
@@ -2615,7 +2634,7 @@ HistoryService *History::insertJoinedMessage(bool unread) {
 	}
 
 	const auto inviter = (peer->asChannel()->inviter > 0)
-		? App::userLoaded(peer->asChannel()->inviter)
+		? owner().userLoaded(peer->asChannel()->inviter)
 		: nullptr;
 	if (!inviter) {
 		return nullptr;
@@ -2732,19 +2751,37 @@ bool History::isEmpty() const {
 }
 
 bool History::isDisplayedEmpty() const {
+	if (!loadedAtTop() || !loadedAtBottom()) {
+		return false;
+	}
 	const auto first = findFirstNonEmpty();
 	if (!first) {
 		return true;
-	} else if (!first->data()->isGroupEssential()) {
-		return false;
-	} else if (const auto chat = peer->asChat()) {
-		// For legacy chats we want to show the chat with only first
-		// message about you creating the group as an empty chat with
-		// a nice information about the group features.
-		return chat->amCreator() && (findLastNonEmpty() == first);
-	} else {
+	}
+	const auto chat = peer->asChat();
+	if (!chat || !chat->amCreator()) {
 		return false;
 	}
+
+	// For legacy chats we want to show the chat with only
+	// messages about you creating the group and maybe about you
+	// changing the group photo as an empty chat with
+	// a nice information about the group features.
+	if (nonEmptyCountMoreThan(2)) {
+		return false;
+	}
+	const auto isChangePhoto = [](not_null<HistoryItem*> item) {
+		if (const auto media = item->media()) {
+			return (media->photo() != nullptr) && !item->toHistoryMessage();
+		}
+		return false;
+	};
+	const auto last = findLastNonEmpty();
+	if (first == last) {
+		return first->data()->isGroupEssential()
+			|| isChangePhoto(first->data());
+	}
+	return first->data()->isGroupEssential() && isChangePhoto(last->data());
 }
 
 auto History::findFirstNonEmpty() const -> Element* {
@@ -2767,6 +2804,21 @@ auto History::findLastNonEmpty() const -> Element* {
 		}
 	}
 	return nullptr;
+}
+
+bool History::nonEmptyCountMoreThan(int count) const {
+	Expects(count >= 0);
+
+	for (const auto &block : blocks) {
+		for (const auto &element : block->messages) {
+			if (!element->data()->isEmpty()) {
+				if (!count--) {
+					return true;
+				}
+			}
+		}
+	}
+	return false;
 }
 
 bool History::hasOrphanMediaGroupPart() const {

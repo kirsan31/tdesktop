@@ -13,7 +13,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "auth_session.h"
 
 namespace Data {
-struct WallPaper;
+class WallPaper;
 } // namespace Data
 
 namespace Lang {
@@ -140,7 +140,7 @@ void writeSavedGifs();
 void readSavedGifs();
 int32 countSavedGifsHash();
 
-void writeBackground(const Data::WallPaper &paper, const QImage &img);
+void writeBackground(const Data::WallPaper &paper, const QImage &image);
 bool readBackground();
 
 void writeTheme(const Window::Theme::Saved &saved);

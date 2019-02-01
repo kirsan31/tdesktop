@@ -145,8 +145,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_sure_add_admin_invite_channel" = "This user is not a subscriber of this channel. Add them to the channel and promote them to admin?";
 "lng_sure_add_admin_unremove" = "This user is currently restricted or removed. Are you sure you want to promote them?";
 "lng_sure_ban_admin" = "This user is an admin. Are you sure you want to go ahead and restrict them?";
-"lng_sure_remove_user_group" = "Remove {user} from the group?";
-"lng_sure_remove_user_channel" = "Remove {user} from the channel?";
 "lng_sure_enable_socks" = "Are you sure you want to enable this proxy?\n\nServer: {server}\nPort: {port}\n\nYou can change your proxy server later in the Settings (Connection Type).";
 "lng_sure_enable" = "Enable";
 
@@ -398,10 +396,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_theme_keep_changes" = "Keep changes";
 "lng_theme_revert" = "Revert";
 "lng_background_header" = "Background preview";
-"lng_background_text1" = "You can't swipe left or right to preview anything - this is tdesktop, sorry.";
-"lng_background_text2" = "Sounds awful.";
+"lng_background_text1" = "Ah, you kids today with techno music! You should enjoy the classics, like Hasselhoff!";
+"lng_background_text2" = "I can't even take you seriously right now.";
 "lng_background_bad_link" = "This background link appears to be invalid.";
 "lng_background_apply" = "Apply";
+"lng_background_share" = "Share";
+"lng_background_link_copied" = "Link copied to clipboard";
 
 "lng_download_path_ask" = "Ask download path for each file";
 "lng_download_path" = "Download path";
@@ -1035,6 +1035,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_media_animation_title" = "Animated GIFs";
 "lng_media_size_limit" = "Limit by size";
 "lng_media_size_up_to" = "up to {size}";
+"lng_media_chat_background" = "Chat background";
 
 "lng_emoji_category1" = "People";
 "lng_emoji_category2" = "Nature";

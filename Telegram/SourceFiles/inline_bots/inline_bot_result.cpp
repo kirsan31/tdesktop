@@ -102,16 +102,16 @@ std::unique_ptr<Result> Result::create(uint64 queryId, const MTPBotInlineResult 
 		if (r.has_title()) result->_title = qs(r.vtitle);
 		if (r.has_description()) result->_description = qs(r.vdescription);
 		if (r.has_photo()) {
-			result->_photo = Auth().data().photo(r.vphoto);
+			result->_photo = Auth().data().processPhoto(r.vphoto);
 		}
 		if (r.has_document()) {
-			result->_document = Auth().data().document(r.vdocument);
+			result->_document = Auth().data().processDocument(r.vdocument);
 		}
 		message = &r.vsend_message;
 	} break;
 	}
-	auto badAttachment = (result->_photo && result->_photo->full->isNull())
-		|| (result->_document && !result->_document->isValid());
+	auto badAttachment = (result->_photo && result->_photo->isNull())
+		|| (result->_document && result->_document->isNull());
 
 	if (!message) {
 		return nullptr;
@@ -246,11 +246,10 @@ std::unique_ptr<Result> Result::create(uint64 queryId, const MTPBotInlineResult 
 
 bool Result::onChoose(Layout::ItemBase *layout) {
 	if (_photo && _type == Type::Photo) {
-		if (_photo->medium->loaded() || _photo->thumb->loaded()) {
+		if (_photo->thumbnail()->loaded()) {
 			return true;
-		} else if (!_photo->medium->loading()) {
-			_photo->thumb->loadEvenCancelled(Data::FileOrigin());
-			_photo->medium->loadEvenCancelled(Data::FileOrigin());
+		} else if (!_photo->thumbnail()->loading()) {
+			_photo->thumbnail()->loadEvenCancelled(Data::FileOrigin());
 		}
 		return false;
 	}

@@ -342,7 +342,9 @@ bool ChannelData::hiddenPreHistory() const {
 }
 
 bool ChannelData::canAddMembers() const {
-	return !amRestricted(ChatRestriction::f_invite_users);
+	return isMegagroup()
+		? !amRestricted(ChatRestriction::f_invite_users)
+		: ((adminRights() & AdminRight::f_invite_users) || amCreator());
 }
 
 bool ChannelData::canSendPolls() const {
@@ -381,7 +383,9 @@ bool ChannelData::canViewBanned() const {
 }
 
 bool ChannelData::canEditInformation() const {
-	return !amRestricted(Restriction::f_change_info);
+	return isMegagroup()
+		? !amRestricted(Restriction::f_change_info)
+		: ((adminRights() & AdminRight::f_change_info) || amCreator());
 }
 
 bool ChannelData::canEditPermissions() const {

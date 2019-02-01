@@ -9,6 +9,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "layout.h"
 #include "core/click_handler_types.h"
+#include "lang/lang_keys.h"
 #include "history/history_item_components.h"
 #include "history/history_item.h"
 #include "history/history.h"
@@ -34,14 +35,16 @@ namespace {
 
 constexpr auto kMaxOriginalEntryLines = 8192;
 
-int articleThumbWidth(PhotoData *thumb, int height) {
-	auto w = thumb->medium->width();
-	auto h = thumb->medium->height();
+int articleThumbWidth(not_null<PhotoData*> thumb, int height) {
+	auto w = thumb->thumbnail()->width();
+	auto h = thumb->thumbnail()->height();
 	return qMax(qMin(height * w / h, height), 1);
 }
 
-int articleThumbHeight(PhotoData *thumb, int width) {
-	return qMax(thumb->medium->height() * width / thumb->medium->width(), 1);
+int articleThumbHeight(not_null<PhotoData*> thumb, int width) {
+	return qMax(
+		thumb->thumbnail()->height() * width / thumb->thumbnail()->width(),
+		1);
 }
 
 std::vector<std::unique_ptr<Data::Media>> PrepareCollageMedia(
@@ -130,6 +133,12 @@ QSize HistoryWebPage::countOptimalSize() {
 		_openl = previewOfHiddenUrl
 			? std::make_shared<HiddenUrlClickHandler>(_data->url)
 			: std::make_shared<UrlClickHandler>(_data->url, true);
+		if (_data->document && _data->document->isWallPaper()) {
+			_openl = std::make_shared<DocumentWrappedClickHandler>(
+				std::move(_openl),
+				_data->document,
+				_parent->data()->fullId());
+		}
 	}
 
 	// init layout
@@ -167,7 +176,8 @@ QSize HistoryWebPage::countOptimalSize() {
 			_parent,
 			_data->document,
 			_data->photo,
-			_collage);
+			_collage,
+			_data->url);
 	}
 
 	auto textFloatsAroundInfo = !_asArticle && !_attach && isBubbleBottom();
@@ -200,8 +210,8 @@ QSize HistoryWebPage::countOptimalSize() {
 			title,
 			Ui::WebpageTextTitleOptions());
 	}
-	if (!_siteNameWidth && !_data->siteName.isEmpty()) {
-		_siteNameWidth = st::webPageTitleFont->width(_data->siteName);
+	if (!_siteNameWidth && !displayedSiteName().isEmpty()) {
+		_siteNameWidth = st::webPageTitleFont->width(displayedSiteName());
 	}
 
 	// init dimensions
@@ -210,7 +220,7 @@ QSize HistoryWebPage::countOptimalSize() {
 	auto maxWidth = skipBlockWidth;
 	auto minHeight = 0;
 
-	auto siteNameHeight = _data->siteName.isEmpty() ? 0 : lineHeight;
+	auto siteNameHeight = _siteNameWidth ? lineHeight : 0;
 	auto titleMinHeight = _title.isEmpty() ? 0 : lineHeight;
 	auto descMaxLines = isLogEntryOriginal() ? kMaxOriginalEntryLines : (3 + (siteNameHeight ? 0 : 1) + (titleMinHeight ? 0 : 1));
 	auto descriptionMinHeight = _description.isEmpty() ? 0 : qMin(_description.minHeight(), descMaxLines * lineHeight);
@@ -221,7 +231,7 @@ QSize HistoryWebPage::countOptimalSize() {
 	}
 
 	if (_siteNameWidth) {
-		if (_title.isEmpty() && _description.isEmpty()) {
+		if (_title.isEmpty() && _description.isEmpty() && textFloatsAroundInfo) {
 			accumulate_max(maxWidth, _siteNameWidth + _parent->skipBlockWidth());
 		} else {
 			accumulate_max(maxWidth, _siteNameWidth + articlePhotoMaxWidth);
@@ -410,22 +420,25 @@ void HistoryWebPage::draw(Painter &p, const QRect &r, TextSelection selection, T
 	auto lineHeight = unitedLineHeight();
 	if (_asArticle) {
 		const auto contextId = _parent->data()->fullId();
-		_data->photo->medium->load(contextId, false, false);
-		bool full = _data->photo->medium->loaded();
+		_data->photo->loadThumbnail(contextId);
+		bool full = _data->photo->thumbnail()->loaded();
 		QPixmap pix;
 		auto pw = qMax(_pixw, lineHeight);
 		auto ph = _pixh;
 		auto pixw = _pixw, pixh = articleThumbHeight(_data->photo, _pixw);
-		auto maxw = ConvertScale(_data->photo->medium->width()), maxh = ConvertScale(_data->photo->medium->height());
+		const auto maxw = ConvertScale(_data->photo->thumbnail()->width());
+		const auto maxh = ConvertScale(_data->photo->thumbnail()->height());
 		if (pixw * ph != pixh * pw) {
 			float64 coef = (pixw * ph > pixh * pw) ? qMin(ph / float64(pixh), maxh / float64(pixh)) : qMin(pw / float64(pixw), maxw / float64(pixw));
 			pixh = qRound(pixh * coef);
 			pixw = qRound(pixw * coef);
 		}
 		if (full) {
-			pix = _data->photo->medium->pixSingle(contextId, pixw, pixh, pw, ph, ImageRoundRadius::Small);
-		} else {
-			pix = _data->photo->thumb->pixBlurredSingle(contextId, pixw, pixh, pw, ph, ImageRoundRadius::Small);
+			pix = _data->photo->thumbnail()->pixSingle(contextId, pixw, pixh, pw, ph, ImageRoundRadius::Small);
+		} else if (_data->photo->thumbnailSmall()->loaded()) {
+			pix = _data->photo->thumbnailSmall()->pixBlurredSingle(contextId, pixw, pixh, pw, ph, ImageRoundRadius::Small);
+		} else if (const auto blurred = _data->photo->thumbnailInline()) {
+			pix = blurred->pixBlurredSingle(contextId, pixw, pixh, pw, ph, ImageRoundRadius::Small);
 		}
 		p.drawPixmapLeft(padding.left() + paintw - pw, tshift, width(), pix);
 		if (selected) {
@@ -436,7 +449,7 @@ void HistoryWebPage::draw(Painter &p, const QRect &r, TextSelection selection, T
 	if (_siteNameWidth) {
 		p.setFont(st::webPageTitleFont);
 		p.setPen(semibold);
-		p.drawTextLeft(padding.left(), tshift, width(), (paintw >= _siteNameWidth) ? _data->siteName : st::webPageTitleFont->elided(_data->siteName, paintw));
+		p.drawTextLeft(padding.left(), tshift, width(), (paintw >= _siteNameWidth) ? displayedSiteName() : st::webPageTitleFont->elided(displayedSiteName(), paintw));
 		tshift += lineHeight;
 	}
 	if (_titleLines) {
@@ -590,24 +603,36 @@ TextState HistoryWebPage::textState(QPoint point, StateRequest request) const {
 			auto attachTop = tshift - bubble.top();
 			if (rtl()) attachLeft = width() - attachLeft - _attach->width();
 			result = _attach->textState(point - QPoint(attachLeft, attachTop), request);
-
-			if (result.link && !_data->document && _data->photo && _collage.empty() && _attach->isReadyForOpen()) {
-				if (_data->type == WebPageType::Profile
-					|| _data->type == WebPageType::Video) {
-					result.link = _openl;
-				} else if (_data->type == WebPageType::Photo
-					|| _data->siteName == qstr("Twitter")
-					|| _data->siteName == qstr("Facebook")) {
-					// leave photo link
-				} else {
-					result.link = _openl;
-				}
-			}
+			result.link = replaceAttachLink(result.link);
 		}
 	}
 
 	result.symbol += symbolAdd;
 	return result;
+}
+
+ClickHandlerPtr HistoryWebPage::replaceAttachLink(
+		const ClickHandlerPtr &link) const {
+	if (!link || !_attach->isReadyForOpen() || !_collage.empty()) {
+		return link;
+	}
+	if (_data->document) {
+		if (_data->document->isWallPaper()) {
+			return _openl;
+		}
+	} else if (_data->photo) {
+		if (_data->type == WebPageType::Profile
+			|| _data->type == WebPageType::Video) {
+			return _openl;
+		} else if (_data->type == WebPageType::Photo
+			|| _data->siteName == qstr("Twitter")
+			|| _data->siteName == qstr("Facebook")) {
+			// leave photo link
+		} else {
+			return _openl;
+		}
+	}
+	return link;
 }
 
 TextSelection HistoryWebPage::adjustSelection(TextSelection selection, TextSelectType type) const {
@@ -632,6 +657,12 @@ void HistoryWebPage::clickHandlerPressedChanged(const ClickHandlerPtr &p, bool p
 	if (_attach) {
 		_attach->clickHandlerPressedChanged(p, pressed);
 	}
+}
+
+bool HistoryWebPage::enforceBubbleWidth() const {
+	return (_attach != nullptr)
+		&& (_data->document != nullptr)
+		&& _data->document->isWallPaper();
 }
 
 void HistoryWebPage::playAnimation(bool autoplay) {
@@ -692,6 +723,12 @@ int HistoryWebPage::bottomInfoPadding() const {
 	// back with st::msgPadding.bottom() instead of left().
 	result += st::msgPadding.bottom() - st::msgPadding.left();
 	return result;
+}
+
+QString HistoryWebPage::displayedSiteName() const {
+	return (_data->document && _data->document->isWallPaper())
+		? lang(lng_media_chat_background)
+		: _data->siteName;
 }
 
 HistoryWebPage::~HistoryWebPage() {

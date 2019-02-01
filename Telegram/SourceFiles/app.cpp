@@ -7,11 +7,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "app.h"
 
-#include "styles/style_overview.h"
-#include "styles/style_mediaview.h"
-#include "styles/style_chat_helpers.h"
-#include "styles/style_history.h"
-#include "styles/style_boxes.h"
 #include "lang/lang_keys.h"
 #include "boxes/confirm_box.h"
 #include "data/data_channel.h"
@@ -30,6 +25,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "inline_bots/inline_bot_layout_item.h"
 #include "core/crash_reports.h"
 #include "core/update_checker.h"
+#include "core/sandbox.h"
+#include "core/application.h"
 #include "window/themes/window_theme.h"
 #include "window/notifications_manager.h"
 #include "platform/platform_notifications_manager.h"
@@ -37,14 +34,17 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "storage/localstorage.h"
 #include "storage/storage_facade.h"
 #include "storage/storage_shared_media.h"
-#include "messenger.h"
-#include "application.h"
 #include "mainwindow.h"
 #include "mainwidget.h"
 #include "apiwrap.h"
 #include "numbers.h"
 #include "observer_peer.h"
 #include "auth_session.h"
+#include "styles/style_overview.h"
+#include "styles/style_mediaview.h"
+#include "styles/style_chat_helpers.h"
+#include "styles/style_history.h"
+#include "styles/style_boxes.h"
 
 #ifdef OS_MAC_OLD
 #include <libexif/exif-data.h>
@@ -117,8 +117,8 @@ namespace App {
 	}
 
 	MainWindow *wnd() {
-		if (auto instance = Messenger::InstancePointer()) {
-			return instance->getActiveWindow();
+		if (Core::Sandbox::Instance().applicationLaunched()) {
+			return Core::App().getActiveWindow();
 		}
 		return nullptr;
 	}
@@ -128,22 +128,6 @@ namespace App {
 			return window->mainWidget();
 		}
 		return nullptr;
-	}
-
-	UserData *feedUser(const MTPUser &user) {
-		return Auth().data().user(user);
-	}
-
-	UserData *feedUsers(const MTPVector<MTPUser> &users) {
-		return Auth().data().processUsers(users);
-	}
-
-	PeerData *feedChat(const MTPChat &chat) {
-		return Auth().data().chat(chat);
-	}
-
-	PeerData *feedChats(const MTPVector<MTPChat> &chats) {
-		return Auth().data().processChats(chats);
 	}
 
 	bool checkEntitiesAndViewsUpdate(const MTPDmessage &m) {
@@ -337,13 +321,13 @@ namespace App {
 	}
 
 	void feedInboxRead(const PeerId &peer, MsgId upTo) {
-		if (const auto history = App::historyLoaded(peer)) {
+		if (const auto history = Auth().data().historyLoaded(peer)) {
 			history->inboxRead(upTo);
 		}
 	}
 
 	void feedOutboxRead(const PeerId &peer, MsgId upTo, TimeId when) {
-		if (auto history = App::historyLoaded(peer)) {
+		if (auto history = Auth().data().historyLoaded(peer)) {
 			history->outboxRead(upTo);
 			if (const auto user = history->peer->asUser()) {
 				user->madeAction(when);
@@ -371,7 +355,7 @@ namespace App {
 		if (!data) return;
 
 		const auto affectedHistory = (channelId != NoChannel)
-			? App::history(peerFromChannel(channelId)).get()
+			? Auth().data().history(peerFromChannel(channelId)).get()
 			: nullptr;
 
 		auto historiesToCheck = base::flat_set<not_null<History*>>();
@@ -393,7 +377,7 @@ namespace App {
 	}
 
 	void feedUserLink(MTPint userId, const MTPContactLink &myLink, const MTPContactLink &foreignLink) {
-		if (const auto user = userLoaded(userId.v)) {
+		if (const auto user = Auth().data().userLoaded(userId.v)) {
 			const auto wasShowPhone = (user->contactStatus() == UserData::ContactStatus::CanAdd);
 			switch (myLink.type()) {
 			case mtpc_contactLinkContact:
@@ -431,49 +415,8 @@ namespace App {
 		}
 	}
 
-	not_null<PeerData*> peer(PeerId id) {
-		return Auth().data().peer(id);
-	}
-	not_null<UserData*> user(UserId id) {
-		return Auth().data().user(id);
-	}
-	not_null<ChatData*> chat(ChatId id) {
-		return Auth().data().chat(id);
-	}
-	not_null<ChannelData*> channel(ChannelId id) {
-		return Auth().data().channel(id);
-	}
-	PeerData *peerLoaded(PeerId id) {
-		return Auth().data().peerLoaded(id);
-	}
-	UserData *userLoaded(UserId id) {
-		return Auth().data().userLoaded(id);
-	}
-	ChatData *chatLoaded(ChatId id) {
-		return Auth().data().chatLoaded(id);
-	}
-	ChannelData *channelLoaded(ChannelId id) {
-		return Auth().data().channelLoaded(id);
-	}
-
 	QString peerName(const PeerData *peer, bool forDialogs) {
 		return peer ? ((forDialogs && peer->isUser() && !peer->asUser()->nameOrPhone.isEmpty()) ? peer->asUser()->nameOrPhone : peer->name) : lang(lng_deleted);
-	}
-
-	not_null<History*> history(PeerId peer) {
-		return Auth().data().history(peer);
-	}
-
-	History *historyLoaded(PeerId peer) {
-		return Auth().data().historyLoaded(peer);
-	}
-
-	not_null<History*> history(not_null<const PeerData*> peer) {
-		return history(peer->id);
-	}
-
-	History *historyLoaded(const PeerData *peer) {
-		return peer ? historyLoaded(peer->id) : nullptr;
 	}
 
 	HistoryItem *histItemById(ChannelId channelId, MsgId itemId) {
@@ -810,14 +753,14 @@ namespace App {
 		setLaunchState(QuitRequested);
 
 		if (auto window = App::wnd()) {
-			if (!Core::App().isSavingSession()) {
+			if (!Core::Sandbox::Instance().isSavingSession()) {
 				window->hide();
 			}
 		}
 		if (auto mainwidget = App::main()) {
 			mainwidget->saveDraftToCloud();
 		}
-		Messenger::QuitAttempt();
+		Core::Application::QuitAttempt();
 	}
 
 	bool quitting() {

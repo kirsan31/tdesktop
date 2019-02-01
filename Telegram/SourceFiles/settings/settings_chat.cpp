@@ -146,7 +146,7 @@ void BackgroundRow::paintEvent(QPaintEvent *e) {
 	}
 	if (radial) {
 		const auto backThumb = App::main()->newBackgroundThumb();
-		if (backThumb->isNull()) {
+		if (!backThumb) {
 			p.drawPixmap(0, 0, _background);
 		} else {
 			const auto &pix = backThumb->pixBlurred(
@@ -265,7 +265,7 @@ void BackgroundRow::updateImage() {
 		Painter p(&back);
 		PainterHighQualityEnabler hq(p);
 
-		if (const auto color = Window::Theme::Background()->color()) {
+		if (const auto color = Window::Theme::Background()->colorForFill()) {
 			p.fillRect(
 				0,
 				0,
@@ -409,8 +409,8 @@ void ChooseFromFile(not_null<QWidget*> parent) {
 				4096 * image.width());
 		}
 
-		Window::Theme::Background()->setImage(
-			{ Window::Theme::kCustomBackground },
+		Window::Theme::Background()->set(
+			Data::CustomWallPaper(),
 			std::move(image));
 		Window::Theme::Background()->setTile(false);
 	};

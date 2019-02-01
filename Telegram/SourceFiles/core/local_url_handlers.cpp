@@ -20,9 +20,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "boxes/sticker_set_box.h"
 #include "passport/passport_form_controller.h"
 #include "window/window_controller.h"
+#include "data/data_session.h"
 #include "mainwindow.h"
 #include "mainwidget.h"
-#include "messenger.h"
+#include "core/application.h"
 #include "auth_session.h"
 #include "apiwrap.h"
 
@@ -37,13 +38,13 @@ bool JoinGroupByHash(const Match &match, const QVariant &context) {
 	}
 	const auto hash = match->captured(1);
 	Auth().api().checkChatInvite(hash, [=](const MTPChatInvite &result) {
-		Messenger::Instance().hideMediaView();
+		Core::App().hideMediaView();
 		result.match([=](const MTPDchatInvite &data) {
 			Ui::show(Box<ConfirmInviteBox>(data, [=] {
 				Auth().api().importChatInvite(hash);
 			}));
 		}, [=](const MTPDchatInviteAlready &data) {
-			if (const auto chat = App::feedChat(data.vchat)) {
+			if (const auto chat = Auth().data().processChat(data.vchat)) {
 				App::wnd()->controller()->showPeerHistory(
 					chat,
 					Window::SectionShow::Way::Forward);
@@ -53,7 +54,7 @@ bool JoinGroupByHash(const Match &match, const QVariant &context) {
 		if (error.code() != 400) {
 			return;
 		}
-		Messenger::Instance().hideMediaView();
+		Core::App().hideMediaView();
 		Ui::show(Box<InformBox>(lang(lng_group_invite_bad_link)));
 	});
 	return true;
@@ -63,7 +64,7 @@ bool ShowStickerSet(const Match &match, const QVariant &context) {
 	if (!AuthSession::Exists()) {
 		return false;
 	}
-	Messenger::Instance().hideMediaView();
+	Core::App().hideMediaView();
 	Ui::show(Box<StickerSetBox>(
 		MTP_inputStickerSetShortName(MTP_string(match->captured(1)))));
 	return true;
@@ -172,7 +173,7 @@ bool ShowWallPaper(const Match &match, const QVariant &context) {
 		qthelp::UrlParamNameTransform::ToLower);
 	return BackgroundPreviewBox::Start(
 		params.value(qsl("slug")),
-		params.value(qsl("mode")));
+		params);
 }
 
 bool ResolveUsername(const Match &match, const QVariant &context) {
@@ -307,6 +308,38 @@ const std::vector<LocalUrlHandler> &LocalUrlHandlers() {
 		}
 	};
 	return Result;
+}
+
+bool InternalPassportLink(const QString &url) {
+	const auto urlTrimmed = url.trimmed();
+	if (!urlTrimmed.startsWith(qstr("tg://"), Qt::CaseInsensitive)) {
+		return false;
+	}
+	const auto command = urlTrimmed.midRef(qstr("tg://").size());
+
+	using namespace qthelp;
+	const auto matchOptions = RegExOption::CaseInsensitive;
+	const auto authMatch = regex_match(
+		qsl("^passport/?\\?(.+)(#|$)"),
+		command,
+		matchOptions);
+	const auto usernameMatch = regex_match(
+		qsl("^resolve/?\\?(.+)(#|$)"),
+		command,
+		matchOptions);
+	const auto usernameValue = usernameMatch->hasMatch()
+		? url_parse_params(
+			usernameMatch->captured(1),
+			UrlParamNameTransform::ToLower).value(qsl("domain"))
+		: QString();
+	const auto authLegacy = (usernameValue == qstr("telegrampassport"));
+	return authMatch->hasMatch() || authLegacy;
+}
+
+bool StartUrlRequiresActivate(const QString &url) {
+	return Core::App().locked()
+		? true
+		: !InternalPassportLink(url);
 }
 
 } // namespace Core

@@ -27,7 +27,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "auth_session.h"
 #include "apiwrap.h"
 #include "media/media_audio.h"
-#include "messenger.h"
+#include "core/application.h"
 #include "mainwindow.h"
 #include "window/window_controller.h"
 #include "core/crash_reports.h"
@@ -164,7 +164,7 @@ HistoryItem::HistoryItem(
 	UserId from)
 : id(id)
 , _history(history)
-, _from(from ? App::user(from) : history->peer)
+, _from(from ? history->owner().user(from) : history->peer)
 , _flags(flags)
 , _date(date) {
 	App::historyRegItem(this);
@@ -462,7 +462,7 @@ bool HistoryItem::canDelete() const {
 	}
 	auto channel = _history->peer->asChannel();
 	if (!channel) {
-		return !(_flags & MTPDmessage_ClientFlag::f_is_group_essential);
+		return !isGroupMigrate();
 	}
 
 	if (id == 1) {
@@ -572,7 +572,7 @@ QString HistoryItem::directLink() const {
 				}
 			}
 		}
-		return Messenger::Instance().createInternalLinkFull(query);
+		return Core::App().createInternalLinkFull(query);
 	}
 	return QString();
 }

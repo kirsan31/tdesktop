@@ -13,6 +13,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_channel.h"
 #include "data/data_chat.h"
 #include "data/data_user.h"
+#include "data/data_session.h"
 #include "history/history.h"
 #include "dialogs/dialogs_indexed_list.h"
 #include "auth_session.h"
@@ -435,7 +436,7 @@ bool AddSpecialBoxController::checkInfoLoaded(
 		Expects(result.type() == mtpc_channels_channelParticipant);
 
 		const auto &participant = result.c_channels_channelParticipant();
-		App::feedUsers(participant.vusers);
+		channel->owner().processUsers(participant.vusers);
 		_additional.applyParticipant(participant.vparticipant);
 		callback();
 	}).fail([=](const RPCError &error) {
@@ -709,27 +710,30 @@ void AddSpecialBoxController::kickUser(
 	// Finally kick him.
 	if (!sure) {
 		const auto text = ((_peer->isChat() || _peer->isMegagroup())
-			? lng_sure_remove_user_group
-			: lng_sure_remove_user_channel)(lt_user, App::peerName(user));
+			? lng_profile_sure_kick
+			: lng_profile_sure_kick_channel)(lt_user, App::peerName(user));
 		_editBox = Ui::show(
 			Box<ConfirmBox>(text, kickUserSure),
 			LayerOption::KeepOther);
 		return;
 	}
 
-	_editBox = nullptr;
 	const auto restrictedRights = _additional.restrictedRights(user);
 	const auto currentRights = restrictedRights
 		? *restrictedRights
 		: MTPChatBannedRights(MTP_chatBannedRights(
 			MTP_flags(0),
 			MTP_int(0)));
-	auto &session = _peer->session();
-	if (const auto chat = _peer->asChat()) {
-		session.api().kickParticipant(chat, user);
-	} else if (const auto channel = _peer->asChannel()) {
-		session.api().kickParticipant(channel, user, currentRights);
-	}
+
+	const auto done = crl::guard(this, [=](
+			const MTPChatBannedRights &newRights) {
+		editRestrictedDone(user, newRights);
+	});
+	const auto fail = crl::guard(this, [=] {
+		_editBox = nullptr;
+	});
+	const auto callback = SaveRestrictedCallback(_peer, user, done, fail);
+	callback(currentRights, ChannelData::KickedRestrictedRights());
 }
 
 bool AddSpecialBoxController::appendRow(not_null<UserData*> user) {
@@ -964,8 +968,8 @@ void AddSpecialBoxSearchController::searchGlobalDone(
 	auto &found = result.c_contacts_found();
 	auto query = _query;
 	if (requestId) {
-		App::feedUsers(found.vusers);
-		App::feedChats(found.vchats);
+		_peer->owner().processUsers(found.vusers);
+		_peer->owner().processChats(found.vchats);
 		auto it = _globalQueries.find(requestId);
 		if (it != _globalQueries.cend()) {
 			query = it->second;
@@ -977,7 +981,7 @@ void AddSpecialBoxSearchController::searchGlobalDone(
 	const auto feedList = [&](const MTPVector<MTPPeer> &list) {
 		for (const auto &mtpPeer : list.v) {
 			const auto peerId = peerFromMTP(mtpPeer);
-			if (const auto peer = App::peerLoaded(peerId)) {
+			if (const auto peer = _peer->owner().peerLoaded(peerId)) {
 				if (const auto user = peer->asUser()) {
 					_additional->checkForLoaded(user);
 					delegate()->peerListSearchAddRow(user);

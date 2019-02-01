@@ -10,7 +10,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "lang/lang_keys.h"
 #include "mainwidget.h"
 #include "mainwindow.h"
-#include "application.h"
+#include "core/application.h"
 #include "core/file_utilities.h"
 #include "core/mime_type.h"
 #include "ui/widgets/popup_menu.h"
@@ -32,7 +32,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "window/window_peer_menu.h"
 #include "observer_peer.h"
 #include "auth_session.h"
-#include "messenger.h"
 #include "layout.h"
 #include "storage/file_download.h"
 #include "calls/calls_instance.h"
@@ -133,7 +132,7 @@ MediaView::MediaView()
 			_collage = nullptr;
 		}
 	};
-	subscribe(Messenger::Instance().authSessionChanged(), [handleAuthSessionChange] {
+	subscribe(Core::App().authSessionChanged(), [handleAuthSessionChange] {
 		handleAuthSessionChange();
 	});
 	handleAuthSessionChange();
@@ -184,7 +183,7 @@ void MediaView::moveToScreen() {
 		}
 		return nullptr;
 	};
-	auto activeWindow = Messenger::Instance().getActiveWindow();
+	auto activeWindow = Core::App().getActiveWindow();
 	auto activeWindowScreen = widgetScreen(activeWindow);
 	auto myScreen = widgetScreen(this);
 	if (activeWindowScreen && myScreen && myScreen != activeWindowScreen) {
@@ -566,7 +565,7 @@ float64 MediaView::radialProgress() const {
 	if (_doc) {
 		return _doc->progress();
 	} else if (_photo) {
-		return _photo->full->progress();
+		return _photo->large()->progress();
 	}
 	return 1.;
 }
@@ -575,7 +574,7 @@ bool MediaView::radialLoading() const {
 	if (_doc) {
 		return _doc->loading();
 	} else if (_photo) {
-		return _photo->full->loading();
+		return _photo->large()->loading();
 	}
 	return false;
 }
@@ -751,7 +750,7 @@ void MediaView::updateMixerVideoVolume() const {
 }
 
 void MediaView::close() {
-	Messenger::Instance().hideMediaView();
+	Core::App().hideMediaView();
 }
 
 void MediaView::activateControls() {
@@ -898,7 +897,7 @@ void MediaView::onSaveAs() {
 				_photo->date),
 			crl::guard(this, [this, photo = _photo](const QString &result) {
 				if (!result.isEmpty() && _photo == photo && photo->loaded()) {
-					photo->full->pix(fileOrigin()).toImage().save(result, "JPG");
+					photo->large()->original().save(result, "JPG");
 				}
 				psShowOverAll(this);
 			}), crl::guard(this, [this] {
@@ -906,7 +905,7 @@ void MediaView::onSaveAs() {
 			}));
 	}
 	activateWindow();
-	Core::App().setActiveWindow(this);
+	QApplication::setActiveWindow(this);
 	setFocus();
 }
 
@@ -1020,7 +1019,7 @@ void MediaView::onDownload() {
 		} else {
 			if (!QDir().exists(path)) QDir().mkpath(path);
 			toName = filedialogDefaultName(qsl("photo"), qsl(".jpg"), path);
-			if (!_photo->full->pix(fileOrigin()).toImage().save(toName, "JPG")) {
+			if (!_photo->large()->original().save(toName, "JPG")) {
 				toName = QString();
 			}
 		}
@@ -1099,7 +1098,7 @@ void MediaView::onCopy() {
 	} else {
 		if (!_photo || !_photo->loaded()) return;
 
-		QApplication::clipboard()->setPixmap(_photo->full->pix(fileOrigin()));
+		QApplication::clipboard()->setPixmap(_photo->large()->pix(fileOrigin()));
 	}
 }
 
@@ -1539,6 +1538,10 @@ void MediaView::showDocument(not_null<DocumentData*> document, HistoryItem *cont
 }
 
 void MediaView::displayPhoto(not_null<PhotoData*> photo, HistoryItem *item) {
+	if (photo->isNull()) {
+		displayDocument(nullptr, item);
+		return;
+	}
 	stopGif();
 	destroyThemePreview();
 	_doc = _autoplayVideoDocument = nullptr;
@@ -1556,11 +1559,11 @@ void MediaView::displayPhoto(not_null<PhotoData*> photo, HistoryItem *item) {
 
 	_zoomToScreen = 0;
 	Auth().downloader().clearPriorities();
-	_full = -1;
+	_blurred = true;
 	_current = QPixmap();
 	_down = OverNone;
-	_w = ConvertScale(photo->full->width());
-	_h = ConvertScale(photo->full->height());
+	_w = ConvertScale(photo->width());
+	_h = ConvertScale(photo->height());
 	if (isHidden()) {
 		moveToScreen();
 	}
@@ -1619,10 +1622,10 @@ void MediaView::displayDocument(DocumentData *doc, HistoryItem *item) { // empty
 	}
 	if (_doc) {
 		if (_doc->sticker()) {
-			if (const auto image = _doc->getStickerImage()) {
+			if (const auto image = _doc->getStickerLarge()) {
 				_current = image->pix(fileOrigin());
-			} else {
-				_current = _doc->thumb->pixBlurred(
+			} else if (_doc->hasThumbnail()) {
+				_current = _doc->thumbnail()->pixBlurred(
 					fileOrigin(),
 					_doc->dimensions.width(),
 					_doc->dimensions.height());
@@ -1648,7 +1651,7 @@ void MediaView::displayDocument(DocumentData *doc, HistoryItem *item) { // empty
 
 	_docIconRect = QRect((width() - st::mediaviewFileIconSize) / 2, (height() - st::mediaviewFileIconSize) / 2, st::mediaviewFileIconSize, st::mediaviewFileIconSize);
 	if (fileBubbleShown()) {
-		if (!_doc || _doc->thumb->isNull()) {
+		if (!_doc || !_doc->hasThumbnail()) {
 			int32 colorIndex = documentColorIndex(_doc, _docExt);
 			_docIconColor = documentColor(colorIndex);
 			const style::icon *(thumbs[]) = { &st::mediaviewFileBlue, &st::mediaviewFileGreen, &st::mediaviewFileRed, &st::mediaviewFileYellow };
@@ -1661,8 +1664,8 @@ void MediaView::displayDocument(DocumentData *doc, HistoryItem *item) { // empty
 				_docExtWidth = st::mediaviewFileExtFont->width(_docExt);
 			}
 		} else {
-			_doc->thumb->load(fileOrigin());
-			int32 tw = _doc->thumb->width(), th = _doc->thumb->height();
+			_doc->loadThumbnail(fileOrigin());
+			int32 tw = _doc->thumbnail()->width(), th = _doc->thumbnail()->height();
 			if (!tw || !th) {
 				_docThumbx = _docThumby = _docThumbw = 0;
 			} else if (tw > th) {
@@ -1746,7 +1749,7 @@ void MediaView::displayDocument(DocumentData *doc, HistoryItem *item) { // empty
 	} else {
 		_from = _user;
 	}
-	_full = 1;
+	_blurred = false;
 	displayFinished();
 }
 
@@ -1777,7 +1780,7 @@ void MediaView::displayFinished() {
 		show();
 		psShowOverAll(this);
 		activateWindow();
-		Core::App().setActiveWindow(this);
+		QApplication::setActiveWindow(this);
 		setFocus();
 	}
 }
@@ -1795,10 +1798,10 @@ void MediaView::initAnimation() {
 	} else if (_doc->dimensions.width() && _doc->dimensions.height()) {
 		auto w = _doc->dimensions.width();
 		auto h = _doc->dimensions.height();
-		_current = _doc->thumb->pixNoCache(fileOrigin(), w, h, VideoThumbOptions(_doc), w / cIntRetinaFactor(), h / cIntRetinaFactor());
+		_current = _doc->thumbnail()->pixNoCache(fileOrigin(), w, h, VideoThumbOptions(_doc), w / cIntRetinaFactor(), h / cIntRetinaFactor());
 		_current.setDevicePixelRatio(cRetinaFactor());
 	} else {
-		_current = _doc->thumb->pixNoCache(fileOrigin(), _doc->thumb->width(), _doc->thumb->height(), VideoThumbOptions(_doc), st::mediaviewFileIconSize, st::mediaviewFileIconSize);
+		_current = _doc->thumbnail()->pixNoCache(fileOrigin(), _doc->thumbnail()->width(), _doc->thumbnail()->height(), VideoThumbOptions(_doc), st::mediaviewFileIconSize, st::mediaviewFileIconSize);
 	}
 }
 
@@ -1811,10 +1814,10 @@ void MediaView::createClipReader() {
 	if (_doc->dimensions.width() && _doc->dimensions.height()) {
 		int w = _doc->dimensions.width();
 		int h = _doc->dimensions.height();
-		_current = _doc->thumb->pixNoCache(fileOrigin(), w, h, VideoThumbOptions(_doc), w / cIntRetinaFactor(), h / cIntRetinaFactor());
+		_current = _doc->thumbnail()->pixNoCache(fileOrigin(), w, h, VideoThumbOptions(_doc), w / cIntRetinaFactor(), h / cIntRetinaFactor());
 		_current.setDevicePixelRatio(cRetinaFactor());
 	} else {
-		_current = _doc->thumb->pixNoCache(fileOrigin(), _doc->thumb->width(), _doc->thumb->height(), VideoThumbOptions(_doc), st::mediaviewFileIconSize, st::mediaviewFileIconSize);
+		_current = _doc->thumbnail()->pixNoCache(fileOrigin(), _doc->thumbnail()->width(), _doc->thumbnail()->height(), VideoThumbOptions(_doc), st::mediaviewFileIconSize, st::mediaviewFileIconSize);
 	}
 	auto mode = (_doc->isVideoFile() || _doc->isVideoMessage())
 		? Media::Clip::Reader::Mode::Video
@@ -2051,6 +2054,38 @@ void MediaView::updateSilentVideoPlaybackState() {
 	updateVideoPlaybackState(state);
 }
 
+void MediaView::validatePhotoImage(Image *image, bool blurred) {
+	if (!image || !image->loaded()) {
+		if (!blurred) {
+			image->load(fileOrigin());
+		}
+		return;
+	} else if (!_current.isNull() && (blurred || !_blurred)) {
+		return;
+	}
+	const auto w = _width * cIntRetinaFactor();
+	const auto h = int((_photo->height() * (qreal(w) / qreal(_photo->width()))) + 0.9999);
+	_current = image->pixNoCache(
+		fileOrigin(),
+		w,
+		h,
+		Images::Option::Smooth
+		| (blurred ? Images::Option::Blurred : Images::Option(0)));
+	_current.setDevicePixelRatio(cRetinaFactor());
+	_blurred = blurred;
+}
+
+void MediaView::validatePhotoCurrentImage() {
+	validatePhotoImage(_photo->large(), false);
+	validatePhotoImage(_photo->thumbnail(), true);
+	validatePhotoImage(_photo->thumbnailSmall(), true);
+	validatePhotoImage(_photo->thumbnailInline(), true);
+	if (_current.isNull()) {
+		_photo->loadThumbnailSmall(fileOrigin());
+		validatePhotoImage(Image::Blank().get(), true);
+	}
+}
+
 void MediaView::paintEvent(QPaintEvent *e) {
 	QRect r(e->rect());
 	QRegion region(e->region());
@@ -2083,39 +2118,24 @@ void MediaView::paintEvent(QPaintEvent *e) {
 
 	// photo
 	if (_photo) {
-		int32 w = _width * cIntRetinaFactor();
-		if (_full <= 0 && _photo->loaded()) {
-			int32 h = int((_photo->full->height() * (qreal(w) / qreal(_photo->full->width()))) + 0.9999);
-			_current = _photo->full->pixNoCache(fileOrigin(), w, h, Images::Option::Smooth);
-			_current.setDevicePixelRatio(cRetinaFactor());
-			_full = 1;
-		} else if (_full < 0 && _photo->medium->loaded()) {
-			int32 h = int((_photo->full->height() * (qreal(w) / qreal(_photo->full->width()))) + 0.9999);
-			_current = _photo->medium->pixNoCache(fileOrigin(), w, h, Images::Option::Smooth | Images::Option::Blurred);
-			_current.setDevicePixelRatio(cRetinaFactor());
-			_full = 0;
-		} else if (_current.isNull() && _photo->thumb->loaded()) {
-			int32 h = int((_photo->full->height() * (qreal(w) / qreal(_photo->full->width()))) + 0.9999);
-			_current = _photo->thumb->pixNoCache(fileOrigin(), w, h, Images::Option::Smooth | Images::Option::Blurred);
-			_current.setDevicePixelRatio(cRetinaFactor());
-		} else if (_current.isNull()) {
-			_current = _photo->thumb->pix(fileOrigin());
-		}
+		validatePhotoCurrentImage();
 	}
 	p.setOpacity(1);
 	if (_photo || fileShown()) {
 		QRect imgRect(_x, _y, _w, _h);
 		if (imgRect.intersects(r)) {
-			auto rounding = (_doc && _doc->isVideoMessage()) ? ImageRoundRadius::Ellipse : ImageRoundRadius::None;
-			auto toDraw = _current.isNull() ? _gif->current(_gif->width() / cIntRetinaFactor(), _gif->height() / cIntRetinaFactor(), _gif->width() / cIntRetinaFactor(), _gif->height() / cIntRetinaFactor(), rounding, RectPart::AllCorners, ms) : _current;
-			if (!_gif && (!_doc || !_doc->getStickerImage()) && toDraw.hasAlpha()) {
+			const auto rounding = (_doc && _doc->isVideoMessage()) ? ImageRoundRadius::Ellipse : ImageRoundRadius::None;
+			const auto toDraw = (_current.isNull() && _gif) ? _gif->current(_gif->width() / cIntRetinaFactor(), _gif->height() / cIntRetinaFactor(), _gif->width() / cIntRetinaFactor(), _gif->height() / cIntRetinaFactor(), rounding, RectPart::AllCorners, ms) : _current;
+			if (!_gif && (!_doc || !_doc->getStickerLarge()) && (toDraw.hasAlpha() || toDraw.isNull())) {
 				p.fillRect(imgRect, _transparentBrush);
 			}
-			if (toDraw.width() != _w * cIntRetinaFactor()) {
-				PainterHighQualityEnabler hq(p);
-				p.drawPixmap(QRect(_x, _y, _w, _h), toDraw);
-			} else {
-				p.drawPixmap(_x, _y, toDraw);
+			if (!toDraw.isNull()) {
+				if (toDraw.width() != _w * cIntRetinaFactor()) {
+					PainterHighQualityEnabler hq(p);
+					p.drawPixmap(QRect(_x, _y, _w, _h), toDraw);
+				} else {
+					p.drawPixmap(_x, _y, toDraw);
+				}
 			}
 
 			bool radial = false;
@@ -2166,7 +2186,7 @@ void MediaView::paintEvent(QPaintEvent *e) {
 						p.restoreTextPalette();
 						p.setOpacity(1);
 					}
-					if (_full >= 1) {
+					if (!_blurred) {
                         auto nextFrame = (dt < st::mediaviewSaveMsgShowing || hidingDt >= 0) ? int(AnimationTimerDelta) : (st::mediaviewSaveMsgShowing + st::mediaviewSaveMsgShown + 1 - dt);
 						_saveMsgUpdater.start(nextFrame);
 					}
@@ -2188,7 +2208,7 @@ void MediaView::paintEvent(QPaintEvent *e) {
 					radial = _radial.animating();
 					radialOpacity = _radial.opacity();
 				}
-				if (!_doc || _doc->thumb->isNull()) {
+				if (!_doc || !_doc->hasThumbnail()) {
 					p.fillRect(_docIconRect, _docIconColor);
 					if ((!_doc || _doc->loaded()) && (!radial || radialOpacity < 1) && _docIcon) {
 						_docIcon->paint(p, _docIconRect.x() + (_docIconRect.width() - _docIcon->width()), _docIconRect.y(), width());
@@ -2200,7 +2220,7 @@ void MediaView::paintEvent(QPaintEvent *e) {
 					}
 				} else {
 					int32 rf(cIntRetinaFactor());
-					p.drawPixmap(_docIconRect.topLeft(), _doc->thumb->pix(fileOrigin(), _docThumbw), QRect(_docThumbx * rf, _docThumby * rf, st::mediaviewFileIconSize * rf, st::mediaviewFileIconSize * rf));
+					p.drawPixmap(_docIconRect.topLeft(), _doc->thumbnail()->pix(fileOrigin(), _docThumbw), QRect(_docThumbx * rf, _docThumby * rf, st::mediaviewFileIconSize * rf, st::mediaviewFileIconSize * rf));
 				}
 
 				paintDocRadialLoading(p, radial, radialOpacity);
@@ -2647,7 +2667,7 @@ void MediaView::setContext(base::optional_variant<
 	} else if (auto peer = base::get_if<not_null<PeerData*>>(&context)) {
 		_msgid = FullMsgId();
 		_canForwardItem = _canDeleteItem = false;
-		_history = App::history(*peer);
+		_history = (*peer)->owner().history(*peer);
 		_peer = *peer;
 	} else {
 		_msgid = FullMsgId();
@@ -2658,10 +2678,10 @@ void MediaView::setContext(base::optional_variant<
 	_migrated = nullptr;
 	if (_history) {
 		if (_history->peer->migrateFrom()) {
-			_migrated = App::history(_history->peer->migrateFrom()->id);
+			_migrated = _history->owner().history(_history->peer->migrateFrom());
 		} else if (_history->peer->migrateTo()) {
 			_migrated = _history;
-			_history = App::history(_history->peer->migrateTo()->id);
+			_history = _history->owner().history(_history->peer->migrateTo());
 		}
 	}
 	_user = _peer ? _peer->asUser() : nullptr;
@@ -2721,10 +2741,10 @@ void MediaView::preloadData(int delta) {
 		if (auto photo = base::get_if<not_null<PhotoData*>>(&entity.data)) {
 			(*photo)->download(fileOrigin());
 		} else if (auto document = base::get_if<not_null<DocumentData*>>(&entity.data)) {
-			if (const auto image = (*document)->getStickerImage()) {
+			if (const auto image = (*document)->getStickerLarge()) {
 				image->load(fileOrigin());
 			} else {
-				(*document)->thumb->load(fileOrigin());
+				(*document)->loadThumbnail(fileOrigin());
 				(*document)->automaticLoad(fileOrigin(), entity.item);
 			}
 		}

@@ -7,12 +7,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "core/update_checker.h"
 
-#include "application.h"
 #include "platform/platform_specific.h"
 #include "base/timer.h"
 #include "base/bytes.h"
 #include "storage/localstorage.h"
-#include "messenger.h"
+#include "core/application.h"
+#include "core/sandbox.h"
 #include "mainwindow.h"
 #include "core/click_handler_types.h"
 #include "info/info_memento.h"
@@ -1129,9 +1129,10 @@ void Updater::check() {
 void Updater::handleReady() {
 	stop();
 	_action = Action::Ready;
-
-	cSetLastUpdateCheck(unixtime());
-	Local::writeSettings();
+	if (!App::quitting()) {
+		cSetLastUpdateCheck(unixtime());
+		Local::writeSettings();
+	}
 }
 
 void Updater::handleFailed() {
@@ -1156,10 +1157,11 @@ void Updater::handleProgress() {
 
 void Updater::scheduleNext() {
 	stop();
-
-	cSetLastUpdateCheck(unixtime());
-	Local::writeSettings();
-	start(true);
+	if (!App::quitting()) {
+		cSetLastUpdateCheck(unixtime());
+		Local::writeSettings();
+		start(true);
+	}
 }
 
 auto Updater::state() const -> State {
@@ -1187,7 +1189,7 @@ void Updater::stop() {
 }
 
 void Updater::start(bool forceWait) {
-	if (!Sandbox::started() || cExeName().isEmpty()) {
+	if (cExeName().isEmpty()) {
 		return;
 	}
 
@@ -1382,8 +1384,8 @@ Updater::~Updater() {
 
 UpdateChecker::UpdateChecker()
 : _updater(GetUpdaterInstance()) {
-	if (const auto messenger = Messenger::InstancePointer()) {
-		if (const auto mtproto = messenger->mtp()) {
+	if (Sandbox::Instance().applicationLaunched()) {
+		if (const auto mtproto = Core::App().mtp()) {
 			_updater->setMtproto(mtproto);
 		}
 	}
@@ -1547,6 +1549,12 @@ bool checkReadyUpdate() {
 		return false;
 	}
 #endif // Q_OS_LINUX
+
+#ifdef Q_OS_MAC
+	Platform::RemoveQuarantine(QFileInfo(curUpdater).absolutePath());
+	Platform::RemoveQuarantine(updater.absolutePath());
+#endif // Q_OS_MAC
+
 	return true;
 }
 

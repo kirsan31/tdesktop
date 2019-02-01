@@ -8,13 +8,15 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "boxes/change_phone_box.h"
 
 #include "lang/lang_keys.h"
-#include "styles/style_boxes.h"
 #include "ui/widgets/labels.h"
 #include "ui/widgets/input_fields.h"
 #include "ui/wrap/fade_wrap.h"
 #include "boxes/confirm_phone_box.h"
 #include "ui/toast/toast.h"
 #include "boxes/confirm_box.h"
+#include "auth_session.h"
+#include "data/data_session.h"
+#include "styles/style_boxes.h"
 
 namespace {
 
@@ -144,11 +146,19 @@ void ChangePhoneBox::EnterPhone::submit() {
 	hideError();
 
 	auto phoneNumber = _phone->getLastText().trimmed();
-	_requestId = MTP::send(MTPaccount_SendChangePhoneCode(MTP_flags(0), MTP_string(phoneNumber), MTP_bool(false)), rpcDone(crl::guard(this, [this, phoneNumber](const MTPauth_SentCode &result) {
-		return sendPhoneDone(phoneNumber, result);
-	})), rpcFail(crl::guard(this, [this, phoneNumber](const RPCError &error) {
-		return sendPhoneFail(phoneNumber, error);
-	})));
+	_requestId = MTP::send(
+		MTPaccount_SendChangePhoneCode(
+			MTP_string(phoneNumber),
+			MTP_codeSettings(
+				MTP_flags(0),
+				MTPstring())),
+		rpcDone(crl::guard(this, [=](
+				const MTPauth_SentCode &result) {
+			return sendPhoneDone(phoneNumber, result);
+		})), rpcFail(crl::guard(this, [=](
+				const RPCError &error) {
+			return sendPhoneFail(phoneNumber, error);
+		})));
 }
 
 void ChangePhoneBox::EnterPhone::sendPhoneDone(const QString &phoneNumber, const MTPauth_SentCode &result) {
@@ -260,7 +270,7 @@ void ChangePhoneBox::EnterCode::submit() {
 		MTP_string(_hash),
 		MTP_string(code)
 	), rpcDone([weak = make_weak(this)](const MTPUser &result) {
-		App::feedUser(result);
+		Auth().data().processUser(result);
 		if (weak) {
 			Ui::hideLayer();
 		}

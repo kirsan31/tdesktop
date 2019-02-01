@@ -29,7 +29,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/file_utilities.h"
 #include "window/window_peer_menu.h"
 #include "lang/lang_keys.h"
-#include "messenger.h"
+#include "core/application.h"
 #include "mainwidget.h"
 #include "auth_session.h"
 #include "apiwrap.h"
@@ -49,28 +49,28 @@ void AddToggleGroupingAction(
 }
 
 void SavePhotoToFile(not_null<PhotoData*> photo) {
-	if (!photo->date || !photo->loaded()) {
+	if (photo->isNull() || !photo->loaded()) {
 		return;
 	}
 
 	FileDialog::GetWritePath(
-		Messenger::Instance().getFileDialogParent(),
+		Core::App().getFileDialogParent(),
 		lang(lng_save_photo),
 		qsl("JPEG Image (*.jpg);;") + FileDialog::AllFilesFilter(),
 		filedialogDefaultName(qsl("photo"), qsl(".jpg")),
 		crl::guard(&Auth(), [=](const QString &result) {
 			if (!result.isEmpty()) {
-				photo->full->pix(Data::FileOrigin()).toImage().save(result, "JPG");
+				photo->large()->original().save(result, "JPG");
 			}
 		}));
 }
 
 void CopyImage(not_null<PhotoData*> photo) {
-	if (!photo->date || !photo->loaded()) {
+	if (photo->isNull() || !photo->loaded()) {
 		return;
 	}
 
-	QApplication::clipboard()->setPixmap(photo->full->pix(Data::FileOrigin()));
+	QApplication::clipboard()->setImage(photo->large()->original());
 }
 
 void ShowStickerPackInfo(not_null<DocumentData*> document) {
@@ -104,7 +104,7 @@ void OpenGif(FullMsgId itemId) {
 	if (const auto item = App::histItemById(itemId)) {
 		if (const auto media = item->media()) {
 			if (const auto document = media->document()) {
-				Messenger::Instance().showDocument(document, item);
+				Core::App().showDocument(document, item);
 			}
 		}
 	}
