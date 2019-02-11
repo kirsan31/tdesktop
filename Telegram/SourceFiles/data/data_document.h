@@ -379,6 +379,7 @@ bool IsValidMediaFile(const QString &filepath);
 bool IsExecutableName(const QString &filepath);
 base::binary_guard ReadImageAsync(
 	not_null<DocumentData*> document,
+	FnMut<QImage(QImage)> postprocess,
 	FnMut<void(QImage&&)> done);
 
 } // namespace Data

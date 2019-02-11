@@ -22,6 +22,8 @@
 <(src_loc)/boxes/auto_download_box.h
 <(src_loc)/boxes/background_box.cpp
 <(src_loc)/boxes/background_box.h
+<(src_loc)/boxes/background_preview_box.cpp
+<(src_loc)/boxes/background_preview_box.h
 <(src_loc)/boxes/calendar_box.cpp
 <(src_loc)/boxes/calendar_box.h
 <(src_loc)/boxes/change_phone_box.cpp
@@ -205,6 +207,8 @@
 <(src_loc)/data/data_user.h
 <(src_loc)/data/data_user_photos.cpp
 <(src_loc)/data/data_user_photos.h
+<(src_loc)/data/data_wall_paper.cpp
+<(src_loc)/data/data_wall_paper.h
 <(src_loc)/data/data_web_page.cpp
 <(src_loc)/data/data_web_page.h
 <(src_loc)/dialogs/dialogs_entry.cpp

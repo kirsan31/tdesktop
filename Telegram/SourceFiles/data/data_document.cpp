@@ -387,7 +387,7 @@ void DocumentOpenClickHandler::Open(
 
 	QString filename;
 	if (!data->saveToCache()
-		|| (location.isEmpty() || (!data->data().isEmpty()))) {
+		|| (location.isEmpty() && (!data->data().isEmpty()))) {
 		filename = documentSaveFilename(data);
 		if (filename.isEmpty()) return;
 	}
@@ -1616,11 +1616,13 @@ vst vstm vstx vsw vsx vtx website ws wsc wsf wsh xbap xll xnk");
 
 base::binary_guard ReadImageAsync(
 		not_null<DocumentData*> document,
+		FnMut<QImage(QImage)> postprocess,
 		FnMut<void(QImage&&)> done) {
 	auto [left, right] = base::make_binary_guard();
 	crl::async([
 		bytes = document->data(),
 		path = document->filepath(),
+		postprocess = std::move(postprocess),
 		guard = std::move(left),
 		callback = std::move(done)
 	]() mutable {
@@ -1635,6 +1637,9 @@ base::binary_guard ReadImageAsync(
 		auto image = bytes.isEmpty()
 			? QImage()
 			: App::readImage(bytes, &format, false, nullptr);
+		if (postprocess) {
+			image = postprocess(std::move(image));
+		}
 		crl::on_main([
 			guard = std::move(guard),
 			image = std::move(image),

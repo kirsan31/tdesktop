@@ -7,100 +7,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #pragma once
 
-class Image;
+#include "data/data_wall_paper.h"
 
-namespace Data {
-
-struct FileOrigin;
-
-class WallPaper {
-public:
-	explicit WallPaper(WallPaperId id);
-
-	void setLocalImageAsThumbnail(not_null<Image*> image);
-
-	[[nodiscard]] WallPaperId id() const;
-	[[nodiscard]] std::optional<QColor> backgroundColor() const;
-	[[nodiscard]] DocumentData *document() const;
-	[[nodiscard]] Image *thumbnail() const;
-	[[nodiscard]] bool isPattern() const;
-	[[nodiscard]] bool isDefault() const;
-	[[nodiscard]] bool isCreator() const;
-	[[nodiscard]] int patternIntensity() const;
-	[[nodiscard]] bool hasShareUrl() const;
-	[[nodiscard]] QString shareUrl() const;
-
-	void loadDocument() const;
-	void loadThumbnail() const;
-	[[nodiscard]] FileOrigin fileOrigin() const;
-
-	[[nodiscard]] WallPaper withUrlParams(
-		const QMap<QString, QString> &params) const;
-
-	[[nodiscard]] static std::optional<WallPaper> Create(
-		const MTPWallPaper &data);
-	[[nodiscard]] static std::optional<WallPaper> Create(
-		const MTPDwallPaper &data);
-
-	[[nodiscard]] QByteArray serialize() const;
-	[[nodiscard]] static std::optional<WallPaper> FromSerialized(
-		const QByteArray &serialized);
-	[[nodiscard]] static std::optional<WallPaper> FromLegacySerialized(
-		quint64 id,
-		quint64 accessHash,
-		quint32 flags,
-		QString slug);
-	[[nodiscard]] static std::optional<WallPaper> FromLegacyId(
-		qint32 legacyId);
-	[[nodiscard]] static std::optional<WallPaper> FromColorSlug(
-		const QString &slug);
-
-private:
-	static constexpr auto kDefaultIntensity = 40;
-
-	WallPaperId _id = WallPaperId();
-	uint64 _accessHash = 0;
-	MTPDwallPaper::Flags _flags;
-	QString _slug;
-
-	MTPDwallPaperSettings::Flags _settings;
-	std::optional<QColor> _backgroundColor;
-	int _intensity = kDefaultIntensity;
-
-	DocumentData *_document = nullptr;
-	Image *_thumbnail = nullptr;
-
-};
-
-[[nodiscard]] WallPaper ThemeWallPaper();
-[[nodiscard]] bool IsThemeWallPaper(const WallPaper &paper);
-[[nodiscard]] WallPaper CustomWallPaper();
-[[nodiscard]] bool IsCustomWallPaper(const WallPaper &paper);
-[[nodiscard]] WallPaper Legacy1DefaultWallPaper();
-[[nodiscard]] bool IsLegacy1DefaultWallPaper(const WallPaper &paper);
-[[nodiscard]] WallPaper DefaultWallPaper();
-[[nodiscard]] bool IsDefaultWallPaper(const WallPaper &paper);
-
-QColor PatternColor(QColor background);
-QImage PreparePatternImage(
-	QImage image,
-	QColor bg,
-	QColor fg,
-	int intensity);
-
-namespace details {
-
-[[nodiscard]] WallPaper UninitializedWallPaper();
-[[nodiscard]] bool IsUninitializedWallPaper(const WallPaper &paper);
-[[nodiscard]] WallPaper TestingThemeWallPaper();
-[[nodiscard]] bool IsTestingThemeWallPaper(const WallPaper &paper);
-[[nodiscard]] WallPaper TestingDefaultWallPaper();
-[[nodiscard]] bool IsTestingDefaultWallPaper(const WallPaper &paper);
-[[nodiscard]] WallPaper TestingEditorWallPaper();
-[[nodiscard]] bool IsTestingEditorWallPaper(const WallPaper &paper);
-
-} // namespace details
-} // namespace Data
+class AuthSession;
 
 namespace Window {
 namespace Theme {
@@ -155,6 +64,7 @@ bool LoadFromFile(const QString &file, Instance *out, QByteArray *outContent);
 bool IsPaletteTestingPath(const QString &path);
 QColor CountAverageColor(const QImage &image);
 QColor AdjustedColor(QColor original, QColor background);
+QImage ProcessBackgroundImage(QImage image);
 
 struct BackgroundUpdate {
 	enum class Type {
@@ -175,7 +85,9 @@ struct BackgroundUpdate {
 	bool tiled;
 };
 
-class ChatBackground : public base::Observable<BackgroundUpdate> {
+class ChatBackground
+	: public base::Observable<BackgroundUpdate>
+	, private base::Subscriber {
 public:
 	ChatBackground();
 
@@ -197,6 +109,9 @@ public:
 	void setTestingDefaultTheme();
 	void revert();
 
+	[[nodiscard]] Data::WallPaper paper() const {
+		return _paper;
+	}
 	[[nodiscard]] WallPaperId id() const {
 		return _paper.id();
 	}
@@ -238,6 +153,9 @@ private:
 	void keepApplied(const QString &path, bool write);
 	[[nodiscard]] bool isNonDefaultThemeOrBackground();
 	[[nodiscard]] bool isNonDefaultBackground();
+	void refreshSession();
+	void checkUploadWallPaper();
+	[[nodiscard]] bool testingPalette() const;
 
 	friend bool IsNightMode();
 	friend void SetNightModeValue(bool nightMode);
@@ -246,6 +164,7 @@ private:
 	friend void KeepApplied();
 	friend bool IsNonDefaultBackground();
 
+	AuthSession *_session = nullptr;
 	Data::WallPaper _paper = Data::details::UninitializedWallPaper();
 	std::optional<QColor> _paperColor;
 	QImage _original;
@@ -265,6 +184,9 @@ private:
 	bool _tileForRevert = false;
 
 	std::vector<AdjustableColor> _adjustableColors;
+	FullMsgId _wallPaperUploadId;
+	mtpRequestId _wallPaperRequestId = 0;
+	rpl::lifetime _wallPaperUploadLifetime;
 
 };
 

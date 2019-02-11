@@ -13,6 +13,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/application.h"
 #include "core/crash_reports.h" // for CrashReports::SetAnnotation
 #include "ui/image/image.h"
+#include "ui/image/image_source.h" // for Images::LocalFileSource
 #include "export/export_controller.h"
 #include "export/view/export_view_panel_controller.h"
 #include "window/notifications_manager.h"
@@ -3064,31 +3065,38 @@ void Session::setWallpapers(const QVector<MTPWallPaper> &data, int32 hash) {
 	_wallpapersHash = hash;
 
 	_wallpapers.clear();
-	_wallpapers.reserve(data.size() + 1);
+	_wallpapers.reserve(data.size() + 2);
 
-	const auto defaultBackground = Images::Create(
-		qsl(":/gui/art/bg.jpg"),
-		"JPG");
-	if (defaultBackground) {
-		_wallpapers.push_back(Data::DefaultWallPaper());
-		_wallpapers.back().setLocalImageAsThumbnail(
-			defaultBackground.get());
-	}
-	const auto oldBackground = Images::Create(
-		qsl(":/gui/art/bg_initial.jpg"),
-		"JPG");
-	if (oldBackground) {
-		_wallpapers.push_back(Data::Legacy1DefaultWallPaper());
-		_wallpapers.back().setLocalImageAsThumbnail(oldBackground.get());
-	}
+	_wallpapers.push_back(Data::Legacy1DefaultWallPaper());
+	_wallpapers.back().setLocalImageAsThumbnail(std::make_shared<Image>(
+		std::make_unique<Images::LocalFileSource>(
+			qsl(":/gui/art/bg_initial.jpg"),
+			QByteArray(),
+			"JPG")));
 	for (const auto &paper : data) {
 		paper.match([&](const MTPDwallPaper &paper) {
-			if (paper.is_pattern()) {
-				return;
-			} else if (const auto parsed = Data::WallPaper::Create(paper)) {
+			if (const auto parsed = Data::WallPaper::Create(paper)) {
 				_wallpapers.push_back(*parsed);
 			}
 		});
+	}
+	const auto defaultFound = ranges::find_if(
+		_wallpapers,
+		Data::IsDefaultWallPaper);
+	if (defaultFound == end(_wallpapers)) {
+		_wallpapers.push_back(Data::DefaultWallPaper());
+		_wallpapers.back().setLocalImageAsThumbnail(std::make_shared<Image>(
+			std::make_unique<Images::LocalFileSource>(
+				qsl(":/gui/arg/bg.jpg"),
+				QByteArray(),
+				"JPG")));
+	}
+}
+
+void Session::removeWallpaper(const WallPaper &paper) {
+	const auto i = ranges::find(_wallpapers, paper.id(), &WallPaper::id);
+	if (i != end(_wallpapers)) {
+		_wallpapers.erase(i);
 	}
 }
 

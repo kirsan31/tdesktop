@@ -5157,7 +5157,6 @@ void ApiWrap::photoUploadReady(
 			)).done(applier).afterRequest(history->sendRequestId).send();
 		}
 	}
-
 }
 
 void ApiWrap::clearPeerPhoto(not_null<PhotoData*> photo) {
