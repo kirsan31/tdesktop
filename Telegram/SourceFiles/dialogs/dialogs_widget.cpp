@@ -246,7 +246,7 @@ DialogsWidget::DialogsWidget(QWidget *parent, not_null<Window::Controller*> cont
 }
 
 void DialogsWidget::setupConnectingWidget() {
-	_connecting = Window::ConnectingWidget::CreateDefaultWidget(
+	_connecting = std::make_unique<Window::ConnectionState>(
 		this,
 		Window::AdaptiveIsOneColumn());
 }
@@ -1555,3 +1555,5 @@ void DialogsWidget::onDialogMoved(int movedFrom, int movedTo) {
 		_scroll->scrollToY(st + st::dialogsRowHeight);
 	}
 }
+
+DialogsWidget::~DialogsWidget() = default;

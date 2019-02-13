@@ -730,14 +730,15 @@ void DocumentData::automaticLoad(
 	const auto filename = toCache
 		? QString()
 		: documentSaveFilename(this);
-	const auto shouldLoadFromCloud = item
-		? Data::AutoDownload::Should(
-			Auth().settings().autoDownload(),
-			item->history()->peer,
-			this)
-		: Data::AutoDownload::Should(
-			Auth().settings().autoDownload(),
-			this);
+	const auto shouldLoadFromCloud = !Data::IsExecutableName(filename)
+		&& (item
+			? Data::AutoDownload::Should(
+				Auth().settings().autoDownload(),
+				item->history()->peer,
+				this)
+			: Data::AutoDownload::Should(
+				Auth().settings().autoDownload(),
+				this));
 	const auto loadFromCloud = shouldLoadFromCloud
 		? LoadFromCloudOrLocal
 		: LoadFromLocalOnly;
@@ -860,6 +861,7 @@ bool DocumentData::loaded(FilePathResolveType type) const {
 			ActiveCache().decrement(that->_data.size());
 			that->_data = _loader->bytes();
 			ActiveCache().increment(that->_data.size());
+
 			if (that->sticker()
 				&& !that->sticker()->image
 				&& !_loader->imageData().isNull()) {
@@ -871,12 +873,13 @@ bool DocumentData::loaded(FilePathResolveType type) const {
 						_loader->imageData()));
 				ActiveCache().increment(ComputeUsage(that->sticker()));
 			}
-			if (!that->_data.isEmpty() || that->getStickerLarge()) {
-				ActiveCache().up(that);
-			}
 
 			that->refreshGoodThumbnail();
 			destroyLoader();
+
+			if (!that->_data.isEmpty() || that->getStickerLarge()) {
+				ActiveCache().up(that);
+			}
 		}
 		_owner->notifyDocumentLayoutChanged(this);
 	}

@@ -1,3 +1,15 @@
+1.5.15 (12.02.19)
+
+- Crash fix.
+
+1.5.14 (12.02.19)
+
+- Crash fix.
+
+1.5.13 (12.02.19)
+
+- Bug fixes and other minor improvements.
+
 1.5.12 (09.02.19)
 
 - Apply blur effects to backgrounds.

@@ -34,7 +34,7 @@ class FadeWrapScaled;
 
 namespace Window {
 class Controller;
-class ConnectingWidget;
+class ConnectionState;
 } // namespace Window
 
 enum DialogsSearchRequestType {
@@ -90,6 +90,8 @@ public:
 	QRect rectForFloatPlayer() const override;
 
 	void notify_historyMuteUpdated(History *history);
+
+	~DialogsWidget();
 
 signals:
 	void cancelled();
@@ -195,7 +197,7 @@ private:
 	class BottomButton;
 	object_ptr<BottomButton> _updateTelegram = { nullptr };
 	object_ptr<BottomButton> _loadMoreChats = { nullptr };
-	base::unique_qptr<Window::ConnectingWidget> _connecting;
+	std::unique_ptr<Window::ConnectionState> _connecting;
 
 	Animation _a_show;
 	Window::SlideDirection _showDirection;
