@@ -541,7 +541,7 @@ void HistoryInner::paintEvent(QPaintEvent *e) {
 
 	Painter p(this);
 	auto clip = e->rect();
-	auto ms = getms();
+	auto ms = crl::now();
 
 	const auto historyDisplayedEmpty = _history->isDisplayedEmpty()
 		&& (!_migrated || _migrated->isDisplayedEmpty());
@@ -766,7 +766,7 @@ bool HistoryInner::eventHook(QEvent *e) {
 }
 
 void HistoryInner::onTouchScrollTimer() {
-	auto nowTime = getms();
+	auto nowTime = crl::now();
 	if (_touchScrollState == Ui::TouchScrollState::Acceleration && _touchWaitingAcceleration && (nowTime - _touchAccelerationTime) > 40) {
 		_touchScrollState = Ui::TouchScrollState::Manual;
 		touchResetSpeed();
@@ -787,7 +787,7 @@ void HistoryInner::onTouchScrollTimer() {
 }
 
 void HistoryInner::touchUpdateSpeed() {
-	const auto nowTime = getms();
+	const auto nowTime = crl::now();
 	if (_touchPrevPosValid) {
 		const int elapsed = nowTime - _touchSpeedTime;
 		if (elapsed) {
@@ -867,7 +867,7 @@ void HistoryInner::touchEvent(QTouchEvent *e) {
 		if (_touchScrollState == Ui::TouchScrollState::Auto) {
 			_touchScrollState = Ui::TouchScrollState::Acceleration;
 			_touchWaitingAcceleration = true;
-			_touchAccelerationTime = getms();
+			_touchAccelerationTime = crl::now();
 			touchUpdateSpeed();
 			_touchStart = _touchPos;
 		} else {
@@ -892,7 +892,7 @@ void HistoryInner::touchEvent(QTouchEvent *e) {
 				touchScrollUpdated(_touchPos);
 			} else if (_touchScrollState == Ui::TouchScrollState::Acceleration) {
 				touchUpdateSpeed();
-				_touchAccelerationTime = getms();
+				_touchAccelerationTime = crl::now();
 				if (_touchSpeed.isNull()) {
 					_touchScrollState = Ui::TouchScrollState::Manual;
 				}
@@ -914,7 +914,7 @@ void HistoryInner::touchEvent(QTouchEvent *e) {
 				_touchScrollState = Ui::TouchScrollState::Auto;
 				_touchPrevPosValid = false;
 				_touchScrollTimer.start(15);
-				_touchTime = getms();
+				_touchTime = crl::now();
 			} else if (_touchScrollState == Ui::TouchScrollState::Auto) {
 				_touchScrollState = Ui::TouchScrollState::Manual;
 				_touchScroll = false;
@@ -3059,6 +3059,18 @@ QString HistoryInner::tooltipText() const {
 					ParseDateTime(forwarded->originalDate).toString(
 						QLocale::system().dateTimeFormat(
 							QLocale::LongFormat)));
+				if (const auto media = view->media()) {
+					if (media->hidesForwardedInfo()) {
+						dateText += "\n" + lng_forwarded(
+							lt_user, 
+							forwarded->originalSender->shortName());
+					}
+				}
+			}
+			if (const auto msgsigned = view->data()->Get<HistoryMessageSigned>()) {
+				if (msgsigned->isElided) {
+					dateText += '\n' + lng_signed_author(lt_user, msgsigned->author);
+				}
 			}
 			return dateText;
 		}
@@ -3127,17 +3139,17 @@ not_null<HistoryView::ElementDelegate*> HistoryInner::ElementDelegate() {
 				}
 			});
 		}
-		TimeMs elementHighlightTime(
+		crl::time elementHighlightTime(
 				not_null<const HistoryView::Element*> view) override {
 			const auto fullAnimMs = App::main()->highlightStartTime(
 				view->data());
 			if (fullAnimMs > 0) {
-				const auto now = getms();
+				const auto now = crl::now();
 				if (fullAnimMs < now) {
 					return now - fullAnimMs;
 				}
 			}
-			return TimeMs(0);
+			return crl::time(0);
 		}
 		bool elementInSelectionMode() override {
 			return App::main()->historyInSelectionMode();

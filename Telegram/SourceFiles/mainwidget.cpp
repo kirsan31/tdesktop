@@ -63,7 +63,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "boxes/download_path_box.h"
 #include "boxes/connection_box.h"
 #include "storage/localstorage.h"
-#include "media/media_audio.h"
+#include "media/audio/media_audio.h"
 #include "media/player/media_player_panel.h"
 #include "media/player/media_player_widget.h"
 #include "media/player/media_player_volume_controller.h"
@@ -102,16 +102,16 @@ namespace {
 constexpr auto kChannelGetDifferenceLimit = 100;
 
 // 1s wait after show channel history before sending getChannelDifference.
-constexpr auto kWaitForChannelGetDifference = TimeMs(1000);
+constexpr auto kWaitForChannelGetDifference = crl::time(1000);
 
 // If nothing is received in 1 min we ping.
 constexpr auto kNoUpdatesTimeout = 60 * 1000;
 
 // If nothing is received in 1 min when was a sleepmode we ping.
-constexpr auto kNoUpdatesAfterSleepTimeout = 60 * TimeMs(1000);
+constexpr auto kNoUpdatesAfterSleepTimeout = 60 * crl::time(1000);
 
 // Send channel views each second.
-constexpr auto kSendViewsTimeout = TimeMs(1000);
+constexpr auto kSendViewsTimeout = crl::time(1000);
 
 // Cache background scaled image after 3s.
 constexpr auto kCacheBackgroundTimeout = 3000;
@@ -1110,12 +1110,21 @@ Dialogs::IndexedList *MainWidget::contactsNoDialogsList() {
 	return _dialogs->contactsNoDialogsList();
 }
 
-TimeMs MainWidget::highlightStartTime(not_null<const HistoryItem*> item) const {
+crl::time MainWidget::highlightStartTime(not_null<const HistoryItem*> item) const {
 	return _history->highlightStartTime(item);
 }
 
 bool MainWidget::historyInSelectionMode() const {
 	return _history->inSelectionMode();
+}
+
+MsgId MainWidget::currentReplyToIdFor(not_null<History*> history) const {
+	if (_history->history() == history) {
+		return _history->replyToId();
+	} else if (const auto localDraft = history->localDraft()) {
+		return localDraft->msgId;
+	}
+	return 0;
 }
 
 void MainWidget::sendBotCommand(PeerData *peer, UserData *bot, const QString &cmd, MsgId replyTo) {
@@ -1155,7 +1164,7 @@ void MainWidget::itemEdited(not_null<HistoryItem*> item) {
 }
 
 void MainWidget::checkLastUpdate(bool afterSleep) {
-	auto n = getms(true);
+	auto n = crl::now();
 	if (_lastUpdateTime && n > _lastUpdateTime + (afterSleep ? kNoUpdatesAfterSleepTimeout : kNoUpdatesTimeout)) {
 		_lastUpdateTime = n;
 		MTP::ping();
@@ -2474,7 +2483,7 @@ void MainWidget::paintEvent(QPaintEvent *e) {
 	}
 
 	Painter p(this);
-	auto progress = _a_show.current(getms(), 1.);
+	auto progress = _a_show.current(crl::now(), 1.);
 	if (_a_show.animating()) {
 		auto coordUnder = _showBack ? anim::interpolate(-st::slideShift, 0, progress) : anim::interpolate(0, -st::slideShift, progress);
 		auto coordOver = _showBack ? anim::interpolate(0, width(), progress) : anim::interpolate(width(), 0, progress);
@@ -3135,7 +3144,7 @@ void MainWidget::gotChannelDifference(
 		getChannelDifference(channel);
 	} else if (_controller->activeChatCurrent().peer() == channel) {
 		channel->ptsWaitingForShortPoll(timeout
-			? (timeout * TimeMs(1000))
+			? (timeout * crl::time(1000))
 			: kWaitForChannelGetDifference);
 	}
 }
@@ -3164,7 +3173,7 @@ void MainWidget::gotState(const MTPupdates_State &state) {
 	auto &d = state.c_updates_state();
 	updSetState(d.vpts.v, d.vdate.v, d.vqts.v, d.vseq.v);
 
-	_lastUpdateTime = getms(true);
+	_lastUpdateTime = crl::now();
 	_noUpdatesTimer.callOnce(kNoUpdatesTimeout);
 	_ptsWaiter.setRequesting(false);
 
@@ -3180,7 +3189,7 @@ void MainWidget::gotDifference(const MTPupdates_Difference &difference) {
 		auto &d = difference.c_updates_differenceEmpty();
 		updSetState(_ptsWaiter.current(), d.vdate.v, updQts, d.vseq.v);
 
-		_lastUpdateTime = getms(true);
+		_lastUpdateTime = crl::now();
 		_noUpdatesTimer.callOnce(kNoUpdatesTimeout);
 
 		_ptsWaiter.setRequesting(false);
@@ -3210,7 +3219,7 @@ void MainWidget::gotDifference(const MTPupdates_Difference &difference) {
 	};
 }
 
-bool MainWidget::getDifferenceTimeChanged(ChannelData *channel, int32 ms, ChannelGetDifferenceTime &channelCurTime, TimeMs &curTime) {
+bool MainWidget::getDifferenceTimeChanged(ChannelData *channel, int32 ms, ChannelGetDifferenceTime &channelCurTime, crl::time &curTime) {
 	if (channel) {
 		if (ms <= 0) {
 			ChannelGetDifferenceTime::iterator i = channelCurTime.find(channel);
@@ -3220,7 +3229,7 @@ bool MainWidget::getDifferenceTimeChanged(ChannelData *channel, int32 ms, Channe
 				return false;
 			}
 		} else {
-			auto when = getms(true) + ms;
+			auto when = crl::now() + ms;
 			ChannelGetDifferenceTime::iterator i = channelCurTime.find(channel);
 			if (i != channelCurTime.cend()) {
 				if (i.value() > when) {
@@ -3240,7 +3249,7 @@ bool MainWidget::getDifferenceTimeChanged(ChannelData *channel, int32 ms, Channe
 				return false;
 			}
 		} else {
-			auto when = getms(true) + ms;
+			auto when = crl::now() + ms;
 			if (!curTime || curTime > when) {
 				curTime = when;
 			} else {
@@ -3307,7 +3316,7 @@ bool MainWidget::failDifference(const RPCError &error) {
 }
 
 void MainWidget::getDifferenceByPts() {
-	auto now = getms(true), wait = 0LL;
+	auto now = crl::now(), wait = 0LL;
 	if (_getDifferenceTimeByPts) {
 		if (_getDifferenceTimeByPts > now) {
 			wait = _getDifferenceTimeByPts - now;
@@ -3332,7 +3341,7 @@ void MainWidget::getDifferenceByPts() {
 }
 
 void MainWidget::getDifferenceAfterFail() {
-	auto now = getms(true), wait = 0LL;
+	auto now = crl::now(), wait = 0LL;
 	if (_getDifferenceTimeAfterFail) {
 		if (_getDifferenceTimeAfterFail > now) {
 			wait = _getDifferenceTimeAfterFail - now;
@@ -3738,7 +3747,7 @@ bool MainWidget::lastWasOnline() const {
 	return _lastWasOnline;
 }
 
-TimeMs MainWidget::lastSetOnline() const {
+crl::time MainWidget::lastSetOnline() const {
 	return _lastSetOnline;
 }
 
@@ -3770,7 +3779,7 @@ void MainWidget::updateOnline(bool gotOtherOffline) {
 			updateIn = qMin(updateIn, int(Global::OfflineIdleTimeout() - idle));
 		}
 	}
-	auto ms = getms(true);
+	auto ms = crl::now();
 	if (isOnline != _lastWasOnline
 		|| (isOnline && _lastSetOnline + Global::OnlineUpdatePeriod() <= ms)
 		|| (isOnline && gotOtherOffline)) {
@@ -3904,7 +3913,7 @@ void MainWidget::updateReceived(const mtpPrime *from, const mtpPrime *end) {
 			MTPUpdates updates;
 			updates.read(from, end);
 
-			_lastUpdateTime = getms(true);
+			_lastUpdateTime = crl::now();
 			_noUpdatesTimer.callOnce(kNoUpdatesTimeout);
 			if (!requestingDifference()
 				|| HasForceLogoutNotification(updates)) {

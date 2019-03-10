@@ -7,8 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #pragma once
 
-#include "media/media_audio.h"
-#include "media/media_audio_loader.h"
+#include "media/audio/media_audio.h"
+#include "media/audio/media_audio_loader.h"
 
 extern "C" {
 #include <libavcodec/avcodec.h>
@@ -28,7 +28,7 @@ public:
 	: AudioPlayerLoader(file, data, std::move(buffer)) {
 	}
 
-	bool open(TimeMs positionMs) override;
+	bool open(crl::time positionMs) override;
 
 	int64 samplesCount() override {
 		return _samplesCount;
@@ -143,7 +143,7 @@ public:
 		const QByteArray &data,
 		bytes::vector &&buffer);
 
-	bool open(TimeMs positionMs) override;
+	bool open(crl::time positionMs) override;
 
 	ReadResult readMore(QByteArray &result, int64 &samplesAdded) override;
 
@@ -151,7 +151,7 @@ public:
 
 private:
 	bool openCodecContext();
-	bool seekTo(TimeMs positionMs);
+	bool seekTo(crl::time positionMs);
 
 	AVCodecContext *_codecContext = nullptr;
 	AVPacket _packet;

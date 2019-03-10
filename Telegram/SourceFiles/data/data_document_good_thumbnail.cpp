@@ -10,7 +10,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_session.h"
 #include "data/data_document.h"
 #include "data/data_file_origin.h"
-#include "media/media_clip_reader.h"
+#include "media/clip/media_clip_reader.h"
 #include "auth_session.h"
 
 namespace Data {
@@ -107,15 +107,11 @@ void GoodThumbSource::ready(
 		QImage &&image,
 		int bytesSize,
 		QByteArray &&bytesForCache) {
-	crl::on_main([
+	crl::on_main(std::move(guard), [
 		=,
-		guard = std::move(guard),
 		image = std::move(image),
 		bytes = std::move(bytesForCache)
 	]() mutable {
-		if (!guard) {
-			return;
-		}
 		if (image.isNull()) {
 			_empty = true;
 			return;

@@ -5,11 +5,11 @@ the official desktop application for the Telegram messaging service.
 For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
-#include "media/media_audio_loaders.h"
+#include "media/audio/media_audio_loaders.h"
 
-#include "media/media_audio.h"
-#include "media/media_audio_ffmpeg_loader.h"
-#include "media/media_child_ffmpeg_loader.h"
+#include "media/audio/media_audio.h"
+#include "media/audio/media_audio_ffmpeg_loader.h"
+#include "media/audio/media_child_ffmpeg_loader.h"
 
 namespace Media {
 namespace Player {
@@ -120,10 +120,10 @@ void Loaders::emitError(AudioMsgId::Type type) {
 }
 
 void Loaders::onLoad(const AudioMsgId &audio) {
-	loadData(audio, TimeMs(0));
+	loadData(audio, crl::time(0));
 }
 
-void Loaders::loadData(AudioMsgId audio, TimeMs positionMs) {
+void Loaders::loadData(AudioMsgId audio, crl::time positionMs) {
 	auto err = SetupNoErrorStarted;
 	auto type = audio.type();
 	auto l = setupLoader(audio, err, positionMs);
@@ -282,7 +282,7 @@ void Loaders::loadData(AudioMsgId audio, TimeMs positionMs) {
 AudioPlayerLoader *Loaders::setupLoader(
 		const AudioMsgId &audio,
 		SetupError &err,
-		TimeMs positionMs) {
+		crl::time positionMs) {
 	err = SetupErrorAtStart;
 	QMutexLocker lock(internal::audioPlayerMutex());
 	if (!mixer()) return nullptr;

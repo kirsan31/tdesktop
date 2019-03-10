@@ -7,14 +7,14 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "media/view/media_clip_playback.h"
 
+#include "media/audio/media_audio.h"
 #include "styles/style_mediaview.h"
-#include "media/media_audio.h"
 
 namespace Media {
 namespace Clip {
 namespace {
 
-constexpr auto kPlaybackAnimationDurationMs = TimeMs(200);
+constexpr auto kPlaybackAnimationDurationMs = crl::time(200);
 
 } // namespace
 
@@ -75,7 +75,7 @@ float64 Playback::value() const {
 	return qMin(a_value.current(), 1.);
 }
 
-float64 Playback::value(TimeMs ms) {
+float64 Playback::value(crl::time ms) {
 	_a_value.step(ms);
 	return value();
 }

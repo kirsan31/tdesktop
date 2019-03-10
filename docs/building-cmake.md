@@ -19,6 +19,7 @@ You will need GCC 7.2 and CMake 3.2 installed. To install them and all the requi
     sudo apt-get install gcc-7 g++-7 cmake
     sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-7 60
     sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-7 60
+    sudo update-alternatives --config gcc
     sudo add-apt-repository --remove ppa:ubuntu-toolchain-r/test
     sudo add-apt-repository --remove ppa:george-edison55/cmake-3.x
 
@@ -64,6 +65,7 @@ Go to ***BuildPath*** and run
 
     git clone git://anongit.freedesktop.org/vdpau/libvdpau
     cd libvdpau
+    git checkout libvdpau-1.2
     ./autogen.sh --enable-static
     make $MAKE_THREADS_CNT
     sudo make install

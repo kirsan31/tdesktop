@@ -328,7 +328,7 @@ void Widget::setupShortcuts() {
 		return isActiveWindow() && !Ui::isLayerShown() && inFocusChain();
 	}) | rpl::start_with_next([=](not_null<Shortcuts::Request*> request) {
 		using Command = Shortcuts::Command;
-		request->check(Command::Search, 1) && request->handle([=] {
+		request->check(Command::Search, 2) && request->handle([=] {
 			_fixedBar->showSearch();
 			return true;
 		});
@@ -396,7 +396,7 @@ void Widget::paintEvent(QPaintEvent *e) {
 	//	updateListSize();
 	//}
 
-	//auto ms = getms();
+	//auto ms = crl::now();
 	//_historyDownShown.step(ms);
 
 	SectionWidget::PaintBackground(this, e);

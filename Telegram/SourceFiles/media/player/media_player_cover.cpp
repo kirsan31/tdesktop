@@ -11,7 +11,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/widgets/labels.h"
 #include "ui/widgets/continuous_sliders.h"
 #include "ui/widgets/buttons.h"
-#include "media/media_audio.h"
+#include "media/audio/media_audio.h"
 #include "media/view/media_clip_playback.h"
 #include "media/player/media_player_button.h"
 #include "media/player/media_player_instance.h"
@@ -145,7 +145,7 @@ void CoverWidget::setCloseCallback(ButtonCallback &&callback) {
 void CoverWidget::handleSeekProgress(float64 progress) {
 	if (!_lastDurationMs) return;
 
-	auto positionMs = snap(static_cast<TimeMs>(progress * _lastDurationMs), 0LL, _lastDurationMs);
+	auto positionMs = snap(static_cast<crl::time>(progress * _lastDurationMs), 0LL, _lastDurationMs);
 	if (_seekPositionMs != positionMs) {
 		_seekPositionMs = positionMs;
 		updateTimeLabel();
@@ -156,7 +156,7 @@ void CoverWidget::handleSeekProgress(float64 progress) {
 void CoverWidget::handleSeekFinished(float64 progress) {
 	if (!_lastDurationMs) return;
 
-	auto positionMs = snap(static_cast<TimeMs>(progress * _lastDurationMs), 0LL, _lastDurationMs);
+	auto positionMs = snap(static_cast<crl::time>(progress * _lastDurationMs), 0LL, _lastDurationMs);
 	_seekPositionMs = -1;
 
 	auto type = AudioMsgId::Type::Song;

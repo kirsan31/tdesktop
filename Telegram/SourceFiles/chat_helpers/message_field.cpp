@@ -27,7 +27,7 @@ namespace {
 using EditLinkAction = Ui::InputField::EditLinkAction;
 using EditLinkSelection = Ui::InputField::EditLinkSelection;
 
-constexpr auto kParseLinksTimeout = TimeMs(1000);
+constexpr auto kParseLinksTimeout = crl::time(1000);
 const auto kMentionTagStart = qstr("mention://user.");
 
 bool IsMentionLink(const QString &link) {
@@ -155,7 +155,10 @@ void EditLinkBox::prepare() {
 		}
 	});
 
-	setTitle(langFactory(lng_formatting_link_create_title));
+	const auto title = url->getLastText().isEmpty()
+			? lng_formatting_link_create_title
+			: lng_formatting_link_edit_title;
+	setTitle(langFactory(title));
 
 	addButton(langFactory(lng_formatting_link_create), submit);
 	addButton(langFactory(lng_cancel), [=] { closeBox(); });

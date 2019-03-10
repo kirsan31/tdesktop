@@ -1000,6 +1000,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_forwarded_via" = "Forwarded from {user} via {inline_bot}";
 "lng_forwarded_channel_via" = "Forwarded from {channel} via {inline_bot}";
 "lng_forwarded_signed" = "{channel} ({user})";
+"lng_signed_author" = "Author: {user}";
 "lng_in_reply_to" = "In reply to";
 "lng_edited" = "edited";
 "lng_edited_date" = "Edited: {date}";
@@ -1409,7 +1410,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_menu_formatting_link_edit" = "Edit link";
 "lng_menu_formatting_clear" = "Plain text";
 "lng_formatting_link_create_title" = "Create link";
-"lng_formatting_link_edit_title" = "Create link";
+"lng_formatting_link_edit_title" = "Edit link";
 "lng_formatting_link_text" = "Text";
 "lng_formatting_link_url" = "URL";
 "lng_formatting_link_create" = "Create";

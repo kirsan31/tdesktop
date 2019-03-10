@@ -13,8 +13,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/sandbox.h"
 #include "core/crash_reports.h"
 #include "storage/localstorage.h"
+#include "media/audio/media_audio.h"
 #include "media/player/media_player_instance.h"
-#include "media/media_audio.h"
 #include "platform/mac/mac_utilities.h"
 #include "lang/lang_keys.h"
 #include "base/timer.h"
@@ -351,7 +351,7 @@ bool objc_idleSupported() {
 	return objc_idleTime(idleTime);
 }
 
-bool objc_idleTime(TimeMs &idleTime) { // taken from https://github.com/trueinteractions/tint/issues/53
+bool objc_idleTime(crl::time &idleTime) { // taken from https://github.com/trueinteractions/tint/issues/53
 	CFMutableDictionaryRef properties = 0;
 	CFTypeRef obj;
 	mach_port_t masterPort;
@@ -400,7 +400,7 @@ bool objc_idleTime(TimeMs &idleTime) { // taken from https://github.com/trueinte
 	IOObjectRelease(iter);
 	if (result == err) return false;
 
-	idleTime = static_cast<TimeMs>(result);
+	idleTime = static_cast<crl::time>(result);
 	return true;
 }
 

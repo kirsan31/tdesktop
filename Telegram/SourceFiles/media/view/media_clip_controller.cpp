@@ -7,14 +7,14 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "media/view/media_clip_controller.h"
 
+#include "media/audio/media_audio.h"
 #include "media/view/media_clip_playback.h"
-#include "styles/style_mediaview.h"
 #include "ui/widgets/labels.h"
 #include "ui/widgets/continuous_sliders.h"
 #include "ui/effects/fade_animation.h"
 #include "ui/widgets/buttons.h"
-#include "media/media_audio.h"
 #include "layout.h"
+#include "styles/style_mediaview.h"
 
 namespace Media {
 namespace Clip {
@@ -61,7 +61,7 @@ Controller::Controller(QWidget *parent) : TWidget(parent)
 void Controller::handleSeekProgress(float64 progress) {
 	if (!_lastDurationMs) return;
 
-	auto positionMs = snap(static_cast<TimeMs>(progress * _lastDurationMs), 0LL, _lastDurationMs);
+	auto positionMs = snap(static_cast<crl::time>(progress * _lastDurationMs), 0LL, _lastDurationMs);
 	if (_seekPositionMs != positionMs) {
 		_seekPositionMs = positionMs;
 		refreshTimeTexts();
@@ -72,7 +72,7 @@ void Controller::handleSeekProgress(float64 progress) {
 void Controller::handleSeekFinished(float64 progress) {
 	if (!_lastDurationMs) return;
 
-	auto positionMs = snap(static_cast<TimeMs>(progress * _lastDurationMs), 0LL, _lastDurationMs);
+	auto positionMs = snap(static_cast<crl::time>(progress * _lastDurationMs), 0LL, _lastDurationMs);
 	_seekPositionMs = -1;
 	emit seekFinished(positionMs);
 	refreshTimeTexts();

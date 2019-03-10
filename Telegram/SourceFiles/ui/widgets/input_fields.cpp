@@ -971,7 +971,7 @@ QRect FlatInput::getTextRect() const {
 void FlatInput::paintEvent(QPaintEvent *e) {
 	Painter p(this);
 
-	auto ms = getms();
+	auto ms = crl::now();
 	auto placeholderFocused = _a_placeholderFocused.current(ms, _focused ? 1. : 0.);
 
 	auto pen = anim::pen(_st.borderColor, _st.borderActive, placeholderFocused);
@@ -1549,7 +1549,7 @@ void InputField::handleTouchEvent(QTouchEvent *e) {
 void InputField::paintEvent(QPaintEvent *e) {
 	Painter p(this);
 
-	auto ms = getms();
+	auto ms = crl::now();
 	auto r = rect().intersected(e->rect());
 	if (_st.textBg->c.alphaF() > 0.) {
 		p.fillRect(r, _st.textBg);
@@ -3603,7 +3603,7 @@ QRect MaskedInputField::getTextRect() const {
 void MaskedInputField::paintEvent(QPaintEvent *e) {
 	Painter p(this);
 
-	auto ms = getms();
+	auto ms = crl::now();
 	auto r = rect().intersected(e->rect());
 	p.fillRect(r, _st.textBg);
 	if (_st.border) {
@@ -3811,7 +3811,7 @@ QRect MaskedInputField::placeholderRect() const {
 	return rect().marginsRemoved(_textMargins + _st.placeholderMargins);
 }
 
-void MaskedInputField::placeholderAdditionalPrepare(Painter &p, TimeMs ms) {
+void MaskedInputField::placeholderAdditionalPrepare(Painter &p, crl::time ms) {
 	p.setFont(_st.font);
 	p.setPen(_st.placeholderFg);
 }
@@ -3940,7 +3940,7 @@ void CountryCodeInput::correctValue(
 PhonePartInput::PhonePartInput(QWidget *parent, const style::InputField &st) : MaskedInputField(parent, st/*, lang(lng_phone_ph)*/) {
 }
 
-void PhonePartInput::paintAdditionalPlaceholder(Painter &p, TimeMs ms) {
+void PhonePartInput::paintAdditionalPlaceholder(Painter &p, crl::time ms) {
 	if (!_pattern.isEmpty()) {
 		auto t = getDisplayedText();
 		auto ph = _additionalPlaceholder.mid(t.size());
@@ -4141,7 +4141,7 @@ void UsernameInput::setLinkPlaceholder(const QString &placeholder) {
 	}
 }
 
-void UsernameInput::paintAdditionalPlaceholder(Painter &p, TimeMs ms) {
+void UsernameInput::paintAdditionalPlaceholder(Painter &p, crl::time ms) {
 	if (!_linkPlaceholder.isEmpty()) {
 		p.setFont(_st.font);
 		p.setPen(_st.placeholderFg);
@@ -4205,7 +4205,7 @@ void PhoneInput::clearText() {
 	correctValue(QString(), 0, phone, pos);
 }
 
-void PhoneInput::paintAdditionalPlaceholder(Painter &p, TimeMs ms) {
+void PhoneInput::paintAdditionalPlaceholder(Painter &p, crl::time ms) {
 	if (!_pattern.isEmpty()) {
 		auto t = getDisplayedText();
 		auto ph = _additionalPlaceholder.mid(t.size());

@@ -14,8 +14,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/media/history_media.h"
 #include "history/history_item.h"
 #include "history/view/history_view_element.h"
-#include "media/media_clip_reader.h"
-#include "media/media_audio.h"
+#include "media/audio/media_audio.h"
+#include "media/clip/media_clip_reader.h"
 #include "media/view/media_clip_playback.h"
 #include "media/player/media_player_instance.h"
 #include "media/player/media_player_round_controller.h"
@@ -174,7 +174,7 @@ void Float::paintEvent(QPaintEvent *e) {
 	p.drawImage(inner.topLeft(), _frame);
 
 	const auto playback = getPlayback();
-	const auto progress = playback ? playback->value(getms()) : 1.;
+	const auto progress = playback ? playback->value(crl::now()) : 1.;
 	if (progress > 0.) {
 		auto pen = st::historyVideoMessageProgressFg->p;
 		auto was = p.pen();

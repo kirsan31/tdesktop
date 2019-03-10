@@ -5,9 +5,9 @@ the official desktop application for the Telegram messaging service.
 For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
-#include "media/media_audio_capture.h"
+#include "media/audio/media_audio_capture.h"
 
-#include "media/media_audio_ffmpeg_loader.h"
+#include "media/audio/media_audio_ffmpeg_loader.h"
 
 #include <AL/al.h>
 #include <AL/alc.h>
@@ -20,8 +20,8 @@ namespace Capture {
 namespace {
 
 constexpr auto kCaptureFrequency = Player::kDefaultFrequency;
-constexpr auto kCaptureSkipDuration = TimeMs(400);
-constexpr auto kCaptureFadeInDuration = TimeMs(300);
+constexpr auto kCaptureSkipDuration = crl::time(400);
+constexpr auto kCaptureFadeInDuration = crl::time(300);
 
 Instance *CaptureInstance = nullptr;
 

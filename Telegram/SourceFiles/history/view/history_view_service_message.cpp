@@ -393,7 +393,7 @@ void Service::draw(
 		Painter &p,
 		QRect clip,
 		TextSelection selection,
-		TimeMs ms) const {
+		crl::time ms) const {
 	const auto item = message();
 	auto g = countGeometry();
 	if (g.width() < 1) {

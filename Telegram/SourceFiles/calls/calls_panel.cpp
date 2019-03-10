@@ -186,7 +186,7 @@ void Panel::Button::setProgress(float64 progress) {
 void Panel::Button::paintEvent(QPaintEvent *e) {
 	Painter p(this);
 
-	auto ms = getms();
+	auto ms = crl::now();
 	auto bgPosition = myrtlpoint(_stFrom->button.rippleAreaPosition);
 	auto paintFrom = (_progress == 0.) || !_stTo;
 	auto paintTo = !paintFrom && (_progress == 1.);
@@ -698,7 +698,7 @@ void Panel::updateStatusGeometry() {
 void Panel::paintEvent(QPaintEvent *e) {
 	Painter p(this);
 	if (!_animationCache.isNull()) {
-		auto opacity = _opacityAnimation.current(getms(), _call ? 1. : 0.);
+		auto opacity = _opacityAnimation.current(crl::now(), _call ? 1. : 0.);
 		if (!_opacityAnimation.animating()) {
 			finishAnimating();
 			if (!_call || isHidden()) return;
@@ -924,7 +924,7 @@ void Panel::updateStatusText(State state) {
 	updateStatusGeometry();
 }
 
-void Panel::startDurationUpdateTimer(TimeMs currentDuration) {
+void Panel::startDurationUpdateTimer(crl::time currentDuration) {
 	auto msTillNextSecond = 1000 - (currentDuration % 1000);
 	_updateDurationTimer.callOnce(msTillNextSecond + 5);
 }

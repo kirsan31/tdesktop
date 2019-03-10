@@ -12,6 +12,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_session.h"
 #include "data/data_user.h"
 #include "base/timer.h"
+#include "base/concurrent_timer.h"
 #include "core/update_checker.h"
 #include "core/shortcuts.h"
 #include "core/sandbox.h"
@@ -35,9 +36,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "media/view/media_view_overlay_widget.h"
 #include "mtproto/dc_options.h"
 #include "mtproto/mtp_instance.h"
+#include "media/audio/media_audio.h"
+#include "media/audio/media_audio_track.h"
 #include "media/player/media_player_instance.h"
-#include "media/media_audio.h"
-#include "media/media_audio_track.h"
 #include "window/notifications_manager.h"
 #include "window/themes/window_theme.h"
 #include "window/window_lock_widgets.h"
@@ -681,8 +682,13 @@ void Application::forceLogOut(const TextWithEntities &explanation) {
 }
 
 void Application::checkLocalTime() {
-	const auto updated = checkms();
-	if (App::main()) App::main()->checkLastUpdate(updated);
+	if (crl::adjust_time()) {
+		base::Timer::Adjust();
+		base::ConcurrentTimerEnvironment::Adjust();
+		if (App::main()) App::main()->checkLastUpdate(true);
+	} else {
+		if (App::main()) App::main()->checkLastUpdate(false);
+	}
 }
 
 void Application::stateChanged(Qt::ApplicationState state) {

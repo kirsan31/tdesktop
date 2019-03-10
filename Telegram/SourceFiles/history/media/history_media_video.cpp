@@ -138,7 +138,7 @@ QSize HistoryVideo::countCurrentSize(int newWidth) {
 	return { newWidth, newHeight };
 }
 
-void HistoryVideo::draw(Painter &p, const QRect &r, TextSelection selection, TimeMs ms) const {
+void HistoryVideo::draw(Painter &p, const QRect &r, TextSelection selection, crl::time ms) const {
 	if (width() < st::msgPadding.left() + st::msgPadding.right() + 1) return;
 
 	_data->automaticLoad(_realParent->fullId(), _parent->data());
@@ -183,11 +183,22 @@ void HistoryVideo::draw(Painter &p, const QRect &r, TextSelection selection, Tim
 		if (good) {
 			good->load({});
 		}
-		if (const auto normal = _data->thumbnail()) {
-			const auto use = (normal->loaded() || !_data->thumbnailInline())
-				? normal
-				: _data->thumbnailInline();
-			p.drawPixmap(rthumb.topLeft(), use->pixBlurredSingle(_realParent->fullId(), _thumbw, _thumbh, paintw, painth, roundRadius, roundCorners));
+		const auto normal = _data->thumbnail();
+		if (normal && normal->loaded()) {
+			p.drawPixmap(rthumb.topLeft(), normal->pixSingle(_realParent->fullId(), _thumbw, _thumbh, paintw, painth, roundRadius, roundCorners));
+		} else if (const auto blurred = _data->thumbnailInline()) {
+			p.drawPixmap(rthumb.topLeft(), blurred->pixBlurredSingle(_realParent->fullId(), _thumbw, _thumbh, paintw, painth, roundRadius, roundCorners));
+		} else {
+			const auto roundTop = (roundCorners & RectPart::TopLeft);
+			const auto roundBottom = (roundCorners & RectPart::BottomLeft);
+			const auto margin = inWebPage
+				? st::buttonRadius
+				: st::historyMessageRadius;
+			const auto parts = roundCorners
+				| RectPart::NoTopBottom
+				| (roundTop ? RectPart::Top : RectPart::None)
+				| (roundBottom ? RectPart::Bottom : RectPart::None);
+			App::roundRect(p, rthumb.marginsAdded({ 0, roundTop ? 0 : margin, 0, roundBottom ? 0 : margin }), st::imageBg, roundRadius, parts);
 		}
 	}
 	if (selected) {
@@ -317,7 +328,7 @@ void HistoryVideo::drawGrouped(
 		Painter &p,
 		const QRect &clip,
 		TextSelection selection,
-		TimeMs ms,
+		crl::time ms,
 		const QRect &geometry,
 		RectParts corners,
 		not_null<uint64*> cacheKey,
@@ -496,7 +507,13 @@ void HistoryVideo::validateGroupedCache(
 	const auto pixHeight = pixSize.height() * cIntRetinaFactor();
 
 	*cacheKey = key;
-	*cache = (image ? image : Image::Blank().get())->pixNoCache(_realParent->fullId(), pixWidth, pixHeight, options, width, height);
+	*cache = (image ? image : Image::BlankMedia().get())->pixNoCache(
+		_realParent->fullId(),
+		pixWidth,
+		pixHeight,
+		options,
+		width,
+		height);
 }
 
 void HistoryVideo::setStatusSize(int newSize) const {

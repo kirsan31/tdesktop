@@ -10,8 +10,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "lang/lang_keys.h"
 #include "layout.h"
 #include "mainwindow.h"
-#include "media/media_audio.h"
-#include "media/media_clip_reader.h"
+#include "media/audio/media_audio.h"
+#include "media/clip/media_clip_reader.h"
 #include "media/player/media_player_round_controller.h"
 #include "media/view/media_clip_playback.h"
 #include "boxes/confirm_box.h"
@@ -236,7 +236,7 @@ QSize HistoryGif::countCurrentSize(int newWidth) {
 	return { newWidth, newHeight };
 }
 
-void HistoryGif::draw(Painter &p, const QRect &r, TextSelection selection, TimeMs ms) const {
+void HistoryGif::draw(Painter &p, const QRect &r, TextSelection selection, crl::time ms) const {
 	if (width() < st::msgPadding.left() + st::msgPadding.right() + 1) return;
 
 	const auto item = _parent->data();
@@ -347,12 +347,22 @@ void HistoryGif::draw(Painter &p, const QRect &r, TextSelection selection, TimeM
 			if (good) {
 				good->load({});
 			}
-			if (const auto normal = _data->thumbnail()) {
-				if (normal->loaded()) {
-					p.drawPixmap(rthumb.topLeft(), normal->pixSingle(_realParent->fullId(), _thumbw, _thumbh, usew, painth, roundRadius, roundCorners));
-				} else if (const auto blurred = _data->thumbnailInline()) {
-					p.drawPixmap(rthumb.topLeft(), blurred->pixBlurredSingle(_realParent->fullId(), _thumbw, _thumbh, usew, painth, roundRadius, roundCorners));
-				}
+			const auto normal = _data->thumbnail();
+			if (normal && normal->loaded()) {
+				p.drawPixmap(rthumb.topLeft(), normal->pixSingle(_realParent->fullId(), _thumbw, _thumbh, paintw, painth, roundRadius, roundCorners));
+			} else if (const auto blurred = _data->thumbnailInline()) {
+				p.drawPixmap(rthumb.topLeft(), blurred->pixBlurredSingle(_realParent->fullId(), _thumbw, _thumbh, paintw, painth, roundRadius, roundCorners));
+			} else if (!isRound) {
+				const auto roundTop = (roundCorners & RectPart::TopLeft);
+				const auto roundBottom = (roundCorners & RectPart::BottomLeft);
+				const auto margin = inWebPage
+					? st::buttonRadius
+					: st::historyMessageRadius;
+				const auto parts = roundCorners
+					| RectPart::NoTopBottom
+					| (roundTop ? RectPart::Top : RectPart::None)
+					| (roundBottom ? RectPart::Bottom : RectPart::None);
+				App::roundRect(p, rthumb.marginsAdded({ 0, roundTop ? 0 : margin, 0, roundBottom ? 0 : margin }), st::imageBg, roundRadius, parts);
 			}
 		}
 	}

@@ -7,7 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #pragma once
 
-#include "platform/win/windows_h_wrapper.h"
+#include "platform/win/wrapper_windows_h.h"
 
 class LocationCoords;
 
@@ -59,7 +59,7 @@ void psDeleteDir(const QString &dir);
 
 void psUserActionDone();
 bool psIdleSupported();
-TimeMs psIdleTime();
+crl::time psIdleTime();
 
 QStringList psInitLogs();
 void psClearInitLogs();
