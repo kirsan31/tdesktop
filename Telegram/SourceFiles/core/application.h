@@ -185,6 +185,9 @@ public:
 	rpl::producer<bool> lockChanges() const;
 	rpl::producer<bool> lockValue() const;
 
+	[[nodiscard]] crl::time lastNonIdleTime() const;
+	void updateNonIdle();
+
 	void registerLeaveSubscription(QWidget *widget);
 	void unregisterLeaveSubscription(QWidget *widget);
 
@@ -282,6 +285,8 @@ private:
 	std::vector<LeaveSubscription> _leaveSubscriptions;
 
 	rpl::lifetime _lifetime;
+
+	crl::time _lastNonIdleTime = 0;
 
 };
 

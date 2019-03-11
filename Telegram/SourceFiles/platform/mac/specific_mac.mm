@@ -90,23 +90,8 @@ void psDeleteDir(const QString &dir) {
 	objc_deleteDir(dir);
 }
 
-namespace {
-
-auto _lastUserAction = 0LL;
-
-} // namespace
-
-void psUserActionDone() {
-	_lastUserAction = crl::now();
-}
-
 bool psIdleSupported() {
 	return objc_idleSupported();
-}
-
-crl::time psIdleTime() {
-	auto idleTime = 0LL;
-	return objc_idleTime(idleTime) ? idleTime : (crl::now() - _lastUserAction);
 }
 
 QStringList psInitLogs() {
@@ -268,6 +253,11 @@ bool OpenSystemSettings(SystemSettingsType type) {
 		break;
 	}
 	return true;
+}
+
+crl::time LastUserInputTime() {
+	auto idleTime = 0LL;
+	return objc_idleTime(idleTime) ? (crl::now() - crl::time(idleTime)) : 0LL;
 }
 
 } // namespace Platform

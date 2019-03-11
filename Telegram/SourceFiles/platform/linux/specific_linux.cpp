@@ -193,22 +193,8 @@ void psDeleteDir(const QString &dir) {
 	_removeDirectory(dir);
 }
 
-namespace {
-
-auto _lastUserAction = 0LL;
-
-} // namespace
-
-void psUserActionDone() {
-	_lastUserAction = crl::now();
-}
-
 bool psIdleSupported() {
 	return false;
-}
-
-crl::time psIdleTime() {
-	return crl::now() - _lastUserAction;
 }
 
 void psActivateProcess(uint64 pid) {
@@ -447,6 +433,10 @@ bool OpenSystemSettings(SystemSettingsType type) {
 		}) != end(options);
 	}
 	return true;
+}
+
+crl::time LastUserInputTime() {
+	return 0LL;
 }
 
 namespace ThirdParty {

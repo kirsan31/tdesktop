@@ -128,27 +128,10 @@ namespace {
 	}
 }
 
-namespace {
-
-crl::time _lastUserAction = 0;
-
-} // namespace
-
-void psUserActionDone() {
-	_lastUserAction = crl::now();
-	EventFilter::getInstance()->setSessionLoggedOff(false);
-}
-
 bool psIdleSupported() {
 	LASTINPUTINFO lii;
 	lii.cbSize = sizeof(LASTINPUTINFO);
 	return GetLastInputInfo(&lii);
-}
-
-crl::time psIdleTime() {
-	LASTINPUTINFO lii;
-	lii.cbSize = sizeof(LASTINPUTINFO);
-	return GetLastInputInfo(&lii) ? (GetTickCount() - lii.dwTime) : (crl::now() - _lastUserAction);
 }
 
 QStringList psInitLogs() {
@@ -348,6 +331,12 @@ QString CurrentExecutablePath(int argc, char *argv[]) {
 		return info.absoluteFilePath();
 	}
 	return QString();
+}
+
+crl::time LastUserInputTime() {
+	LASTINPUTINFO lii;
+	lii.cbSize = sizeof(LASTINPUTINFO);
+	return GetLastInputInfo(&lii) ? (crl::now() + lii.dwTime - GetTickCount()) : 0LL;
 }
 
 namespace {
