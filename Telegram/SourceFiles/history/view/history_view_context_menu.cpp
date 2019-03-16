@@ -112,7 +112,7 @@ void OpenGif(FullMsgId itemId) {
 
 void ShowInFolder(not_null<DocumentData*> document) {
 	const auto filepath = document->filepath(
-		DocumentData::FilePathResolveChecked);
+		DocumentData::FilePathResolve::Checked);
 	if (!filepath.isEmpty()) {
 		File::ShowInFolder(filepath);
 	}
@@ -122,6 +122,12 @@ void AddSaveDocumentAction(
 		not_null<Ui::PopupMenu*> menu,
 		Data::FileOrigin origin,
 		not_null<DocumentData*> document) {
+	const auto save = [=] {
+		DocumentSaveClickHandler::Save(
+			origin,
+			document,
+			DocumentSaveClickHandler::Mode::ToNewFile);
+	};
 	menu->addAction(
 		lang(document->isVideoFile()
 			? lng_context_save_video
@@ -135,7 +141,7 @@ void AddSaveDocumentAction(
 		App::LambdaDelayed(
 			st::defaultDropdownMenu.menu.ripple.hideDuration,
 			&Auth(),
-			[=] { DocumentSaveClickHandler::Save(origin, document, true); }));
+			save));
 }
 
 void AddDocumentActions(
@@ -169,7 +175,7 @@ void AddDocumentActions(
 			[=] { ToggleFavedSticker(document, contextId); });
 	}
 	if (!document->filepath(
-			DocumentData::FilePathResolveChecked).isEmpty()) {
+			DocumentData::FilePathResolve::Checked).isEmpty()) {
 		menu->addAction(
 			lang((cPlatform() == dbipMac || cPlatform() == dbipMacOld)
 				? lng_context_show_in_finder

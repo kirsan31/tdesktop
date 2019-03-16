@@ -366,11 +366,7 @@ MainWidget::MainWidget(
 , _sideShadow(this)
 , _dialogs(this, _controller)
 , _history(this, _controller)
-, _playerPlaylist(
-	this,
-	_controller,
-	Media::Player::Panel::Layout::OnlyPlaylist)
-, _playerPanel(this, _controller, Media::Player::Panel::Layout::Full)
+, _playerPlaylist(this, _controller)
 , _noUpdatesTimer([=] { sendPing(); })
 , _byPtsTimer([=] { getDifferenceByPts(); })
 , _bySeqTimer([=] { getDifference(); })
@@ -393,11 +389,9 @@ MainWidget::MainWidget(
 	connect(_dialogs, SIGNAL(cancelled()), this, SLOT(dialogsCancelled()));
 	connect(this, SIGNAL(dialogsUpdated()), _dialogs, SLOT(onListScroll()));
 	connect(_history, SIGNAL(cancelled()), _dialogs, SLOT(activate()));
-	subscribe(Media::Player::Updated(), [this](const AudioMsgId &audioId) {
-		if (audioId.type() != AudioMsgId::Type::Video) {
-			handleAudioUpdate(audioId);
-		}
-	});
+	subscribe(
+		Media::Player::instance()->updatedNotifier(),
+		[=](const Media::Player::TrackState &state) { handleAudioUpdate(state); });
 	subscribe(session().calls().currentCallChanged(), [this](Calls::Call *call) { setCurrentCall(call); });
 
 	session().data().currentExportView(
@@ -447,15 +441,6 @@ MainWidget::MainWidget(
 		}
 	});
 
-	_playerPanel->setPinCallback([this] { switchToFixedPlayer(); });
-	_playerPanel->setCloseCallback([this] { closeBothPlayers(); });
-	subscribe(Media::Player::instance()->titleButtonOver(), [this](bool over) {
-		if (over) {
-			_playerPanel->showFromOther();
-		} else {
-			_playerPanel->hideFromOther();
-		}
-	});
 	subscribe(Media::Player::instance()->playerWidgetOver(), [this](bool over) {
 		if (over) {
 			if (_playerPlaylist->isHidden()) {
@@ -471,7 +456,7 @@ MainWidget::MainWidget(
 	});
 	subscribe(Media::Player::instance()->tracksFinishedNotifier(), [this](AudioMsgId::Type type) {
 		if (type == AudioMsgId::Type::Voice) {
-			auto songState = Media::Player::mixer()->currentState(AudioMsgId::Type::Song);
+			const auto songState = Media::Player::instance()->getState(AudioMsgId::Type::Song);
 			if (!songState.id || IsStoppedOrStopping(songState.state)) {
 				closeBothPlayers();
 			}
@@ -1186,29 +1171,16 @@ void MainWidget::messagesAffected(
 	}
 }
 
-void MainWidget::handleAudioUpdate(const AudioMsgId &audioId) {
+void MainWidget::handleAudioUpdate(const Media::Player::TrackState &state) {
 	using State = Media::Player::State;
-	const auto document = audioId.audio();
-	auto state = Media::Player::mixer()->currentState(audioId.type());
-	if (state.id == audioId && state.state == State::StoppedAtStart) {
-		state.state = State::Stopped;
-		Media::Player::mixer()->clearStoppedAtStart(audioId);
-
-		auto filepath = document->filepath(DocumentData::FilePathResolveSaveFromData);
-		if (!filepath.isEmpty()) {
-			if (Data::IsValidMediaFile(filepath)) {
-				File::Launch(filepath);
-			}
-		}
+	const auto document = state.id.audio();
+	if (!Media::Player::IsStoppedOrStopping(state.state)) {
+		createPlayer();
+	} else if (state.state == State::StoppedAtStart) {
+		closeBothPlayers();
 	}
 
-	if (state.id == audioId) {
-		if (!Media::Player::IsStoppedOrStopping(state.state)) {
-			createPlayer();
-		}
-	}
-
-	if (const auto item = App::histItemById(audioId.contextId())) {
+	if (const auto item = App::histItemById(state.id.contextId())) {
 		session().data().requestItemRepaint(item);
 	}
 	if (const auto items = InlineBots::Layout::documentItems()) {
@@ -1220,47 +1192,12 @@ void MainWidget::handleAudioUpdate(const AudioMsgId &audioId) {
 	}
 }
 
-void MainWidget::switchToPanelPlayer() {
-	if (_playerUsingPanel) return;
-	_playerUsingPanel = true;
-
-	_player->hide(anim::type::normal);
-	_playerVolume.destroyDelayed();
-	_playerPlaylist->hideIgnoringEnterEvents();
-
-	Media::Player::instance()->usePanelPlayer().notify(true, true);
-}
-
-void MainWidget::switchToFixedPlayer() {
-	if (!_playerUsingPanel) return;
-	_playerUsingPanel = false;
-
-	if (!_player) {
-		createPlayer();
-	} else {
-		_player->show(anim::type::normal);
-		if (!_playerVolume) {
-			_playerVolume.create(this);
-			_player->entity()->volumeWidgetCreated(_playerVolume);
-			updateMediaPlayerPosition();
-		}
-	}
-
-	Media::Player::instance()->usePanelPlayer().notify(false, true);
-	_playerPanel->hideIgnoringEnterEvents();
-}
-
 void MainWidget::closeBothPlayers() {
-	if (_playerUsingPanel) {
-		_playerUsingPanel = false;
-		_player.destroyDelayed();
-	} else if (_player) {
+	if (_player) {
 		_player->hide(anim::type::normal);
 	}
 	_playerVolume.destroyDelayed();
 
-	Media::Player::instance()->usePanelPlayer().notify(false, true);
-	_playerPanel->hideIgnoringEnterEvents();
 	_playerPlaylist->hideIgnoringEnterEvents();
 	Media::Player::instance()->stop(AudioMsgId::Type::Voice);
 	Media::Player::instance()->stop(AudioMsgId::Type::Song);
@@ -1269,9 +1206,6 @@ void MainWidget::closeBothPlayers() {
 }
 
 void MainWidget::createPlayer() {
-	if (_playerUsingPanel) {
-		return;
-	}
 	if (!_player) {
 		_player.create(this, object_ptr<Media::Player::Widget>(this));
 		rpl::merge(
@@ -1314,7 +1248,7 @@ void MainWidget::playerHeightUpdated() {
 		updateControlsGeometry();
 	}
 	if (!_playerHeight && _player->isHidden()) {
-		auto state = Media::Player::mixer()->currentState(Media::Player::instance()->getActiveType());
+		const auto state = Media::Player::instance()->getState(Media::Player::instance()->getActiveType());
 		if (!state.id || Media::Player::IsStoppedOrStopping(state.state)) {
 			_playerVolume.destroyDelayed();
 			_player.destroyDelayed();
@@ -1454,10 +1388,6 @@ void MainWidget::documentLoadProgress(FileLoader *loader) {
 }
 
 void MainWidget::documentLoadProgress(DocumentData *document) {
-	if (document->loaded()) {
-		document->performActionOnLoad();
-	}
-
 	session().data().requestDocumentViewRepaint(document);
 	session().documentUpdated.notify(document, true);
 
@@ -1770,7 +1700,7 @@ void MainWidget::choosePeer(PeerId peerId, MsgId showAtMsgId) {
 }
 
 void MainWidget::clearBotStartToken(PeerData *peer) {
-	if (peer && peer->isUser() && peer->asUser()->botInfo) {
+	if (peer && peer->isUser() && peer->asUser()->isBot()) {
 		peer->asUser()->botInfo->startToken = QString();
 	}
 }
@@ -2042,10 +1972,6 @@ Window::SectionSlideParams MainWidget::prepareShowAnimation(
 	if (playerVolumeVisible) {
 		_playerVolume->hide();
 	}
-	auto playerPanelVisible = !_playerPanel->isHidden();
-	if (playerPanelVisible) {
-		_playerPanel->hide();
-	}
 	auto playerPlaylistVisible = !_playerPlaylist->isHidden();
 	if (playerPlaylistVisible) {
 		_playerPlaylist->hide();
@@ -2072,9 +1998,6 @@ Window::SectionSlideParams MainWidget::prepareShowAnimation(
 
 	if (playerVolumeVisible) {
 		_playerVolume->show();
-	}
-	if (playerPanelVisible) {
-		_playerPanel->show();
 	}
 	if (playerPlaylistVisible) {
 		_playerPlaylist->show();
@@ -2330,7 +2253,6 @@ void MainWidget::orderWidgets() {
 	}
 	_connecting->raise();
 	_playerPlaylist->raise();
-	_playerPanel->raise();
 	floatPlayerRaiseAll();
 	if (_hider) _hider->raise();
 }
@@ -2351,10 +2273,6 @@ QPixmap MainWidget::grabForShowAnimation(const Window::SectionSlideParams &param
 	auto playerVolumeVisible = _playerVolume && !_playerVolume->isHidden();
 	if (playerVolumeVisible) {
 		_playerVolume->hide();
-	}
-	auto playerPanelVisible = !_playerPanel->isHidden();
-	if (playerPanelVisible) {
-		_playerPanel->hide();
 	}
 	auto playerPlaylistVisible = !_playerPlaylist->isHidden();
 	if (playerPlaylistVisible) {
@@ -2385,9 +2303,6 @@ QPixmap MainWidget::grabForShowAnimation(const Window::SectionSlideParams &param
 	}
 	if (playerVolumeVisible) {
 		_playerVolume->show();
-	}
-	if (playerPanelVisible) {
-		_playerPanel->show();
 	}
 	if (playerPlaylistVisible) {
 		_playerPlaylist->show();
@@ -2890,7 +2805,6 @@ void MainWidget::updateThirdColumnToCurrentChat(
 }
 
 void MainWidget::updateMediaPlayerPosition() {
-	_playerPanel->moveToRight(0, 0);
 	if (_player && _playerVolume) {
 		auto relativePosition = _player->entity()->getPositionForVolumeWidget();
 		auto playerMargins = _playerVolume->getMargin();
@@ -3316,7 +3230,7 @@ bool MainWidget::failDifference(const RPCError &error) {
 }
 
 void MainWidget::getDifferenceByPts() {
-	auto now = crl::now(), wait = 0LL;
+	auto now = crl::now(), wait = crl::time(0);
 	if (_getDifferenceTimeByPts) {
 		if (_getDifferenceTimeByPts > now) {
 			wait = _getDifferenceTimeByPts - now;
@@ -3341,7 +3255,7 @@ void MainWidget::getDifferenceByPts() {
 }
 
 void MainWidget::getDifferenceAfterFail() {
-	auto now = crl::now(), wait = 0LL;
+	auto now = crl::now(), wait = crl::time(0);
 	if (_getDifferenceTimeAfterFail) {
 		if (_getDifferenceTimeAfterFail > now) {
 			wait = _getDifferenceTimeAfterFail - now;
@@ -3525,7 +3439,6 @@ void MainWidget::openPeerByName(
 
 bool MainWidget::contentOverlapped(const QRect &globalRect) {
 	return (_history->contentOverlapped(globalRect)
-			|| _playerPanel->overlaps(globalRect)
 			|| _playerPlaylist->overlaps(globalRect)
 			|| (_playerVolume && _playerVolume->overlaps(globalRect)));
 }
@@ -3768,7 +3681,7 @@ void MainWidget::updateOnline(bool gotOtherOffline) {
 	bool isOnline = !App::quitting() && App::wnd()->isActive();
 	int updateIn = Global::OnlineUpdatePeriod();
 	if (isOnline) {
-		const auto idle = crl::now() - Platform::LastUserInputTime();
+		const auto idle = crl::now() - Core::App().lastNonIdleTime();
 		if (idle >= Global::OfflineIdleTimeout()) {
 			isOnline = false;
 			if (!_isIdle) {
@@ -3884,7 +3797,8 @@ void MainWidget::writeDrafts(History *history) {
 }
 
 void MainWidget::checkIdleFinish() {
-	if (crl::now() - Platform::LastUserInputTime() < Global::OfflineIdleTimeout()) {
+	if (crl::now() - Core::App().lastNonIdleTime()
+		< Global::OfflineIdleTimeout()) {
 		_idleFinishTimer.cancel();
 		_isIdle = false;
 		updateOnline();
@@ -4446,7 +4360,7 @@ void MainWidget::feedUpdate(const MTPUpdate &update) {
 					user->firstName,
 					user->lastName,
 					((user->contactStatus() == UserData::ContactStatus::Contact
-						|| isServiceUser(user->id)
+						|| user->isServiceUser()
 						|| user->isSelf()
 						|| user->phone().isEmpty())
 						? QString()

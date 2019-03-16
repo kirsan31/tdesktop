@@ -14,9 +14,9 @@ struct HistoryMessageReply;
 struct HistoryMessageForwarded;
 
 namespace Media {
-namespace Clip {
-class Playback;
-} // namespace Clip
+namespace View {
+class PlaybackProgress;
+} // namespace View
 
 namespace Player {
 class RoundController;
@@ -28,8 +28,6 @@ public:
 	HistoryGif(
 		not_null<Element*> parent,
 		not_null<DocumentData*> document);
-
-	void refreshParentId(not_null<HistoryItem*> realParent) override;
 
 	void draw(Painter &p, const QRect &r, TextSelection selection, crl::time ms) const override;
 	TextState textState(QPoint point, StateRequest request) const override;
@@ -91,7 +89,7 @@ private:
 	Media::Player::RoundController *activeRoundVideo() const;
 	Media::Clip::Reader *activeRoundPlayer() const;
 	Media::Clip::Reader *currentReader() const;
-	Media::Clip::Playback *videoPlayback() const;
+	Media::View::PlaybackProgress *videoPlayback() const;
 	void clipCallback(Media::Clip::Notification notification);
 
 	bool needInfoDisplay() const;
@@ -104,7 +102,6 @@ private:
 	bool isSeparateRoundVideo() const;
 
 	not_null<DocumentData*> _data;
-	FileClickHandlerPtr _openInMediaviewLink;
 	int _thumbw = 1;
 	int _thumbh = 1;
 	Text _caption;

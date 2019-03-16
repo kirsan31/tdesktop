@@ -9,6 +9,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "core/crash_reports.h"
 
+namespace Media {
 namespace {
 
 constexpr AVSampleFormat AudioToFormat = AV_SAMPLE_FMT_S16;
@@ -26,59 +27,77 @@ bool IsPlanarFormat(int format) {
 
 } // namespace
 
-VideoSoundData::~VideoSoundData() {
-	if (context) {
-		avcodec_close(context);
-		avcodec_free_context(&context);
-		context = nullptr;
-	}
-}
-
-ChildFFMpegLoader::ChildFFMpegLoader(std::unique_ptr<VideoSoundData> &&data)
+ChildFFMpegLoader::ChildFFMpegLoader(
+	std::unique_ptr<ExternalSoundData> &&data)
 : AbstractAudioFFMpegLoader(
 	FileLocation(),
 	QByteArray(),
 	bytes::vector())
 , _parentData(std::move(data)) {
+	Expects(_parentData->codec != nullptr);
 }
 
 bool ChildFFMpegLoader::open(crl::time positionMs) {
 	return initUsingContext(
-		_parentData->context,
+		_parentData->codec.get(),
 		_parentData->length,
 		_parentData->frequency);
 }
 
-AudioPlayerLoader::ReadResult ChildFFMpegLoader::readMore(
+AudioPlayerLoader::ReadResult ChildFFMpegLoader::readFromInitialFrame(
 		QByteArray &result,
 		int64 &samplesAdded) {
+	if (!_parentData->frame) {
+		return ReadResult::Wait;
+	}
+	return replaceFrameAndRead(
+		base::take(_parentData->frame),
+		result,
+		samplesAdded);
+}
+
+AudioPlayerLoader::ReadResult ChildFFMpegLoader::readMore(
+	QByteArray & result,
+	int64 & samplesAdded) {
+	const auto initialFrameResult = readFromInitialFrame(
+		result,
+		samplesAdded);
+	if (initialFrameResult != ReadResult::Wait) {
+		return initialFrameResult;
+	}
+
 	const auto readResult = readFromReadyContext(
-		_parentData->context,
+		_parentData->codec.get(),
 		result,
 		samplesAdded);
 	if (readResult != ReadResult::Wait) {
 		return readResult;
 	}
 
-	if (_queue.isEmpty()) {
+	if (_queue.empty()) {
 		return _eofReached ? ReadResult::EndOfFile : ReadResult::Wait;
 	}
 
-	AVPacket packet;
-	FFMpeg::packetFromDataWrap(packet, _queue.dequeue());
+	auto packet = std::move(_queue.front());
+	_queue.pop_front();
 
-	_eofReached = FFMpeg::isNullPacket(packet);
+	_eofReached = packet.empty();
 	if (_eofReached) {
-		avcodec_send_packet(_parentData->context, nullptr); // drain
+		avcodec_send_packet(_parentData->codec.get(), nullptr); // drain
 		return ReadResult::Ok;
 	}
 
-	auto res = avcodec_send_packet(_parentData->context, &packet);
+	auto res = avcodec_send_packet(
+		_parentData->codec.get(),
+		&packet.fields());
 	if (res < 0) {
-		FFMpeg::freePacket(&packet);
-
 		char err[AV_ERROR_MAX_STRING_SIZE] = { 0 };
-		LOG(("Audio Error: Unable to avcodec_send_packet() file '%1', data size '%2', error %3, %4").arg(_file.name()).arg(_data.size()).arg(res).arg(av_make_error_string(err, sizeof(err), res)));
+		LOG(("Audio Error: Unable to avcodec_send_packet() file '%1', "
+			"data size '%2', error %3, %4"
+			).arg(_file.name()
+			).arg(_data.size()
+			).arg(res
+			).arg(av_make_error_string(err, sizeof(err), res)));
 		// There is a sample voice message where skipping such packet
 		// results in a crash (read_access to nullptr) in swr_convert().
 		if (res == AVERROR_INVALIDDATA) {
@@ -86,19 +105,30 @@ AudioPlayerLoader::ReadResult ChildFFMpegLoader::readMore(
 		}
 		return ReadResult::Error;
 	}
-	FFMpeg::freePacket(&packet);
 	return ReadResult::Ok;
 }
 
-void ChildFFMpegLoader::enqueuePackets(QQueue<FFMpeg::AVPacketDataWrap> &packets) {
-	_queue += std::move(packets);
+void ChildFFMpegLoader::enqueuePackets(
+		std::deque<Streaming::Packet> &&packets) {
+	if (_queue.empty()) {
+		_queue = std::move(packets);
+	} else {
+		_queue.insert(
+			end(_queue),
+			std::make_move_iterator(packets.begin()),
+			std::make_move_iterator(packets.end()));
+	}
 	packets.clear();
 }
 
-ChildFFMpegLoader::~ChildFFMpegLoader() {
-	for (auto &packetData : base::take(_queue)) {
-		AVPacket packet;
-		FFMpeg::packetFromDataWrap(packet, packetData);
-		FFMpeg::freePacket(&packet);
-	}
+void ChildFFMpegLoader::setForceToBuffer(bool force) {
+	_forceToBuffer = force;
 }
+
+bool ChildFFMpegLoader::forceToBuffer() const {
+	return _forceToBuffer;
+}
+
+ChildFFMpegLoader::~ChildFFMpegLoader() = default;
+
+} // namespace Media

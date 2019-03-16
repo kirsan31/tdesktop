@@ -48,7 +48,6 @@ enum {
 	AudioVoiceMsgMaxLength = 100 * 60, // 100 minutes
 	AudioVoiceMsgUpdateView = 100, // 100ms
 	AudioVoiceMsgChannels = 2, // stereo
-	AudioVoiceMsgBufferSize = 256 * 1024, // 256 Kb buffers (1.3 - 3.0 secs)
 
 	StickerMaxSize = 2048, // 2048x2048 is a max image size for sticker
 
@@ -62,9 +61,6 @@ enum {
 
 	MaxMessageSize = 4096,
 
-	SetOnlineAfterActivity = 30, // user with hidden last seen stays online for such amount of seconds in the interface
-
-	ServiceUserId = 777000,
 	WebPageUserId = 701000,
 
 	UpdateDelayConstPart = 8 * 3600, // 8 hour min time between update check requests
@@ -74,14 +70,6 @@ enum {
 
 	ChoosePeerByDragTimeout = 1000, // 1 second mouse not moved to choose dialog when dragging a file
 };
-
-inline bool isNotificationsUser(uint64 id) {
-	return (id == 333000) || (id == ServiceUserId);
-}
-
-inline bool isServiceUser(uint64 id) {
-	return !(id % 1000);// (id == 333000) || (id == ServiceUserId);
-}
 
 #ifdef Q_OS_WIN
 inline const GUID &cGUID() {

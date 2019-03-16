@@ -186,9 +186,9 @@ struct FileReadDescriptor {
 	QDataStream stream;
 	~FileReadDescriptor() {
 		if (version) {
-			stream.setDevice(0);
+			stream.setDevice(nullptr);
 			if (buffer.isOpen()) buffer.close();
-			buffer.setBuffer(0);
+			buffer.setBuffer(nullptr);
 		}
 	}
 };
@@ -212,9 +212,9 @@ struct EncryptedDescriptor {
 	QBuffer buffer;
 	QDataStream stream;
 	void finish() {
-		if (stream.device()) stream.setDevice(0);
+		if (stream.device()) stream.setDevice(nullptr);
 		if (buffer.isOpen()) buffer.close();
-		buffer.setBuffer(0);
+		buffer.setBuffer(nullptr);
 	}
 	~EncryptedDescriptor() {
 		finish();
@@ -305,7 +305,7 @@ struct FileWriteDescriptor {
 	void finish() {
 		if (!file.isOpen()) return;
 
-		stream.setDevice(0);
+		stream.setDevice(nullptr);
 
 		md5.feed(&dataSize, sizeof(dataSize));
 		qint32 version = AppVersion;
@@ -473,9 +473,9 @@ bool readEncryptedFile(FileReadDescriptor &result, const QString &name, FileOpti
 
 	EncryptedDescriptor data;
 	if (!decryptLocal(data, encrypted, key)) {
-		result.stream.setDevice(0);
+		result.stream.setDevice(nullptr);
 		if (result.buffer.isOpen()) result.buffer.close();
-		result.buffer.setBuffer(0);
+		result.buffer.setBuffer(nullptr);
 		result.data = QByteArray();
 		result.version = 0;
 		return false;
@@ -602,12 +602,13 @@ enum {
 	dbiTxtDomainString = 0x53,
 	dbiThemeKey = 0x54,
 	dbiTileBackground = 0x55,
-	dbiCacheSettings = 0x56,
+	dbiCacheSettingsOld = 0x56,
 	dbiAnimationsDisabled = 0x57,
 	dbiScalePercent = 0x58,
 	dbiPlaybackSpeed = 0x59,
 	dbiLanguagesKey = 0x5a,
 	dbiCallSettings = 0x5b,
+	dbiCacheSettings = 0x5c,
 
 	dbiEncryptedWithSalt = 333,
 	dbiEncrypted = 444,
@@ -668,6 +669,16 @@ FileKey _recentHashtagsAndBotsKey = 0;
 bool _recentHashtagsAndBotsWereRead = false;
 qint64 _cacheTotalSizeLimit = Database::Settings().totalSizeLimit;
 qint32 _cacheTotalTimeLimit = Database::Settings().totalTimeLimit;
+qint64 _cacheBigFileTotalSizeLimit = Database::Settings().totalSizeLimit;
+qint32 _cacheBigFileTotalTimeLimit = Database::Settings().totalTimeLimit;
+
+bool NoTimeLimit(qint32 storedLimitValue) {
+	// This is a workaround for a bug in storing the cache time limit.
+	// See https://github.com/telegramdesktop/tdesktop/issues/5611
+	return !storedLimitValue
+		|| (storedLimitValue == qint32(std::numeric_limits<int32>::max()))
+		|| (storedLimitValue == qint32(std::numeric_limits<int64>::max()));
+}
 
 FileKey _exportSettingsKey = 0;
 
@@ -1069,18 +1080,37 @@ bool _readSetting(quint32 blockId, QDataStream &stream, int version, ReadSetting
 		cSetUseExternalVideoPlayer(v == 1);
 	} break;
 
-	case dbiCacheSettings: {
+	case dbiCacheSettingsOld: {
 		qint64 size;
 		qint32 time;
 		stream >> size >> time;
 		if (!_checkStreamStatus(stream)
 			|| size <= Database::Settings().maxDataSize
-			|| time < 0) {
+			|| (!NoTimeLimit(time) && time < 0)) {
+			return false;
+		}
+		_cacheTotalSizeLimit = size;
+		_cacheTotalTimeLimit = NoTimeLimit(time) ? 0 : time;
+		_cacheBigFileTotalSizeLimit = size;
+		_cacheBigFileTotalTimeLimit = NoTimeLimit(time) ? 0 : time;
+	} break;
+
+	case dbiCacheSettings: {
+		qint64 size, sizeBig;
+		qint32 time, timeBig;
+		stream >> size >> time >> sizeBig >> timeBig;
+		if (!_checkStreamStatus(stream)
+			|| size <= Database::Settings().maxDataSize
+			|| sizeBig <= Database::Settings().maxDataSize
+			|| (!NoTimeLimit(time) && time < 0)
+			|| (!NoTimeLimit(timeBig) && timeBig < 0)) {
 			return false;
 		}
 
 		_cacheTotalSizeLimit = size;
-		_cacheTotalTimeLimit = time;
+		_cacheTotalTimeLimit = NoTimeLimit(time) ? 0 : time;
+		_cacheBigFileTotalSizeLimit = sizeBig;
+		_cacheBigFileTotalTimeLimit = NoTimeLimit(timeBig) ? 0 : timeBig;
 	} break;
 
 	case dbiAnimationsDisabled: {
@@ -2104,7 +2134,7 @@ void _writeUserSettings() {
 	data.stream << quint32(dbiModerateMode) << qint32(Global::ModerateModeEnabled() ? 1 : 0);
 	data.stream << quint32(dbiAutoPlay) << qint32(cAutoPlayGif() ? 1 : 0);
 	data.stream << quint32(dbiUseExternalVideoPlayer) << qint32(cUseExternalVideoPlayer());
-	data.stream << quint32(dbiCacheSettings) << qint64(_cacheTotalSizeLimit) << qint32(_cacheTotalTimeLimit);
+	data.stream << quint32(dbiCacheSettings) << qint64(_cacheTotalSizeLimit) << qint32(_cacheTotalTimeLimit) << qint64(_cacheBigFileTotalSizeLimit) << qint32(_cacheBigFileTotalTimeLimit);
 	if (!userData.isEmpty()) {
 		data.stream << quint32(dbiAuthSessionSettings) << userData;
 	}
@@ -2813,6 +2843,8 @@ void reset() {
 	_oldMapVersion = _oldSettingsVersion = 0;
 	_cacheTotalSizeLimit = Database::Settings().totalSizeLimit;
 	_cacheTotalTimeLimit = Database::Settings().totalTimeLimit;
+	_cacheBigFileTotalSizeLimit = Database::Settings().totalSizeLimit;
+	_cacheBigFileTotalTimeLimit = Database::Settings().totalTimeLimit;
 	StoredAuthSessionCache.reset();
 	_mapChanged = true;
 	_writeMap(WriteMapWhen::Now);
@@ -3176,16 +3208,20 @@ qint32 _storageAudioSize(qint32 rawlen) {
 	return result;
 }
 
-QString cachePath() {
-	Expects(!_userDbPath.isEmpty());
-
-	return _userDbPath + "cache";
-}
-
 Storage::EncryptionKey cacheKey() {
 	Expects(LocalKey != nullptr);
 
 	return Storage::EncryptionKey(bytes::make_vector(LocalKey->data()));
+}
+
+Storage::EncryptionKey cacheBigFileKey() {
+	return cacheKey();
+}
+
+QString cachePath() {
+	Expects(!_userDbPath.isEmpty());
+
+	return _userDbPath + "cache";
 }
 
 Storage::Cache::Database::Settings cacheSettings() {
@@ -3197,17 +3233,40 @@ Storage::Cache::Database::Settings cacheSettings() {
 	return result;
 }
 
-void updateCacheSettings(Storage::Cache::Database::SettingsUpdate &update) {
+void updateCacheSettings(
+		Storage::Cache::Database::SettingsUpdate &update,
+		Storage::Cache::Database::SettingsUpdate &updateBig) {
 	Expects(update.totalSizeLimit > Database::Settings().maxDataSize);
 	Expects(update.totalTimeLimit >= 0);
+	Expects(updateBig.totalSizeLimit > Database::Settings().maxDataSize);
+	Expects(updateBig.totalTimeLimit >= 0);
 
 	if (_cacheTotalSizeLimit == update.totalSizeLimit
-		&& _cacheTotalTimeLimit == update.totalTimeLimit) {
+		&& _cacheTotalTimeLimit == update.totalTimeLimit
+		&& _cacheBigFileTotalSizeLimit == updateBig.totalSizeLimit
+		&& _cacheBigFileTotalTimeLimit == updateBig.totalTimeLimit) {
 		return;
 	}
 	_cacheTotalSizeLimit = update.totalSizeLimit;
 	_cacheTotalTimeLimit = update.totalTimeLimit;
+	_cacheBigFileTotalSizeLimit = updateBig.totalSizeLimit;
+	_cacheBigFileTotalTimeLimit = updateBig.totalTimeLimit;
 	_writeUserSettings();
+}
+
+QString cacheBigFilePath() {
+	Expects(!_userDbPath.isEmpty());
+
+	return _userDbPath + "media_cache";
+}
+
+Storage::Cache::Database::Settings cacheBigFileSettings() {
+	auto result = Storage::Cache::Database::Settings();
+	result.clearOnWrongKey = true;
+	result.totalSizeLimit = _cacheBigFileTotalSizeLimit;
+	result.totalTimeLimit = _cacheBigFileTotalTimeLimit;
+	result.maxDataSize = Storage::kMaxFileInMemory;
+	return result;
 }
 
 class CountWaveformTask : public Task {
@@ -3218,21 +3277,18 @@ public:
 		, _data(doc->data())
 		, _wavemax(0) {
 		if (_data.isEmpty() && !_loc.accessEnable()) {
-			_doc = 0;
+			_doc = nullptr;
 		}
 	}
-	void process() {
+	void process() override {
 		if (!_doc) return;
 
 		_waveform = audioCountWaveform(_loc, _data);
-		uchar wavemax = 0;
-		for (int32 i = 0, l = _waveform.size(); i < l; ++i) {
-			uchar waveat = _waveform.at(i);
-			if (wavemax < waveat) wavemax = waveat;
-		}
-		_wavemax = wavemax;
+		_wavemax = _waveform.empty()
+			? char(0)
+			: *ranges::max_element(_waveform);
 	}
-	void finish() {
+	void finish() override {
 		if (const auto voice = _doc ? _doc->voice() : nullptr) {
 			if (!_waveform.isEmpty()) {
 				voice->waveform = _waveform;
@@ -3249,7 +3305,7 @@ public:
 			Auth().data().requestDocumentViewRepaint(_doc);
 		}
 	}
-	virtual ~CountWaveformTask() {
+	~CountWaveformTask() {
 		if (_data.isEmpty() && _doc) {
 			_loc.accessDisable();
 		}

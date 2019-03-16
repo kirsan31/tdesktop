@@ -71,7 +71,7 @@ Storage::Cache::Key StorageCacheKey(const StorageImageLocation &location) {
 
 Storage::Cache::Key WebDocumentCacheKey(const WebFileLocation &location) {
 	const auto dcId = uint64(location.dc()) & 0xFFULL;
-	const auto url = location.url();
+	const auto &url = location.url();
 	const auto hash = openssl::Sha256(bytes::make_span(url));
 	const auto bytes = bytes::make_span(hash);
 	const auto bytes1 = bytes.subspan(0, sizeof(uint32));
@@ -172,6 +172,18 @@ bool ReplyPreview::empty() const {
 }
 
 } // namespace Data
+
+uint32 AudioMsgId::CreateExternalPlayId() {
+	static auto Result = uint32(0);
+	return ++Result ? Result : ++Result;
+}
+
+AudioMsgId AudioMsgId::ForVideo() {
+	auto result = AudioMsgId();
+	result._externalPlayId = CreateExternalPlayId();
+	result._type = Type::Video;
+	return result;
+}
 
 void AudioMsgId::setTypeFromAudio() {
 	if (_audio->isVoiceMessage() || _audio->isVideoMessage()) {

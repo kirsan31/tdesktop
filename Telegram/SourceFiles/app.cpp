@@ -117,10 +117,9 @@ namespace App {
 	}
 
 	MainWindow *wnd() {
-		if (Core::Sandbox::Instance().applicationLaunched()) {
-			return Core::App().getActiveWindow();
-		}
-		return nullptr;
+		return Core::IsAppLaunched()
+			? Core::App().getActiveWindow()
+			: nullptr;
 	}
 
 	MainWidget *main() {
@@ -397,10 +396,10 @@ namespace App {
 				user->setContactStatus(UserData::ContactStatus::CanAdd);
 			}
 
-			const auto showPhone = !isServiceUser(user->id)
+			const auto showPhone = !user->isServiceUser()
 				&& !user->isSelf()
 				&& user->contactStatus() == UserData::ContactStatus::CanAdd;
-			const auto showPhoneChanged = !isServiceUser(user->id)
+			const auto showPhoneChanged = !user->isServiceUser()
 				&& !user->isSelf()
 				&& (showPhone != wasShowPhone);
 			if (showPhoneChanged) {
@@ -422,14 +421,11 @@ namespace App {
 	HistoryItem *histItemById(ChannelId channelId, MsgId itemId) {
 		if (!itemId) return nullptr;
 
-		auto data = fetchMsgsData(channelId, false);
+		const auto data = fetchMsgsData(channelId, false);
 		if (!data) return nullptr;
 
-		auto i = data->constFind(itemId);
-		if (i != data->cend()) {
-			return i.value();
-		}
-		return nullptr;
+		const auto i = data->constFind(itemId);
+		return (i != data->cend()) ? i.value() : nullptr;
 	}
 
 	HistoryItem *histItemById(const ChannelData *channel, MsgId itemId) {
@@ -617,6 +613,8 @@ namespace App {
 		prepareCorners(SelectedOverlayLargeCorners, st::historyMessageRadius, st::msgSelectOverlay);
 		prepareCorners(DateCorners, st::dateRadius, st::msgDateImgBg);
 		prepareCorners(DateSelectedCorners, st::dateRadius, st::msgDateImgBgSelected);
+		prepareCorners(OverviewVideoCorners, st::overviewVideoStatusRadius, st::msgDateImgBg);
+		prepareCorners(OverviewVideoSelectedCorners, st::overviewVideoStatusRadius, st::msgDateImgBgSelected);
 		prepareCorners(InShadowCorners, st::historyMessageRadius, st::msgInShadow);
 		prepareCorners(InSelectedShadowCorners, st::historyMessageRadius, st::msgInShadowSelected);
 		prepareCorners(ForwardCorners, st::historyMessageRadius, st::historyForwardChooseBg);

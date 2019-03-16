@@ -391,12 +391,12 @@ BackgroundPreviewBox::BackgroundPreviewBox(
 	const Data::WallPaper &paper)
 : _text1(GenerateTextItem(
 	this,
-	Auth().data().history(peerFromUser(ServiceUserId)),
+	Auth().data().history(peerFromUser(PeerData::kServiceNotificationsId)),
 	lang(lng_background_text1),
 	false))
 , _text2(GenerateTextItem(
 	this,
-	Auth().data().history(peerFromUser(ServiceUserId)),
+	Auth().data().history(peerFromUser(PeerData::kServiceNotificationsId)),
 	lang(lng_background_text2),
 	true))
 , _paper(paper)
@@ -702,7 +702,7 @@ void BackgroundPreviewBox::checkLoadedDocument() {
 	const auto document = _paper.document();
 	if (!_full.isNull()
 		|| !document
-		|| !document->loaded(DocumentData::FilePathResolveChecked)
+		|| !document->loaded(DocumentData::FilePathResolve::Checked)
 		|| _generating) {
 		return;
 	}
@@ -784,7 +784,7 @@ void BackgroundPreviewBox::elementAnimationAutoplayAsync(
 
 crl::time BackgroundPreviewBox::elementHighlightTime(
 		not_null<const Element*> element) {
-	return crl::time();
+	return crl::time(0);
 }
 
 bool BackgroundPreviewBox::elementInSelectionMode() {

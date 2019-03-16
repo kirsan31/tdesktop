@@ -10,6 +10,7 @@ using "dialogs/dialogs.style";
 using "ui/widgets/widgets.style";
 
 minPhotoSize: 100px;
+minVideoSize: 160px;
 maxMediaSize: 430px;
 maxStickerSize: 256px;
 maxGifSize: 320px;
@@ -552,3 +553,22 @@ historyGroupAboutBulletSkip: 16px;
 historyGroupAboutHeaderSkip: 10px;
 historyGroupAboutTextSkip: 10px;
 historyGroupAboutSkip: 8px;
+
+historyVideoDownloadSize: 36px;
+historyVideoCancel: icon {{ "playlist_cancel", historyFileThumbIconFg }};
+historyVideoCancelSelected: icon {{ "playlist_cancel", historyFileThumbIconFgSelected }};
+historyVideoDownload: icon {{ "playlist_download", historyFileThumbIconFg }};
+historyVideoDownloadSelected: icon {{ "playlist_download", historyFileThumbIconFgSelected }};
+historyVideoRadialLine: 2px;
+
+historyAudioDownloadSize: 20px;
+historyAudioRadialLine: 2px;
+historyAudioDownloadShift: 28px;
+historyAudioInCancel: icon {{ "history_audio_cancel", historyFileInIconFg }};
+historyAudioInCancelSelected: icon {{ "history_audio_cancel", historyFileInIconFgSelected }};
+historyAudioOutCancel: icon {{ "history_audio_cancel", historyFileOutIconFg }};
+historyAudioOutCancelSelected: icon {{ "history_audio_cancel", historyFileOutIconFgSelected }};
+historyAudioInDownload: icon {{ "history_audio_download", historyFileInIconFg }};
+historyAudioInDownloadSelected: icon {{ "history_audio_download", historyFileInIconFgSelected }};
+historyAudioOutDownload: icon {{ "history_audio_download", historyFileOutIconFg }};
+historyAudioOutDownloadSelected: icon {{ "history_audio_download", historyFileOutIconFgSelected }};

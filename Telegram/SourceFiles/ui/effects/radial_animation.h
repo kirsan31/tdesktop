@@ -43,9 +43,9 @@ public:
 		Painter &p,
 		const QRect &inner,
 		int32 thickness,
-		style::color color);
+		style::color color) const;
 
-	RadialState computeState();
+	RadialState computeState() const;
 
 private:
 	crl::time _firstStart = 0;
@@ -70,7 +70,7 @@ public:
 	}
 
 	void start(crl::time skip = 0);
-	void stop();
+	void stop(anim::type animated = anim::type::normal);
 
 	void step(crl::time ms);
 	void step() {

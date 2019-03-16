@@ -20,6 +20,12 @@ struct Key;
 } // namespace Cache
 } // namespace Storage
 
+namespace Media {
+namespace Streaming {
+class Loader;
+} // namespace Streaming
+} // namespace Media
+
 namespace Data {
 class Session;
 } // namespace Data
@@ -93,22 +99,20 @@ public:
 		const HistoryItem *item);
 	void automaticLoadSettingsChanged();
 
-	enum FilePathResolveType {
-		FilePathResolveCached,
-		FilePathResolveChecked,
-		FilePathResolveSaveFromData,
-		FilePathResolveSaveFromDataSilent,
+	enum class FilePathResolve {
+		Cached,
+		Checked,
+		SaveFromData,
+		SaveFromDataSilent,
 	};
 	[[nodiscard]] bool loaded(
-		FilePathResolveType type = FilePathResolveCached) const;
+		FilePathResolve resolve = FilePathResolve::Cached) const;
 	[[nodiscard]] bool loading() const;
 	[[nodiscard]] QString loadingFilePath() const;
 	[[nodiscard]] bool displayLoading() const;
 	void save(
 		Data::FileOrigin origin,
 		const QString &toFile,
-		ActionOnLoad action = ActionOnLoadNone,
-		const FullMsgId &actionMsgId = FullMsgId(),
 		LoadFromCloudSetting fromCloud = LoadFromCloudOrLocal,
 		bool autoLoading = false);
 	void cancel();
@@ -125,12 +129,9 @@ public:
 	void setLocation(const FileLocation &loc);
 
 	[[nodiscard]] QString filepath(
-		FilePathResolveType type = FilePathResolveCached,
-		bool forceSavingAs = false) const;
+		FilePathResolve resolve = FilePathResolve::Cached) const;
 
 	[[nodiscard]] bool saveToCache() const;
-
-	void performActionOnLoad();
 
 	void unload();
 	[[nodiscard]] Image *getReplyPreview(Data::FileOrigin origin);
@@ -158,10 +159,11 @@ public:
 	[[nodiscard]] bool isGifv() const;
 	[[nodiscard]] bool isTheme() const;
 	[[nodiscard]] bool isSharedMediaMusic() const;
-	[[nodiscard]] int32 duration() const;
+	[[nodiscard]] TimeId getDuration() const;
 	[[nodiscard]] bool isImage() const;
 	void recountIsImage();
 	[[nodiscard]] bool supportsStreaming() const;
+	void setNotSupportsStreaming();
 	void setData(const QByteArray &data) {
 		_data = data;
 	}
@@ -179,7 +181,7 @@ public:
 
 	[[nodiscard]] Image *goodThumbnail() const;
 	[[nodiscard]] Storage::Cache::Key goodThumbnailCacheKey() const;
-	void setGoodThumbnail(QImage &&image, QByteArray &&bytes);
+	void setGoodThumbnailOnUpload(QImage &&image, QByteArray &&bytes);
 	void refreshGoodThumbnail();
 	void replaceGoodThumbnail(std::unique_ptr<Images::Source> &&source);
 
@@ -218,6 +220,14 @@ public:
 		const QString &songPerformer);
 	[[nodiscard]] QString composeNameString() const;
 
+	[[nodiscard]] bool canBePlayed() const;
+	[[nodiscard]] bool canBeStreamed() const;
+	[[nodiscard]] auto createStreamingLoader(Data::FileOrigin origin) const
+		-> std::unique_ptr<Media::Streaming::Loader>;
+
+	void setInappPlaybackFailed();
+	[[nodiscard]] bool inappPlaybackFailed() const;
+
 	~DocumentData();
 
 	DocumentId id = 0;
@@ -231,10 +241,17 @@ public:
 	std::unique_ptr<Data::UploadState> uploadingData;
 
 private:
+	enum class SupportsStreaming : uchar {
+		Unknown,
+		MaybeYes,
+		MaybeNo,
+		No,
+	};
 	friend class Serialize::Document;
 
 	LocationType locationType() const;
 	void validateGoodThumbnail();
+	void setMaybeSupportsStreaming(bool supports);
 
 	void destroyLoader(mtpFileLoader *newValue = nullptr) const;
 
@@ -261,10 +278,9 @@ private:
 	std::unique_ptr<DocumentAdditionalData> _additional;
 	int32 _duration = -1;
 	bool _isImage = false;
-	bool _supportsStreaming = false;
+	SupportsStreaming _supportsStreaming = SupportsStreaming::Unknown;
+	bool _inappPlaybackFailed = false;
 
-	ActionOnLoad _actionOnLoad = ActionOnLoadNone;
-	FullMsgId _actionOnLoadMsgId;
 	mutable FileLoader *_loader = nullptr;
 
 };
@@ -291,11 +307,16 @@ private:
 
 class DocumentSaveClickHandler : public DocumentClickHandler {
 public:
+	enum class Mode {
+		ToCacheOrFile,
+		ToFile,
+		ToNewFile,
+	};
 	using DocumentClickHandler::DocumentClickHandler;
 	static void Save(
 		Data::FileOrigin origin,
 		not_null<DocumentData*> document,
-		bool forceSavingAs = false);
+		Mode mode = Mode::ToCacheOrFile);
 
 protected:
 	void onClickImpl() const override;
@@ -308,8 +329,7 @@ public:
 	static void Open(
 		Data::FileOrigin origin,
 		not_null<DocumentData*> document,
-		HistoryItem *context,
-		ActionOnLoad action = ActionOnLoadOpen);
+		HistoryItem *context);
 
 protected:
 	void onClickImpl() const override;
@@ -325,9 +345,12 @@ protected:
 
 };
 
-class GifOpenClickHandler : public DocumentOpenClickHandler {
+class DocumentOpenWithClickHandler : public DocumentClickHandler {
 public:
-	using DocumentOpenClickHandler::DocumentOpenClickHandler;
+	using DocumentClickHandler::DocumentClickHandler;
+	static void Open(
+		Data::FileOrigin origin,
+		not_null<DocumentData*> document);
 
 protected:
 	void onClickImpl() const override;

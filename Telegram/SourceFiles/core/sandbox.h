@@ -39,21 +39,14 @@ public:
 	void pauseDelayedWindowActivations();
 	void resumeDelayedWindowActivations();
 
+	rpl::producer<> widgetUpdateRequests() const;
+
 	ProxyData sandboxProxy() const;
 
 	static Sandbox &Instance() {
 		Expects(QApplication::instance() != nullptr);
 
 		return *static_cast<Sandbox*>(QApplication::instance());
-	}
-
-	bool applicationLaunched() const {
-		return _application != nullptr;
-	}
-	Application &application() const {
-		Expects(_application != nullptr);
-
-		return *_application;
 	}
 
 	~Sandbox();
@@ -117,6 +110,8 @@ private:
 
 	QByteArray _lastCrashDump;
 	ProxyData _sandboxProxy;
+
+	rpl::event_stream<> _widgetUpdateRequests;
 
 };
 

@@ -1464,6 +1464,8 @@ void HistoryWidget::applyDraft(FieldHistoryAction fieldHistoryAction) {
 }
 
 void HistoryWidget::applyCloudDraft(History *history) {
+	Expects(!Auth().supportMode());
+
 	if (_history == history && !_editMsgId) {
 		applyDraft(Ui::InputField::HistoryAction::NewEntry);
 
@@ -1605,9 +1607,11 @@ void HistoryWidget::showHistory(
 	}
 
 	if (_peer) {
-		_unblock->setText(lang(_peer->isUser() && _peer->asUser()->botInfo
-			? lng_restart_button
-			: lng_unblock_button).toUpper());
+		_unblock->setText(lang((_peer->isUser()
+			&& _peer->asUser()->isBot()
+			&& !_peer->asUser()->isSupport())
+				? lng_restart_button
+				: lng_unblock_button).toUpper());
 		if (const auto channel = _peer->asChannel()) {
 			channel->updateFull();
 			_joinChannel->setText(lang(channel->isMegagroup()
@@ -1789,7 +1793,10 @@ bool HistoryWidget::contentOverlapped(const QRect &globalRect) {
 }
 
 void HistoryWidget::updateReportSpamStatus() {
-	if (!_peer || (_peer->isUser() && (_peer->id == Auth().userPeerId() || isNotificationsUser(_peer->id) || isServiceUser(_peer->id) || _peer->asUser()->botInfo))) {
+	if (!_peer
+		|| (_peer->id == Auth().userPeerId())
+		|| _peer->isServiceUser()
+		|| (_peer->isUser() && _peer->asUser()->isBot())) {
 		setReportSpamStatus(dbiprsHidden);
 		return;
 	} else if (!_firstLoadRequest && _history->isEmpty()) {
@@ -4360,7 +4367,7 @@ void HistoryWidget::sendFileConfirmed(
 				MTP_long(groupId)),
 			NewMessageUnread);
 	} else if (file->type == SendMediaType::Audio) {
-		if (!peer->isChannel()) {
+		if (!peer->isChannel() || peer->isMegagroup()) {
 			flags |= MTPDmessage::Flag::f_media_unread;
 		}
 		auto documentFlags = MTPDmessageMediaDocument::Flag::f_document | 0;

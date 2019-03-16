@@ -112,10 +112,16 @@ bool hasDraft(const PeerId &peer);
 void writeFileLocation(MediaKey location, const FileLocation &local);
 FileLocation readFileLocation(MediaKey location, bool check = true);
 
-QString cachePath();
 Storage::EncryptionKey cacheKey();
+QString cachePath();
 Storage::Cache::Database::Settings cacheSettings();
-void updateCacheSettings(Storage::Cache::Database::SettingsUpdate &update);
+void updateCacheSettings(
+	Storage::Cache::Database::SettingsUpdate &update,
+	Storage::Cache::Database::SettingsUpdate &updateBig);
+
+Storage::EncryptionKey cacheBigFileKey();
+QString cacheBigFilePath();
+Storage::Cache::Database::Settings cacheBigFileSettings();
 
 void countVoiceWaveform(DocumentData *document);
 

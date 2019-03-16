@@ -90,7 +90,10 @@ Reader::Reader(const QString &filepath, Callback &&callback, Mode mode, crl::tim
 Reader::Reader(not_null<DocumentData*> document, FullMsgId msgId, Callback &&callback, Mode mode, crl::time seekMs)
 : _callback(std::move(callback))
 , _mode(mode)
-, _audioMsgId(document, msgId, (mode == Mode::Video) ? rand_value<uint32>() : 0)
+, _audioMsgId(
+	document,
+	msgId,
+	(mode == Mode::Video) ? AudioMsgId::CreateExternalPlayId() : 0)
 , _seekPositionMs(seekMs) {
 	init(document->location(), document->data());
 }
@@ -369,7 +372,7 @@ public:
 		if (!_implementation && !init()) {
 			return error();
 		}
-		if (frame() && frame()->original.isNull()) {
+		if (frame()->original.isNull()) {
 			auto readResult = _implementation->readFramesTill(-1, ms);
 			if (readResult == internal::ReaderImplementation::ReadResult::EndOfFile && _seekPositionMs > 0) {
 				// If seek was done to the end: try to read the first frame,
@@ -460,7 +463,8 @@ public:
 	}
 
 	bool renderFrame() {
-		Assert(frame() != 0 && _request.valid());
+		Expects(_request.valid());
+
 		if (!_implementation->renderFrame(frame()->original, frame()->alpha, QSize(_request.framew, _request.frameh))) {
 			return false;
 		}
@@ -573,7 +577,7 @@ private:
 	};
 	Frame _frames[3];
 	int _frame = 0;
-	Frame *frame() {
+	not_null<Frame*> frame() {
 		return _frames + _frame;
 	}
 
@@ -761,7 +765,7 @@ void Manager::process() {
 	_processingInThread = thread();
 
 	bool checkAllReaders = false;
-	auto ms = crl::now(), minms = ms + 86400 * 1000LL;
+	auto ms = crl::now(), minms = ms + 86400 * crl::time(1000);
 	{
 		QMutexLocker lock(&_readerPointersMutex);
 		for (auto it = _readerPointers.begin(), e = _readerPointers.end(); it != e; ++it) {
@@ -863,7 +867,7 @@ FileMediaInformation::Video PrepareForSending(const QString &fname, const QByteA
 	auto localLocation = FileLocation(fname);
 	auto localData = QByteArray(data);
 
-	auto seekPositionMs = 0LL;
+	auto seekPositionMs = crl::time(0);
 	auto reader = std::make_unique<internal::FFMpegReaderImplementation>(&localLocation, &localData, AudioMsgId());
 	if (reader->start(internal::ReaderImplementation::Mode::Inspecting, seekPositionMs)) {
 		auto durationMs = reader->durationMs();

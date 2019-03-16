@@ -145,11 +145,15 @@ Session::Session(not_null<AuthSession*> session)
 , _cache(Core::App().databases().get(
 	Local::cachePath(),
 	Local::cacheSettings()))
+, _bigFileCache(Core::App().databases().get(
+	Local::cacheBigFilePath(),
+	Local::cacheBigFileSettings()))
 , _selfDestructTimer([=] { checkSelfDestructItems(); })
 , _a_sendActions(animation(this, &Session::step_typings))
 , _groups(this)
 , _unmuteByFinishedTimer([=] { unmuteByFinished(); }) {
 	_cache->open(Local::cacheKey());
+	_bigFileCache->open(Local::cacheBigFileKey());
 
 	setupContactViewsViewer();
 	setupChannelLeavingViewer();
@@ -309,11 +313,12 @@ not_null<UserData*> Session::processUser(const MTPUser &data) {
 			const auto nameChanged = (result->firstName != fname)
 				|| (result->lastName != lname);
 
-			auto showPhone = !isServiceUser(result->id)
+			auto showPhone = !result->isServiceUser()
+				&& !data.is_support()
 				&& !data.is_self()
 				&& !data.is_contact()
 				&& !data.is_mutual_contact();
-			auto showPhoneChanged = !isServiceUser(result->id)
+			auto showPhoneChanged = !result->isServiceUser()
 				&& !data.is_self()
 				&& ((showPhone
 					&& result->contactStatus() == UserData::ContactStatus::Contact)
@@ -321,7 +326,7 @@ not_null<UserData*> Session::processUser(const MTPUser &data) {
 						&& result->contactStatus() == UserData::ContactStatus::CanAdd));
 			if (minimal) {
 				showPhoneChanged = false;
-				showPhone = !isServiceUser(result->id)
+				showPhone = !result->isServiceUser()
 					&& (result->id != _session->userPeerId())
 					&& (result->contactStatus() == UserData::ContactStatus::CanAdd);
 			}
@@ -743,6 +748,10 @@ void Session::step_typings(crl::time ms, bool timer) {
 
 Storage::Cache::Database &Session::cache() {
 	return *_cache;
+}
+
+Storage::Cache::Database &Session::cacheBigFile() {
+	return *_bigFileCache;
 }
 
 void Session::startExport(PeerData *peer) {
@@ -1723,26 +1732,27 @@ void Session::photoConvert(
 
 PhotoData *Session::photoFromWeb(
 		const MTPWebDocument &data,
-		ImagePtr thumbnailSmall,
+		ImagePtr thumbnail,
 		bool willBecomeNormal) {
 	const auto large = Images::Create(data);
 	const auto thumbnailInline = ImagePtr();
 	if (large->isNull()) {
 		return nullptr;
 	}
-	auto thumbnail = large;
+	auto thumbnailSmall = large;
 	if (willBecomeNormal) {
 		const auto width = large->width();
 		const auto height = large->height();
-		if (thumbnailSmall->isNull()) {
-			auto thumbsize = shrinkToKeepAspect(width, height, 100, 100);
-			thumbnailSmall = Images::Create(thumbsize.width(), thumbsize.height());
-		}
 
-		auto mediumsize = shrinkToKeepAspect(width, height, 320, 320);
-		thumbnail = Images::Create(mediumsize.width(), mediumsize.height());
-	} else if (thumbnailSmall->isNull()) {
-		thumbnailSmall = large;
+		auto thumbsize = shrinkToKeepAspect(width, height, 100, 100);
+		thumbnailSmall = Images::Create(thumbsize.width(), thumbsize.height());
+
+		if (thumbnail->isNull()) {
+			auto mediumsize = shrinkToKeepAspect(width, height, 320, 320);
+			thumbnail = Images::Create(mediumsize.width(), mediumsize.height());
+		}
+	} else if (thumbnail->isNull()) {
+		thumbnail = large;
 	}
 
 	return photo(
@@ -2950,14 +2960,14 @@ void Session::serviceNotification(
 		const TextWithEntities &message,
 		const MTPMessageMedia &media) {
 	const auto date = unixtime();
-	if (!userLoaded(ServiceUserId)) {
+	if (!peerLoaded(PeerData::kServiceNotificationsId)) {
 		processUser(MTP_user(
 			MTP_flags(
 				MTPDuser::Flag::f_first_name
 				| MTPDuser::Flag::f_phone
 				| MTPDuser::Flag::f_status
 				| MTPDuser::Flag::f_verified),
-			MTP_int(ServiceUserId),
+			MTP_int(peerToUser(PeerData::kServiceNotificationsId)),
 			MTPlong(),
 			MTP_string("Telegram"),
 			MTPstring(),
@@ -2970,7 +2980,7 @@ void Session::serviceNotification(
 			MTPstring(),
 			MTPstring()));
 	}
-	const auto history = this->history(peerFromUser(ServiceUserId));
+	const auto history = this->history(PeerData::kServiceNotificationsId);
 	if (!history->lastMessageKnown()) {
 		_session->api().requestDialogEntry(history, [=] {
 			insertCheckedServiceNotification(message, media, date);
@@ -2992,7 +3002,7 @@ void Session::insertCheckedServiceNotification(
 		const TextWithEntities &message,
 		const MTPMessageMedia &media,
 		TimeId date) {
-	const auto history = this->history(peerFromUser(ServiceUserId));
+	const auto history = this->history(PeerData::kServiceNotificationsId);
 	if (!history->isReadyFor(ShowAtUnreadMsgId)) {
 		history->setUnreadCount(0);
 		history->getReadyFor(ShowAtTheEndMsgId);
@@ -3007,7 +3017,7 @@ void Session::insertCheckedServiceNotification(
 			MTP_message(
 				MTP_flags(flags),
 				MTP_int(clientMsgId()),
-				MTP_int(ServiceUserId),
+				MTP_int(peerToUser(PeerData::kServiceNotificationsId)),
 				MTP_peerUser(MTP_int(_session->userId())),
 				MTPnullFwdHeader,
 				MTPint(),

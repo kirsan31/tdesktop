@@ -1192,7 +1192,7 @@ std::unique_ptr<QMimeData> HistoryInner::prepareDrag() {
 		if (const auto media = view->media()) {
 			if (const auto document = media->getDocument()) {
 				const auto filepath = document->filepath(
-					DocumentData::FilePathResolveChecked);
+					DocumentData::FilePathResolve::Checked);
 				if (!filepath.isEmpty()) {
 					QList<QUrl> urls;
 					urls.push_back(QUrl::fromLocalFile(filepath));
@@ -1538,7 +1538,7 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 				saveContextGif(itemId);
 			});
 		}
-		if (!document->filepath(DocumentData::FilePathResolveChecked).isEmpty()) {
+		if (!document->filepath(DocumentData::FilePathResolve::Checked).isEmpty()) {
 			_menu->addAction(lang((cPlatform() == dbipMac || cPlatform() == dbipMacOld) ? lng_context_show_in_finder : lng_context_show_in_folder), [=] {
 				showContextInFolder(document);
 			});
@@ -1814,7 +1814,7 @@ void HistoryInner::cancelContextDownload(not_null<DocumentData*> document) {
 
 void HistoryInner::showContextInFolder(not_null<DocumentData*> document) {
 	const auto filepath = document->filepath(
-		DocumentData::FilePathResolveChecked);
+		DocumentData::FilePathResolve::Checked);
 	if (!filepath.isEmpty()) {
 		File::ShowInFolder(filepath);
 	}
@@ -1823,7 +1823,10 @@ void HistoryInner::showContextInFolder(not_null<DocumentData*> document) {
 void HistoryInner::saveDocumentToFile(
 		FullMsgId contextId,
 		not_null<DocumentData*> document) {
-	DocumentSaveClickHandler::Save(contextId, document, true);
+	DocumentSaveClickHandler::Save(
+		contextId,
+		document,
+		DocumentSaveClickHandler::Mode::ToNewFile);
 }
 
 void HistoryInner::openContextGif(FullMsgId itemId) {
@@ -3067,7 +3070,7 @@ QString HistoryInner::tooltipText() const {
 				if (const auto media = view->media()) {
 					if (media->hidesForwardedInfo()) {
 						dateText += "\n" + lng_forwarded(
-							lt_user, 
+							lt_user,
 							forwarded->originalSender->shortName());
 					}
 				}

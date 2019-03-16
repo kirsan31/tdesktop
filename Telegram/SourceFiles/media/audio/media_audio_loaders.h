@@ -21,14 +21,15 @@ class Loaders : public QObject {
 
 public:
 	Loaders(QThread *thread);
-	void feedFromVideo(VideoSoundPart &&part);
+	void feedFromExternal(ExternalSoundPart &&part);
+	void forceToBufferExternal(const AudioMsgId &audioId);
 	~Loaders();
 
 signals:
 	void error(const AudioMsgId &audio);
 	void needToCheck();
 
-	public slots:
+public slots:
 	void onInit();
 
 	void onStart(const AudioMsgId &audio, qint64 positionMs);
@@ -37,16 +38,18 @@ signals:
 
 private:
 	void videoSoundAdded();
-	void clearFromVideoQueue();
 
 	AudioMsgId _audio, _song, _video;
 	std::unique_ptr<AudioPlayerLoader> _audioLoader;
 	std::unique_ptr<AudioPlayerLoader> _songLoader;
 	std::unique_ptr<AudioPlayerLoader> _videoLoader;
 
-	QMutex _fromVideoMutex;
-	QMap<AudioMsgId, QQueue<FFMpeg::AVPacketDataWrap>> _fromVideoQueues;
-	SingleQueuedInvokation _fromVideoNotify;
+	QMutex _fromExternalMutex;
+	base::flat_map<
+		AudioMsgId,
+		std::deque<Streaming::Packet>> _fromExternalQueues;
+	base::flat_set<AudioMsgId> _fromExternalForceToBuffer;
+	SingleQueuedInvokation _fromExternalNotify;
 
 	void emitError(AudioMsgId::Type type);
 	AudioMsgId clear(AudioMsgId::Type type);
@@ -58,7 +61,7 @@ private:
 		SetupErrorLoadedFull = 2,
 		SetupNoErrorStarted = 3,
 	};
-	void loadData(AudioMsgId audio, crl::time positionMs);
+	void loadData(AudioMsgId audio, crl::time positionMs = 0);
 	AudioPlayerLoader *setupLoader(
 		const AudioMsgId &audio,
 		SetupError &err,
