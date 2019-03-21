@@ -568,7 +568,9 @@ Reader::SerializedSlice Reader::Slices::serializeAndUnloadUnused() {
 }
 
 Reader::SerializedSlice Reader::Slices::serializeAndUnloadSlice(
-	int sliceNumber) {
+		int sliceNumber) {
+	Expects(_headerMode != HeaderMode::Unknown);
+	Expects(_headerMode != HeaderMode::NoCache);
 	Expects(sliceNumber >= 0 && sliceNumber <= _data.size());
 
 	if (isGoodHeader() && (sliceNumber == 1)) {
@@ -812,7 +814,7 @@ bool Reader::fillFromSlices(int offset, bytes::span buffer) {
 		// HeaderMode::Good and really are putting the first slice to cache.
 		Assert(result.toCache.number > 0 || _slices.isGoodHeader());
 
-		const auto index = std::min(result.toCache.number, 1) - 1;
+		const auto index = std::max(result.toCache.number, 1) - 1;
 		cancelLoadInRange(index * kInSlice, (index + 1) * kInSlice);
 		putToCache(std::move(result.toCache));
 	}
