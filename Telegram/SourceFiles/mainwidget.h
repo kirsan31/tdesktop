@@ -177,7 +177,6 @@ public:
 
 	void showForwardLayer(MessageIdsList &&items);
 	void showSendPathsLayer();
-	void deleteLayer(FullMsgId itemId);
 	void cancelUploadLayer(not_null<HistoryItem*> item);
 	void shareUrlLayer(const QString &url, const QString &text);
 	void inlineSwitchLayer(const QString &botAndQuery);
@@ -195,18 +194,6 @@ public:
 	void dialogsActivate();
 
 	void deletePhotoLayer(PhotoData *photo);
-
-	bool leaveChatFailed(PeerData *peer, const RPCError &e);
-	void deleteHistoryAfterLeave(PeerData *peer, const MTPUpdates &updates);
-	void deleteMessages(
-		not_null<PeerData*> peer,
-		const QVector<MTPint> &ids,
-		bool revoke);
-	void deletedContact(UserData *user, const MTPcontacts_Link &result);
-	void deleteConversation(
-		not_null<PeerData*> peer,
-		bool deleteHistory = true);
-	void deleteAndExit(ChatData *chat);
 
 	bool sendMessageFail(const RPCError &error);
 
@@ -379,10 +366,6 @@ private:
 	void destroyExportTopBar();
 	void exportTopBarHeightUpdated();
 
-	void messagesAffected(
-		not_null<PeerData*> peer,
-		const MTPmessages_AffectedMessages &result);
-
 	Window::SectionSlideParams prepareShowAnimation(
 		bool willHaveTopBarShadow);
 	void showNewSection(
@@ -416,8 +399,6 @@ private:
 	void feedMessageIds(const MTPVector<MTPUpdate> &updates);
 	// Doesn't call sendHistoryChangeNotifications itself.
 	void feedUpdate(const MTPUpdate &update);
-
-	void deleteHistoryPart(DeleteHistoryRequest request, const MTPmessages_AffectedHistory &result);
 
 	void usernameResolveDone(QPair<MsgId, QString> msgIdAndStartToken, const MTPcontacts_ResolvedPeer &result);
 	bool usernameResolveFail(QString name, const RPCError &error);

@@ -7,8 +7,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "data/data_peer.h"
 
-#include <rpl/filter.h>
-#include <rpl/map.h>
 #include "data/data_user.h"
 #include "data/data_chat.h"
 #include "data/data_channel.h"
@@ -26,6 +24,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/image/image.h"
 #include "ui/empty_userpic.h"
 #include "ui/text_options.h"
+#include "history/history.h"
+#include "history/view/history_view_element.h"
+#include "history/history_item.h"
 
 namespace {
 
@@ -60,6 +61,12 @@ style::color PeerUserpicColor(PeerId peerId) {
 		st::historyPeer8UserpicBg,
 	};
 	return colors[PeerColorIndex(peerId)];
+}
+
+PeerId FakePeerIdForJustName(const QString &name) {
+	return peerFromUser(name.isEmpty()
+		? 777
+		: hashCrc32(name.constData(), name.size() * sizeof(QChar)));
 }
 
 } // namespace Data
@@ -376,6 +383,17 @@ void PeerData::setPinnedMessageId(MsgId messageId) {
 	}
 }
 
+bool PeerData::canExportChatHistory() const {
+	for (const auto &block : _owner->history(id)->blocks) {
+		for (const auto &message : block->messages) {
+			if (!message->data()->serviceMsg()) {
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
 bool PeerData::setAbout(const QString &newAbout) {
 	if (_about == newAbout) {
 		return false;
@@ -630,7 +648,31 @@ Data::RestrictionCheckResult PeerData::amRestricted(
 	return Result::Allowed();
 }
 
+bool PeerData::canRevokeFullHistory() const {
+	return isUser()
+		&& Global::RevokePrivateInbox()
+		&& (Global::RevokePrivateTimeLimit() == 0x7FFFFFFF);
+}
+
 namespace Data {
+
+std::vector<ChatRestrictions> ListOfRestrictions() {
+	using Flag = ChatRestriction;
+
+	return {
+		Flag::f_send_messages,
+		Flag::f_send_media,
+		Flag::f_send_stickers
+		| Flag::f_send_gifs
+		| Flag::f_send_games
+		| Flag::f_send_inline,
+		Flag::f_embed_links,
+		Flag::f_send_polls,
+		Flag::f_invite_users,
+		Flag::f_pin_messages,
+		Flag::f_change_info,
+	};
+}
 
 std::optional<LangKey> RestrictionErrorKey(
 		not_null<PeerData*> peer,

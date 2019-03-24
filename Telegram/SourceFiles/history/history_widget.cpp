@@ -2753,7 +2753,7 @@ void HistoryWidget::saveEditMsg() {
 			MTP_int(_editMsgId),
 			MTP_string(sending.text),
 			MTPInputMedia(),
-			MTPnullMarkup,
+			MTPReplyMarkup(),
 			sentEntities),
 		rpcDone(&HistoryWidget::saveEditMsgDone, _history),
 		rpcFail(&HistoryWidget::saveEditMsgFail, _history));
@@ -4328,13 +4328,13 @@ void HistoryWidget::sendFileConfirmed(
 				MTP_int(newId.msg),
 				MTP_int(messageFromId),
 				peerToMTP(file->to.peer),
-				MTPnullFwdHeader,
+				MTPMessageFwdHeader(),
 				MTPint(),
 				MTP_int(file->to.replyTo),
 				MTP_int(unixtime()),
 				MTP_string(caption.text),
 				photo,
-				MTPnullMarkup,
+				MTPReplyMarkup(),
 				localEntities,
 				MTP_int(1),
 				MTPint(),
@@ -4353,13 +4353,13 @@ void HistoryWidget::sendFileConfirmed(
 				MTP_int(newId.msg),
 				MTP_int(messageFromId),
 				peerToMTP(file->to.peer),
-				MTPnullFwdHeader,
+				MTPMessageFwdHeader(),
 				MTPint(),
 				MTP_int(file->to.replyTo),
 				MTP_int(unixtime()),
 				MTP_string(caption.text),
 				document,
-				MTPnullMarkup,
+				MTPReplyMarkup(),
 				localEntities,
 				MTP_int(1),
 				MTPint(),
@@ -4381,13 +4381,13 @@ void HistoryWidget::sendFileConfirmed(
 				MTP_int(newId.msg),
 				MTP_int(messageFromId),
 				peerToMTP(file->to.peer),
-				MTPnullFwdHeader,
+				MTPMessageFwdHeader(),
 				MTPint(),
 				MTP_int(file->to.replyTo),
 				MTP_int(unixtime()),
 				MTP_string(caption.text),
 				document,
-				MTPnullMarkup,
+				MTPReplyMarkup(),
 				localEntities,
 				MTP_int(1),
 				MTPint(),
@@ -4533,16 +4533,11 @@ void HistoryWidget::onReportSpamClear() {
 	Expects(_peer != nullptr);
 
 	InvokeQueued(App::main(), [peer = _peer] {
-		if (peer->isUser()) {
-			App::main()->deleteConversation(peer);
-		} else if (auto chat = peer->asChat()) {
-			App::main()->deleteAndExit(chat);
-		} else if (auto channel = peer->asChannel()) {
-			if (channel->migrateFrom()) {
-				App::main()->deleteConversation(channel->migrateFrom());
-			}
-			Auth().api().leaveChannel(channel);
+		Ui::showChatsList();
+		if (const auto from = peer->migrateFrom()) {
+			peer->session().api().deleteConversation(from, false);
 		}
+		peer->session().api().deleteConversation(peer, false);
 	});
 
 	// Invalidates _peer.
@@ -5536,7 +5531,7 @@ bool HistoryWidget::sendExistingPhoto(
 		messagePostAuthor,
 		photo,
 		caption,
-		MTPnullMarkup);
+		MTPReplyMarkup());
 
 	_history->sendRequestId = MTP::send(
 		MTPmessages_SendMedia(
@@ -5549,7 +5544,7 @@ bool HistoryWidget::sendExistingPhoto(
 				MTPint()),
 			MTP_string(caption.text),
 			MTP_long(randomId),
-			MTPnullMarkup,
+			MTPReplyMarkup(),
 			sentEntities),
 		App::main()->rpcDone(&MainWidget::sentUpdatesReceived),
 		App::main()->rpcFail(&MainWidget::sendMessageFail),
@@ -6289,23 +6284,36 @@ void HistoryWidget::updateForwardingTexts() {
 	int32 version = 0;
 	QString from, text;
 	if (const auto count = int(_toForward.size())) {
-		QMap<PeerData*, bool> fromUsersMap;
-		QVector<PeerData*> fromUsers;
-		fromUsers.reserve(_toForward.size());
+		auto insertedPeers = base::flat_set<not_null<PeerData*>>();
+		auto insertedNames = base::flat_set<QString>();
+		auto fullname = QString();
+		auto names = std::vector<QString>();
+		names.reserve(_toForward.size());
 		for (const auto item : _toForward) {
-			const auto from = item->senderOriginal();
-			if (!fromUsersMap.contains(from)) {
-				fromUsersMap.insert(from, true);
-				fromUsers.push_back(from);
+			if (const auto from = item->senderOriginal()) {
+				if (!insertedPeers.contains(from)) {
+					insertedPeers.emplace(from);
+					names.push_back(from->shortName());
+					fullname = App::peerName(from);
+				}
+				version += from->nameVersion;
+			} else if (const auto info = item->hiddenForwardedInfo()) {
+				if (!insertedNames.contains(info->name)) {
+					insertedNames.emplace(info->name);
+					names.push_back(info->firstName);
+					fullname = info->name;
+				}
+				++version;
+			} else {
+				Unexpected("Corrupt forwarded information in message.");
 			}
-			version += from->nameVersion;
 		}
-		if (fromUsers.size() > 2) {
-			from = lng_forwarding_from(lt_count, fromUsers.size() - 1, lt_user, fromUsers.at(0)->shortName());
-		} else if (fromUsers.size() < 2) {
-			from = fromUsers.at(0)->name;
+		if (names.size() > 2) {
+			from = lng_forwarding_from(lt_count, names.size() - 1, lt_user, names[0]);
+		} else if (names.size() < 2) {
+			from = fullname;
 		} else {
-			from = lng_forwarding_from_two(lt_user, fromUsers.at(0)->shortName(), lt_second_user, fromUsers.at(1)->shortName());
+			from = lng_forwarding_from_two(lt_user, names[0], lt_second_user, names[1]);
 		}
 
 		if (count < 2) {
@@ -6326,7 +6334,13 @@ void HistoryWidget::checkForwardingInfo() {
 	if (!_toForward.empty()) {
 		auto version = 0;
 		for (const auto item : _toForward) {
-			version += item->senderOriginal()->nameVersion;
+			if (const auto from = item->senderOriginal()) {
+				version += from->nameVersion;
+			} else if (const auto info = item->hiddenForwardedInfo()) {
+				++version;
+			} else {
+				Unexpected("Corrupt forwarded information in message.");
+			}
 		}
 		if (version != _toForwardNameVersion) {
 			updateForwardingTexts();
@@ -6604,7 +6618,7 @@ void HistoryWidget::paintEvent(QPaintEvent *e) {
 		updateListSize();
 	}
 
-	Window::SectionWidget::PaintBackground(this, e);
+	Window::SectionWidget::PaintBackground(this, e->rect());
 
 	Painter p(this);
 	const auto clip = e->rect();

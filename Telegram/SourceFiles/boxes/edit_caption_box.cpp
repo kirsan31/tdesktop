@@ -51,9 +51,13 @@ EditCaptionBox::EditCaptionBox(
 		dimensions = QSize(photo->width(), photo->height());
 		image = photo->large();
 	} else if (const auto document = media->document()) {
-		dimensions = document->dimensions;
 		image = document->thumbnail();
+		dimensions = image
+			? image->size()
+			: document->dimensions;
 		if (document->isAnimation()) {
+			_gifw = document->dimensions.width();
+			_gifh = document->dimensions.height();
 			_animated = true;
 		} else if (document->isVideoFile()) {
 			_animated = true;
@@ -72,7 +76,7 @@ EditCaptionBox::EditCaptionBox(
 		if (!image) {
 			_thumbw = 0;
 		} else {
-			int32 tw = image->width(), th = image->height();
+			const auto tw = image->width(), th = image->height();
 			if (tw > th) {
 				_thumbw = (tw * st::msgFileThumbSize) / th;
 			} else {
@@ -80,7 +84,7 @@ EditCaptionBox::EditCaptionBox(
 			}
 			_thumbnailImage = image;
 			_refreshThumbnail = [=] {
-				auto options = Images::Option::Smooth
+				const auto options = Images::Option::Smooth
 					| Images::Option::RoundedSmall
 					| Images::Option::RoundedTopLeft
 					| Images::Option::RoundedTopRight
@@ -97,7 +101,7 @@ EditCaptionBox::EditCaptionBox(
 		}
 
 		if (doc) {
-			auto nameString = doc->isVoiceMessage()
+			const auto nameString = doc->isVoiceMessage()
 				? lang(lng_media_audio)
 				: doc->composeNameString();
 			_name.setText(
@@ -105,7 +109,7 @@ EditCaptionBox::EditCaptionBox(
 				nameString,
 				Ui::NameTextOptions());
 			_status = formatSizeText(doc->size);
-			_statusw = qMax(
+			_statusw = std::max(
 				_name.maxWidth(),
 				st::normalFont->width(_status));
 			_isImage = doc->isImage();
@@ -118,12 +122,12 @@ EditCaptionBox::EditCaptionBox(
 		if (!image) {
 			image = Image::BlankMedia();
 		}
-		int32 maxW = 0, maxH = 0;
+		auto maxW = 0, maxH = 0;
+		const auto limitW = st::sendMediaPreviewSize;
+		auto limitH = std::min(st::confirmMaxHeight, _gifh ? _gifh : INT_MAX);
 		if (_animated) {
-			int32 limitW = st::sendMediaPreviewSize;
-			int32 limitH = st::confirmMaxHeight;
-			maxW = qMax(dimensions.width(), 1);
-			maxH = qMax(dimensions.height(), 1);
+			maxW = std::max(dimensions.width(), 1);
+			maxH = std::max(dimensions.height(), 1);
 			if (maxW * limitH > maxH * limitW) {
 				if (maxW < limitW) {
 					maxH = maxH * limitW / maxW;
@@ -164,24 +168,42 @@ EditCaptionBox::EditCaptionBox(
 		}
 		_refreshThumbnail();
 
-		int32 tw = _thumb.width(), th = _thumb.height();
-		if (!tw || !th) {
-			tw = th = 1;
-		}
-		_thumbw = st::sendMediaPreviewSize;
-		if (_thumb.width() < _thumbw) {
-			_thumbw = (_thumb.width() > 20) ? _thumb.width() : 20;
-		}
-		int32 maxthumbh = qMin(qRound(1.5 * _thumbw), int(st::confirmMaxHeight));
-		_thumbh = qRound(th * float64(_thumbw) / tw);
-		if (_thumbh > maxthumbh) {
-			_thumbw = qRound(_thumbw * float64(maxthumbh) / _thumbh);
-			_thumbh = maxthumbh;
-			if (_thumbw < 10) {
-				_thumbw = 10;
+		const auto resizeDimensions = [&](int &thumbWidth, int &thumbHeight, int &thumbX) {
+			auto tw = thumbWidth, th = thumbHeight;
+			if (!tw || !th) {
+				tw = th = 1;
 			}
+			if (thumbWidth < st::sendMediaPreviewSize) {
+				thumbWidth = (thumbWidth > 20) ? thumbWidth : 20;
+			} else {
+				thumbWidth = st::sendMediaPreviewSize;
+			}
+			const auto maxThumbHeight = std::min(int(std::round(1.5 * thumbWidth)), limitH);
+			thumbHeight = int(std::round(th * float64(thumbWidth) / tw));
+			if (thumbHeight > maxThumbHeight) {
+				thumbWidth = int(std::round(thumbWidth * float64(maxThumbHeight) / thumbHeight));
+				thumbHeight = maxThumbHeight;
+				if (thumbWidth < 10) {
+					thumbWidth = 10;
+				}
+			}
+			thumbX = (st::boxWideWidth - thumbWidth) / 2;
+		};
+
+		if (doc && doc->isAnimation()) {
+			resizeDimensions(_gifw, _gifh, _gifx);
 		}
-		_thumbx = (st::boxWideWidth - _thumbw) / 2;
+		limitH = std::min(st::confirmMaxHeight, _gifh ? _gifh : INT_MAX);
+
+		_thumbw = _thumb.width();
+		_thumbh = _thumb.height();
+		// If thumb's and resized gif's sizes are equal,
+		// Then just take made values.
+		if (_thumbw == _gifw && _thumbh == _gifh) {
+			_thumbx = (st::boxWideWidth - _thumbw) / 2;
+		} else {
+			resizeDimensions(_thumbw, _thumbh, _thumbx);
+		}
 
 		const auto prepareBasicThumb = _refreshThumbnail;
 		const auto scaleThumbDown = [=] {
@@ -269,7 +291,7 @@ void EditCaptionBox::clipCallback(Media::Clip::Notification notification) {
 		}
 
 		if (_gifPreview && _gifPreview->ready() && !_gifPreview->started()) {
-			auto s = QSize(_thumbw, _thumbh);
+			const auto s = QSize(_gifw, _gifh);
 			_gifPreview->start(s.width(), s.height(), s.width(), s.height(), ImageRoundRadius::None, RectPart::None);
 		}
 
@@ -343,7 +365,7 @@ void EditCaptionBox::setupEmojiPanel() {
 void EditCaptionBox::updateBoxSize() {
 	auto newHeight = st::boxPhotoPadding.top() + st::boxPhotoCaptionSkip + _field->height() + errorTopSkip() + st::normalFont->height;
 	if (_photo || _animated) {
-		newHeight += _thumbh;
+		newHeight += std::max(_thumbh, _gifh);
 	} else if (_thumbw) {
 		newHeight += 0 + st::msgFileThumbSize + 0;
 	} else if (_doc) {
@@ -364,22 +386,24 @@ void EditCaptionBox::paintEvent(QPaintEvent *e) {
 	Painter p(this);
 
 	if (_photo || _animated) {
+		const auto th = std::max(_gifh, _thumbh);
 		if (_thumbx > st::boxPhotoPadding.left()) {
-			p.fillRect(st::boxPhotoPadding.left(), st::boxPhotoPadding.top(), _thumbx - st::boxPhotoPadding.left(), _thumbh, st::confirmBg);
+			p.fillRect(st::boxPhotoPadding.left(), st::boxPhotoPadding.top(), _thumbx - st::boxPhotoPadding.left(), th, st::confirmBg);
 		}
 		if (_thumbx + _thumbw < width() - st::boxPhotoPadding.right()) {
-			p.fillRect(_thumbx + _thumbw, st::boxPhotoPadding.top(), width() - st::boxPhotoPadding.right() - _thumbx - _thumbw, _thumbh, st::confirmBg);
+			p.fillRect(_thumbx + _thumbw, st::boxPhotoPadding.top(), width() - st::boxPhotoPadding.right() - _thumbx - _thumbw, th, st::confirmBg);
 		}
 		if (_gifPreview && _gifPreview->started()) {
-			auto s = QSize(_thumbw, _thumbh);
-			auto paused = _controller->isGifPausedAtLeastFor(Window::GifPauseReason::Layer);
-			auto frame = _gifPreview->current(s.width(), s.height(), s.width(), s.height(), ImageRoundRadius::None, RectPart::None, paused ? 0 : crl::now());
-			p.drawPixmap(_thumbx, st::boxPhotoPadding.top(), frame);
+			const auto s = QSize(_gifw, _gifh);
+			const auto paused = _controller->isGifPausedAtLeastFor(Window::GifPauseReason::Layer);
+			const auto frame = _gifPreview->current(s.width(), s.height(), s.width(), s.height(), ImageRoundRadius::None, RectPart::None, paused ? 0 : crl::now());
+			p.drawPixmap(_gifx, st::boxPhotoPadding.top(), frame);
 		} else {
-			p.drawPixmap(_thumbx, st::boxPhotoPadding.top(), _thumb);
+			const auto offset = _gifh ? ((_gifh - _thumbh) / 2) : 0;
+			p.drawPixmap(_thumbx, st::boxPhotoPadding.top() + offset, _thumb);
 		}
 		if (_animated && !_gifPreview) {
-			QRect inner(_thumbx + (_thumbw - st::msgFileSize) / 2, st::boxPhotoPadding.top() + (_thumbh - st::msgFileSize) / 2, st::msgFileSize, st::msgFileSize);
+			QRect inner(_thumbx + (_thumbw - st::msgFileSize) / 2, st::boxPhotoPadding.top() + (th - st::msgFileSize) / 2, st::msgFileSize, st::msgFileSize);
 			p.setPen(Qt::NoPen);
 			p.setBrush(st::msgDateImgBg);
 
@@ -388,13 +412,13 @@ void EditCaptionBox::paintEvent(QPaintEvent *e) {
 				p.drawEllipse(inner);
 			}
 
-			auto icon = &st::historyFileInPlay;
+			const auto icon = &st::historyFileInPlay;
 			icon->paintInCenter(p, inner);
 		}
 	} else if (_doc) {
-		int32 w = width() - st::boxPhotoPadding.left() - st::boxPhotoPadding.right();
-		int32 h = _thumbw ? (0 + st::msgFileThumbSize + 0) : (0 + st::msgFileSize + 0);
-		int32 nameleft = 0, nametop = 0, nameright = 0, statustop = 0;
+		const auto w = width() - st::boxPhotoPadding.left() - st::boxPhotoPadding.right();
+		const auto h = _thumbw ? (0 + st::msgFileThumbSize + 0) : (0 + st::msgFileSize + 0);
+		auto nameleft = 0, nametop = 0, nameright = 0, statustop = 0;
 		if (_thumbw) {
 			nameleft = 0 + st::msgFileThumbSize + st::msgFileThumbPadding.right();
 			nametop = st::msgFileThumbNameTop - st::msgFileThumbPadding.top();
@@ -406,12 +430,12 @@ void EditCaptionBox::paintEvent(QPaintEvent *e) {
 			nameright = 0;
 			statustop = st::msgFileStatusTop - st::msgFilePadding.top();
 		}
-		int32 namewidth = w - nameleft - 0;
+		const auto namewidth = w - nameleft - 0;
 		if (namewidth > _statusw) {
 			//w -= (namewidth - _statusw);
 			//namewidth = _statusw;
 		}
-		int32 x = (width() - w) / 2, y = st::boxPhotoPadding.top();
+		const auto x = (width() - w) / 2, y = st::boxPhotoPadding.top();
 
 //		App::roundRect(p, x, y, w, h, st::msgInBg, MessageInCorners, &st::msgInShadow);
 
@@ -419,7 +443,7 @@ void EditCaptionBox::paintEvent(QPaintEvent *e) {
 			QRect rthumb(rtlrect(x + 0, y + 0, st::msgFileThumbSize, st::msgFileThumbSize, width()));
 			p.drawPixmap(rthumb.topLeft(), _thumb);
 		} else {
-			QRect inner(rtlrect(x + 0, y + 0, st::msgFileSize, st::msgFileSize, width()));
+			const QRect inner(rtlrect(x + 0, y + 0, st::msgFileSize, st::msgFileSize, width()));
 			p.setPen(Qt::NoPen);
 			p.setBrush(st::msgFileInBg);
 
@@ -428,14 +452,14 @@ void EditCaptionBox::paintEvent(QPaintEvent *e) {
 				p.drawEllipse(inner);
 			}
 
-			auto icon = &(_isAudio ? st::historyFileInPlay : _isImage ? st::historyFileInImage : st::historyFileInDocument);
+			const auto icon = &(_isAudio ? st::historyFileInPlay : _isImage ? st::historyFileInImage : st::historyFileInDocument);
 			icon->paintInCenter(p, inner);
 		}
 		p.setFont(st::semiboldFont);
 		p.setPen(st::historyFileNameInFg);
 		_name.drawLeftElided(p, x + nameleft, y + nametop, namewidth, width());
 
-		auto &status = st::mediaInFg;
+		const auto &status = st::mediaInFg;
 		p.setFont(st::normalFont);
 		p.setPen(status);
 		p.drawTextLeft(x + nameleft, y + statustop, width(), _status);
@@ -470,7 +494,7 @@ void EditCaptionBox::setInnerFocus() {
 void EditCaptionBox::save() {
 	if (_saveRequestId) return;
 
-	auto item = App::histItemById(_msgId);
+	const auto item = App::histItemById(_msgId);
 	if (!item) {
 		_error = lang(lng_edit_deleted);
 		update();
@@ -505,7 +529,7 @@ void EditCaptionBox::save() {
 			MTP_int(item->id),
 			MTP_string(sending.text),
 			MTPInputMedia(),
-			MTPnullMarkup,
+			MTPReplyMarkup(),
 			sentEntities),
 		rpcDone(&EditCaptionBox::saveDone),
 		rpcFail(&EditCaptionBox::saveFail));

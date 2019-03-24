@@ -176,6 +176,10 @@ MTPInputPrivacyKey ApiWrap::Privacy::Input(Key key) {
 		return MTP_inputPrivacyKeyStatusTimestamp();
 	case Privacy::Key::CallsPeer2Peer:
 		return MTP_inputPrivacyKeyPhoneP2P();
+	case Privacy::Key::Forwards:
+		return MTP_inputPrivacyKeyForwards();
+	case Privacy::Key::ProfilePhoto:
+		return MTP_inputPrivacyKeyProfilePhoto();
 	}
 	Unexpected("Key in ApiWrap::Privacy::Input.");
 }
@@ -2211,6 +2215,10 @@ void ApiWrap::handlePrivacyChange(
 		case mtpc_inputPrivacyKeyPhoneCall: return Key::Calls;
 		case mtpc_privacyKeyPhoneP2P:
 		case mtpc_inputPrivacyKeyPhoneP2P: return Key::CallsPeer2Peer;
+		case mtpc_privacyKeyForwards:
+		case mtpc_inputPrivacyKeyForwards: return Key::Forwards;
+		case mtpc_privacyKeyProfilePhoto:
+		case mtpc_inputPrivacyKeyProfilePhoto: return Key::ProfilePhoto;
 		}
 		return std::nullopt;
 	}();
@@ -2327,7 +2335,7 @@ int ApiWrap::OnlineTillFromStatus(
 	Unexpected("Bad UserStatus type.");
 }
 
-void ApiWrap::clearHistory(not_null<PeerData*> peer) {
+void ApiWrap::clearHistory(not_null<PeerData*> peer, bool revoke) {
 	auto deleteTillId = MsgId(0);
 	if (const auto history = _session->data().historyLoaded(peer)) {
 		if (const auto last = history->lastMessage()) {
@@ -2341,7 +2349,7 @@ void ApiWrap::clearHistory(not_null<PeerData*> peer) {
 	}
 	if (const auto channel = peer->asChannel()) {
 		if (const auto migrated = peer->migrateFrom()) {
-			clearHistory(migrated);
+			clearHistory(migrated, revoke);
 		}
 		if (IsServerMsgId(deleteTillId)) {
 			request(MTPchannels_DeleteHistory(
@@ -2350,17 +2358,63 @@ void ApiWrap::clearHistory(not_null<PeerData*> peer) {
 			)).send();
 		}
 	} else {
-		request(MTPmessages_DeleteHistory(
-			MTP_flags(MTPmessages_DeleteHistory::Flag::f_just_clear),
-			peer->input,
-			MTP_int(0)
-		)).done([=](const MTPmessages_AffectedHistory &result) {
-			const auto offset = applyAffectedHistory(peer, result);
-			if (offset > 0) {
-				clearHistory(peer);
-			}
-		}).send();
+		deleteHistory(peer, true, revoke);
 	}
+}
+
+void ApiWrap::deleteConversation(not_null<PeerData*> peer, bool revoke) {
+	if (const auto history = _session->data().historyLoaded(peer->id)) {
+		_session->data().setPinnedDialog(history, false);
+		App::main()->removeDialog(history);
+		history->clear();
+		if (const auto channel = peer->asMegagroup()) {
+			channel->addFlags(MTPDchannel::Flag::f_left);
+			if (const auto from = channel->getMigrateFromChat()) {
+				if (const auto migrated = _session->data().historyLoaded(from)) {
+					migrated->updateChatListExistence();
+				}
+			}
+		} else {
+			history->markFullyLoaded();
+		}
+	}
+	if (const auto chat = peer->asChat()) {
+		request(MTPmessages_DeleteChatUser(
+			chat->inputChat,
+			_session->user()->inputUser
+		)).done([=](const MTPUpdates &updates) {
+			applyUpdates(updates);
+			deleteHistory(peer, false, revoke);
+		}).fail([=](const RPCError &error) {
+			deleteHistory(peer, false, revoke);
+		}).send();
+		return;
+	} else if (const auto channel = peer->asChannel()) {
+		channel->ptsWaitingForShortPoll(-1);
+		leaveChannel(channel);
+	} else {
+		deleteHistory(peer, false, revoke);
+	}
+}
+
+void ApiWrap::deleteHistory(not_null<PeerData*> peer, bool justClear, bool revoke) {
+	using Flag = MTPmessages_DeleteHistory::Flag;
+	const auto flags = Flag(0)
+		| (justClear ? Flag::f_just_clear : Flag(0))
+		| ((peer->isUser() && revoke) ? Flag::f_revoke : Flag(0));
+	request(MTPmessages_DeleteHistory(
+		MTP_flags(flags),
+		peer->input,
+		MTP_int(0)
+	)).done([=](const MTPmessages_AffectedHistory &result) {
+		const auto offset = applyAffectedHistory(peer, result);
+		if (offset > 0) {
+			deleteHistory(peer, justClear, revoke);
+		} else if (!justClear && cReportSpamStatuses().contains(peer->id)) {
+			cRefReportSpamStatuses().remove(peer->id);
+			Local::writeReportSpamStatuses();
+		}
+	}).send();
 }
 
 int ApiWrap::applyAffectedHistory(
@@ -2390,6 +2444,30 @@ void ApiWrap::applyAffectedMessages(
 		const MTPmessages_AffectedMessages &result) {
 	const auto &data = result.c_messages_affectedMessages();
 	App::main()->ptsUpdateAndApply(data.vpts.v, data.vpts_count.v);
+}
+
+void ApiWrap::deleteMessages(
+		not_null<PeerData*> peer,
+		const QVector<MTPint> &ids,
+		bool revoke) {
+	const auto done = [=](const MTPmessages_AffectedMessages & result) {
+		applyAffectedMessages(peer, result);
+		if (const auto history = peer->owner().historyLoaded(peer)) {
+			history->requestChatListMessage();
+		}
+	};
+	if (const auto channel = peer->asChannel()) {
+		request(MTPchannels_DeleteMessages(
+			channel->inputChannel,
+			MTP_vector<MTPint>(ids)
+		)).done(done).send();
+	} else {
+		using Flag = MTPmessages_DeleteMessages::Flag;
+		request(MTPmessages_DeleteMessages(
+			MTP_flags(revoke ? Flag::f_revoke : Flag(0)),
+			MTP_vector<MTPint>(ids)
+		)).done(done).send();
+	}
 }
 
 void ApiWrap::saveDraftsToCloud() {
@@ -3407,7 +3485,7 @@ void ApiWrap::applyUpdatesNoPtsCheck(const MTPUpdates &updates) {
 				d.vdate,
 				d.vmessage,
 				MTP_messageMediaEmpty(),
-				MTPnullMarkup,
+				MTPReplyMarkup(),
 				d.has_entities() ? d.ventities : MTPnullEntities,
 				MTPint(),
 				MTPint(),
@@ -3431,7 +3509,7 @@ void ApiWrap::applyUpdatesNoPtsCheck(const MTPUpdates &updates) {
 				d.vdate,
 				d.vmessage,
 				MTP_messageMediaEmpty(),
-				MTPnullMarkup,
+				MTPReplyMarkup(),
 				d.has_entities() ? d.ventities : MTPnullEntities,
 				MTPint(),
 				MTPint(),
@@ -4366,7 +4444,7 @@ void ApiWrap::sendSharedContact(
 			MTP_int(newId.msg),
 			MTP_int(messageFromId),
 			peerToMTP(peer->id),
-			MTPnullFwdHeader,
+			MTPMessageFwdHeader(),
 			MTPint(),
 			MTP_int(options.replyTo),
 			MTP_int(unixtime()),
@@ -4377,7 +4455,7 @@ void ApiWrap::sendSharedContact(
 				MTP_string(lastName),
 				MTP_string(vcard),
 				MTP_int(userId)),
-			MTPnullMarkup,
+			MTPReplyMarkup(),
 			MTPnullEntities,
 			MTP_int(views),
 			MTPint(),
@@ -4651,13 +4729,13 @@ void ApiWrap::sendMessage(MessageToSend &&message) {
 				MTP_int(newId.msg),
 				MTP_int(messageFromId),
 				peerToMTP(peer->id),
-				MTPnullFwdHeader,
+				MTPMessageFwdHeader(),
 				MTPint(),
 				MTP_int(message.replyTo),
 				MTP_int(unixtime()),
 				msgText,
 				media,
-				MTPnullMarkup,
+				MTPReplyMarkup(),
 				localEntities,
 				MTP_int(1),
 				MTPint(),
@@ -4670,7 +4748,7 @@ void ApiWrap::sendMessage(MessageToSend &&message) {
 			MTP_int(message.replyTo),
 			msgText,
 			MTP_long(randomId),
-			MTPnullMarkup,
+			MTPReplyMarkup(),
 			sentEntities
 		)).done([=](const MTPUpdates &result) {
 			applyUpdates(result, randomId);
@@ -4862,7 +4940,7 @@ void ApiWrap::sendExistingDocument(
 		messagePostAuthor,
 		document,
 		caption,
-		MTPnullMarkup);
+		MTPReplyMarkup());
 
 	auto failHandler = std::make_shared<Fn<void(const RPCError&)>>();
 	auto performRequest = [=] {
@@ -4876,7 +4954,7 @@ void ApiWrap::sendExistingDocument(
 				MTPint()),
 			MTP_string(captionText),
 			MTP_long(randomId),
-			MTPnullMarkup,
+			MTPReplyMarkup(),
 			sentEntities
 		)).done([=](const MTPUpdates &result) {
 			applyUpdates(result, randomId);
@@ -5026,7 +5104,7 @@ void ApiWrap::sendMediaWithRandomId(
 		media,
 		MTP_string(caption.text),
 		MTP_long(randomId),
-		MTPnullMarkup,
+		MTPReplyMarkup(),
 		sentEntities
 	)).done([=](const MTPUpdates &result) { applyUpdates(result);
 	}).fail([=](const RPCError &error) { sendMessageFail(error);

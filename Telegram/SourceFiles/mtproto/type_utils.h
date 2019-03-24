@@ -95,9 +95,6 @@ enum class MTPDreplyKeyboardMarkup_ClientFlag : uint32 {
 DEFINE_MTP_CLIENT_FLAGS(MTPDreplyKeyboardMarkup)
 
 enum class MTPDstickerSet_ClientFlag : uint32 {
-	// old value for sticker set is not yet loaded flag
-	f_not_loaded__old = (1U << 31),
-
 	// sticker set is not yet loaded
 	f_not_loaded = (1U << 30),
 
@@ -142,6 +139,4 @@ enum class MTPDchannel_ClientFlag : uint32 {
 };
 DEFINE_MTP_CLIENT_FLAGS(MTPDchannel)
 
-extern const MTPReplyMarkup MTPnullMarkup;
 extern const MTPVector<MTPMessageEntity> MTPnullEntities;
-extern const MTPMessageFwdHeader MTPnullFwdHeader;

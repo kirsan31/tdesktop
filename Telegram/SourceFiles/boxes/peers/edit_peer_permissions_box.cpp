@@ -18,7 +18,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "info/profile/info_profile_icon.h"
 #include "info/profile/info_profile_values.h"
 #include "boxes/peers/edit_participants_box.h"
-#include "boxes/peers/manage_peer_box.h"
+#include "boxes/peers/edit_peer_info_box.h"
 #include "window/window_controller.h"
 #include "mainwindow.h"
 #include "styles/style_boxes.h"
@@ -80,21 +80,24 @@ void ApplyDependencies(
 }
 
 std::vector<std::pair<ChatRestrictions, LangKey>> RestrictionLabels() {
-	using Flag = ChatRestriction;
-
-	return {
-		{ Flag::f_send_messages, lng_rights_chat_send_text },
-		{ Flag::f_send_media, lng_rights_chat_send_media },
-		{ Flag::f_send_stickers
-		| Flag::f_send_gifs
-		| Flag::f_send_games
-		| Flag::f_send_inline, lng_rights_chat_send_stickers },
-		{ Flag::f_embed_links, lng_rights_chat_send_links },
-		{ Flag::f_send_polls, lng_rights_chat_send_polls },
-		{ Flag::f_invite_users, lng_rights_chat_add_members },
-		{ Flag::f_pin_messages, lng_rights_group_pin },
-		{ Flag::f_change_info, lng_rights_group_info },
+	const auto langKeys = {
+		lng_rights_chat_send_text,
+		lng_rights_chat_send_media,
+		lng_rights_chat_send_stickers,
+		lng_rights_chat_send_links,
+		lng_rights_chat_send_polls,
+		lng_rights_chat_add_members,
+		lng_rights_group_pin,
+		lng_rights_group_info,
 	};
+
+	std::vector<std::pair<ChatRestrictions, LangKey>> vector;
+	const auto restrictions = Data::ListOfRestrictions();
+	auto i = 0;
+	for (const auto key : langKeys) {
+		vector.push_back({restrictions[i++], key});
+	}
+	return vector;
 }
 
 std::vector<std::pair<ChatAdminRights, LangKey>> AdminRightLabels(
@@ -354,7 +357,7 @@ void EditPeerPermissionsBox::addBannedButtons(
 		{ 0, st::infoProfileSkip, 0, st::infoProfileSkip });
 
 	const auto navigation = App::wnd()->controller();
-	ManagePeerBox::CreateButton(
+	EditPeerInfoBox::CreateButton(
 		container,
 		Lang::Viewer(lng_manage_peer_exceptions),
 		(channel
@@ -368,7 +371,7 @@ void EditPeerPermissionsBox::addBannedButtons(
 		},
 		st::peerPermissionsButton);
 	if (channel) {
-		ManagePeerBox::CreateButton(
+		EditPeerInfoBox::CreateButton(
 			container,
 			Lang::Viewer(lng_manage_peer_removed_users),
 			Info::Profile::KickedCountValue(channel)

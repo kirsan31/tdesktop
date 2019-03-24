@@ -7,41 +7,137 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "boxes/peers/edit_peer_info_box.h"
 
-#include <rpl/range.h>
-#include <rpl/flatten_latest.h>
-#include "info/profile/info_profile_button.h"
-#include "ui/wrap/vertical_layout.h"
-#include "ui/wrap/padding_wrap.h"
-#include "ui/wrap/slide_wrap.h"
-#include "ui/widgets/input_fields.h"
-#include "ui/widgets/checkbox.h"
-#include "ui/widgets/labels.h"
-#include "ui/toast/toast.h"
-#include "ui/special_buttons.h"
-#include "boxes/confirm_box.h"
-#include "boxes/photo_crop_box.h"
-#include "boxes/add_contact_box.h"
-#include "boxes/stickers_box.h"
-#include "boxes/peer_list_controllers.h"
-#include "boxes/peers/edit_participants_box.h"
-#include "data/data_peer.h"
-#include "data/data_chat.h"
-#include "data/data_channel.h"
-#include "chat_helpers/emoji_suggestions_widget.h"
-#include "mtproto/sender.h"
-#include "lang/lang_keys.h"
-#include "mainwidget.h"
-#include "core/application.h"
 #include "apiwrap.h"
 #include "auth_session.h"
+#include "boxes/add_contact_box.h"
+#include "boxes/confirm_box.h"
+#include "boxes/peer_list_controllers.h"
+#include "boxes/peers/edit_participants_box.h"
+#include "boxes/peers/edit_peer_type_box.h"
+#include "boxes/peers/edit_peer_history_visibility_box.h"
+#include "boxes/peers/edit_peer_permissions_box.h"
+#include "boxes/stickers_box.h"
+#include "chat_helpers/emoji_suggestions_widget.h"
+#include "data/data_channel.h"
+#include "data/data_chat.h"
+#include "data/data_peer.h"
+#include "history/admin_log/history_admin_log_section.h"
+#include "info/profile/info_profile_button.h"
+#include "info/profile/info_profile_values.h"
+#include "lang/lang_keys.h"
+#include "mainwidget.h"
+#include "mainwindow.h"
+#include "mtproto/sender.h"
 #include "observer_peer.h"
 #include "styles/style_boxes.h"
 #include "styles/style_info.h"
+#include "ui/rp_widget.h"
+#include "ui/special_buttons.h"
+#include "ui/toast/toast.h"
+#include "ui/widgets/checkbox.h"
+#include "ui/widgets/input_fields.h"
+#include "ui/widgets/labels.h"
+#include "ui/wrap/padding_wrap.h"
+#include "ui/wrap/slide_wrap.h"
+#include "ui/wrap/vertical_layout.h"
+#include "window/window_controller.h"
+#include <rpl/flatten_latest.h>
+#include <rpl/range.h>
+#include "info/profile/info_profile_icon.h"
 
 namespace {
 
-constexpr auto kUsernameCheckTimeout = crl::time(200);
-constexpr auto kMinUsernameLength = 5;
+auto ToPositiveNumberString() {
+	return rpl::map([](int count) {
+		return count ? QString::number(count) : QString();
+	});
+}
+
+auto ToPositiveNumberStringRestrictions() {
+	return rpl::map([](int count) {
+		return QString::number(count)
+		+ QString("/")
+		+ QString::number(int(Data::ListOfRestrictions().size()));
+	});
+}
+
+void AddSkip(
+		not_null<Ui::VerticalLayout*> container,
+		int top = st::editPeerTopButtonsLayoutSkip,
+		int bottom = st::editPeerTopButtonsLayoutSkipToBottom) {
+	container->add(object_ptr<Ui::FixedHeightWidget>(
+		container,
+		top));
+	container->add(object_ptr<BoxContentDivider>(container));
+	container->add(object_ptr<Ui::FixedHeightWidget>(
+		container,
+		bottom));
+}
+
+void AddButtonWithCount(
+		not_null<Ui::VerticalLayout*> parent,
+		rpl::producer<QString> &&text,
+		rpl::producer<QString> &&count,
+		Fn<void()> callback,
+		const style::icon &icon) {
+	EditPeerInfoBox::CreateButton(
+		parent,
+		std::move(text),
+		std::move(count),
+		std::move(callback),
+		st::manageGroupButton,
+		&icon);
+}
+
+Info::Profile::Button *AddButtonWithText(
+		not_null<Ui::VerticalLayout*> parent,
+		rpl::producer<QString> &&text,
+		rpl::producer<QString> &&label,
+		Fn<void()> callback) {
+	return EditPeerInfoBox::CreateButton(
+		parent,
+		std::move(text),
+		std::move(label),
+		std::move(callback),
+		st::manageGroupTopButtonWithText,
+		nullptr);
+}
+
+void AddButtonDelete(
+		not_null<Ui::VerticalLayout*> parent,
+		rpl::producer<QString> &&text,
+		Fn<void()> callback) {
+	EditPeerInfoBox::CreateButton(
+		parent,
+		std::move(text),
+		rpl::single(QString()),
+		std::move(callback),
+		st::manageDeleteGroupButton,
+		nullptr);
+}
+
+void ShowEditPermissions(not_null<PeerData*> peer) {
+	const auto box = Ui::show(
+		Box<EditPeerPermissionsBox>(peer),
+		LayerOption::KeepOther);
+	box->saveEvents(
+	) | rpl::start_with_next([=](MTPDchatBannedRights::Flags restrictions) {
+		const auto callback = crl::guard(box, [=](bool success) {
+			if (success) {
+				box->closeBox();
+			}
+		});
+		peer->session().api().saveDefaultRestrictions(
+			peer->migrateToOrMe(),
+			MTP_chatBannedRights(MTP_flags(restrictions), MTP_int(0)),
+			callback);
+	}, box->lifetime());
+}
+
+} // namespace
+
+namespace {
+
 constexpr auto kMaxGroupChannelTitle = 255; // See also add_contact_box.
 constexpr auto kMaxChannelDescription = 255; // See also add_contact_box.
 
@@ -57,39 +153,13 @@ public:
 	void setFocus();
 
 private:
-	enum class Privacy {
-		Public,
-		Private,
-	};
-	enum class HistoryVisibility {
-		Visible,
-		Hidden,
-	};
-	enum class UsernameState {
-		Normal,
-		TooMany,
-		NotAvailable,
-	};
 	struct Controls {
 		Ui::InputField *title = nullptr;
 		Ui::InputField *description = nullptr;
 		Ui::UserpicButton *photo = nullptr;
 		rpl::lifetime initialPhotoImageWaiting;
-
-		std::shared_ptr<Ui::RadioenumGroup<Privacy>> privacy;
-		Ui::SlideWrap<Ui::RpWidget> *usernameWrap = nullptr;
-		Ui::UsernameInput *username = nullptr;
-		base::unique_qptr<Ui::FlatLabel> usernameResult;
-		const style::FlatLabel *usernameResultStyle = nullptr;
-
-		Ui::SlideWrap<Ui::RpWidget> *createInviteLinkWrap = nullptr;
-		Ui::SlideWrap<Ui::RpWidget> *editInviteLinkWrap = nullptr;
-		Ui::FlatLabel *inviteLink = nullptr;
-
-		std::shared_ptr<Ui::RadioenumGroup<HistoryVisibility>> historyVisibility;
+		Ui::VerticalLayout *buttonsLayout = nullptr;
 		Ui::SlideWrap<Ui::RpWidget> *historyVisibilityWrap = nullptr;
-
-		Ui::Checkbox *signatures = nullptr;
 	};
 	struct Saving {
 		std::optional<QString> username;
@@ -99,46 +169,25 @@ private:
 		std::optional<bool> signatures;
 	};
 
-	Fn<QString()> computeTitle() const;
 	object_ptr<Ui::RpWidget> createPhotoAndTitleEdit();
 	object_ptr<Ui::RpWidget> createTitleEdit();
 	object_ptr<Ui::RpWidget> createPhotoEdit();
 	object_ptr<Ui::RpWidget> createDescriptionEdit();
-	object_ptr<Ui::RpWidget> createPrivaciesEdit();
-	object_ptr<Ui::RpWidget> createUsernameEdit();
-	object_ptr<Ui::RpWidget> createInviteLinkCreate();
-	object_ptr<Ui::RpWidget> createInviteLinkEdit();
-	object_ptr<Ui::RpWidget> createHistoryVisibilityEdit();
-	object_ptr<Ui::RpWidget> createSignaturesEdit();
+	object_ptr<Ui::RpWidget> createManageGroupButtons();
 	object_ptr<Ui::RpWidget> createStickersEdit();
-	object_ptr<Ui::RpWidget> createDeleteButton();
 
-	QString inviteLinkText() const;
-	void observeInviteLink();
+	void refreshHistoryVisibility(bool instant);
+	void showEditPeerTypeBox(std::optional<LangKey> error = std::nullopt);
+	void fillPrivacyTypeButton();
+	void fillInviteLinkButton();
+	void fillSignaturesButton();
+	void fillHistoryVisibilityButton();
+	void fillManageSection();
 
 	void submitTitle();
 	void submitDescription();
 	void deleteWithConfirmation();
 	void deleteChannel();
-	void privacyChanged(Privacy value);
-
-	void checkUsernameAvailability();
-	void askUsernameRevoke();
-	void usernameChanged();
-	void showUsernameError(rpl::producer<QString> &&error);
-	void showUsernameGood();
-	void showUsernameResult(
-		rpl::producer<QString> &&text,
-		not_null<const style::FlatLabel*> st);
-
-	bool canEditInviteLink() const;
-	bool inviteLinkShown() const;
-	void refreshEditInviteLink();
-	void refreshCreateInviteLink();
-	void refreshHistoryVisibility();
-	void createInviteLink();
-	void revokeInviteLink();
-	void exportInviteLink(const QString &confirmation);
 
 	std::optional<Saving> validate() const;
 	bool validateUsername(Saving &to) const;
@@ -161,19 +210,22 @@ private:
 	void subscribeToMigration();
 	void migrate(not_null<ChannelData*> channel);
 
+	std::optional<Privacy> _privacySavedValue = {};
+	std::optional<HistoryVisibility> _historyVisibilitySavedValue = {};
+	std::optional<QString> _usernameSavedValue = {};
+	std::optional<bool> _signaturesSavedValue = {};
+
 	not_null<BoxContent*> _box;
 	not_null<PeerData*> _peer;
 	bool _isGroup = false;
 
 	base::unique_qptr<Ui::VerticalLayout> _wrap;
 	Controls _controls;
-	base::Timer _checkUsernameTimer;
-	mtpRequestId _checkUsernameRequestId = 0;
-	UsernameState _usernameState = UsernameState::Normal;
-	rpl::event_stream<rpl::producer<QString>> _usernameResultTexts;
 
 	std::deque<FnMut<void()>> _saveStagesQueue;
 	Saving _savingData;
+
+	const rpl::event_stream<Privacy> _updadePrivacyType;
 
 	rpl::lifetime _lifetime;
 
@@ -184,9 +236,10 @@ Controller::Controller(
 	not_null<PeerData*> peer)
 : _box(box)
 , _peer(peer)
-, _isGroup(_peer->isChat() || _peer->isMegagroup())
-, _checkUsernameTimer([=] { checkUsernameAvailability(); }) {
-	_box->setTitle(computeTitle());
+, _isGroup(_peer->isChat() || _peer->isMegagroup()) {
+	_box->setTitle(langFactory(_isGroup
+		? lng_edit_group
+		: lng_edit_channel_title));
 	_box->addButton(langFactory(lng_settings_save), [this] {
 		save();
 	});
@@ -206,14 +259,7 @@ void Controller::subscribeToMigration() {
 
 void Controller::migrate(not_null<ChannelData*> channel) {
 	_peer = channel;
-	observeInviteLink();
 	_peer->updateFull();
-}
-
-Fn<QString()> Controller::computeTitle() const {
-	return langFactory(_isGroup
-			? lng_edit_group
-			: lng_edit_channel_title);
 }
 
 object_ptr<Ui::VerticalLayout> Controller::createContent() {
@@ -223,13 +269,7 @@ object_ptr<Ui::VerticalLayout> Controller::createContent() {
 
 	_wrap->add(createPhotoAndTitleEdit());
 	_wrap->add(createDescriptionEdit());
-	_wrap->add(createPrivaciesEdit());
-	_wrap->add(createInviteLinkCreate());
-	_wrap->add(createInviteLinkEdit());
-	_wrap->add(createHistoryVisibilityEdit());
-	_wrap->add(createSignaturesEdit());
-	_wrap->add(createStickersEdit());
-	_wrap->add(createDeleteButton());
+	_wrap->add(createManageGroupButtons());
 
 	return result;
 }
@@ -256,12 +296,12 @@ object_ptr<Ui::RpWidget> Controller::createPhotoAndTitleEdit() {
 	}
 
 	auto result = object_ptr<Ui::RpWidget>(_wrap);
-	auto container = result.data();
+	const auto container = result.data();
 
-	auto photoWrap = Ui::AttachParentChild(
+	const auto photoWrap = Ui::AttachParentChild(
 		container,
 		createPhotoEdit());
-	auto titleEdit = Ui::AttachParentChild(
+	const auto titleEdit = Ui::AttachParentChild(
 		container,
 		createTitleEdit());
 	photoWrap->heightValue(
@@ -270,7 +310,7 @@ object_ptr<Ui::RpWidget> Controller::createPhotoAndTitleEdit() {
 	}, photoWrap->lifetime());
 	container->widthValue(
 	) | rpl::start_with_next([titleEdit](int width) {
-		auto left = st::editPeerPhotoMargins.left()
+		const auto left = st::editPeerPhotoMargins.left()
 			+ st::defaultUserpicButton.size.width();
 		titleEdit->resizeToWidth(width - left);
 		titleEdit->moveToLeft(left, 0, width);
@@ -355,601 +395,30 @@ object_ptr<Ui::RpWidget> Controller::createDescriptionEdit() {
 	return std::move(result);
 }
 
-object_ptr<Ui::RpWidget> Controller::createPrivaciesEdit() {
+object_ptr<Ui::RpWidget> Controller::createManageGroupButtons() {
 	Expects(_wrap != nullptr);
 
-	const auto canEditUsername = [&] {
-		if (const auto chat = _peer->asChat()) {
-			return chat->canEditUsername();
-		} else if (const auto channel = _peer->asChannel()) {
-			return channel->canEditUsername();
-		}
-		Unexpected("Peer type in Controller::createPrivaciesEdit.");
-	}();
-	if (!canEditUsername) {
-		return nullptr;
-	}
 	auto result = object_ptr<Ui::PaddingWrap<Ui::VerticalLayout>>(
 		_wrap,
 		object_ptr<Ui::VerticalLayout>(_wrap),
-		st::editPeerPrivaciesMargins);
-	auto container = result->entity();
+		st::editPeerBottomButtonsLayoutMargins);
+	_controls.buttonsLayout = result->entity();
 
-	const auto isPublic = _peer->isChannel()
-		&& _peer->asChannel()->isPublic();
-	_controls.privacy = std::make_shared<Ui::RadioenumGroup<Privacy>>(
-		isPublic ? Privacy::Public : Privacy::Private);
-	auto addButton = [&](
-			Privacy value,
-			LangKey groupTextKey,
-			LangKey channelTextKey,
-			LangKey groupAboutKey,
-			LangKey channelAboutKey) {
-		container->add(object_ptr<Ui::FixedHeightWidget>(
-			container,
-			st::editPeerPrivacyTopSkip));
-		container->add(object_ptr<Ui::Radioenum<Privacy>>(
-			container,
-			_controls.privacy,
-			value,
-			lang(_isGroup ? groupTextKey : channelTextKey),
-			st::defaultBoxCheckbox));
-		container->add(object_ptr<Ui::PaddingWrap<Ui::FlatLabel>>(
-			container,
-			object_ptr<Ui::FlatLabel>(
-				container,
-				Lang::Viewer(_isGroup ? groupAboutKey : channelAboutKey),
-				st::editPeerPrivacyLabel),
-			st::editPeerPrivacyLabelMargins));
-		container->add(object_ptr<Ui::FixedHeightWidget>(
-			container,
-			st::editPeerPrivacyBottomSkip));
-	};
-	addButton(
-		Privacy::Public,
-		lng_create_public_group_title,
-		lng_create_public_channel_title,
-		lng_create_public_group_about,
-		lng_create_public_channel_about);
-	addButton(
-		Privacy::Private,
-		lng_create_private_group_title,
-		lng_create_private_channel_title,
-		lng_create_private_group_about,
-		lng_create_private_channel_about);
-	container->add(createUsernameEdit());
+	fillManageSection();
 
-	_controls.privacy->setChangedCallback([this](Privacy value) {
-		privacyChanged(value);
-	});
-	if (!isPublic) {
-		checkUsernameAvailability();
-	}
-
-	return std::move(result);
-}
-
-object_ptr<Ui::RpWidget> Controller::createUsernameEdit() {
-	Expects(_wrap != nullptr);
-
-	const auto channel = _peer->asChannel();
-	const auto username = channel ? channel->username : QString();
-
-	auto result = object_ptr<Ui::SlideWrap<Ui::VerticalLayout>>(
-		_wrap,
-		object_ptr<Ui::VerticalLayout>(_wrap),
-		st::editPeerUsernameMargins);
-	_controls.usernameWrap = result.data();
-
-	auto container = result->entity();
-	container->add(object_ptr<Ui::FlatLabel>(
-		container,
-		Lang::Viewer(lng_create_group_link),
-		st::editPeerSectionLabel));
-	auto placeholder = container->add(object_ptr<Ui::RpWidget>(
-		container));
-	placeholder->setAttribute(Qt::WA_TransparentForMouseEvents);
-	_controls.username = Ui::AttachParentChild(
-		container,
-		object_ptr<Ui::UsernameInput>(
-			container,
-			st::setupChannelLink,
-			Fn<QString()>(),
-			username,
-			true));
-	_controls.username->heightValue(
-	) | rpl::start_with_next([placeholder](int height) {
-		placeholder->resize(placeholder->width(), height);
-	}, placeholder->lifetime());
-	placeholder->widthValue(
-	) | rpl::start_with_next([this](int width) {
-		_controls.username->resize(
-			width,
-			_controls.username->height());
-	}, placeholder->lifetime());
-	_controls.username->move(placeholder->pos());
-
-	QObject::connect(
-		_controls.username,
-		&Ui::UsernameInput::changed,
-		[this] { usernameChanged(); });
-
-	auto shown = (_controls.privacy->value() == Privacy::Public);
-	result->toggle(shown, anim::type::instant);
-
-	return std::move(result);
-}
-
-void Controller::privacyChanged(Privacy value) {
-	auto toggleEditUsername = [&] {
-		_controls.usernameWrap->toggle(
-			(value == Privacy::Public),
-			anim::type::instant);
-	};
-	auto refreshVisibilities = [&] {
-		// First we need to show everything, then hide anything.
-		// Otherwise the scroll position could jump up undesirably.
-
-		if (value == Privacy::Public) {
-			toggleEditUsername();
-		}
-		refreshCreateInviteLink();
-		refreshEditInviteLink();
-		refreshHistoryVisibility();
-		if (value == Privacy::Public) {
-			_controls.usernameResult = nullptr;
-			checkUsernameAvailability();
-		} else {
-			toggleEditUsername();
-		}
-	};
-	if (value == Privacy::Public) {
-		if (_usernameState == UsernameState::TooMany) {
-			askUsernameRevoke();
-			return;
-		} else if (_usernameState == UsernameState::NotAvailable) {
-			_controls.privacy->setValue(Privacy::Private);
-			return;
-		}
-		refreshVisibilities();
-		_controls.username->setDisplayFocused(true);
-		_controls.username->setFocus();
-		_box->scrollToWidget(_controls.username);
-	} else {
-		request(base::take(_checkUsernameRequestId)).cancel();
-		_checkUsernameTimer.cancel();
-		refreshVisibilities();
-		setFocus();
-	}
-}
-
-void Controller::checkUsernameAvailability() {
-	if (!_controls.username) {
-		return;
-	}
-	auto initial = (_controls.privacy->value() != Privacy::Public);
-	auto checking = initial
-		? qsl(".bad.")
-		: _controls.username->getLastText().trimmed();
-	if (checking.size() < kMinUsernameLength) {
-		return;
-	}
-	if (_checkUsernameRequestId) {
-		request(_checkUsernameRequestId).cancel();
-	}
-	const auto channel = _peer->migrateToOrMe()->asChannel();
-	const auto username = channel ? channel->username : QString();
-	_checkUsernameRequestId = request(MTPchannels_CheckUsername(
-		channel ? channel->inputChannel : MTP_inputChannelEmpty(),
-		MTP_string(checking)
-	)).done([=](const MTPBool &result) {
-		_checkUsernameRequestId = 0;
-		if (initial) {
-			return;
-		}
-		if (!mtpIsTrue(result) && checking != username) {
-			showUsernameError(
-				Lang::Viewer(lng_create_channel_link_occupied));
-		} else {
-			showUsernameGood();
-		}
-	}).fail([=](const RPCError &error) {
-		_checkUsernameRequestId = 0;
-		const auto &type = error.type();
-		_usernameState = UsernameState::Normal;
-		if (type == qstr("CHANNEL_PUBLIC_GROUP_NA")) {
-			_usernameState = UsernameState::NotAvailable;
-			_controls.privacy->setValue(Privacy::Private);
-		} else if (type == qstr("CHANNELS_ADMIN_PUBLIC_TOO_MUCH")) {
-			_usernameState = UsernameState::TooMany;
-			if (_controls.privacy->value() == Privacy::Public) {
-				askUsernameRevoke();
-			}
-		} else if (initial) {
-			if (_controls.privacy->value() == Privacy::Public) {
-				_controls.usernameResult = nullptr;
-				_controls.username->setFocus();
-				_box->scrollToWidget(_controls.username);
-			}
-		} else if (type == qstr("USERNAME_INVALID")) {
-			showUsernameError(
-				Lang::Viewer(lng_create_channel_link_invalid));
-		} else if (type == qstr("USERNAME_OCCUPIED")
-			&& checking != username) {
-			showUsernameError(
-				Lang::Viewer(lng_create_channel_link_occupied));
-		}
-	}).send();
-}
-
-void Controller::askUsernameRevoke() {
-	_controls.privacy->setValue(Privacy::Private);
-	auto revokeCallback = crl::guard(this, [this] {
-		_usernameState = UsernameState::Normal;
-		_controls.privacy->setValue(Privacy::Public);
-		checkUsernameAvailability();
-	});
-	Ui::show(
-		Box<RevokePublicLinkBox>(std::move(revokeCallback)),
-		LayerOption::KeepOther);
-}
-
-void Controller::usernameChanged() {
-	auto username = _controls.username->getLastText().trimmed();
-	if (username.isEmpty()) {
-		_controls.usernameResult = nullptr;
-		_checkUsernameTimer.cancel();
-		return;
-	}
-	auto bad = ranges::find_if(username, [](QChar ch) {
-		return (ch < 'A' || ch > 'Z')
-			&& (ch < 'a' || ch > 'z')
-			&& (ch < '0' || ch > '9')
-			&& (ch != '_');
-	}) != username.end();
-	if (bad) {
-		showUsernameError(
-			Lang::Viewer(lng_create_channel_link_bad_symbols));
-	} else if (username.size() < kMinUsernameLength) {
-		showUsernameError(
-			Lang::Viewer(lng_create_channel_link_too_short));
-	} else {
-		_controls.usernameResult = nullptr;
-		_checkUsernameTimer.callOnce(kUsernameCheckTimeout);
-	}
-}
-
-void Controller::showUsernameError(rpl::producer<QString> &&error) {
-	showUsernameResult(std::move(error), &st::editPeerUsernameError);
-}
-
-void Controller::showUsernameGood() {
-	showUsernameResult(
-		Lang::Viewer(lng_create_channel_link_available),
-		&st::editPeerUsernameGood);
-}
-
-void Controller::showUsernameResult(
-		rpl::producer<QString> &&text,
-		not_null<const style::FlatLabel*> st) {
-	if (!_controls.usernameResult
-		|| _controls.usernameResultStyle != st) {
-		_controls.usernameResultStyle = st;
-		_controls.usernameResult = base::make_unique_q<Ui::FlatLabel>(
-			_controls.usernameWrap,
-			_usernameResultTexts.events() | rpl::flatten_latest(),
-			*st);
-		auto label = _controls.usernameResult.get();
-		label->show();
-		label->widthValue(
-		) | rpl::start_with_next([label] {
-			label->moveToRight(
-				st::editPeerUsernamePosition.x(),
-				st::editPeerUsernamePosition.y());
-		}, label->lifetime());
-	}
-	_usernameResultTexts.fire(std::move(text));
-}
-
-void Controller::createInviteLink() {
-	exportInviteLink(lang(_isGroup
-		? lng_group_invite_about
-		: lng_group_invite_about_channel));
-}
-
-void Controller::revokeInviteLink() {
-	exportInviteLink(lang(lng_group_invite_about_new));
-}
-
-void Controller::exportInviteLink(const QString &confirmation) {
-	auto boxPointer = std::make_shared<QPointer<ConfirmBox>>();
-	auto callback = crl::guard(this, [=] {
-		if (const auto strong = *boxPointer) {
-			strong->closeBox();
-		}
-		_peer->session().api().exportInviteLink(_peer->migrateToOrMe());
-	});
-	auto box = Box<ConfirmBox>(
-		confirmation,
-		std::move(callback));
-	*boxPointer = Ui::show(std::move(box), LayerOption::KeepOther);
-}
-
-bool Controller::canEditInviteLink() const {
-	if (const auto channel = _peer->asChannel()) {
-		return channel->amCreator()
-			|| (channel->adminRights() & ChatAdminRight::f_invite_users);
-	} else if (const auto chat = _peer->asChat()) {
-		return chat->amCreator()
-			|| (chat->adminRights() & ChatAdminRight::f_invite_users);
-	}
-	return false;
-}
-
-bool Controller::inviteLinkShown() const {
-	return !_controls.privacy
-		|| (_controls.privacy->value() == Privacy::Private);
-}
-
-QString Controller::inviteLinkText() const {
-	if (const auto channel = _peer->asChannel()) {
-		return channel->inviteLink();
-	} else if (const auto chat = _peer->asChat()) {
-		return chat->inviteLink();
-	}
-	return QString();
-}
-
-void Controller::observeInviteLink() {
-	if (!_controls.editInviteLinkWrap) {
-		return;
-	}
-	Notify::PeerUpdateValue(
-		_peer,
-		Notify::PeerUpdate::Flag::InviteLinkChanged
-	) | rpl::start_with_next([=] {
-		refreshCreateInviteLink();
-		refreshEditInviteLink();
-	}, _controls.editInviteLinkWrap->lifetime());
-}
-
-object_ptr<Ui::RpWidget> Controller::createInviteLinkEdit() {
-	Expects(_wrap != nullptr);
-
-	if (!canEditInviteLink()) {
-		return nullptr;
-	}
-
-	auto result = object_ptr<Ui::SlideWrap<Ui::VerticalLayout>>(
-		_wrap,
-		object_ptr<Ui::VerticalLayout>(_wrap),
-		st::editPeerInviteLinkMargins);
-	_controls.editInviteLinkWrap = result.data();
-
-	auto container = result->entity();
-	container->add(object_ptr<Ui::FlatLabel>(
-		container,
-		Lang::Viewer(lng_profile_invite_link_section),
-		st::editPeerSectionLabel));
-	container->add(object_ptr<Ui::FixedHeightWidget>(
-		container,
-		st::editPeerInviteLinkSkip));
-
-	_controls.inviteLink = container->add(object_ptr<Ui::FlatLabel>(
-		container,
-		st::editPeerInviteLink));
-	_controls.inviteLink->setSelectable(true);
-	_controls.inviteLink->setContextCopyText(QString());
-	_controls.inviteLink->setBreakEverywhere(true);
-	_controls.inviteLink->setClickHandlerFilter([=](auto&&...) {
-		QApplication::clipboard()->setText(inviteLinkText());
-		Ui::Toast::Show(lang(lng_group_invite_copied));
-		return false;
-	});
-
-	container->add(object_ptr<Ui::FixedHeightWidget>(
-		container,
-		st::editPeerInviteLinkSkip));
-	container->add(object_ptr<Ui::LinkButton>(
-		container,
-		lang(lng_group_invite_create_new),
-		st::editPeerInviteLinkButton)
-	)->addClickHandler([=] { revokeInviteLink(); });
-
-	observeInviteLink();
-
-	return std::move(result);
-}
-
-void Controller::refreshEditInviteLink() {
-	auto link = inviteLinkText();
-	auto text = TextWithEntities();
-	if (!link.isEmpty()) {
-		text.text = link;
-		auto remove = qstr("https://");
-		if (text.text.startsWith(remove)) {
-			text.text.remove(0, remove.size());
-		}
-		text.entities.push_back(EntityInText(
-			EntityInTextCustomUrl,
-			0,
-			text.text.size(),
-			link));
-	}
-	_controls.inviteLink->setMarkedText(text);
-
-	// Hack to expand FlatLabel width to naturalWidth again.
-	_controls.editInviteLinkWrap->resizeToWidth(st::boxWideWidth);
-
-	_controls.editInviteLinkWrap->toggle(
-		inviteLinkShown() && !link.isEmpty(),
-		anim::type::instant);
-}
-
-object_ptr<Ui::RpWidget> Controller::createInviteLinkCreate() {
-	Expects(_wrap != nullptr);
-
-	if (!canEditInviteLink()) {
-		return nullptr;
-	}
-
-	auto result = object_ptr<Ui::SlideWrap<Ui::VerticalLayout>>(
-		_wrap,
-		object_ptr<Ui::VerticalLayout>(_wrap),
-		st::editPeerInviteLinkMargins);
-	auto container = result->entity();
-
-	container->add(object_ptr<Ui::FlatLabel>(
-		container,
-		Lang::Viewer(lng_profile_invite_link_section),
-		st::editPeerSectionLabel));
-	container->add(object_ptr<Ui::FixedHeightWidget>(
-		container,
-		st::editPeerInviteLinkSkip));
-
-	container->add(object_ptr<Ui::LinkButton>(
-		_wrap,
-		lang(lng_group_invite_create),
-		st::editPeerInviteLinkButton)
-	)->addClickHandler([this] {
-		createInviteLink();
-	});
-	_controls.createInviteLinkWrap = result.data();
-
-	observeInviteLink();
-
-	return std::move(result);
-}
-
-void Controller::refreshCreateInviteLink() {
-	_controls.createInviteLinkWrap->toggle(
-		inviteLinkShown() && inviteLinkText().isEmpty(),
-		anim::type::instant);
-}
-
-object_ptr<Ui::RpWidget> Controller::createHistoryVisibilityEdit() {
-	Expects(_wrap != nullptr);
-
-	const auto canEdit = [&] {
-		if (const auto chat = _peer->asChat()) {
-			return chat->canEditPreHistoryHidden();
-		} else if (const auto channel = _peer->asChannel()) {
-			return channel->canEditPreHistoryHidden();
-		}
-		Unexpected("User in Controller::createHistoryVisibilityEdit.");
-	}();
-	if (!canEdit) {
-		return nullptr;
-	}
-	const auto channel = _peer->asChannel();
-
-	auto result = object_ptr<Ui::SlideWrap<Ui::VerticalLayout>>(
-		_wrap,
-		object_ptr<Ui::VerticalLayout>(_wrap),
-		st::editPeerInvitesMargins);
-	_controls.historyVisibilityWrap = result.data();
-	auto container = result->entity();
-
-	_controls.historyVisibility
-		= std::make_shared<Ui::RadioenumGroup<HistoryVisibility>>(
-			(!channel || channel->hiddenPreHistory())
-				? HistoryVisibility::Hidden
-				: HistoryVisibility::Visible);
-	auto addButton = [&](
-			HistoryVisibility value,
-			LangKey groupTextKey,
-			LangKey groupAboutKey) {
-		container->add(object_ptr<Ui::FixedHeightWidget>(
-			container,
-			st::editPeerPrivacyTopSkip + st::editPeerPrivacyBottomSkip));
-		container->add(object_ptr<Ui::Radioenum<HistoryVisibility>>(
-			container,
-			_controls.historyVisibility,
-			value,
-			lang(groupTextKey),
-			st::defaultBoxCheckbox));
-		container->add(object_ptr<Ui::PaddingWrap<Ui::FlatLabel>>(
-			container,
-			object_ptr<Ui::FlatLabel>(
-				container,
-				Lang::Viewer(groupAboutKey),
-				st::editPeerPrivacyLabel),
-			st::editPeerPrivacyLabelMargins));
-	};
-
-	container->add(object_ptr<Ui::FlatLabel>(
-		container,
-		Lang::Viewer(lng_manage_history_visibility_title),
-		st::editPeerSectionLabel));
-	addButton(
-		HistoryVisibility::Visible,
-		lng_manage_history_visibility_shown,
-		lng_manage_history_visibility_shown_about);
-	addButton(
-		HistoryVisibility::Hidden,
-		lng_manage_history_visibility_hidden,
-		(_peer->isChat()
-			? lng_manage_history_visibility_hidden_legacy
-			: lng_manage_history_visibility_hidden_about));
-
-	refreshHistoryVisibility();
-
-	return std::move(result);
-}
-
-void Controller::refreshHistoryVisibility() {
-	if (!_controls.historyVisibilityWrap) {
-		return;
-	}
-	auto historyVisibilityShown = !_controls.privacy
-		|| (_controls.privacy->value() == Privacy::Private);
-	_controls.historyVisibilityWrap->toggle(
-		historyVisibilityShown,
-		anim::type::instant);
-}
-
-object_ptr<Ui::RpWidget> Controller::createSignaturesEdit() {
-	Expects(_wrap != nullptr);
-
-	auto channel = _peer->asChannel();
-	if (!channel
-		|| !channel->canEditSignatures()
-		|| channel->isMegagroup()) {
-		return nullptr;
-	}
-	auto result = object_ptr<Ui::VerticalLayout>(_wrap);
-	auto container = result.data();
-	container->add(object_ptr<Ui::FixedHeightWidget>(
-		container,
-		st::defaultBoxCheckbox.margin.top()));
-	_controls.signatures = container->add(
-		object_ptr<Ui::PaddingWrap<Ui::Checkbox>>(
-			container,
-			object_ptr<Ui::Checkbox>(
-				container,
-				lang(lng_edit_sign_messages),
-				channel->addsSignature(),
-				st::defaultBoxCheckbox),
-			st::editPeerSignaturesMargins))->entity();
-	container->add(object_ptr<Ui::FixedHeightWidget>(
-		container,
-		st::defaultBoxCheckbox.margin.bottom()));
 	return std::move(result);
 }
 
 object_ptr<Ui::RpWidget> Controller::createStickersEdit() {
 	Expects(_wrap != nullptr);
 
-	auto channel = _peer->asChannel();
-	if (!channel || !channel->canEditStickers()) {
-		return nullptr;
-	}
+	const auto channel = _peer->asChannel();
 
 	auto result = object_ptr<Ui::SlideWrap<Ui::VerticalLayout>>(
 		_wrap,
 		object_ptr<Ui::VerticalLayout>(_wrap),
-		st::editPeerInviteLinkMargins);
-	auto container = result->entity();
+		st::editPeerInvitesMargins);
+	const auto container = result->entity();
 
 	container->add(object_ptr<Ui::FlatLabel>(
 		container,
@@ -978,27 +447,315 @@ object_ptr<Ui::RpWidget> Controller::createStickersEdit() {
 	return std::move(result);
 }
 
-object_ptr<Ui::RpWidget> Controller::createDeleteButton() {
-	Expects(_wrap != nullptr);
-
-	auto channel = _peer->asChannel();
-	if (!channel || !channel->canDelete()) {
-		return nullptr;
+void Controller::refreshHistoryVisibility(bool instant = false) {
+	if (!_controls.historyVisibilityWrap) {
+		return;
 	}
-	auto text = lang(_isGroup
-		? lng_profile_delete_group
-		: lng_profile_delete_channel);
-	auto result = object_ptr<Ui::PaddingWrap<Ui::LinkButton>>(
-		_wrap,
-		object_ptr<Ui::LinkButton>(
-			_wrap,
-			text,
-			st::editPeerDeleteButton),
-		st::editPeerDeleteButtonMargins);
-	result->entity()->addClickHandler([this] {
-		deleteWithConfirmation();
+	_controls.historyVisibilityWrap->toggle(
+		_privacySavedValue != Privacy::Public,
+		instant ? anim::type::instant : anim::type::normal);
+};
+
+void Controller::showEditPeerTypeBox(std::optional<LangKey> error) {
+	const auto boxCallback = crl::guard(this, [=](
+			Privacy checked, QString publicLink) {
+		_updadePrivacyType.fire(std::move(checked));
+		_privacySavedValue = checked;
+		_usernameSavedValue = publicLink;
+		refreshHistoryVisibility();
 	});
-	return std::move(result);
+	Ui::show(
+		Box<EditPeerTypeBox>(
+			_peer,
+			boxCallback,
+			_privacySavedValue,
+			_usernameSavedValue,
+			error),
+		LayerOption::KeepOther);
+}
+
+void Controller::fillPrivacyTypeButton() {
+	Expects(_controls.buttonsLayout != nullptr);
+
+	// Create Privacy Button.
+	_privacySavedValue = (_peer->isChannel()
+		&& _peer->asChannel()->isPublic())
+		? Privacy::Public
+		: Privacy::Private;
+
+	AddButtonWithText(
+		_controls.buttonsLayout,
+		Lang::Viewer((_peer->isChat() || _peer->isMegagroup())
+			? lng_manage_peer_group_type
+			: lng_manage_peer_channel_type),
+		_updadePrivacyType.events(
+		) | rpl::map([](Privacy flag) {
+			return lang(Privacy::Public == flag
+				? lng_manage_public_peer_title
+				: lng_manage_private_peer_title);
+		}),
+		[=] { showEditPeerTypeBox(); });
+
+	_updadePrivacyType.fire_copy(*_privacySavedValue);
+}
+
+void Controller::fillInviteLinkButton() {
+	Expects(_controls.buttonsLayout != nullptr);
+
+	const auto buttonCallback = [=] {
+		Ui::show(
+			Box<EditPeerTypeBox>(_peer),
+			LayerOption::KeepOther);
+	};
+
+	AddButtonWithText(
+		_controls.buttonsLayout,
+		Lang::Viewer(lng_profile_invite_link_section),
+		rpl::single(QString()), //Empty text.
+		buttonCallback);
+}
+
+void Controller::fillSignaturesButton() {
+	Expects(_controls.buttonsLayout != nullptr);
+	const auto channel = _peer->asChannel();
+	if (!channel) return;
+
+	AddButtonWithText(
+		_controls.buttonsLayout,
+		Lang::Viewer(lng_edit_sign_messages),
+		rpl::single(QString()),
+		[=] {}
+	)->toggleOn(rpl::single(channel->addsSignature())
+	)->toggledValue(
+	) | rpl::start_with_next([=](bool toggled) {
+		_signaturesSavedValue = toggled;
+	}, _controls.buttonsLayout->lifetime());
+}
+
+void Controller::fillHistoryVisibilityButton() {
+	Expects(_controls.buttonsLayout != nullptr);
+
+	const auto wrapLayout = _controls.buttonsLayout->add(
+		object_ptr<Ui::SlideWrap<Ui::VerticalLayout>>(
+			_controls.buttonsLayout,
+			object_ptr<Ui::VerticalLayout>(_controls.buttonsLayout),
+			st::boxOptionListPadding)); // Empty margins.
+	_controls.historyVisibilityWrap = wrapLayout;
+
+	const auto channel = _peer->asChannel();
+	const auto container = wrapLayout->entity();
+
+	_historyVisibilitySavedValue = (!channel || channel->hiddenPreHistory())
+		? HistoryVisibility::Hidden
+		: HistoryVisibility::Visible;
+
+	const auto updateHistoryVisibility =
+		std::make_shared<rpl::event_stream<HistoryVisibility>>();
+
+	const auto boxCallback = crl::guard(this, [=](HistoryVisibility checked) {
+		updateHistoryVisibility->fire(std::move(checked));
+		_historyVisibilitySavedValue = checked;
+	});
+	const auto buttonCallback = [=] {
+		Ui::show(
+			Box<EditPeerHistoryVisibilityBox>(
+				_peer,
+				boxCallback,
+				*_historyVisibilitySavedValue),
+			LayerOption::KeepOther);
+	};
+	AddButtonWithText(
+		container,
+		Lang::Viewer(lng_manage_history_visibility_title),
+		updateHistoryVisibility->events(
+		) | rpl::map([](HistoryVisibility flag) {
+			return lang((HistoryVisibility::Visible == flag)
+				? lng_manage_history_visibility_shown
+				: lng_manage_history_visibility_hidden);
+		}),
+		buttonCallback);
+
+	updateHistoryVisibility->fire_copy(*_historyVisibilitySavedValue);
+
+	//While appearing box we should use instant animation.
+	refreshHistoryVisibility(true);
+}
+
+void Controller::fillManageSection() {
+	Expects(_controls.buttonsLayout != nullptr);
+
+	const auto navigation = App::wnd()->controller();
+
+	const auto chat = _peer->asChat();
+	const auto channel = _peer->asChannel();
+	const auto isChannel = (!chat);
+	if (!chat && !channel) return;
+
+	const auto canEditUsername = [=] {
+		return isChannel
+			? channel->canEditUsername()
+			: chat->canEditUsername();
+	}();
+	const auto canEditInviteLink = [=] {
+		return isChannel
+			? (channel->amCreator()
+				|| (channel->adminRights() & ChatAdminRight::f_invite_users))
+			: (chat->amCreator()
+				|| (chat->adminRights() & ChatAdminRight::f_invite_users));
+	}();
+	const auto canEditSignatures = [=] {
+		return isChannel
+			? (channel->canEditSignatures() && !channel->isMegagroup())
+			: false;
+	}();
+	const auto canEditPreHistoryHidden = [=] {
+		return isChannel
+			? channel->canEditPreHistoryHidden()
+			: chat->canEditPreHistoryHidden();
+	}();
+
+	const auto canEditPermissions = [=] {
+		return isChannel
+			? channel->canEditPermissions()
+			: chat->canEditPermissions();
+	}();
+	const auto canViewAdmins = [=] {
+		return isChannel
+			? channel->canViewAdmins()
+			: chat->amIn();
+	}();
+	const auto canViewMembers = [=] {
+		return isChannel
+			? channel->canViewMembers()
+			: chat->amIn();
+	}();
+	const auto canViewKicked = [=] {
+		return isChannel
+			? (!channel->isMegagroup())
+			: false;
+	}();
+	const auto hasRecentActions = [=] {
+		return isChannel
+			? (channel->hasAdminRights() || channel->amCreator())
+			: false;
+	}();
+
+	const auto canEditStickers = [=] {
+		// return true;
+		return isChannel
+			? channel->canEditStickers()
+			: false;
+	}();
+	const auto canDeleteChannel = [=] {
+		return isChannel
+			? channel->canDelete()
+			: false;
+	}();
+
+	AddSkip(_controls.buttonsLayout, 0);
+
+	if (canEditUsername) {
+		fillPrivacyTypeButton();
+	}
+	else if (canEditInviteLink) {
+		fillInviteLinkButton();
+	}
+	if (canEditSignatures) {
+		fillSignaturesButton();
+	}
+	if (canEditPreHistoryHidden) {
+		fillHistoryVisibilityButton();
+	}
+	if (canEditPreHistoryHidden
+		|| canEditSignatures
+		|| canEditInviteLink
+		|| canEditUsername) {
+		AddSkip(
+			_controls.buttonsLayout,
+			st::editPeerTopButtonsLayoutSkip,
+			st::editPeerTopButtonsLayoutSkipCustomBottom);
+	}
+
+	if (canEditPermissions) {
+		AddButtonWithCount(
+			_controls.buttonsLayout,
+			Lang::Viewer(lng_manage_peer_permissions),
+			Info::Profile::RestrictionsCountValue(_peer)
+			| ToPositiveNumberStringRestrictions(),
+			[=] { ShowEditPermissions(_peer); },
+			st::infoIconPermissions);
+	}
+	if (canViewAdmins) {
+		AddButtonWithCount(
+			_controls.buttonsLayout,
+			Lang::Viewer(lng_manage_peer_administrators),
+			Info::Profile::AdminsCountValue(_peer)
+			| ToPositiveNumberString(),
+			[=] {
+				ParticipantsBoxController::Start(
+					navigation,
+					_peer,
+					ParticipantsBoxController::Role::Admins);
+			},
+			st::infoIconAdministrators);
+	}
+	if (canViewMembers) {
+		AddButtonWithCount(
+			_controls.buttonsLayout,
+			Lang::Viewer(lng_manage_peer_members),
+			Info::Profile::MembersCountValue(_peer)
+			| ToPositiveNumberString(),
+			[=] {
+				ParticipantsBoxController::Start(
+					navigation,
+					_peer,
+					ParticipantsBoxController::Role::Members);
+			},
+			st::infoIconMembers);
+	}
+	if (canViewKicked) {
+		AddButtonWithCount(
+			_controls.buttonsLayout,
+			Lang::Viewer(lng_manage_peer_removed_users),
+			Info::Profile::KickedCountValue(channel)
+			| ToPositiveNumberString(),
+			[=] {
+				ParticipantsBoxController::Start(
+					navigation,
+					_peer,
+					ParticipantsBoxController::Role::Kicked);
+			},
+			st::infoIconBlacklist);
+	}
+	if (hasRecentActions) {
+		AddButtonWithCount(
+			_controls.buttonsLayout,
+			Lang::Viewer(lng_manage_peer_recent_actions),
+			rpl::single(QString()), //Empty count.
+			[=] {
+				navigation->showSection(AdminLog::SectionMemento(channel));
+			},
+			st::infoIconRecentActions);
+	}
+
+	if (canEditStickers || canDeleteChannel) {
+		AddSkip(_controls.buttonsLayout,
+			st::editPeerTopButtonsLayoutSkipCustomTop);
+	}
+
+	if (canEditStickers) {
+		_controls.buttonsLayout->add(createStickersEdit());
+	}
+
+	if (canDeleteChannel) {
+		AddButtonDelete(
+			_controls.buttonsLayout,
+			Lang::Viewer(_isGroup
+				? lng_profile_delete_group
+				: lng_profile_delete_channel),
+			[=]{ deleteWithConfirmation(); }
+		);
+	}
 }
 
 void Controller::submitTitle() {
@@ -1038,16 +795,16 @@ std::optional<Controller::Saving> Controller::validate() const {
 }
 
 bool Controller::validateUsername(Saving &to) const {
-	if (!_controls.privacy) {
-		return true;
-	} else if (_controls.privacy->value() == Privacy::Private) {
+	if (_privacySavedValue != Privacy::Public) {
 		to.username = QString();
 		return true;
 	}
-	auto username = _controls.username->getLastText().trimmed();
+	const auto username = _usernameSavedValue.value_or(
+		_peer->isChannel()
+			? _peer->asChannel()->username
+			: QString()
+	);
 	if (username.isEmpty()) {
-		_controls.username->showError();
-		_box->scrollToWidget(_controls.username);
 		return false;
 	}
 	to.username = username;
@@ -1058,7 +815,7 @@ bool Controller::validateTitle(Saving &to) const {
 	if (!_controls.title) {
 		return true;
 	}
-	auto title = _controls.title->getLastText().trimmed();
+	const auto title = _controls.title->getLastText().trimmed();
 	if (title.isEmpty()) {
 		_controls.title->showError();
 		_box->scrollToWidget(_controls.title);
@@ -1077,20 +834,21 @@ bool Controller::validateDescription(Saving &to) const {
 }
 
 bool Controller::validateHistoryVisibility(Saving &to) const {
-	if (!_controls.historyVisibility
-		|| (_controls.privacy && _controls.privacy->value() == Privacy::Public)) {
+	if (!_controls.historyVisibilityWrap
+		|| !_controls.historyVisibilityWrap->toggled()
+		|| (_privacySavedValue == Privacy::Public)) {
 		return true;
 	}
 	to.hiddenPreHistory
-		= (_controls.historyVisibility->value() == HistoryVisibility::Hidden);
+		= (_historyVisibilitySavedValue == HistoryVisibility::Hidden);
 	return true;
 }
 
 bool Controller::validateSignatures(Saving &to) const {
-	if (!_controls.signatures) {
+	if (!_signaturesSavedValue.has_value()) {
 		return true;
 	}
-	to.signatures = _controls.signatures->checked();
+	to.signatures = _signaturesSavedValue;
 	return true;
 }
 
@@ -1100,14 +858,14 @@ void Controller::save() {
 	if (!_saveStagesQueue.empty()) {
 		return;
 	}
-	if (auto saving = validate()) {
+	if (const auto saving = validate()) {
 		_savingData = *saving;
-		pushSaveStage([this] { saveUsername(); });
-		pushSaveStage([this] { saveTitle(); });
-		pushSaveStage([this] { saveDescription(); });
-		pushSaveStage([this] { saveHistoryVisibility(); });
-		pushSaveStage([this] { saveSignatures(); });
-		pushSaveStage([this] { savePhoto(); });
+		pushSaveStage([=] { saveUsername(); });
+		pushSaveStage([=] { saveTitle(); });
+		pushSaveStage([=] { saveDescription(); });
+		pushSaveStage([=] { saveHistoryVisibility(); });
+		pushSaveStage([=] { saveSignatures(); });
+		pushSaveStage([=] { savePhoto(); });
 		continueSave();
 	}
 }
@@ -1169,13 +927,12 @@ void Controller::saveUsername() {
 				return lng_create_channel_link_invalid;
 			} else if (type == qstr("USERNAME_OCCUPIED")
 				|| type == qstr("USERNAMES_UNAVAILABLE")) {
-				return lng_create_channel_link_invalid;
+				return lng_create_channel_link_occupied;
 			}
 			return lng_create_channel_link_invalid;
 		}();
-		_controls.username->showError();
-		_box->scrollToWidget(_controls.username);
-		showUsernameError(Lang::Viewer(errorKey));
+		// Very rare case.
+		showEditPeerTypeBox(errorKey);
 		cancelSave();
 	}).send();
 }
@@ -1344,15 +1101,15 @@ void Controller::deleteWithConfirmation() {
 }
 
 void Controller::deleteChannel() {
-	const auto channel = _peer->asChannel();
-	Assert(channel != nullptr);
+	Expects(_peer->isChannel());
 
+	const auto channel = _peer->asChannel();
 	const auto chat = channel->migrateFrom();
 
 	Ui::hideLayer();
 	Ui::showChatsList();
 	if (chat) {
-		App::main()->deleteAndExit(chat);
+		chat->session().api().deleteConversation(chat, false);
 	}
 	MTP::send(
 		MTPchannels_DeleteChannel(channel->inputChannel),
@@ -1369,7 +1126,7 @@ EditPeerInfoBox::EditPeerInfoBox(
 }
 
 void EditPeerInfoBox::prepare() {
-	auto controller = Ui::CreateChild<Controller>(this, this, _peer);
+	const auto controller = Ui::CreateChild<Controller>(this, this, _peer);
 	_focusRequests.events(
 	) | rpl::start_with_next(
 		[=] { controller->setFocus(); },
@@ -1379,4 +1136,67 @@ void EditPeerInfoBox::prepare() {
 	setInnerWidget(object_ptr<Ui::OverrideMargins>(
 		this,
 		std::move(content)));
+}
+
+Info::Profile::Button *EditPeerInfoBox::CreateButton(
+		not_null<Ui::VerticalLayout*> parent,
+		rpl::producer<QString> &&text,
+		rpl::producer<QString> &&count,
+		Fn<void()> callback,
+		const style::InfoProfileCountButton &st,
+		const style::icon *icon) {
+	const auto button = parent->add(
+		object_ptr<Info::Profile::Button>(
+			parent,
+			std::move(text),
+			st.button));
+	button->addClickHandler(callback);
+	if (icon) {
+		Ui::CreateChild<Info::Profile::FloatingIcon>(
+			button,
+			*icon,
+			st.iconPosition);
+	}
+	const auto label = Ui::CreateChild<Ui::FlatLabel>(
+		button,
+		std::move(count),
+		st.label);
+	label->setAttribute(Qt::WA_TransparentForMouseEvents);
+
+	rpl::combine(
+		button->widthValue(),
+		label->widthValue()
+	) | rpl::start_with_next([=, &st](int outerWidth, int width) {
+		label->moveToRight(
+			st.labelPosition.x(),
+			st.labelPosition.y(),
+			outerWidth);
+	}, label->lifetime());
+
+	return button;
+}
+
+bool EditPeerInfoBox::Available(not_null<PeerData*> peer) {
+	if (const auto chat = peer->asChat()) {
+		return false
+			|| chat->canEditInformation()
+			|| chat->canEditPermissions();
+	} else if (const auto channel = peer->asChannel()) {
+		// canViewMembers() is removed, because in supergroups you
+		// see them in profile and in channels only admins can see them.
+
+		// canViewAdmins() is removed, because in supergroups it is
+		// always true and in channels it is equal to canViewBanned().
+
+		return false
+			//|| channel->canViewMembers()
+			//|| channel->canViewAdmins()
+			|| channel->canViewBanned()
+			|| channel->canEditInformation()
+			|| channel->canEditPermissions()
+			|| channel->hasAdminRights()
+			|| channel->amCreator();
+	} else {
+		return false;
+	}
 }

@@ -151,6 +151,7 @@ public:
 		not_null<HistoryItem*> item,
 		bool suggestModerateActions);
 	DeleteMessagesBox(QWidget*, MessageIdsList &&selected);
+	DeleteMessagesBox(QWidget*, not_null<PeerData*> peer, bool justClear);
 
 	void setDeleteConfirmedCallback(Fn<void()> callback) {
 		_deleteConfirmedCallback = std::move(callback);
@@ -163,17 +164,24 @@ protected:
 	void keyPressEvent(QKeyEvent *e) override;
 
 private:
+	struct RevokeConfig {
+		QString checkbox;
+		TextWithEntities description;
+	};
 	void deleteAndClear();
+	PeerData *checkFromSinglePeer() const;
+	std::optional<RevokeConfig> revokeText(not_null<PeerData*> peer) const;
 
+	PeerData * const _wipeHistoryPeer = nullptr;
+	const bool _wipeHistoryJustClear = false;
 	const MessageIdsList _ids;
-	const bool _singleItem = false;
 	UserData *_moderateFrom = nullptr;
 	ChannelData *_moderateInChannel = nullptr;
 	bool _moderateBan = false;
 	bool _moderateDeleteAll = false;
 
 	object_ptr<Ui::FlatLabel> _text = { nullptr };
-	object_ptr<Ui::Checkbox> _forEveryone = { nullptr };
+	object_ptr<Ui::Checkbox> _revoke = { nullptr };
 	object_ptr<Ui::Checkbox> _banUser = { nullptr };
 	object_ptr<Ui::Checkbox> _reportSpam = { nullptr };
 	object_ptr<Ui::Checkbox> _deleteAll = { nullptr };

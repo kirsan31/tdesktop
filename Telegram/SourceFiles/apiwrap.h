@@ -211,7 +211,12 @@ public:
 		const MTPUserStatus &status,
 		int currentOnlineTill);
 
-	void clearHistory(not_null<PeerData*> peer);
+	void clearHistory(not_null<PeerData*> peer, bool revoke);
+	void deleteConversation(not_null<PeerData*> peer, bool revoke);
+	void deleteMessages(
+		not_null<PeerData*> peer,
+		const QVector<MTPint> &ids,
+		bool revoke);
 
 	base::Observable<PeerData*> &fullPeerUpdated() {
 		return _fullPeerUpdated;
@@ -384,6 +389,8 @@ public:
 			Calls,
 			Invites,
 			CallsPeer2Peer,
+			Forwards,
+			ProfilePhoto,
 		};
 		enum class Option {
 			Everyone,
@@ -543,6 +550,10 @@ private:
 		UserId userId,
 		const SendOptions &options);
 
+	void deleteHistory(
+		not_null<PeerData*> peer,
+		bool justClear,
+		bool revoke);
 	void sendReadRequest(not_null<PeerData*> peer, MsgId upTo);
 	int applyAffectedHistory(
 		not_null<PeerData*> peer,

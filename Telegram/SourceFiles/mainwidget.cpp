@@ -157,32 +157,29 @@ bool HasForceLogoutNotification(const MTPUpdates &updates) {
 bool ForwardedInfoDataLoaded(
 		not_null<AuthSession*> session,
 		const MTPMessageFwdHeader &header) {
-	if (header.type() != mtpc_messageFwdHeader) {
-		return true;
-	}
-	auto &info = header.c_messageFwdHeader();
-	if (info.has_channel_id()) {
-		if (!session->data().channelLoaded(info.vchannel_id.v)) {
-			return false;
-		}
-		if (info.has_from_id()) {
-			const auto from = session->data().user(info.vfrom_id.v);
-			if (from->loadedStatus == PeerData::NotLoaded) {
+	return header.match([&](const MTPDmessageFwdHeader &data) {
+		if (data.has_channel_id()) {
+			if (!session->data().channelLoaded(data.vchannel_id.v)) {
 				return false;
 			}
-		}
-	} else {
-		if (info.has_from_id() && !session->data().userLoaded(info.vfrom_id.v)) {
+			if (data.has_from_id()) {
+				const auto from = session->data().user(data.vfrom_id.v);
+				if (from->loadedStatus == PeerData::NotLoaded) {
+					return false;
+				}
+			}
+		} else if (data.has_from_id()
+			&& !session->data().userLoaded(data.vfrom_id.v)) {
 			return false;
 		}
-	}
-	return true;
+		return true;
+	});
 }
 
 bool MentionUsersLoaded(
 		not_null<AuthSession*> session,
 		const MTPVector<MTPMessageEntity> &entities) {
-	for_const (auto &entity, entities.v) {
+	for (const auto &entity : entities.v) {
 		auto type = entity.type();
 		if (type == mtpc_messageEntityMentionName) {
 			if (!session->data().userLoaded(entity.c_messageEntityMentionName().vuser_id.v)) {
@@ -838,13 +835,6 @@ void MainWidget::showSendPathsLayer() {
 	}
 }
 
-void MainWidget::deleteLayer(FullMsgId itemId) {
-	if (const auto item = App::histItemById(itemId)) {
-		const auto suggestModerateActions = true;
-		Ui::show(Box<DeleteMessagesBox>(item, suggestModerateActions));
-	}
-}
-
 void MainWidget::cancelUploadLayer(not_null<HistoryItem*> item) {
 	const auto itemId = item->fullId();
 	session().uploader().pause(itemId);
@@ -909,119 +899,8 @@ void MainWidget::dialogsActivate() {
 	_dialogs->activate();
 }
 
-bool MainWidget::leaveChatFailed(PeerData *peer, const RPCError &error) {
-	if (MTP::isDefaultHandledError(error)) return false;
-
-	if (error.type() == qstr("USER_NOT_PARTICIPANT") || error.type() == qstr("CHAT_ID_INVALID") || error.type() == qstr("PEER_ID_INVALID")) { // left this chat already
-		deleteConversation(peer);
-		return true;
-	}
-	return false;
-}
-
-void MainWidget::deleteHistoryAfterLeave(PeerData *peer, const MTPUpdates &updates) {
-	sentUpdatesReceived(updates);
-	deleteConversation(peer);
-}
-
-void MainWidget::deleteHistoryPart(DeleteHistoryRequest request, const MTPmessages_AffectedHistory &result) {
-	auto peer = request.peer;
-
-	auto &d = result.c_messages_affectedHistory();
-	if (peer && peer->isChannel()) {
-		peer->asChannel()->ptsUpdateAndApply(d.vpts.v, d.vpts_count.v);
-	} else {
-		ptsUpdateAndApply(d.vpts.v, d.vpts_count.v);
-	}
-
-	auto offset = d.voffset.v;
-	if (offset <= 0) {
-		cRefReportSpamStatuses().remove(peer->id);
-		Local::writeReportSpamStatuses();
-		return;
-	}
-
-	auto flags = MTPmessages_DeleteHistory::Flags(0);
-	if (request.justClearHistory) {
-		flags |= MTPmessages_DeleteHistory::Flag::f_just_clear;
-	}
-	MTP::send(MTPmessages_DeleteHistory(MTP_flags(flags), peer->input, MTP_int(0)), rpcDone(&MainWidget::deleteHistoryPart, request));
-}
-
-void MainWidget::deleteMessages(
-		not_null<PeerData*> peer,
-		const QVector<MTPint> &ids,
-		bool revoke) {
-	if (const auto channel = peer->asChannel()) {
-		MTP::send(
-			MTPchannels_DeleteMessages(
-				channel->inputChannel,
-				MTP_vector<MTPint>(ids)),
-			rpcDone(&MainWidget::messagesAffected, peer));
-	} else {
-		using Flag = MTPmessages_DeleteMessages::Flag;
-		MTP::send(
-			MTPmessages_DeleteMessages(
-				MTP_flags(revoke ? Flag::f_revoke : Flag(0)),
-				MTP_vector<MTPint>(ids)),
-			rpcDone(&MainWidget::messagesAffected, peer));
-	}
-}
-
-void MainWidget::deletedContact(UserData *user, const MTPcontacts_Link &result) {
-	auto &d(result.c_contacts_link());
-	session().data().processUsers(MTP_vector<MTPUser>(1, d.vuser));
-	App::feedUserLink(MTP_int(peerToUser(user->id)), d.vmy_link, d.vforeign_link);
-}
-
 void MainWidget::removeDialog(Dialogs::Key key) {
 	_dialogs->removeDialog(key);
-}
-
-void MainWidget::deleteConversation(
-		not_null<PeerData*> peer,
-		bool deleteHistory) {
-	if (_controller->activeChatCurrent().peer() == peer) {
-		Ui::showChatsList();
-	}
-	if (const auto history = session().data().historyLoaded(peer->id)) {
-		session().data().setPinnedDialog(history, false);
-		removeDialog(history);
-		if (const auto channel = peer->asMegagroup()) {
-			channel->addFlags(MTPDchannel::Flag::f_left);
-			if (const auto from = channel->getMigrateFromChat()) {
-				if (const auto migrated = session().data().historyLoaded(from)) {
-					migrated->updateChatListExistence();
-				}
-			}
-		}
-		history->clear();
-		if (deleteHistory) {
-			history->markFullyLoaded();
-		}
-	}
-	if (const auto channel = peer->asChannel()) {
-		channel->ptsWaitingForShortPoll(-1);
-	}
-	if (deleteHistory) {
-		DeleteHistoryRequest request = { peer, false };
-		MTP::send(
-			MTPmessages_DeleteHistory(
-				MTP_flags(0),
-				peer->input,
-				MTP_int(0)),
-			rpcDone(&MainWidget::deleteHistoryPart, request));
-	}
-}
-
-void MainWidget::deleteAndExit(ChatData *chat) {
-	PeerData *peer = chat;
-	MTP::send(
-		MTPmessages_DeleteChatUser(
-			chat->inputChat,
-			session().user()->inputUser),
-		rpcDone(&MainWidget::deleteHistoryAfterLeave, peer),
-		rpcFail(&MainWidget::leaveChatFailed, peer));
 }
 
 bool MainWidget::sendMessageFail(const RPCError &error) {
@@ -1153,21 +1032,6 @@ void MainWidget::checkLastUpdate(bool afterSleep) {
 	if (_lastUpdateTime && n > _lastUpdateTime + (afterSleep ? kNoUpdatesAfterSleepTimeout : kNoUpdatesTimeout)) {
 		_lastUpdateTime = n;
 		MTP::ping();
-	}
-}
-
-void MainWidget::messagesAffected(
-		not_null<PeerData*> peer,
-		const MTPmessages_AffectedMessages &result) {
-	const auto &data = result.c_messages_affectedMessages();
-	if (const auto channel = peer->asChannel()) {
-		channel->ptsUpdateAndApply(data.vpts.v, data.vpts_count.v);
-	} else {
-		ptsUpdateAndApply(data.vpts.v, data.vpts_count.v);
-	}
-
-	if (const auto history = session().data().historyLoaded(peer)) {
-		history->requestChatListMessage();
 	}
 }
 
@@ -3519,7 +3383,8 @@ void MainWidget::incrementSticker(DocumentData *sticker) {
 				0, // count
 				0, // hash
 				MTPDstickerSet_ClientFlag::f_special | 0,
-				TimeId(0)));
+				TimeId(0),
+				ImagePtr()));
 		} else {
 			it->title = lang(lng_recent_stickers);
 		}
@@ -4556,7 +4421,10 @@ void MainWidget::feedUpdate(const MTPUpdate &update) {
 	case mtpc_updateChatPinnedMessage: {
 		const auto &d = update.c_updateChatPinnedMessage();
 		if (const auto chat = session().data().chatLoaded(d.vchat_id.v)) {
-			chat->setPinnedMessageId(d.vid.v);
+			const auto status = chat->applyUpdateVersion(d.vversion.v);
+			if (status == ChatData::UpdateStatus::Good) {
+				chat->setPinnedMessageId(d.vid.v);
+			}
 		}
 	} break;
 
@@ -4569,99 +4437,8 @@ void MainWidget::feedUpdate(const MTPUpdate &update) {
 
 	////// Cloud sticker sets
 	case mtpc_updateNewStickerSet: {
-		auto &d = update.c_updateNewStickerSet();
-		bool writeArchived = false;
-		if (d.vstickerset.type() == mtpc_messages_stickerSet) {
-			auto &set = d.vstickerset.c_messages_stickerSet();
-			if (set.vset.type() == mtpc_stickerSet) {
-				auto &s = set.vset.c_stickerSet();
-				if (!s.has_installed_date()) {
-					LOG(("API Error: "
-						"updateNewStickerSet without install_date flag."));
-				}
-				if (!s.is_masks()) {
-					auto &sets = session().data().stickerSetsRef();
-					auto it = sets.find(s.vid.v);
-					if (it == sets.cend()) {
-						it = sets.insert(s.vid.v, Stickers::Set(
-							s.vid.v,
-							s.vaccess_hash.v,
-							Stickers::GetSetTitle(s),
-							qs(s.vshort_name),
-							s.vcount.v,
-							s.vhash.v,
-							s.vflags.v | MTPDstickerSet::Flag::f_installed_date,
-							s.has_installed_date() ? s.vinstalled_date.v : unixtime()));
-					} else {
-						it->flags |= MTPDstickerSet::Flag::f_installed_date;
-						if (!it->installDate) {
-							it->installDate = unixtime();
-						}
-						if (it->flags & MTPDstickerSet::Flag::f_archived) {
-							it->flags &= ~MTPDstickerSet::Flag::f_archived;
-							writeArchived = true;
-						}
-					}
-					auto inputSet = MTP_inputStickerSetID(MTP_long(it->id), MTP_long(it->access));
-					auto &v = set.vdocuments.v;
-					it->stickers.clear();
-					it->stickers.reserve(v.size());
-					for (const auto &item : v) {
-						const auto document = session().data().processDocument(
-							item);
-						if (!document->sticker()) continue;
-
-						it->stickers.push_back(document);
-						if (document->sticker()->set.type() != mtpc_inputStickerSetID) {
-							document->sticker()->set = inputSet;
-						}
-					}
-					it->emoji.clear();
-					auto &packs = set.vpacks.v;
-					for (auto i = 0, l = packs.size(); i != l; ++i) {
-						if (packs[i].type() != mtpc_stickerPack) continue;
-						auto &pack = packs.at(i).c_stickerPack();
-						if (auto emoji = Ui::Emoji::Find(qs(pack.vemoticon))) {
-							emoji = emoji->original();
-							auto &stickers = pack.vdocuments.v;
-
-							Stickers::Pack p;
-							p.reserve(stickers.size());
-							for (auto j = 0, c = stickers.size(); j != c; ++j) {
-								auto doc = session().data().document(stickers[j].v);
-								if (!doc->sticker()) continue;
-
-								p.push_back(doc);
-							}
-							it->emoji.insert(emoji, p);
-						}
-					}
-
-					auto &order = session().data().stickerSetsOrderRef();
-					int32 insertAtIndex = 0, currentIndex = order.indexOf(s.vid.v);
-					if (currentIndex != insertAtIndex) {
-						if (currentIndex > 0) {
-							order.removeAt(currentIndex);
-						}
-						order.insert(insertAtIndex, s.vid.v);
-					}
-
-					auto custom = sets.find(Stickers::CustomSetId);
-					if (custom != sets.cend()) {
-						for (int32 i = 0, l = it->stickers.size(); i < l; ++i) {
-							int32 removeIndex = custom->stickers.indexOf(it->stickers.at(i));
-							if (removeIndex >= 0) custom->stickers.removeAt(removeIndex);
-						}
-						if (custom->stickers.isEmpty()) {
-							sets.erase(custom);
-						}
-					}
-					Local::writeInstalledStickers();
-					if (writeArchived) Local::writeArchivedStickers();
-					session().data().notifyStickersUpdated();
-				}
-			}
-		}
+		const auto &d = update.c_updateNewStickerSet();
+		Stickers::NewSetReceived(d.vstickerset);
 	} break;
 
 	case mtpc_updateStickerSetsOrder: {

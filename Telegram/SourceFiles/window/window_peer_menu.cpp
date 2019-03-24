@@ -14,8 +14,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "boxes/report_box.h"
 #include "boxes/create_poll_box.h"
 #include "boxes/peers/add_participants_box.h"
-#include "boxes/peers/manage_peer_box.h"
-#include "boxes/peers/edit_peer_info_box.h"
 #include "ui/toast/toast.h"
 #include "auth_session.h"
 #include "apiwrap.h"
@@ -38,6 +36,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_drafts.h"
 #include "data/data_user.h"
 #include "dialogs/dialogs_key.h"
+#include "boxes/peers/edit_peer_info_box.h"
 
 namespace Window {
 namespace {
@@ -336,9 +335,11 @@ void Filler::addUserActions(not_null<UserData*> user) {
 				lang(lng_profile_invite_to_group),
 				[user] { AddBotToGroupBoxController::Start(user); });
 		}
-		_addAction(
-			lang(lng_profile_export_chat),
-			[=] { PeerMenuExportChat(user); });
+		if (user->canExportChatHistory()) {
+			_addAction(
+				lang(lng_profile_export_chat),
+				[=] { PeerMenuExportChat(user); });
+		}
 	}
 	_addAction(
 		lang(lng_profile_delete_conversation),
@@ -353,10 +354,10 @@ void Filler::addUserActions(not_null<UserData*> user) {
 
 void Filler::addChatActions(not_null<ChatData*> chat) {
 	if (_source != PeerMenuSource::ChatsList) {
-		if (ManagePeerBox::Available(chat)) {
+		if (EditPeerInfoBox::Available(chat)) {
 			const auto text = lang(lng_manage_group_title);
 			_addAction(text, [=] {
-				Ui::show(Box<ManagePeerBox>(chat));
+				App::wnd()->controller()->showEditPeerBox(chat);
 			});
 		}
 		if (chat->canAddMembers()) {
@@ -369,9 +370,11 @@ void Filler::addChatActions(not_null<ChatData*> chat) {
 				lang(lng_polls_create),
 				[=] { PeerMenuCreatePoll(chat); });
 		}
-		_addAction(
-			lang(lng_profile_export_chat),
-			[=] { PeerMenuExportChat(chat); });
+		if (chat->canExportChatHistory()) {
+			_addAction(
+				lang(lng_profile_export_chat),
+				[=] { PeerMenuExportChat(chat); });
+		}
 	}
 	_addAction(
 		lang(lng_profile_clear_and_exit),
@@ -393,12 +396,12 @@ void Filler::addChannelActions(not_null<ChannelData*> channel) {
 		}
 	}
 	if (_source != PeerMenuSource::ChatsList) {
-		if (ManagePeerBox::Available(channel)) {
+		if (EditPeerInfoBox::Available(channel)) {
 			const auto text = lang(isGroup
 				? lng_manage_group_title
 				: lng_manage_channel_title);
 			_addAction(text, [channel] {
-				Ui::show(Box<ManagePeerBox>(channel));
+				App::wnd()->controller()->showEditPeerBox(channel);
 			});
 		}
 		if (channel->canAddMembers()) {
@@ -411,11 +414,13 @@ void Filler::addChannelActions(not_null<ChannelData*> channel) {
 				lang(lng_polls_create),
 				[=] { PeerMenuCreatePoll(channel); });
 		}
-		_addAction(
-			lang(isGroup
-				? lng_profile_export_chat
-				: lng_profile_export_channel),
-			[=] { PeerMenuExportChat(channel); });
+		if (channel->canExportChatHistory()) {
+			_addAction(
+				lang(isGroup
+					? lng_profile_export_chat
+					: lng_profile_export_channel),
+				[=] { PeerMenuExportChat(channel); });
+		}
 	}
 	if (channel->amIn()) {
 		if (isGroup && !channel->isPublic()) {
@@ -565,22 +570,27 @@ void PeerMenuExportChat(not_null<PeerData*> peer) {
 }
 
 void PeerMenuDeleteContact(not_null<UserData*> user) {
-	auto text = lng_sure_delete_contact(
+	const auto text = lng_sure_delete_contact(
 		lt_contact,
 		App::peerName(user));
-	auto deleteSure = [=] {
+	const auto deleteSure = [=] {
 		Ui::hideLayer();
-		MTP::send(
-			MTPcontacts_DeleteContact(user->inputUser),
-			App::main()->rpcDone(
-				&MainWidget::deletedContact,
-				user.get()));
+		user->session().api().request(MTPcontacts_DeleteContact(
+			user->inputUser
+		)).done([=](const MTPcontacts_Link &result) {
+			result.match([&](const MTPDcontacts_link &data) {
+				user->owner().processUser(data.vuser);
+				App::feedUserLink(
+					MTP_int(peerToUser(user->id)),
+					data.vmy_link,
+					data.vforeign_link);
+			});
+		}).send();
 	};
-	auto box = Box<ConfirmBox>(
+	Ui::show(Box<ConfirmBox>(
 		text,
 		lang(lng_box_delete),
-		std::move(deleteSure));
-	Ui::show(std::move(box));
+		deleteSure));
 }
 
 void PeerMenuAddContact(not_null<UserData*> user) {
@@ -777,73 +787,14 @@ void PeerMenuAddMuteAction(
 //}
 
 Fn<void()> ClearHistoryHandler(not_null<PeerData*> peer) {
-	return [peer] {
-		const auto weak = std::make_shared<QPointer<ConfirmBox>>();
-		const auto text = peer->isSelf()
-			? lang(lng_sure_delete_saved_messages)
-			: peer->isUser()
-			? lng_sure_delete_history(lt_contact, peer->name)
-			: lng_sure_delete_group_history(lt_group, peer->name);
-		auto callback = [=] {
-			if (auto strong = *weak) {
-				strong->closeBox();
-			}
-			Auth().api().clearHistory(peer);
-		};
-		*weak = Ui::show(
-			Box<ConfirmBox>(
-				text,
-				lang(lng_box_delete),
-				st::attentionBoxButton,
-				std::move(callback)),
-			LayerOption::KeepOther);
+	return [=] {
+		Ui::show(Box<DeleteMessagesBox>(peer, true), LayerOption::KeepOther);
 	};
 }
 
 Fn<void()> DeleteAndLeaveHandler(not_null<PeerData*> peer) {
-	return [peer] {
-		const auto warningText = peer->isSelf()
-			? lang(lng_sure_delete_saved_messages)
-			: peer->isUser()
-			? lng_sure_delete_history(lt_contact, peer->name)
-			: peer->isChat()
-			? lng_sure_delete_and_exit(lt_group, peer->name)
-			: lang(peer->isMegagroup()
-				? lng_sure_leave_group
-				: lng_sure_leave_channel);
-		const auto confirmText = lang(peer->isUser()
-			? lng_box_delete
-			: lng_box_leave);
-		const auto &confirmStyle = peer->isChannel()
-			? st::defaultBoxButton
-			: st::attentionBoxButton;
-		auto callback = [peer] {
-			Ui::hideLayer();
-			const auto controller = App::wnd()->controller();
-			if (controller->activeChatCurrent().peer() == peer) {
-				Ui::showChatsList();
-			}
-			if (peer->isUser()) {
-				App::main()->deleteConversation(peer);
-			} else if (const auto chat = peer->asChat()) {
-				App::main()->deleteAndExit(chat);
-			} else if (const auto channel = peer->asChannel()) {
-				// Don't delete old history by default,
-				// because Android app doesn't.
-				//
-				//if (auto migrateFrom = channel->migrateFrom()) {
-				//	App::main()->deleteConversation(migrateFrom);
-				//}
-				Auth().api().leaveChannel(channel);
-			}
-		};
-		Ui::show(
-			Box<ConfirmBox>(
-				warningText,
-				confirmText,
-				confirmStyle,
-				std::move(callback)),
-			LayerOption::KeepOther);
+	return [=] {
+		Ui::show(Box<DeleteMessagesBox>(peer, false), LayerOption::KeepOther);
 	};
 }
 

@@ -9,6 +9,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "boxes/peer_list_box.h"
 #include "boxes/edit_privacy_box.h"
+#include "history/view/history_view_element.h"
 #include "mtproto/sender.h"
 
 namespace Settings {
@@ -36,7 +37,7 @@ private:
 
 };
 
-class LastSeenPrivacyController : public EditPrivacyBox::Controller, private base::Subscriber {
+class LastSeenPrivacyController : public EditPrivacyBox::Controller {
 public:
 	using Option = EditPrivacyBox::Option;
 	using Exception = EditPrivacyBox::Exception;
@@ -55,7 +56,7 @@ public:
 
 };
 
-class GroupsInvitePrivacyController : public EditPrivacyBox::Controller, private base::Subscriber {
+class GroupsInvitePrivacyController : public EditPrivacyBox::Controller {
 public:
 	using Option = EditPrivacyBox::Option;
 	using Exception = EditPrivacyBox::Exception;
@@ -72,7 +73,7 @@ public:
 
 };
 
-class CallsPrivacyController : public EditPrivacyBox::Controller, private base::Subscriber {
+class CallsPrivacyController : public EditPrivacyBox::Controller {
 public:
 	using Option = EditPrivacyBox::Option;
 	using Exception = EditPrivacyBox::Exception;
@@ -88,7 +89,7 @@ public:
 
 };
 
-class CallsPeer2PeerPrivacyController : public EditPrivacyBox::Controller, private base::Subscriber {
+class CallsPeer2PeerPrivacyController : public EditPrivacyBox::Controller {
 public:
 	using Option = EditPrivacyBox::Option;
 	using Exception = EditPrivacyBox::Exception;
@@ -100,6 +101,65 @@ public:
 	LangKey optionsTitleKey() override;
 	LangKey optionLabelKey(EditPrivacyBox::Option option) override;
 	rpl::producer<QString> warning() override;
+	LangKey exceptionButtonTextKey(Exception exception) override;
+	QString exceptionBoxTitle(Exception exception) override;
+	rpl::producer<QString> exceptionsDescription() override;
+
+};
+
+class ForwardsPrivacyController
+	: public EditPrivacyBox::Controller
+	, private HistoryView::ElementDelegate {
+public:
+	using Option = EditPrivacyBox::Option;
+	using Exception = EditPrivacyBox::Exception;
+
+	Key key() override;
+	MTPInputPrivacyKey apiKey() override;
+
+	QString title() override;
+	LangKey optionsTitleKey() override;
+	rpl::producer<QString> warning() override;
+	LangKey exceptionButtonTextKey(Exception exception) override;
+	QString exceptionBoxTitle(Exception exception) override;
+	rpl::producer<QString> exceptionsDescription() override;
+
+	object_ptr<Ui::RpWidget> setupAboveWidget(
+		not_null<QWidget*> parent,
+		rpl::producer<Option> optionValue) override;
+
+private:
+	using Element = HistoryView::Element;
+	not_null<HistoryView::ElementDelegate*> delegate();
+	HistoryView::Context elementContext() override;
+	std::unique_ptr<Element> elementCreate(
+		not_null<HistoryMessage*> message) override;
+	std::unique_ptr<Element> elementCreate(
+		not_null<HistoryService*> message) override;
+	bool elementUnderCursor(not_null<const Element*> view) override;
+	void elementAnimationAutoplayAsync(
+		not_null<const Element*> element) override;
+	crl::time elementHighlightTime(
+		not_null<const Element*> element) override;
+	bool elementInSelectionMode() override;
+
+	static void PaintForwardedTooltip(
+		Painter &p,
+		not_null<HistoryView::Element*> view,
+		Option value);
+
+};
+
+class ProfilePhotoPrivacyController : public EditPrivacyBox::Controller {
+public:
+	using Option = EditPrivacyBox::Option;
+	using Exception = EditPrivacyBox::Exception;
+
+	Key key() override;
+	MTPInputPrivacyKey apiKey() override;
+
+	QString title() override;
+	LangKey optionsTitleKey() override;
 	LangKey exceptionButtonTextKey(Exception exception) override;
 	QString exceptionBoxTitle(Exception exception) override;
 	rpl::producer<QString> exceptionsDescription() override;
