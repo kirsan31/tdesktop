@@ -228,6 +228,8 @@ struct FileLoadResult {
 	PreparedPhotoThumbs photoThumbs;
 	TextWithTags caption;
 
+	bool edit = false;
+
 	void setFileData(const QByteArray &filedata);
 	void setThumbData(const QByteArray &thumbdata);
 
@@ -252,7 +254,7 @@ struct FileMediaInformation {
 	};
 
 	QString filemime;
-	base::variant<Image, Song, Video> media;
+	base::optional_variant<Image, Song, Video> media;
 };
 
 class FileLoadTask final : public Task {
@@ -273,7 +275,8 @@ public:
 		SendMediaType type,
 		const FileLoadTo &to,
 		const TextWithTags &caption,
-		std::shared_ptr<SendingAlbum> album = nullptr);
+		std::shared_ptr<SendingAlbum> album = nullptr,
+		MsgId msgIdToEdit = 0);
 	FileLoadTask(
 		const QByteArray &voice,
 		int32 duration,
@@ -320,6 +323,7 @@ private:
 	VoiceWaveform _waveform;
 	SendMediaType _type;
 	TextWithTags _caption;
+	MsgId _msgIdToEdit = 0;
 
 	std::shared_ptr<FileLoadResult> _result;
 

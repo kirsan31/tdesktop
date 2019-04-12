@@ -19,7 +19,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 namespace Media {
 namespace Player {
 
-VolumeController::VolumeController(QWidget *parent) : TWidget(parent)
+VolumeController::VolumeController(QWidget *parent)
+: TWidget(parent)
 , _slider(this, st::mediaPlayerPanelPlayback) {
 	_slider->setMoveByWheel(true);
 	_slider->setChangeProgressCallback([this](float64 volume) {
@@ -68,7 +69,8 @@ void VolumeController::applyVolumeChange(float64 volume) {
 	}
 }
 
-VolumeWidget::VolumeWidget(QWidget *parent) : TWidget(parent)
+VolumeWidget::VolumeWidget(QWidget *parent)
+: RpWidget(parent)
 , _controller(this) {
 	hide();
 	_controller->setIsVertical(true);
@@ -79,9 +81,12 @@ VolumeWidget::VolumeWidget(QWidget *parent) : TWidget(parent)
 	_showTimer.setSingleShot(true);
 	connect(&_showTimer, SIGNAL(timeout()), this, SLOT(onShowStart()));
 
-	if (cPlatform() == dbipMac || cPlatform() == dbipMacOld) {
-		connect(App::wnd()->windowHandle(), SIGNAL(activeChanged()), this, SLOT(onWindowActiveChanged()));
-	}
+	macWindowDeactivateEvents(
+	) | rpl::filter([=] {
+		return !isHidden();
+	}) | rpl::start_with_next([=] {
+		leaveEvent(nullptr);
+	}, lifetime());
 
 	hide();
 	auto margin = getMargin();
@@ -102,12 +107,6 @@ bool VolumeWidget::overlaps(const QRect &globalRect) {
 	return rect().marginsRemoved(getMargin()).contains(QRect(mapFromGlobal(globalRect.topLeft()), globalRect.size()));
 }
 
-void VolumeWidget::onWindowActiveChanged() {
-	if (!App::wnd()->windowHandle()->isActive() && !isHidden()) {
-		leaveEvent(nullptr);
-	}
-}
-
 void VolumeWidget::resizeEvent(QResizeEvent *e) {
 	auto inner = rect().marginsRemoved(getMargin());
 	_controller->setGeometry(inner.x(), inner.y() - st::lineWidth, inner.width(), inner.height() + st::lineWidth - ((st::mediaPlayerVolumeSize.width() - st::mediaPlayerPanelPlayback.width) / 2));
@@ -117,9 +116,9 @@ void VolumeWidget::paintEvent(QPaintEvent *e) {
 	Painter p(this);
 
 	if (!_cache.isNull()) {
-		bool animating = _a_appearance.animating(crl::now());
+		bool animating = _a_appearance.animating();
 		if (animating) {
-			p.setOpacity(_a_appearance.current(_hiding));
+			p.setOpacity(_a_appearance.value(_hiding ? 0. : 1.));
 		} else if (_hiding || isHidden()) {
 			hidingFinished();
 			return;
@@ -142,27 +141,27 @@ void VolumeWidget::paintEvent(QPaintEvent *e) {
 
 void VolumeWidget::enterEventHook(QEvent *e) {
 	_hideTimer.stop();
-	if (_a_appearance.animating(crl::now())) {
+	if (_a_appearance.animating()) {
 		onShowStart();
 	} else {
 		_showTimer.start(0);
 	}
-	return TWidget::enterEventHook(e);
+	return RpWidget::enterEventHook(e);
 }
 
 void VolumeWidget::leaveEventHook(QEvent *e) {
 	_showTimer.stop();
-	if (_a_appearance.animating(crl::now())) {
+	if (_a_appearance.animating()) {
 		onHideStart();
 	} else {
 		_hideTimer.start(300);
 	}
-	return TWidget::leaveEventHook(e);
+	return RpWidget::leaveEventHook(e);
 }
 
 void VolumeWidget::otherEnter() {
 	_hideTimer.stop();
-	if (_a_appearance.animating(crl::now())) {
+	if (_a_appearance.animating()) {
 		onShowStart();
 	} else {
 		_showTimer.start(0);
@@ -171,7 +170,7 @@ void VolumeWidget::otherEnter() {
 
 void VolumeWidget::otherLeave() {
 	_showTimer.stop();
-	if (_a_appearance.animating(crl::now())) {
+	if (_a_appearance.animating()) {
 		onHideStart();
 	} else {
 		_hideTimer.start(0);
@@ -196,14 +195,16 @@ void VolumeWidget::onHideStart() {
 }
 
 void VolumeWidget::startAnimation() {
-	auto from = _hiding ? 1. : 0.;
-	auto to = _hiding ? 0. : 1.;
 	if (_cache.isNull()) {
 		showChildren();
 		_cache = Ui::GrabWidget(this);
 	}
 	hideChildren();
-	_a_appearance.start([this] { appearanceCallback(); }, from, to, st::defaultInnerDropdown.duration);
+	_a_appearance.start(
+		[=] { appearanceCallback(); },
+		_hiding ? 1. : 0.,
+		_hiding ? 0. : 1.,
+		st::defaultInnerDropdown.duration);
 }
 
 void VolumeWidget::appearanceCallback() {

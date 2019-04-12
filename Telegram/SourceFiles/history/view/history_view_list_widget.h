@@ -7,8 +7,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #pragma once
 
-#include "ui/widgets/tooltip.h"
 #include "ui/rp_widget.h"
+#include "ui/effects/animations.h"
+#include "ui/widgets/tooltip.h"
 #include "mtproto/sender.h"
 #include "base/timer.h"
 #include "data/data_messages.h"
@@ -152,7 +153,7 @@ public:
 	bool isBelowPosition(Data::MessagePosition position) const;
 	void highlightMessage(FullMsgId itemId);
 
-	TextWithEntities getSelectedText() const;
+	TextForMimeData getSelectedText() const;
 	MessageIdsList getSelectedItems() const;
 	void cancelSelection();
 	void selectItem(not_null<HistoryItem*> item);
@@ -381,7 +382,7 @@ private:
 		not_null<const Element*> view) const;
 	void checkUnreadBarCreation();
 	void applyUpdatedScrollState();
-	void scrollToAnimationCallback(FullMsgId attachToId);
+	void scrollToAnimationCallback(FullMsgId attachToId, int relativeTo);
 
 	void updateHighlightedMessage();
 
@@ -437,10 +438,10 @@ private:
 	Element *_visibleTopItem = nullptr;
 	int _visibleTopFromItem = 0;
 	ScrollTopState _scrollTopState;
-	Animation _scrollToAnimation;
+	Ui::Animations::Simple _scrollToAnimation;
 
 	bool _scrollDateShown = false;
-	Animation _scrollDateOpacity;
+	Ui::Animations::Simple _scrollDateOpacity;
 	SingleQueuedInvokation _scrollDateCheck;
 	base::Timer _scrollDateHideTimer;
 	Element *_scrollDateLastItem = nullptr;
@@ -465,7 +466,7 @@ private:
 	bool _selectEnabled = false;
 	HistoryItem *_selectedTextItem = nullptr;
 	TextSelection _selectedTextRange;
-	TextWithEntities _selectedText;
+	TextForMimeData _selectedText;
 	SelectedMap _selected;
 	base::flat_set<FullMsgId> _dragSelected;
 	DragSelectAction _dragSelectAction = DragSelectAction::None;

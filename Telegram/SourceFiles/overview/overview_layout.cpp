@@ -51,13 +51,13 @@ TextWithEntities ComposeNameWithEntities(DocumentData *document) {
 		result.text = document->filename().isEmpty()
 			? qsl("Unknown File")
 			: document->filename();
-		result.entities.push_back({ EntityInTextBold, 0, result.text.size() });
+		result.entities.push_back({ EntityType::Bold, 0, result.text.size() });
 	} else if (song->performer.isEmpty()) {
 		result.text = song->title;
-		result.entities.push_back({ EntityInTextBold, 0, result.text.size() });
+		result.entities.push_back({ EntityType::Bold, 0, result.text.size() });
 	} else {
 		result.text = song->performer + QString::fromUtf8(" \xe2\x80\x93 ") + (song->title.isEmpty() ? qsl("Unknown Track") : song->title);
-		result.entities.push_back({ EntityInTextBold, 0, song->performer.size() });
+		result.entities.push_back({ EntityType::Bold, 0, song->performer.size() });
 	}
 	return result;
 }
@@ -72,7 +72,7 @@ public:
 	, _check(st, _updateCallback) {
 	}
 
-	void paint(Painter &p, crl::time ms, QPoint position, int outerWidth, bool selected, bool selecting);
+	void paint(Painter &p, QPoint position, int outerWidth, bool selected, bool selecting);
 
 	void setActive(bool active);
 	void setPressed(bool pressed);
@@ -87,18 +87,18 @@ private:
 	Fn<void()> _updateCallback;
 	Ui::RoundCheckbox _check;
 
-	Animation _pression;
+	Ui::Animations::Simple _pression;
 	bool _active = false;
 	bool _pressed = false;
 
 };
 
-void Checkbox::paint(Painter &p, crl::time ms, QPoint position, int outerWidth, bool selected, bool selecting) {
+void Checkbox::paint(Painter &p, QPoint position, int outerWidth, bool selected, bool selecting) {
 	_check.setDisplayInactive(selecting);
 	_check.setChecked(selected);
-	const auto pression = _pression.current(ms, (_active && _pressed) ? 1. : 0.);
+	const auto pression = _pression.value((_active && _pressed) ? 1. : 0.);
 	const auto masterScale = 1. - (1. - st::overviewCheckPressedSize) * pression;
-	_check.paint(p, ms, position.x(), position.y(), outerWidth, masterScale);
+	_check.paint(p, position.x(), position.y(), outerWidth, masterScale);
 }
 
 void Checkbox::setActive(bool active) {
@@ -167,7 +167,7 @@ void ItemBase::paintCheckbox(
 		ensureCheckboxCreated();
 	}
 	if (_check) {
-		_check->paint(p, context->ms, position, _width, selected, context->selecting);
+		_check->paint(p, position, _width, selected, context->selecting);
 	}
 }
 
@@ -218,29 +218,27 @@ void RadialProgressItem::setLinks(
 	_cancell = std::move(cancell);
 }
 
-void RadialProgressItem::step_radial(crl::time ms, bool timer) {
-	const auto updateRadial = [&] {
-		return _radial->update(dataProgress(), dataFinished(), ms);
-	};
-	if (timer) {
-		if (!anim::Disabled() || updateRadial()) {
-			Auth().data().requestItemRepaint(parent());
-		}
-	} else {
-		updateRadial();
-		if (!_radial->animating()) {
-			checkRadialFinished();
-		}
+void RadialProgressItem::radialAnimationCallback(crl::time now) const {
+	const auto updated = [&] {
+		return _radial->update(dataProgress(), dataFinished(), now);
+	}();
+	if (!anim::Disabled() || updated) {
+		Auth().data().requestItemRepaint(parent());
+	}
+	if (!_radial->animating()) {
+		checkRadialFinished();
 	}
 }
 
 void RadialProgressItem::ensureRadial() {
 	if (!_radial) {
-		_radial = std::make_unique<Ui::RadialAnimation>(animation(const_cast<RadialProgressItem*>(this), &RadialProgressItem::step_radial));
+		_radial = std::make_unique<Ui::RadialAnimation>([=](crl::time now) {
+			radialAnimationCallback(now);
+		});
 	}
 }
 
-void RadialProgressItem::checkRadialFinished() {
+void RadialProgressItem::checkRadialFinished() const {
 	if (_radial && !_radial->animating() && dataLoaded()) {
 		_radial.reset();
 	}
@@ -396,6 +394,11 @@ Video::Video(
 , _duration(formatDurationText(_data->getDuration())) {
 	setDocumentLinks(_data);
 	_data->loadThumbnail(parent->fullId());
+	if (_data->hasThumbnail() && !_data->thumbnail()->loaded()) {
+		if (const auto good = _data->goodThumbnail()) {
+			good->load({});
+		}
+	}
 }
 
 void Video::initDimensions() {
@@ -426,11 +429,12 @@ void Video::paint(Painter &p, const QRect &clip, TextSelection selection, const 
 		}
 	}
 	updateStatusText();
-	const auto radial = isRadialAnimation(context->ms);
+	const auto radial = isRadialAnimation();
 	const auto radialOpacity = radial ? _radial->opacity() : 0.;
 
 	if ((blurred || thumbLoaded || goodLoaded)
-		&& (_pix.width() != _width * cIntRetinaFactor())) {
+		&& ((_pix.width() != _width * cIntRetinaFactor())
+			|| (_pixBlurred && (thumbLoaded || goodLoaded)))) {
 		auto size = _width * cIntRetinaFactor();
 		auto img = goodLoaded
 			? _data->goodThumbnail()->original()
@@ -447,9 +451,9 @@ void Video::paint(Painter &p, const QRect &clip, TextSelection selection, const 
 			img = img.copy(0, (img.height() - img.width()) / 2, img.width(), img.width()).scaled(size, size, Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation);
 		}
 		img.setDevicePixelRatio(cRetinaFactor());
-		_data->unload();
 
 		_pix = App::pixmapFromImageInPlace(std::move(img));
+		_pixBlurred = !(thumbLoaded || goodLoaded);
 	}
 
 	if (_pix.isNull()) {
@@ -491,7 +495,7 @@ void Video::paint(Painter &p, const QRect &clip, TextSelection selection, const 
 			p.setBrush(st::msgDateImgBgSelected);
 		} else {
 			auto over = ClickHandler::showAsActive((_data->loading() || _data->uploading()) ? _cancell : (loaded || _data->canBePlayed()) ? _openl : _savel);
-			p.setBrush(anim::brush(st::msgDateImgBg, st::msgDateImgBgOver, _a_iconOver.current(context->ms, over ? 1. : 0.)));
+			p.setBrush(anim::brush(st::msgDateImgBg, st::msgDateImgBgOver, _a_iconOver.value(over ? 1. : 0.)));
 		}
 
 		{
@@ -554,8 +558,6 @@ void Video::updateStatusText() {
 		statusSize = FileStatusSizeFailed;
 	} else if (_data->uploading()) {
 		statusSize = _data->uploadingData->offset;
-	} else if (_data->loading()) {
-		statusSize = _data->loadOffset();
 	} else if (_data->loaded()) {
 		statusSize = FileStatusSizeLoaded;
 	} else {
@@ -619,12 +621,12 @@ void Voice::paint(Painter &p, const QRect &clip, TextSelection selection, const 
 			_radial->start(_data->progress());
 		}
 	}
-	bool showPause = updateStatusText();
-	int32 nameVersion = parent()->fromOriginal()->nameVersion;
+	const auto showPause = updateStatusText();
+	const auto nameVersion = parent()->fromOriginal()->nameVersion;
 	if (nameVersion > _nameVersion) {
 		updateName();
 	}
-	bool radial = isRadialAnimation(context->ms);
+	const auto radial = isRadialAnimation();
 
 	const auto nameleft = _st.songPadding.left()
 		+ _st.songThumbSize
@@ -670,10 +672,10 @@ void Voice::paint(Painter &p, const QRect &clip, TextSelection selection, const 
 			p.setBrush((thumbLoaded || blurred) ? st::msgDateImgBgSelected : st::msgFileInBgSelected);
 		} else if (_data->hasThumbnail()) {
 			auto over = ClickHandler::showAsActive(checkLink);
-			p.setBrush(anim::brush(st::msgDateImgBg, st::msgDateImgBgOver, _a_iconOver.current(context->ms, over ? 1. : 0.)));
+			p.setBrush(anim::brush(st::msgDateImgBg, st::msgDateImgBgOver, _a_iconOver.value(over ? 1. : 0.)));
 		} else {
 			auto over = ClickHandler::showAsActive(checkLink);
-			p.setBrush(anim::brush(st::msgFileInBg, st::msgFileInBgOver, _a_iconOver.current(context->ms, over ? 1. : 0.)));
+			p.setBrush(anim::brush(st::msgFileInBg, st::msgFileInBgOver, _a_iconOver.value(over ? 1. : 0.)));
 		}
 		{
 			PainterHighQualityEnabler hq(p);
@@ -915,12 +917,13 @@ void Document::initDimensions() {
 }
 
 void Document::paint(Painter &p, const QRect &clip, TextSelection selection, const PaintContext *context) {
-	bool selected = (selection == FullSelection);
+	const auto selected = (selection == FullSelection);
 
 	const auto cornerDownload = downloadInCorner();
 
 	_data->automaticLoad(parent()->fullId(), parent());
-	bool loaded = _data->loaded(), displayLoading = _data->displayLoading();
+	const auto loaded = _data->loaded();
+	const auto displayLoading = _data->displayLoading();
 
 	if (displayLoading) {
 		ensureRadial();
@@ -928,13 +931,13 @@ void Document::paint(Painter &p, const QRect &clip, TextSelection selection, con
 			_radial->start(_data->progress());
 		}
 	}
-	bool showPause = updateStatusText();
-	bool radial = isRadialAnimation(context->ms);
+	const auto showPause = updateStatusText();
+	const auto radial = isRadialAnimation();
 
 	int32 nameleft = 0, nametop = 0, nameright = 0, statustop = 0, datetop = -1;
-	bool wthumb = withThumb();
+	const auto wthumb = withThumb();
 
-	auto isSong = _data->isSong();
+	const auto isSong = _data->isSong();
 	if (isSong) {
 		nameleft = _st.songPadding.left() + _st.songThumbSize + _st.songPadding.right();
 		nameright = _st.songPadding.left();
@@ -948,7 +951,7 @@ void Document::paint(Painter &p, const QRect &clip, TextSelection selection, con
 				p.setBrush(st::msgFileInBgSelected);
 			} else {
 				auto over = ClickHandler::showAsActive((!cornerDownload && (_data->loading() || _data->uploading())) ? _cancell : (loaded || _data->canBePlayed()) ? _openl : _savel);
-				p.setBrush(anim::brush(_st.songIconBg, _st.songOverBg, _a_iconOver.current(context->ms, over ? 1. : 0.)));
+				p.setBrush(anim::brush(_st.songIconBg, _st.songOverBg, _a_iconOver.value(over ? 1. : 0.)));
 			}
 
 			{
@@ -1026,7 +1029,7 @@ void Document::paint(Painter &p, const QRect &clip, TextSelection selection, con
 						p.setBrush(wthumb ? st::msgDateImgBgSelected : documentSelectedColor(_colorIndex));
 					} else {
 						auto over = ClickHandler::showAsActive(_data->loading() ? _cancell : _savel);
-						p.setBrush(anim::brush(wthumb ? st::msgDateImgBg : documentDarkColor(_colorIndex), wthumb ? st::msgDateImgBgOver : documentOverColor(_colorIndex), _a_iconOver.current(context->ms, over ? 1. : 0.)));
+						p.setBrush(anim::brush(wthumb ? st::msgDateImgBg : documentDarkColor(_colorIndex), wthumb ? st::msgDateImgBgOver : documentOverColor(_colorIndex), _a_iconOver.value(over ? 1. : 0.)));
 					}
 					p.setOpacity(radialOpacity * p.opacity());
 
@@ -1314,7 +1317,7 @@ Link::Link(
 	int32 from = 0, till = text.size(), lnk = entities.size();
 	for (const auto &entity : entities) {
 		auto type = entity.type();
-		if (type != EntityInTextUrl && type != EntityInTextCustomUrl && type != EntityInTextEmail) {
+		if (type != EntityType::Url && type != EntityType::CustomUrl && type != EntityType::Email) {
 			continue;
 		}
 		const auto customUrl = entity.data();
@@ -1329,7 +1332,7 @@ Link::Link(
 		--lnk;
 		auto &entity = entities.at(lnk);
 		auto type = entity.type();
-		if (type != EntityInTextUrl && type != EntityInTextCustomUrl && type != EntityInTextEmail) {
+		if (type != EntityType::Url && type != EntityType::CustomUrl && type != EntityType::Email) {
 			++lnk;
 			break;
 		}
@@ -1425,7 +1428,7 @@ Link::Link(
 			domain = parts.at(2);
 		}
 
-		parts = domain.split('@').back().split('.');
+		parts = domain.split('@').back().split('.', QString::SkipEmptyParts);
 		if (parts.size() > 1) {
 			_letter = parts.at(parts.size() - 2).at(0).toUpper();
 			if (_title.isEmpty()) {
@@ -1453,8 +1456,8 @@ void Link::initDimensions() {
 int32 Link::resizeGetHeight(int32 width) {
 	_width = qMin(width, _maxw);
 	int32 w = _width - st::linksPhotoSize - st::linksPhotoPadding;
-	for (int32 i = 0, l = _links.size(); i < l; ++i) {
-		_links.at(i).lnk->setFullDisplayed(w >= _links.at(i).width);
+	for (const auto &link : _links) {
+		link.lnk->setFullDisplayed(w >= link.width);
 	}
 
 	_height = 0;
@@ -1547,10 +1550,10 @@ void Link::paint(Painter &p, const QRect &clip, TextSelection selection, const P
 	}
 
 	p.setPen(st::windowActiveTextFg);
-	for (int32 i = 0, l = _links.size(); i < l; ++i) {
-		if (clip.intersects(rtlrect(left, top, qMin(w, _links.at(i).width), st::normalFont->height, _width))) {
-			p.setFont(ClickHandler::showAsActive(_links.at(i).lnk) ? st::normalFont->underline() : st::normalFont);
-			p.drawTextLeft(left, top, _width, (w < _links.at(i).width) ? st::normalFont->elided(_links.at(i).text, w) : _links.at(i).text);
+	for (const auto &link : _links) {
+		if (clip.intersects(rtlrect(left, top, qMin(w, link.width), st::normalFont->height, _width))) {
+			p.setFont(ClickHandler::showAsActive(link.lnk) ? st::normalFont->underline() : st::normalFont);
+			p.drawTextLeft(left, top, _width, (w < link.width) ? st::normalFont->elided(link.text, w) : link.text);
 		}
 		top += st::normalFont->height;
 	}
@@ -1587,9 +1590,9 @@ TextState Link::getState(
 	if (!_text.isEmpty()) {
 		top += qMin(st::normalFont->height * 3, _text.countHeight(w));
 	}
-	for (int32 i = 0, l = _links.size(); i < l; ++i) {
-		if (rtlrect(left, top, qMin(w, _links.at(i).width), st::normalFont->height, _width).contains(point)) {
-			return { parent(), ClickHandlerPtr(_links[i].lnk) };
+	for (const auto &link : _links) {
+		if (rtlrect(left, top, qMin(w, link.width), st::normalFont->height, _width).contains(point)) {
+			return { parent(), ClickHandlerPtr(link.lnk) };
 		}
 		top += st::normalFont->height;
 	}

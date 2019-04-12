@@ -94,6 +94,8 @@
 <(src_loc)/calls/calls_top_bar.h
 <(src_loc)/chat_helpers/bot_keyboard.cpp
 <(src_loc)/chat_helpers/bot_keyboard.h
+<(src_loc)/chat_helpers/emoji_keywords.cpp
+<(src_loc)/chat_helpers/emoji_keywords.h
 <(src_loc)/chat_helpers/emoji_list_widget.cpp
 <(src_loc)/chat_helpers/emoji_list_widget.h
 <(src_loc)/chat_helpers/emoji_sets_manager.cpp
@@ -144,6 +146,7 @@
 <(src_loc)/core/media_active_cache.h
 <(src_loc)/core/mime_type.cpp
 <(src_loc)/core/mime_type.h
+<(src_loc)/core/qt_signal_producer.h
 <(src_loc)/core/sandbox.cpp
 <(src_loc)/core/sandbox.h
 <(src_loc)/core/shortcuts.cpp
@@ -448,8 +451,6 @@
 <(src_loc)/media/player/media_player_instance.h
 <(src_loc)/media/player/media_player_panel.cpp
 <(src_loc)/media/player/media_player_panel.h
-<(src_loc)/media/player/media_player_round_controller.cpp
-<(src_loc)/media/player/media_player_round_controller.h
 <(src_loc)/media/player/media_player_volume_controller.cpp
 <(src_loc)/media/player/media_player_volume_controller.h
 <(src_loc)/media/player/media_player_widget.cpp

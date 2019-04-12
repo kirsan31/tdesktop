@@ -79,8 +79,7 @@ private:
 		int top,
 		int width,
 		int outerWidth,
-		TextSelection selection,
-		crl::time ms) const;
+		TextSelection selection) const;
 	void paintRadio(
 		Painter &p,
 		const Answer &answer,
@@ -109,7 +108,7 @@ private:
 	void saveStateInAnimation() const;
 	void startAnswersAnimation() const;
 	void resetAnswersAnimation() const;
-	void step_radial(crl::time ms, bool timer);
+	void radialAnimationCallback() const;
 
 	void toggleRipple(Answer &answer, bool pressed);
 

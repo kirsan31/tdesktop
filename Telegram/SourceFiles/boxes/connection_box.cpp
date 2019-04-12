@@ -20,6 +20,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/wrap/slide_wrap.h"
 #include "ui/wrap/vertical_layout.h"
 #include "ui/toast/toast.h"
+#include "ui/effects/animations.h"
 #include "ui/effects/radial_animation.h"
 #include "ui/text_options.h"
 #include "styles/style_boxes.h"
@@ -52,8 +53,8 @@ protected:
 private:
 	void setupControls(View &&view);
 	int countAvailableWidth() const;
-	void step_radial(crl::time ms, bool timer);
-	void paintCheck(Painter &p, crl::time ms);
+	void radialAnimationCallback();
+	void paintCheck(Painter &p);
 	void showMenu();
 
 	View _view;
@@ -67,8 +68,8 @@ private:
 	base::unique_qptr<Ui::DropdownMenu> _menu;
 
 	bool _set = false;
-	Animation _toggled;
-	Animation _setAnimation;
+	Ui::Animations::Simple _toggled;
+	Ui::Animations::Simple _setAnimation;
 	std::unique_ptr<Ui::InfiniteRadialAnimation> _progress;
 	std::unique_ptr<Ui::InfiniteRadialAnimation> _checking;
 
@@ -180,8 +181,8 @@ rpl::producer<> ProxyRow::shareClicks() const {
 
 void ProxyRow::setupControls(View &&view) {
 	updateFields(std::move(view));
-	_toggled.finish();
-	_setAnimation.finish();
+	_toggled.stop();
+	_setAnimation.stop();
 
 	_menuToggle->addClickHandler([=] { showMenu(); });
 }
@@ -209,7 +210,7 @@ void ProxyRow::updateFields(View &&view) {
 	if (state == State::Connecting) {
 		if (!_progress) {
 			_progress = std::make_unique<Ui::InfiniteRadialAnimation>(
-				animation(this, &ProxyRow::step_radial),
+				[=] { radialAnimationCallback(); },
 				st::proxyCheckingAnimation);
 		}
 		_progress->start();
@@ -219,7 +220,7 @@ void ProxyRow::updateFields(View &&view) {
 	if (state == State::Checking) {
 		if (!_checking) {
 			_checking = std::make_unique<Ui::InfiniteRadialAnimation>(
-				animation(this, &ProxyRow::step_radial),
+				[=] { radialAnimationCallback(); },
 				st::proxyCheckingAnimation);
 			_checking->start();
 		}
@@ -241,8 +242,8 @@ void ProxyRow::updateFields(View &&view) {
 	update();
 }
 
-void ProxyRow::step_radial(crl::time ms, bool timer) {
-	if (timer && !anim::Disabled()) {
+void ProxyRow::radialAnimationCallback() {
+	if (!anim::Disabled()) {
 		update();
 	}
 }
@@ -268,9 +269,8 @@ int ProxyRow::resizeGetHeight(int newWidth) {
 void ProxyRow::paintEvent(QPaintEvent *e) {
 	Painter p(this);
 
-	const auto ms = crl::now();
 	if (!_view.deleted) {
-		paintRipple(p, 0, 0, ms);
+		paintRipple(p, 0, 0);
 	}
 
 	const auto left = _skipLeft;
@@ -281,7 +281,7 @@ void ProxyRow::paintEvent(QPaintEvent *e) {
 		p.setOpacity(st::stickersRowDisabledOpacity);
 	}
 
-	paintCheck(p, ms);
+	paintCheck(p);
 
 	p.setPen(st::proxyRowTitleFg);
 	p.setFont(st::semiboldFont);
@@ -323,35 +323,29 @@ void ProxyRow::paintEvent(QPaintEvent *e) {
 
 	auto statusLeft = left;
 	if (_checking) {
-		_checking->step(ms);
-		if (_checking) {
-			_checking->draw(
-				p,
-				{
-					st::proxyCheckingPosition.x() + statusLeft,
-					st::proxyCheckingPosition.y() + top
-				},
-				width());
-			statusLeft += st::proxyCheckingPosition.x()
-				+ st::proxyCheckingAnimation.size.width()
-				+ st::proxyCheckingSkip;
-		}
+		_checking->draw(
+			p,
+			{
+				st::proxyCheckingPosition.x() + statusLeft,
+				st::proxyCheckingPosition.y() + top
+			},
+			width());
+		statusLeft += st::proxyCheckingPosition.x()
+			+ st::proxyCheckingAnimation.size.width()
+			+ st::proxyCheckingSkip;
 	}
 	p.drawTextLeft(statusLeft, top, width(), status);
 	top += st::normalFont->height + st::proxyRowPadding.bottom();
 }
 
-void ProxyRow::paintCheck(Painter &p, crl::time ms) {
-	if (_progress) {
-		_progress->step(ms);
-	}
+void ProxyRow::paintCheck(Painter &p) {
 	const auto loading = _progress
 		? _progress->computeState()
 		: Ui::RadialState{ 0., 0, FullArcLength };
-	const auto toggled = _toggled.current(ms, _view.selected ? 1. : 0.)
+	const auto toggled = _toggled.value(_view.selected ? 1. : 0.)
 		* (1. - loading.shown);
 	const auto _st = &st::defaultRadio;
-	const auto set = _setAnimation.current(ms, _set ? 1. : 0.);
+	const auto set = _setAnimation.value(_set ? 1. : 0.);
 
 	PainterHighQualityEnabler hq(p);
 

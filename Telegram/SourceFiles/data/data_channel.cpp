@@ -64,12 +64,11 @@ void ChannelData::setPhoto(const MTPChatPhoto &photo) {
 }
 
 void ChannelData::setPhoto(PhotoId photoId, const MTPChatPhoto &photo) {
-	if (photo.type() == mtpc_chatPhoto) {
-		const auto &data = photo.c_chatPhoto();
-		updateUserpic(photoId, data.vphoto_small);
-	} else {
+	photo.match([&](const MTPDchatPhoto & data) {
+		updateUserpic(photoId, data.vdc_id.v, data.vphoto_small);
+	}, [&](const MTPDchatPhotoEmpty &) {
 		clearUserpic();
-	}
+	});
 }
 
 void ChannelData::setName(const QString &newName, const QString &newUsername) {
@@ -266,6 +265,17 @@ void ChannelData::applyEditBanned(not_null<UserData*> user, const MTPChatBannedR
 		}
 	}
 	Notify::peerUpdatedDelayed(this, flags);
+}
+
+void ChannelData::markForbidden() {
+	owner().processChat(MTP_channelForbidden(
+		MTP_flags(isMegagroup()
+			? MTPDchannelForbidden::Flag::f_megagroup
+			: MTPDchannelForbidden::Flag::f_broadcast),
+		MTP_int(bareId()),
+		MTP_long(access),
+		MTP_string(name),
+		MTPint()));
 }
 
 bool ChannelData::isGroupAdmin(not_null<UserData*> user) const {

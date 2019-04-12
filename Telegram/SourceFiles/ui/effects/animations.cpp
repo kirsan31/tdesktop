@@ -14,7 +14,7 @@ namespace Ui {
 namespace Animations {
 namespace {
 
-constexpr auto kAnimationTimeout = crl::time(1000) / 60;
+constexpr auto kAnimationTick = crl::time(1000) / 120;
 constexpr auto kIgnoreUpdatesTimeout = crl::time(4);
 
 } // namespace
@@ -53,18 +53,19 @@ void Basic::markStopped() {
 
 Manager::Manager() {
 	Core::Sandbox::Instance().widgetUpdateRequests(
-	) | rpl::start_with_next([=] {
+	) | rpl::filter([=] {
+		return (_lastUpdateTime + kIgnoreUpdatesTimeout < crl::now());
+	}) | rpl::start_with_next([=] {
 		update();
 	}, _lifetime);
 }
 
 void Manager::start(not_null<Basic*> animation) {
+	_forceImmediateUpdate = true;
 	if (_updating) {
 		_starting.emplace_back(animation.get());
 	} else {
-		if (empty(_active)) {
-			updateQueued();
-		}
+		schedule();
 		_active.emplace_back(animation.get());
 	}
 }
@@ -93,8 +94,8 @@ void Manager::update() {
 		return;
 	}
 	const auto now = crl::now();
-	if (_lastUpdateTime + kIgnoreUpdatesTimeout >= now) {
-		return;
+	if (_forceImmediateUpdate) {
+		_forceImmediateUpdate = false;
 	}
 	schedule();
 
@@ -117,31 +118,47 @@ void Manager::update() {
 }
 
 void Manager::updateQueued() {
-	InvokeQueued(this, [=] { update(); });
+	Expects(_timerId == 0);
+
+	_timerId = -1;
+	InvokeQueued(delayedCallGuard(), [=] {
+		Expects(_timerId < 0);
+
+		_timerId = 0;
+		update();
+	});
 }
 
 void Manager::schedule() {
-	if (_scheduled) {
+	if (_scheduled || _timerId < 0) {
 		return;
 	}
 	stopTimer();
 
 	_scheduled = true;
-	Ui::PostponeCall([=] {
+	Ui::PostponeCall(delayedCallGuard(), [=] {
 		_scheduled = false;
-
-		const auto next = _lastUpdateTime + kAnimationTimeout;
-		const auto now = crl::now();
-		if (now < next) {
-			_timerId = startTimer(next - now, Qt::PreciseTimer);
-		} else {
+		if (_forceImmediateUpdate) {
+			_forceImmediateUpdate = false;
 			updateQueued();
+		} else {
+			const auto next = _lastUpdateTime + kAnimationTick;
+			const auto now = crl::now();
+			if (now < next) {
+				_timerId = startTimer(next - now, Qt::PreciseTimer);
+			} else {
+				updateQueued();
+			}
 		}
 	});
 }
 
+not_null<const QObject*> Manager::delayedCallGuard() const {
+	return static_cast<const QObject*>(this);
+}
+
 void Manager::stopTimer() {
-	if (_timerId) {
+	if (_timerId > 0) {
 		killTimer(base::take(_timerId));
 	}
 }

@@ -30,7 +30,7 @@ public:
 	uint16 fullSelectionLength() const override;
 	bool hasTextForCopy() const override;
 
-	TextWithEntities selectedText(TextSelection selection) const override;
+	TextForMimeData selectedText(TextSelection selection) const override;
 
 	bool uploading() const override;
 
@@ -48,7 +48,7 @@ public:
 	QMargins bubbleMargins() const override;
 	bool hideForwardedFrom() const override;
 
-	void step_voiceProgress(float64 ms, bool timer);
+	bool voiceProgressAnimationCallback(crl::time now);
 
 	void clickHandlerPressedChanged(const ClickHandlerPtr &p, bool pressed) override;
 

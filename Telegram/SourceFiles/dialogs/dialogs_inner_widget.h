@@ -10,6 +10,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "dialogs/dialogs_widget.h"
 #include "dialogs/dialogs_key.h"
 #include "data/data_messages.h"
+#include "ui/effects/animations.h"
 #include "base/flags.h"
 
 namespace Dialogs {
@@ -235,13 +236,11 @@ private:
 		int fullWidth,
 		bool active,
 		bool selected,
-		bool onlyBackground,
-		crl::time ms) const;
+		bool onlyBackground) const;
 	void paintSearchInChat(
 		Painter &p,
 		int fullWidth,
-		bool onlyBackground,
-		crl::time ms) const;
+		bool onlyBackground) const;
 	void paintSearchInPeer(
 		Painter &p,
 		not_null<PeerData*> peer,
@@ -283,7 +282,7 @@ private:
 	void stopReorderPinned();
 	int countPinnedIndex(Dialogs::Row *ofRow);
 	void savePinnedOrder();
-	void step_pinnedShifting(crl::time ms, bool timer);
+	bool pinnedShiftAnimationCallback(crl::time now);
 	void handleChatMigration(not_null<ChatData*> chat);
 
 	not_null<Window::Controller*> _controller;
@@ -313,7 +312,7 @@ private:
 		crl::time animStartTime = 0;
 	};
 	std::vector<PinnedRow> _pinnedRows;
-	BasicAnimation _a_pinnedShifting;
+	Ui::Animations::Basic _pinnedShiftAnimation;
 	std::deque<Dialogs::Key> _pinnedOrder;
 
 	// Remember the last currently dragged row top shift for updating area.

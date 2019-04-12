@@ -451,7 +451,7 @@ void InnerWidget::updateEmptyText() {
 	auto hasSearch = !_searchQuery.isEmpty();
 	auto hasFilter = (_filter.flags != 0) || !_filter.allUsers;
 	auto text = TextWithEntities { lang((hasSearch || hasFilter) ? lng_admin_log_no_results_title : lng_admin_log_no_events_title) };
-	text.entities.append(EntityInText(EntityInTextBold, 0, text.text.size()));
+	text.entities.append(EntityInText(EntityType::Bold, 0, text.text.size()));
 	auto description = hasSearch
 		? lng_admin_log_no_results_search_text(lt_query, TextUtilities::Clean(_searchQuery))
 		: lang(hasFilter ? lng_admin_log_no_results_text : lng_admin_log_no_events_text);
@@ -471,7 +471,7 @@ QString InnerWidget::tooltipText() const {
 		&& _mouseAction == MouseAction::None) {
 		if (const auto view = App::hoveredItem()) {
 			if (const auto forwarded = view->data()->Get<HistoryMessageForwarded>()) {
-				return forwarded->text.originalText(AllTextSelection, ExpandLinksNone);
+				return forwarded->text.toString();
 			}
 		}
 	} else if (const auto lnk = ClickHandler::getActive()) {
@@ -801,7 +801,7 @@ void InnerWidget::paintEvent(QPaintEvent *e) {
 			});
 
 			auto dateHeight = st::msgServicePadding.bottom() + st::msgServiceFont->height + st::msgServicePadding.top();
-			auto scrollDateOpacity = _scrollDateOpacity.current(ms, _scrollDateShown ? 1. : 0.);
+			auto scrollDateOpacity = _scrollDateOpacity.value(_scrollDateShown ? 1. : 0.);
 			enumerateDates([&](not_null<Element*> view, int itemtop, int dateTop) {
 				// stop the enumeration if the date is above the painted rect
 				if (dateTop + dateHeight <= clip.top()) {
@@ -890,10 +890,10 @@ void InnerWidget::paintEmpty(Painter &p) {
 	_emptyText.draw(p, rect.x() + st::historyAdminLogEmptyPadding.left(), rect.y() + st::historyAdminLogEmptyPadding.top(), innerWidth, style::al_top);
 }
 
-TextWithEntities InnerWidget::getSelectedText() const {
+TextForMimeData InnerWidget::getSelectedText() const {
 	return _selectedItem
 		? _selectedItem->selectedText(_selectedText)
-		: TextWithEntities();
+		: TextForMimeData();
 }
 
 void InnerWidget::keyPressEvent(QKeyEvent *e) {
@@ -903,7 +903,7 @@ void InnerWidget::keyPressEvent(QKeyEvent *e) {
 		copySelectedText();
 #ifdef Q_OS_MAC
 	} else if (e->key() == Qt::Key_E && e->modifiers().testFlag(Qt::ControlModifier)) {
-		SetClipboardWithEntities(getSelectedText(), QClipboard::FindBuffer);
+		SetClipboardText(getSelectedText(), QClipboard::FindBuffer);
 #endif // Q_OS_MAC
 	} else {
 		e->ignore();
@@ -1105,7 +1105,7 @@ void InnerWidget::copyContextImage(PhotoData *photo) {
 }
 
 void InnerWidget::copySelectedText() {
-	SetClipboardWithEntities(getSelectedText());
+	SetClipboardText(getSelectedText());
 }
 
 void InnerWidget::showStickerPackInfo(not_null<DocumentData*> document) {
@@ -1136,7 +1136,7 @@ void InnerWidget::openContextGif(FullMsgId itemId) {
 
 void InnerWidget::copyContextText(FullMsgId itemId) {
 	if (const auto item = App::histItemById(itemId)) {
-		SetClipboardWithEntities(HistoryItemText(item));
+		SetClipboardText(HistoryItemText(item));
 	}
 }
 
@@ -1394,7 +1394,7 @@ void InnerWidget::mouseActionFinish(const QPoint &screenPos, Qt::MouseButton but
 
 #if defined Q_OS_LINUX32 || defined Q_OS_LINUX64
 	if (_selectedItem && _selectedText.from != _selectedText.to) {
-		SetClipboardWithEntities(
+		SetClipboardText(
 			_selectedItem->selectedText(_selectedText),
 			QClipboard::Selection);
 	}

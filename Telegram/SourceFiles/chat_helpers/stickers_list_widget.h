@@ -201,7 +201,7 @@ private:
 
 	void paintFeaturedStickers(Painter &p, QRect clip);
 	void paintStickers(Painter &p, QRect clip);
-	void paintMegagroupEmptySet(Painter &p, int y, bool buttonSelected, crl::time ms);
+	void paintMegagroupEmptySet(Painter &p, int y, bool buttonSelected);
 	void paintSticker(Painter &p, Set &set, int y, int index, bool selected, bool deleteSelected);
 	void paintEmptySearchResults(Painter &p);
 
@@ -246,6 +246,7 @@ private:
 	void showPreview();
 
 	ChannelData *_megagroupSet = nullptr;
+	uint64 _megagroupSetIdRequested = 0;
 	std::vector<Set> _mySets;
 	std::vector<Set> _featuredSets;
 	std::vector<Set> _searchSets;

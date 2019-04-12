@@ -313,6 +313,8 @@ void Uploader::sendNext() {
 			if (requestsSent.empty() && docRequestsSent.empty()) {
 				const auto silent = uploadingData.file
 					&& uploadingData.file->to.silent;
+				const auto edit = uploadingData.file &&
+					uploadingData.file->edit;
 				if (uploadingData.type() == SendMediaType::Photo) {
 					auto photoFilename = uploadingData.filename();
 					if (!photoFilename.endsWith(qstr(".jpg"), Qt::CaseInsensitive)) {
@@ -329,7 +331,7 @@ void Uploader::sendNext() {
 						MTP_int(uploadingData.partsCount),
 						MTP_string(photoFilename),
 						MTP_bytes(md5));
-					_photoReady.fire({ uploadingId, silent, file });
+					_photoReady.fire({ uploadingId, silent, file, edit });
 				} else if (uploadingData.type() == SendMediaType::File
 					|| uploadingData.type() == SendMediaType::WallPaper
 					|| uploadingData.type() == SendMediaType::Audio) {
@@ -362,9 +364,14 @@ void Uploader::sendNext() {
 							uploadingId,
 							silent,
 							file,
-							thumb });
+							thumb,
+							edit });
 					} else {
-						_documentReady.fire({ uploadingId, silent, file });
+						_documentReady.fire({
+							uploadingId,
+							silent,
+							file,
+							edit });
 					}
 				} else if (uploadingData.type() == SendMediaType::Secure) {
 					_secureReady.fire({

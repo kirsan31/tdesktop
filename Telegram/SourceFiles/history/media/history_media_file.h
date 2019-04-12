@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #pragma once
 
 #include "history/media/history_media.h"
+#include "ui/effects/animations.h"
 #include "ui/effects/radial_animation.h"
 
 class HistoryFileMedia : public HistoryMedia {
@@ -62,21 +63,24 @@ protected:
 	// duration = -1 - no duration, duration = -2 - "GIF" duration
 	void setStatusSize(int newSize, int fullSize, int duration, qint64 realDuration) const;
 
-	void step_radial(crl::time ms, bool timer);
+	void radialAnimationCallback(crl::time now) const;
 	void thumbAnimationCallback();
 
 	void ensureAnimation() const;
 	void checkAnimationFinished() const;
 
-	bool isRadialAnimation(crl::time ms) const {
-		if (!_animation || !_animation->radial.animating()) return false;
-
-		_animation->radial.step(ms);
-		return _animation && _animation->radial.animating();
-	}
-	bool isThumbAnimation(crl::time ms) const {
+	bool isRadialAnimation() const {
 		if (_animation) {
-			if (_animation->a_thumbOver.animating(ms)) {
+			if (_animation->radial.animating()) {
+				return true;
+			}
+			checkAnimationFinished();
+		}
+		return false;
+	}
+	bool isThumbAnimation() const {
+		if (_animation) {
+			if (_animation->a_thumbOver.animating()) {
 				return true;
 			}
 			checkAnimationFinished();
@@ -89,10 +93,12 @@ protected:
 	virtual bool dataLoaded() const = 0;
 
 	struct AnimationData {
-		AnimationData(AnimationCallbacks &&radialCallbacks)
-			: radial(std::move(radialCallbacks)) {
+		template <typename Callback>
+		AnimationData(Callback &&radialCallback)
+		: radial(std::forward<Callback>(radialCallback)) {
 		}
-		Animation a_thumbOver;
+
+		Ui::Animations::Simple a_thumbOver;
 		Ui::RadialAnimation radial;
 	};
 	mutable std::unique_ptr<AnimationData> _animation;

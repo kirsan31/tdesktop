@@ -9,6 +9,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "layout.h"
 #include "core/click_handler_types.h"
+#include "ui/effects/animations.h"
 #include "ui/effects/radial_animation.h"
 #include "styles/style_overview.h"
 
@@ -129,16 +130,19 @@ protected:
 		ClickHandlerPtr &&cancell);
 	void setDocumentLinks(not_null<DocumentData*> document);
 
-	void step_radial(crl::time ms, bool timer);
+	void radialAnimationCallback(crl::time now) const;
 
 	void ensureRadial();
-	void checkRadialFinished();
+	void checkRadialFinished() const;
 
-	bool isRadialAnimation(crl::time ms) const {
-		if (!_radial || !_radial->animating()) return false;
-
-		_radial->step(ms);
-		return _radial && _radial->animating();
+	bool isRadialAnimation() const {
+		if (_radial) {
+			if (_radial->animating()) {
+				return true;
+			}
+			checkRadialFinished();
+		}
+		return false;
 	}
 
 	virtual float64 dataProgress() const = 0;
@@ -148,8 +152,8 @@ protected:
 		return false;
 	}
 
-	std::unique_ptr<Ui::RadialAnimation> _radial;
-	Animation _a_iconOver;
+	mutable std::unique_ptr<Ui::RadialAnimation> _radial;
+	Ui::Animations::Simple _a_iconOver;
 
 };
 
@@ -243,6 +247,7 @@ private:
 
 	QString _duration;
 	QPixmap _pix;
+	bool _pixBlurred = true;
 
 	void updateStatusText();
 

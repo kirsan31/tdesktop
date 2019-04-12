@@ -421,7 +421,7 @@ void Message::draw(
 		g.setHeight(g.height() - keyboardHeight);
 		auto keyboardPosition = QPoint(g.left(), g.top() + g.height() + st::msgBotKbButton.margin);
 		p.translate(keyboardPosition);
-		keyboard->paint(p, g.width(), clip.translated(-keyboardPosition), ms);
+		keyboard->paint(p, g.width(), clip.translated(-keyboardPosition));
 		p.translate(-keyboardPosition);
 	}
 
@@ -1054,19 +1054,17 @@ void Message::updatePressed(QPoint point) {
 	}
 }
 
-TextWithEntities Message::selectedText(TextSelection selection) const {
+TextForMimeData Message::selectedText(TextSelection selection) const {
 	const auto item = message();
 	const auto media = this->media();
 
-	TextWithEntities logEntryOriginalResult;
-	auto textResult = item->_text.originalTextWithEntities(
-		selection,
-		ExpandLinksAll);
+	auto logEntryOriginalResult = TextForMimeData();
+	auto textResult = item->_text.toTextForMimeData(selection);
 	auto skipped = skipTextSelection(selection);
 	auto mediaDisplayed = (media && media->isDisplayed());
 	auto mediaResult = (mediaDisplayed || isHiddenByGroup())
 		? media->selectedText(skipped)
-		: TextWithEntities();
+		: TextForMimeData();
 	if (auto entry = logEntryOriginal()) {
 		const auto originalSelection = mediaDisplayed
 			? media->skipSelection(skipped)
@@ -1074,17 +1072,15 @@ TextWithEntities Message::selectedText(TextSelection selection) const {
 		logEntryOriginalResult = entry->selectedText(originalSelection);
 	}
 	auto result = textResult;
-	if (result.text.isEmpty()) {
+	if (result.empty()) {
 		result = std::move(mediaResult);
-	} else if (!mediaResult.text.isEmpty()) {
-		result.text += qstr("\n\n");
-		TextUtilities::Append(result, std::move(mediaResult));
+	} else if (!mediaResult.empty()) {
+		result.append(qstr("\n\n")).append(std::move(mediaResult));
 	}
-	if (result.text.isEmpty()) {
+	if (result.empty()) {
 		result = std::move(logEntryOriginalResult);
-	} else if (!logEntryOriginalResult.text.isEmpty()) {
-		result.text += qstr("\n\n");
-		TextUtilities::Append(result, std::move(logEntryOriginalResult));
+	} else if (!logEntryOriginalResult.empty()) {
+		result.append(qstr("\n\n")).append(std::move(logEntryOriginalResult));
 	}
 	return result;
 }
@@ -1785,7 +1781,7 @@ void Message::refreshEditedBadge() {
 	if (const auto msgsigned = item->Get<HistoryMessageSigned>()) {
 		const auto text = (!edited || !editDate)
 			? dateText
-			: edited->text.originalText();
+			: edited->text.toString();
 		msgsigned->refresh(text);
 	}
 	initTime();

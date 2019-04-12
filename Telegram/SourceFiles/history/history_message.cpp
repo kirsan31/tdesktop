@@ -16,6 +16,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/history_location_manager.h"
 #include "history/history_service.h"
 #include "history/view/history_view_service_message.h"
+#include "history/view/history_view_context_menu.h" // For CopyPostLink().
 #include "auth_session.h"
 #include "boxes/share_box.h"
 #include "boxes/confirm_box.h"
@@ -104,9 +105,7 @@ void FastShareMessage(not_null<HistoryItem*> item) {
 	auto copyCallback = [data]() {
 		if (auto item = App::histItemById(data->msgIds[0])) {
 			if (item->hasDirectLink()) {
-				QApplication::clipboard()->setText(item->directLink());
-
-				Ui::Toast::Show(lang(lng_channel_public_link_copied));
+				HistoryView::CopyPostLink(item->fullId());
 			} else if (const auto bot = item->getMessageBot()) {
 				if (const auto media = item->media()) {
 					if (const auto game = media->game()) {
@@ -619,7 +618,8 @@ bool HistoryMessage::allowsEdit(TimeId now) const {
 	return canStopPoll()
 		&& !isTooOldForEdit(now)
 		&& (!_media || _media->allowsEdit())
-		&& !isUnsupportedMessage();
+		&& !isUnsupportedMessage()
+		&& !isEditingMedia();
 }
 
 bool HistoryMessage::uploading() const {
@@ -752,6 +752,19 @@ void HistoryMessage::refreshSentMedia(const MTPMessageMedia *media) {
 	refreshMedia(media);
 	if (wasGrouped) {
 		history()->owner().groups().refreshMessage(this);
+	} else {
+		history()->owner().requestItemViewRefresh(this);
+	}
+}
+
+void HistoryMessage::returnSavedMedia() {
+	if (!_savedMedia) {
+		return;
+	}
+	const auto wasGrouped = history()->owner().groups().isGrouped(this);
+	_media = std::move(_savedMedia);
+	if (wasGrouped) {
+		history()->owner().groups().refreshMessage(this, true);
 	} else {
 		history()->owner().requestItemViewRefresh(this);
 	}
@@ -913,7 +926,9 @@ void HistoryMessage::applyEdition(const MTPDmessage &message) {
 		textWithEntities.entities = TextUtilities::EntitiesFromMTP(message.ventities.v);
 	}
 	setReplyMarkup(message.has_reply_markup() ? (&message.vreply_markup) : nullptr);
-	refreshMedia(message.has_media() ? (&message.vmedia) : nullptr);
+	if (!isLocalUpdateMedia()) {
+		refreshMedia(message.has_media() ? (&message.vmedia) : nullptr);
+	}
 	setViewsCount(message.has_views() ? message.vviews.v : -1);
 	setText(textWithEntities);
 
@@ -922,17 +937,13 @@ void HistoryMessage::applyEdition(const MTPDmessage &message) {
 
 void HistoryMessage::applyEdition(const MTPDmessageService &message) {
 	if (message.vaction.type() == mtpc_messageActionHistoryClear) {
-		applyEditionToEmpty();
+		setReplyMarkup(nullptr);
+		refreshMedia(nullptr);
+		setEmptyText();
+		setViewsCount(-1);
+
+		finishEditionToEmpty();
 	}
-}
-
-void HistoryMessage::applyEditionToEmpty() {
-	setReplyMarkup(nullptr);
-	refreshMedia(nullptr);
-	setEmptyText();
-	setViewsCount(-1);
-
-	finishEditionToEmpty();
 }
 
 void HistoryMessage::updateSentMedia(const MTPMessageMedia *media) {
@@ -998,9 +1009,9 @@ Storage::SharedMediaTypesMask HistoryMessage::sharedMediaTypes() const {
 void HistoryMessage::setText(const TextWithEntities &textWithEntities) {
 	for_const (auto &entity, textWithEntities.entities) {
 		auto type = entity.type();
-		if (type == EntityInTextUrl
-			|| type == EntityInTextCustomUrl
-			|| type == EntityInTextEmail) {
+		if (type == EntityType::Url
+			|| type == EntityType::CustomUrl
+			|| type == EntityType::Email) {
 			_flags |= MTPDmessage_ClientFlag::f_has_text_links;
 			break;
 		}
@@ -1082,14 +1093,14 @@ TextWithEntities HistoryMessage::originalText() const {
 	if (emptyText()) {
 		return { QString(), EntitiesInText() };
 	}
-	return _text.originalTextWithEntities();
+	return _text.toTextWithEntities();
 }
 
-TextWithEntities HistoryMessage::clipboardText() const {
+TextForMimeData HistoryMessage::clipboardText() const {
 	if (emptyText()) {
-		return { QString(), EntitiesInText() };
+		return TextForMimeData();
 	}
-	return _text.originalTextWithEntities(AllTextSelection, ExpandLinksAll);
+	return _text.toTextForMimeData();
 }
 
 bool HistoryMessage::textHasLinks() const {
@@ -1148,6 +1159,7 @@ std::unique_ptr<HistoryView::Element> HistoryMessage::createView(
 
 HistoryMessage::~HistoryMessage() {
 	_media.reset();
+	_savedMedia.reset();
 	if (auto reply = Get<HistoryMessageReply>()) {
 		reply->clearData(this);
 	}

@@ -22,11 +22,11 @@ namespace {
 // After 128 MB of unpacked images we try to clear some memory.
 constexpr auto kMemoryForCache = 128 * 1024 * 1024;
 
-QMap<QString, Image*> LocalFileImages;
-QMap<QString, Image*> WebUrlImages;
-QMap<StorageKey, Image*> StorageImages;
-QMap<StorageKey, Image*> WebCachedImages;
-QMap<StorageKey, Image*> GeoPointImages;
+std::map<QString, std::unique_ptr<Image>> LocalFileImages;
+std::map<QString, std::unique_ptr<Image>> WebUrlImages;
+std::unordered_map<InMemoryKey, std::unique_ptr<Image>> StorageImages;
+std::unordered_map<InMemoryKey, std::unique_ptr<Image>> WebCachedImages;
+std::unordered_map<InMemoryKey, std::unique_ptr<Image>> GeoPointImages;
 
 int64 ComputeUsage(QSize size) {
 	return int64(size.width()) * size.height() * 4;
@@ -60,25 +60,15 @@ uint64 SinglePixKey(Options options) {
 } // namespace
 
 void ClearRemote() {
-	for (auto image : base::take(StorageImages)) {
-		delete image;
-	}
-	for (auto image : base::take(WebUrlImages)) {
-		delete image;
-	}
-	for (auto image : base::take(WebCachedImages)) {
-		delete image;
-	}
-	for (auto image : base::take(GeoPointImages)) {
-		delete image;
-	}
+	base::take(StorageImages);
+	base::take(WebUrlImages);
+	base::take(WebCachedImages);
+	base::take(GeoPointImages);
 }
 
 void ClearAll() {
 	ActiveCache().clear();
-	for (auto image : base::take(LocalFileImages)) {
-		delete image;
-	}
+	base::take(LocalFileImages);
 	ClearRemote();
 }
 
@@ -86,54 +76,61 @@ ImagePtr Create(const QString &file, QByteArray format) {
 	if (file.startsWith(qstr("http://"), Qt::CaseInsensitive)
 		|| file.startsWith(qstr("https://"), Qt::CaseInsensitive)) {
 		const auto &key = file;
-		auto i = WebUrlImages.constFind(key);
-		if (i == WebUrlImages.cend()) {
-			i = WebUrlImages.insert(
+		const auto i = WebUrlImages.find(key);
+		const auto image = (i != end(WebUrlImages))
+			? i->second.get()
+			: WebUrlImages.emplace(
 				key,
-				new Image(std::make_unique<WebUrlSource>(file)));
-		}
-		return ImagePtr(i.value());
-	} else {
-		QFileInfo f(file);
-		const auto key = qsl("//:%1//:%2//:"
-		).arg(f.size()
-		).arg(f.lastModified().toTime_t()
-		) + file;
-		auto i = LocalFileImages.constFind(key);
-		if (i == LocalFileImages.cend()) {
-			i = LocalFileImages.insert(
-				key,
-				new Image(std::make_unique<LocalFileSource>(
+				std::make_unique<Image>(std::make_unique<WebUrlSource>(file))
+			).first->second.get();
+		return ImagePtr(image);
+	}
+	QFileInfo f(file);
+	const auto key = qsl("//:%1//:%2//:"
+	).arg(f.size()
+	).arg(f.lastModified().toTime_t()
+	) + file;
+	const auto i = LocalFileImages.find(key);
+	const auto image = (i != end(LocalFileImages))
+		? i->second.get()
+		: LocalFileImages.emplace(
+			key,
+			std::make_unique<Image>(
+				std::make_unique<LocalFileSource>(
 					file,
 					QByteArray(),
-					format)));
-		}
-		return ImagePtr(i.value());
-	}
+					format))
+		).first->second.get();
+	return ImagePtr(image);
 }
 
 ImagePtr Create(const QString &url, QSize box) {
 	const auto key = qsl("//:%1//:%2//:").arg(box.width()).arg(box.height()) + url;
-	auto i = WebUrlImages.constFind(key);
-	if (i == WebUrlImages.cend()) {
-		i = WebUrlImages.insert(
+	const auto i = WebUrlImages.find(key);
+	const auto image = (i != end(WebUrlImages))
+		? i->second.get()
+		: WebUrlImages.emplace(
 			key,
-			new Image(std::make_unique<WebUrlSource>(url, box)));
-	}
-	return ImagePtr(i.value());
+			std::make_unique<Image>(std::make_unique<WebUrlSource>(url, box))
+		).first->second.get();
+	return ImagePtr(image);
 }
 
 ImagePtr Create(const QString &url, int width, int height) {
-	const auto key = url;
-	auto i = WebUrlImages.constFind(key);
-	if (i == WebUrlImages.cend()) {
-		i = WebUrlImages.insert(
+	const auto &key = url;
+	const auto i = WebUrlImages.find(key);
+	const auto found = (i != end(WebUrlImages));
+	const auto image = found
+		? i->second.get()
+		: WebUrlImages.emplace(
 			key,
-			new Image(std::make_unique<WebUrlSource>(url, width, height)));
-	} else {
-		i.value()->setInformation(0, width, height);
+			std::make_unique<Image>(
+				std::make_unique<WebUrlSource>(url, width, height))
+		).first->second.get();
+	if (found) {
+		image->setInformation(0, width, height);
 	}
-	return ImagePtr(i.value());
+	return ImagePtr(image);
 }
 
 ImagePtr Create(const QByteArray &filecontent, QByteArray format) {
@@ -165,34 +162,168 @@ ImagePtr Create(int width, int height) {
 }
 
 ImagePtr Create(const StorageImageLocation &location, int size) {
-	const auto key = storageKey(location);
-	auto i = StorageImages.constFind(key);
-	if (i == StorageImages.cend()) {
-		i = StorageImages.insert(
-			key,
-			new Image(std::make_unique<StorageSource>(location, size)));
-	} else {
-		i.value()->refreshFileReference(location.fileReference());
+	if (!location.valid()) {
+		return ImagePtr();
 	}
-	return ImagePtr(i.value());
+	const auto key = inMemoryKey(location);
+	const auto i = StorageImages.find(key);
+	const auto found = (i != end(StorageImages));
+	const auto image = found
+		? i->second.get()
+		: StorageImages.emplace(
+			key,
+			std::make_unique<Image>(
+				std::make_unique<StorageSource>(location, size))
+		).first->second.get();
+	if (found) {
+		image->refreshFileReference(location.fileReference());
+	}
+	return ImagePtr(image);
 }
 
 ImagePtr Create(
 		const StorageImageLocation &location,
 		const QByteArray &bytes) {
-	const auto key = storageKey(location);
-	auto i = StorageImages.constFind(key);
-	if (i == StorageImages.cend()) {
-		i = StorageImages.insert(
+	const auto key = inMemoryKey(location);
+	const auto i = StorageImages.find(key);
+	const auto found = (i != end(StorageImages));
+	const auto image = found
+		? i->second.get()
+		: StorageImages.emplace(
 			key,
-			new Image(std::make_unique<StorageSource>(
-				location,
-				bytes.size())));
-	} else {
-		i.value()->refreshFileReference(location.fileReference());
+			std::make_unique<Image>(
+				std::make_unique<StorageSource>(location, bytes.size()))
+		).first->second.get();
+	if (found) {
+		image->refreshFileReference(location.fileReference());
 	}
-	i.value()->setImageBytes(bytes);
-	return ImagePtr(i.value());
+	image->setImageBytes(bytes);
+	return ImagePtr(image);
+}
+
+template <typename CreateLocation>
+ImagePtr CreateFromPhotoSize(
+		CreateLocation &&createLocation,
+		const MTPPhotoSize &size) {
+	return size.match([&](const MTPDphotoSize &data) {
+		const auto &location = data.vlocation.c_fileLocationToBeDeprecated();
+		return Create(
+			StorageImageLocation(
+				createLocation(data.vtype, location),
+				data.vw.v,
+				data.vh.v),
+			data.vsize.v);
+	}, [&](const MTPDphotoCachedSize &data) {
+		const auto bytes = qba(data.vbytes);
+		const auto &location = data.vlocation.c_fileLocationToBeDeprecated();
+		return Create(
+			StorageImageLocation(
+				createLocation(data.vtype, location),
+				data.vw.v,
+				data.vh.v),
+			bytes);
+	}, [&](const MTPDphotoStrippedSize &data) {
+		const auto bytes = qba(data.vbytes);
+		if (bytes.size() < 3 || bytes[0] != '\x01') {
+			return ImagePtr();
+		}
+		const char header[] = "\xff\xd8\xff\xe0\x00\x10\x4a\x46\x49"
+"\x46\x00\x01\x01\x00\x00\x01\x00\x01\x00\x00\xff\xdb\x00\x43\x00\x28\x1c"
+"\x1e\x23\x1e\x19\x28\x23\x21\x23\x2d\x2b\x28\x30\x3c\x64\x41\x3c\x37\x37"
+"\x3c\x7b\x58\x5d\x49\x64\x91\x80\x99\x96\x8f\x80\x8c\x8a\xa0\xb4\xe6\xc3"
+"\xa0\xaa\xda\xad\x8a\x8c\xc8\xff\xcb\xda\xee\xf5\xff\xff\xff\x9b\xc1\xff"
+"\xff\xff\xfa\xff\xe6\xfd\xff\xf8\xff\xdb\x00\x43\x01\x2b\x2d\x2d\x3c\x35"
+"\x3c\x76\x41\x41\x76\xf8\xa5\x8c\xa5\xf8\xf8\xf8\xf8\xf8\xf8\xf8\xf8\xf8"
+"\xf8\xf8\xf8\xf8\xf8\xf8\xf8\xf8\xf8\xf8\xf8\xf8\xf8\xf8\xf8\xf8\xf8\xf8"
+"\xf8\xf8\xf8\xf8\xf8\xf8\xf8\xf8\xf8\xf8\xf8\xf8\xf8\xf8\xf8\xf8\xf8\xf8"
+"\xf8\xf8\xf8\xf8\xf8\xff\xc0\x00\x11\x08\x00\x00\x00\x00\x03\x01\x22\x00"
+"\x02\x11\x01\x03\x11\x01\xff\xc4\x00\x1f\x00\x00\x01\x05\x01\x01\x01\x01"
+"\x01\x01\x00\x00\x00\x00\x00\x00\x00\x00\x01\x02\x03\x04\x05\x06\x07\x08"
+"\x09\x0a\x0b\xff\xc4\x00\xb5\x10\x00\x02\x01\x03\x03\x02\x04\x03\x05\x05"
+"\x04\x04\x00\x00\x01\x7d\x01\x02\x03\x00\x04\x11\x05\x12\x21\x31\x41\x06"
+"\x13\x51\x61\x07\x22\x71\x14\x32\x81\x91\xa1\x08\x23\x42\xb1\xc1\x15\x52"
+"\xd1\xf0\x24\x33\x62\x72\x82\x09\x0a\x16\x17\x18\x19\x1a\x25\x26\x27\x28"
+"\x29\x2a\x34\x35\x36\x37\x38\x39\x3a\x43\x44\x45\x46\x47\x48\x49\x4a\x53"
+"\x54\x55\x56\x57\x58\x59\x5a\x63\x64\x65\x66\x67\x68\x69\x6a\x73\x74\x75"
+"\x76\x77\x78\x79\x7a\x83\x84\x85\x86\x87\x88\x89\x8a\x92\x93\x94\x95\x96"
+"\x97\x98\x99\x9a\xa2\xa3\xa4\xa5\xa6\xa7\xa8\xa9\xaa\xb2\xb3\xb4\xb5\xb6"
+"\xb7\xb8\xb9\xba\xc2\xc3\xc4\xc5\xc6\xc7\xc8\xc9\xca\xd2\xd3\xd4\xd5\xd6"
+"\xd7\xd8\xd9\xda\xe1\xe2\xe3\xe4\xe5\xe6\xe7\xe8\xe9\xea\xf1\xf2\xf3\xf4"
+"\xf5\xf6\xf7\xf8\xf9\xfa\xff\xc4\x00\x1f\x01\x00\x03\x01\x01\x01\x01\x01"
+"\x01\x01\x01\x01\x00\x00\x00\x00\x00\x00\x01\x02\x03\x04\x05\x06\x07\x08"
+"\x09\x0a\x0b\xff\xc4\x00\xb5\x11\x00\x02\x01\x02\x04\x04\x03\x04\x07\x05"
+"\x04\x04\x00\x01\x02\x77\x00\x01\x02\x03\x11\x04\x05\x21\x31\x06\x12\x41"
+"\x51\x07\x61\x71\x13\x22\x32\x81\x08\x14\x42\x91\xa1\xb1\xc1\x09\x23\x33"
+"\x52\xf0\x15\x62\x72\xd1\x0a\x16\x24\x34\xe1\x25\xf1\x17\x18\x19\x1a\x26"
+"\x27\x28\x29\x2a\x35\x36\x37\x38\x39\x3a\x43\x44\x45\x46\x47\x48\x49\x4a"
+"\x53\x54\x55\x56\x57\x58\x59\x5a\x63\x64\x65\x66\x67\x68\x69\x6a\x73\x74"
+"\x75\x76\x77\x78\x79\x7a\x82\x83\x84\x85\x86\x87\x88\x89\x8a\x92\x93\x94"
+"\x95\x96\x97\x98\x99\x9a\xa2\xa3\xa4\xa5\xa6\xa7\xa8\xa9\xaa\xb2\xb3\xb4"
+"\xb5\xb6\xb7\xb8\xb9\xba\xc2\xc3\xc4\xc5\xc6\xc7\xc8\xc9\xca\xd2\xd3\xd4"
+"\xd5\xd6\xd7\xd8\xd9\xda\xe2\xe3\xe4\xe5\xe6\xe7\xe8\xe9\xea\xf2\xf3\xf4"
+"\xf5\xf6\xf7\xf8\xf9\xfa\xff\xda\x00\x0c\x03\x01\x00\x02\x11\x03\x11\x00"
+"\x3f\x00";
+		const char footer[] = "\xff\xd9";
+		auto real = QByteArray(header, sizeof(header) - 1);
+		real[164] = bytes[1];
+		real[166] = bytes[2];
+		const auto ready = real
+			+ bytes.mid(3)
+			+ QByteArray::fromRawData(footer, sizeof(footer) - 1);
+		auto image = App::readImage(ready);
+		return !image.isNull()
+			? Images::Create(std::move(image), "JPG")
+			: ImagePtr();
+	}, [&](const MTPDphotoSizeEmpty &) {
+		return ImagePtr();
+	});
+}
+
+ImagePtr Create(const MTPDstickerSet &set, const MTPPhotoSize &size) {
+	const auto create = [&](
+			const MTPstring &thumbSize,
+			const MTPDfileLocationToBeDeprecated &location) {
+		return StorageFileLocation(
+			set.vthumb_dc_id.v,
+			Auth().userId(),
+			MTP_inputStickerSetThumb(
+				MTP_inputStickerSetID(set.vid, set.vaccess_hash),
+				location.vvolume_id,
+				location.vlocal_id));
+	};
+	return CreateFromPhotoSize(create, size);
+}
+
+ImagePtr Create(const MTPDphoto &photo, const MTPPhotoSize &size) {
+	const auto create = [&](
+			const MTPstring &thumbSize,
+			const MTPDfileLocationToBeDeprecated &location) {
+		return StorageFileLocation(
+			photo.vdc_id.v,
+			Auth().userId(),
+			MTP_inputPhotoFileLocation(
+				photo.vid,
+				photo.vaccess_hash,
+				photo.vfile_reference,
+				thumbSize));
+	};
+	return CreateFromPhotoSize(create, size);
+}
+
+ImagePtr Create(const MTPDdocument &document, const MTPPhotoSize &size) {
+	const auto create = [&](
+			const MTPstring &thumbSize,
+			const MTPDfileLocationToBeDeprecated &location) {
+		return StorageFileLocation(
+			document.vdc_id.v,
+			Auth().userId(),
+			MTP_inputDocumentFileLocation(
+				document.vid,
+				document.vaccess_hash,
+				document.vfile_reference,
+				thumbSize));
+	};
+	return CreateFromPhotoSize(create, size);
 }
 
 QSize getImageSize(const QVector<MTPDocumentAttribute> &attributes) {
@@ -216,7 +347,6 @@ ImagePtr Create(const MTPDwebDocument &document) {
 	auto filesize = 0; // document.vsize.v;
 	return Create(
 		WebFileLocation(
-			Global::WebFileDcId(),
 			document.vurl.v,
 			document.vaccess_hash.v),
 		size.width(),
@@ -244,7 +374,6 @@ ImagePtr Create(const MTPDwebDocument &document, QSize box) {
 	auto filesize = 0; // document.vsize.v;
 	return Create(
 		WebFileLocation(
-			Global::WebFileDcId(),
 			document.vurl.v,
 			document.vaccess_hash.v),
 		box,
@@ -284,17 +413,18 @@ ImagePtr Create(
 		const WebFileLocation &location,
 		QSize box,
 		int size) {
-	const auto key = storageKey(location);
-	auto i = WebCachedImages.constFind(key);
-	if (i == WebCachedImages.cend()) {
-		i = WebCachedImages.insert(
+	const auto key = inMemoryKey(location);
+	const auto i = WebCachedImages.find(key);
+	const auto image = (i != end(WebCachedImages))
+		? i->second.get()
+		: WebCachedImages.emplace(
 			key,
-			new Image(std::make_unique<WebCachedSource>(
+			std::make_unique<Image>(std::make_unique<WebCachedSource>(
 				location,
 				box,
-				size)));
-	}
-	return ImagePtr(i.value());
+				size))
+		).first->second.get();
+	return ImagePtr(image);
 }
 
 ImagePtr Create(
@@ -302,29 +432,32 @@ ImagePtr Create(
 		int width,
 		int height,
 		int size) {
-	const auto key = storageKey(location);
-	auto i = WebCachedImages.constFind(key);
-	if (i == WebCachedImages.cend()) {
-		i = WebCachedImages.insert(
+	const auto key = inMemoryKey(location);
+	const auto i = WebCachedImages.find(key);
+	const auto image = (i != end(WebCachedImages))
+		? i->second.get()
+		: WebCachedImages.emplace(
 			key,
-			new Image(std::make_unique<WebCachedSource>(
+			std::make_unique<Image>(std::make_unique<WebCachedSource>(
 				location,
 				width,
 				height,
-				size)));
-	}
-	return ImagePtr(i.value());
+				size))
+		).first->second.get();
+	return ImagePtr(image);
 }
 
 ImagePtr Create(const GeoPointLocation &location) {
-	const auto key = storageKey(location);
-	auto i = GeoPointImages.constFind(key);
-	if (i == GeoPointImages.cend()) {
-		i = GeoPointImages.insert(
+	const auto key = inMemoryKey(location);
+	const auto i = GeoPointImages.find(key);
+	const auto image = (i != end(GeoPointImages))
+		? i->second.get()
+		: GeoPointImages.emplace(
 			key,
-			new Image(std::make_unique<GeoPointSource>(location)));
-	}
-	return ImagePtr(i.value());
+			std::make_unique<Image>(
+				std::make_unique<GeoPointSource>(location))
+		).first->second.get();
+	return ImagePtr(image);
 }
 
 } // namespace Images

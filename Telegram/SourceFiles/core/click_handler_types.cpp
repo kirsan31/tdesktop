@@ -64,6 +64,8 @@ QString tryConvertUrlToLocal(QString url) {
 		} else if (auto bgMatch = regex_match(qsl("^bg/([a-zA-Z0-9\\.\\_\\-]+)(\\?(.+)?)?$"), query, matchOptions)) {
 			const auto params = bgMatch->captured(3);
 			return qsl("tg://bg?slug=") + bgMatch->captured(1) + (params.isEmpty() ? QString() : '&' + params);
+		} else if (auto postMatch = regex_match(qsl("^c/(\\-?\\d+)/(\\d+)(#|$)"), query, matchOptions)) {
+			return qsl("tg://privatepost?channel=%1&post=%2").arg(postMatch->captured(1)).arg(postMatch->captured(2));
 		} else if (auto usernameMatch = regex_match(qsl("^([a-zA-Z0-9\\.\\_]+)(/?\\?|/?$|/(\\d+)/?(?:\\?|$))"), query, matchOptions)) {
 			auto params = query.mid(usernameMatch->captured(0).size()).toString();
 			auto postParam = QString();
@@ -131,24 +133,11 @@ void UrlClickHandler::Open(QString url, QVariant context) {
 	}
 }
 
-QString UrlClickHandler::getExpandedLinkText(ExpandLinksMode mode, const QStringRef &textPart) const {
-	QString result;
-	if (mode != ExpandLinksNone) {
-		result = _originalUrl;
-	}
-	return result;
-}
-
-TextWithEntities UrlClickHandler::getExpandedLinkTextWithEntities(ExpandLinksMode mode, int entityOffset, const QStringRef &textPart) const {
-	TextWithEntities result;
-	auto entityType = isEmail(_originalUrl) ? EntityInTextEmail : EntityInTextUrl;
-	int entityLength = textPart.size();
-	if (mode != ExpandLinksNone) {
-		result.text = _originalUrl;
-		entityLength = _originalUrl.size();
-	}
-	result.entities.push_back({ entityType, entityOffset, entityLength });
-	return result;
+auto UrlClickHandler::getTextEntity() const -> TextEntity {
+	const auto type = isEmail(_originalUrl)
+		? EntityType::Email
+		: EntityType::Url;
+	return { type, _originalUrl };
 }
 
 void HiddenUrlClickHandler::Open(QString url, QVariant context) {
@@ -207,28 +196,8 @@ void BotGameUrlClickHandler::onClick(ClickContext context) const {
 	}
 }
 
-QString HiddenUrlClickHandler::getExpandedLinkText(ExpandLinksMode mode, const QStringRef &textPart) const {
-	QString result;
-	if (mode == ExpandLinksAll) {
-		result = textPart.toString() + qsl(" (") + url() + ')';
-	} else if (mode == ExpandLinksUrlOnly) {
-		result = url();
-	}
-	return result;
-}
-
-TextWithEntities HiddenUrlClickHandler::getExpandedLinkTextWithEntities(ExpandLinksMode mode, int entityOffset, const QStringRef &textPart) const {
-	TextWithEntities result;
-	if (mode == ExpandLinksUrlOnly) {
-		result.text = url();
-		result.entities.push_back({ EntityInTextUrl, entityOffset, result.text.size() });
-	} else {
-		result.entities.push_back({ EntityInTextCustomUrl, entityOffset, textPart.size(), url() });
-		if (mode == ExpandLinksAll) {
-			result.text = textPart.toString() + qsl(" (") + url() + ')';
-		}
-	}
-	return result;
+auto HiddenUrlClickHandler::getTextEntity() const -> TextEntity {
+	return { EntityType::CustomUrl, url() };
 }
 
 QString MentionClickHandler::copyToClipboardContextItemText() const {
@@ -242,8 +211,8 @@ void MentionClickHandler::onClick(ClickContext context) const {
 	}
 }
 
-TextWithEntities MentionClickHandler::getExpandedLinkTextWithEntities(ExpandLinksMode mode, int entityOffset, const QStringRef &textPart) const {
-	return simpleTextWithEntity({ EntityInTextMention, entityOffset, textPart.size() });
+auto MentionClickHandler::getTextEntity() const -> TextEntity {
+	return { EntityType::Mention };
 }
 
 void MentionNameClickHandler::onClick(ClickContext context) const {
@@ -255,9 +224,9 @@ void MentionNameClickHandler::onClick(ClickContext context) const {
 	}
 }
 
-TextWithEntities MentionNameClickHandler::getExpandedLinkTextWithEntities(ExpandLinksMode mode, int entityOffset, const QStringRef &textPart) const {
+auto MentionNameClickHandler::getTextEntity() const -> TextEntity {
 	auto data = QString::number(_userId) + '.' + QString::number(_accessHash);
-	return simpleTextWithEntity({ EntityInTextMentionName, entityOffset, textPart.size(), data });
+	return { EntityType::MentionName, data };
 }
 
 QString MentionNameClickHandler::tooltip() const {
@@ -281,8 +250,8 @@ void HashtagClickHandler::onClick(ClickContext context) const {
 	}
 }
 
-TextWithEntities HashtagClickHandler::getExpandedLinkTextWithEntities(ExpandLinksMode mode, int entityOffset, const QStringRef &textPart) const {
-	return simpleTextWithEntity({ EntityInTextHashtag, entityOffset, textPart.size() });
+auto HashtagClickHandler::getTextEntity() const -> TextEntity {
+	return { EntityType::Hashtag };
 }
 
 QString CashtagClickHandler::copyToClipboardContextItemText() const {
@@ -296,11 +265,8 @@ void CashtagClickHandler::onClick(ClickContext context) const {
 	}
 }
 
-TextWithEntities CashtagClickHandler::getExpandedLinkTextWithEntities(
-		ExpandLinksMode mode,
-		int entityOffset,
-		const QStringRef &textPart) const {
-	return simpleTextWithEntity({ EntityInTextCashtag, entityOffset, textPart.size() });
+auto CashtagClickHandler::getTextEntity() const -> TextEntity {
+	return { EntityType::Cashtag };
 }
 
 PeerData *BotCommandClickHandler::_peer = nullptr;
@@ -332,6 +298,6 @@ void BotCommandClickHandler::onClick(ClickContext context) const {
 	}
 }
 
-TextWithEntities BotCommandClickHandler::getExpandedLinkTextWithEntities(ExpandLinksMode mode, int entityOffset, const QStringRef &textPart) const {
-	return simpleTextWithEntity({ EntityInTextBotCommand, entityOffset, textPart.size() });
+auto BotCommandClickHandler::getTextEntity() const -> TextEntity {
+	return { EntityType::BotCommand };
 }

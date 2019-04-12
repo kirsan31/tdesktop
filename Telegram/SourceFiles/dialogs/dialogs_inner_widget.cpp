@@ -71,7 +71,9 @@ DialogsInner::DialogsInner(QWidget *parent, not_null<Window::Controller*> contro
 , _dialogs(std::make_unique<Dialogs::IndexedList>(Dialogs::SortMode::Date))
 , _contactsNoDialogs(std::make_unique<Dialogs::IndexedList>(Dialogs::SortMode::Name))
 , _contacts(std::make_unique<Dialogs::IndexedList>(Dialogs::SortMode::Name))
-, _a_pinnedShifting(animation(this, &DialogsInner::step_pinnedShifting))
+, _pinnedShiftAnimation([=](crl::time now) {
+	return pinnedShiftAnimationCallback(now);
+})
 , _addContactLnk(this, lang(lng_add_contact_button))
 , _cancelSearchInChat(this, st::dialogsCancelSearchInPeer)
 , _cancelSearchFromUser(this, st::dialogsCancelSearchInPeer) {
@@ -255,10 +257,6 @@ void DialogsInner::paintRegion(Painter &p, const QRegion &region, bool paintingO
 	auto fullWidth = getFullWidth();
 	auto ms = crl::now();
 	if (_state == State::Default) {
-		if (_a_pinnedShifting.animating()) {
-			_a_pinnedShifting.step(ms, false);
-		}
-
 		auto rows = shownDialogs();
 		auto dialogsClip = r;
 		if (_dialogsImportant) {
@@ -370,7 +368,7 @@ void DialogsInner::paintRegion(Painter &p, const QRegion &region, bool paintingO
 					auto &result = _hashtagResults[from];
 					bool selected = (from == (isPressed() ? _hashtagPressed : _hashtagSelected));
 					p.fillRect(0, 0, fullWidth, st::mentionHeight, selected ? st::mentionBgOver : st::dialogsBg);
-					result->row.paintRipple(p, 0, 0, fullWidth, ms);
+					result->row.paintRipple(p, 0, 0, fullWidth);
 					if (!paintingOther) {
 						auto &tag = result->tag;
 						if (selected) {
@@ -458,14 +456,14 @@ void DialogsInner::paintRegion(Painter &p, const QRegion &region, bool paintingO
 					const auto selected = (from == (isPressed()
 						? _peerSearchPressed
 						: _peerSearchSelected));
-					paintPeerSearchResult(p, result.get(), fullWidth, active, selected, paintingOther, ms);
+					paintPeerSearchResult(p, result.get(), fullWidth, active, selected, paintingOther);
 					p.translate(0, st::dialogsRowHeight);
 				}
 			}
 		}
 
 		if (_searchInChat) {
-			paintSearchInChat(p, fullWidth, paintingOther, ms);
+			paintSearchInChat(p, fullWidth, paintingOther);
 			p.translate(0, searchInChatSkip());
 			if (_waitingForSearch && _searchResults.empty()) {
 				p.fillRect(
@@ -551,12 +549,11 @@ void DialogsInner::paintPeerSearchResult(
 		int fullWidth,
 		bool active,
 		bool selected,
-		bool onlyBackground,
-		crl::time ms) const {
+		bool onlyBackground) const {
 	QRect fullRect(0, 0, fullWidth, st::dialogsRowHeight);
 	p.fillRect(fullRect, active ? st::dialogsBgActive : (selected ? st::dialogsBgOver : st::dialogsBg));
 	if (!active) {
-		result->row.paintRipple(p, 0, 0, fullWidth, ms);
+		result->row.paintRipple(p, 0, 0, fullWidth);
 	}
 	if (onlyBackground) return;
 
@@ -607,8 +604,7 @@ void DialogsInner::paintPeerSearchResult(
 void DialogsInner::paintSearchInChat(
 		Painter &p,
 		int fullWidth,
-		bool onlyBackground,
-		crl::time ms) const {
+		bool onlyBackground) const {
 	auto height = searchInChatSkip();
 
 	auto top = st::searchedBarHeight;
@@ -855,7 +851,7 @@ void DialogsInner::mousePressEvent(QMouseEvent *e) {
 	} else if (_pressed) {
 		auto row = _pressed;
 		row->addRipple(e->pos() - QPoint(0, dialogsOffset() + _pressed->pos() * st::dialogsRowHeight), QSize(getFullWidth(), st::dialogsRowHeight), [this, row] {
-			if (!_a_pinnedShifting.animating()) {
+			if (!_pinnedShiftAnimation.animating()) {
 				row->entry()->updateChatListEntry();
 			}
 		});
@@ -901,7 +897,7 @@ void DialogsInner::checkReorderPinnedStart(QPoint localPosition) {
 				_pinnedOrder = Auth().data().pinnedDialogsOrder();
 				_pinnedRows[_draggingIndex].yadd = anim::value(0, localPosition.y() - _dragStart.y());
 				_pinnedRows[_draggingIndex].animStartTime = crl::now();
-				_a_pinnedShifting.start();
+				_pinnedShiftAnimation.start();
 			}
 		}
 	}
@@ -959,7 +955,7 @@ void DialogsInner::finishReorderPinned() {
 	}
 
 	_draggingIndex = -1;
-	if (!_a_pinnedShifting.animating()) {
+	if (!_pinnedShiftAnimation.animating()) {
 		_pinnedRows.clear();
 		_aboveIndex = -1;
 	}
@@ -969,7 +965,7 @@ void DialogsInner::finishReorderPinned() {
 }
 
 void DialogsInner::stopReorderPinned() {
-	_a_pinnedShifting.stop();
+	_pinnedShiftAnimation.stop();
 	finishReorderPinned();
 }
 
@@ -990,7 +986,7 @@ int DialogsInner::updateReorderIndexGetCount() {
 	_draggingIndex = index;
 	_aboveIndex = _draggingIndex;
 	while (count > _pinnedRows.size()) {
-		_pinnedRows.push_back(PinnedRow());
+		_pinnedRows.emplace_back();
 	}
 	while (count < _pinnedRows.size()) {
 		_pinnedRows.pop_back();
@@ -1007,7 +1003,7 @@ bool DialogsInner::updateReorderPinned(QPoint localPosition) {
 
 	auto yaddWas = _pinnedRows[_draggingIndex].yadd.current();
 	auto shift = 0;
-	auto ms = crl::now();
+	auto now = crl::now();
 	auto rowHeight = st::dialogsRowHeight;
 	if (_dragStart.y() > localPosition.y() && _draggingIndex > 0) {
 		shift = -floorclamp(_dragStart.y() - localPosition.y() + (rowHeight / 2), rowHeight, 0, _draggingIndex);
@@ -1016,7 +1012,7 @@ bool DialogsInner::updateReorderPinned(QPoint localPosition) {
 			shownDialogs()->movePinned(_dragging, -1);
 			std::swap(_pinnedRows[from], _pinnedRows[from - 1]);
 			_pinnedRows[from].yadd = anim::value(_pinnedRows[from].yadd.current() - rowHeight, 0);
-			_pinnedRows[from].animStartTime = ms;
+			_pinnedRows[from].animStartTime = now;
 		}
 	} else if (_dragStart.y() < localPosition.y() && _draggingIndex + 1 < pinnedCount) {
 		shift = floorclamp(localPosition.y() - _dragStart.y() + (rowHeight / 2), rowHeight, 0, pinnedCount - _draggingIndex - 1);
@@ -1025,15 +1021,15 @@ bool DialogsInner::updateReorderPinned(QPoint localPosition) {
 			shownDialogs()->movePinned(_dragging, 1);
 			std::swap(_pinnedRows[from], _pinnedRows[from + 1]);
 			_pinnedRows[from].yadd = anim::value(_pinnedRows[from].yadd.current() + rowHeight, 0);
-			_pinnedRows[from].animStartTime = ms;
+			_pinnedRows[from].animStartTime = now;
 		}
 	}
 	if (shift) {
 		_draggingIndex += shift;
 		_aboveIndex = _draggingIndex;
 		_dragStart.setY(_dragStart.y() + shift * rowHeight);
-		if (!_a_pinnedShifting.animating()) {
-			_a_pinnedShifting.start();
+		if (!_pinnedShiftAnimation.animating()) {
+			_pinnedShiftAnimation.start();
 		}
 	}
 	_aboveTopShift = qCeil(_pinnedRows[_aboveIndex].yadd.current());
@@ -1041,22 +1037,22 @@ bool DialogsInner::updateReorderPinned(QPoint localPosition) {
 	if (!_pinnedRows[_draggingIndex].animStartTime) {
 		_pinnedRows[_draggingIndex].yadd.finish();
 	}
-	_a_pinnedShifting.step(ms, true);
+	pinnedShiftAnimationCallback(now);
 
-	auto countDraggingScrollDelta = [this, localPosition] {
+	const auto delta = [&] {
 		if (localPosition.y() < _visibleTop) {
 			return localPosition.y() - _visibleTop;
 		}
 		return 0;
-	};
+	}();
 
-	emit draggingScrollDelta(countDraggingScrollDelta());
+	emit draggingScrollDelta(delta);
 	return true;
 }
 
-void DialogsInner::step_pinnedShifting(crl::time ms, bool timer) {
+bool DialogsInner::pinnedShiftAnimationCallback(crl::time now) {
 	if (anim::Disabled()) {
-		ms += st::stickersRowDuration;
+		now += st::stickersRowDuration;
 	}
 
 	auto wasAnimating = false;
@@ -1069,8 +1065,8 @@ void DialogsInner::step_pinnedShifting(crl::time ms, bool timer) {
 			wasAnimating = true;
 			if (updateMin < 0) updateMin = i;
 			updateMax = i;
-			if (start + st::stickersRowDuration > ms && ms >= start) {
-				_pinnedRows[i].yadd.update(float64(ms - start) / st::stickersRowDuration, anim::sineInOut);
+			if (start + st::stickersRowDuration > now && now >= start) {
+				_pinnedRows[i].yadd.update(float64(now - start) / st::stickersRowDuration, anim::sineInOut);
 				animating = true;
 			} else {
 				_pinnedRows[i].yadd.finish();
@@ -1078,33 +1074,31 @@ void DialogsInner::step_pinnedShifting(crl::time ms, bool timer) {
 			}
 		}
 	}
-	if (timer || (wasAnimating && !animating)) {
-		updateReorderIndexGetCount();
-		if (_draggingIndex >= 0) {
-			if (updateMin < 0 || updateMin > _draggingIndex) {
-				updateMin = _draggingIndex;
-			}
-			if (updateMax < _draggingIndex) updateMax = _draggingIndex;
+	updateReorderIndexGetCount();
+	if (_draggingIndex >= 0) {
+		if (updateMin < 0 || updateMin > _draggingIndex) {
+			updateMin = _draggingIndex;
 		}
-		if (updateMin >= 0) {
-			auto top = pinnedOffset();
-			auto updateFrom = top + st::dialogsRowHeight * (updateMin - 1);
-			auto updateHeight = st::dialogsRowHeight * (updateMax - updateMin + 3);
-			if (base::in_range(_aboveIndex, 0, _pinnedRows.size())) {
-				// Always include currently dragged chat in its current and old positions.
-				auto aboveRowBottom = top + (_aboveIndex + 1) * st::dialogsRowHeight;
-				auto aboveTopShift = qCeil(_pinnedRows[_aboveIndex].yadd.current());
-				accumulate_max(updateHeight, (aboveRowBottom - updateFrom) + _aboveTopShift);
-				accumulate_max(updateHeight, (aboveRowBottom - updateFrom) + aboveTopShift);
-				_aboveTopShift = aboveTopShift;
-			}
-			update(0, updateFrom, getFullWidth(), updateHeight);
+		if (updateMax < _draggingIndex) updateMax = _draggingIndex;
+	}
+	if (updateMin >= 0) {
+		auto top = pinnedOffset();
+		auto updateFrom = top + st::dialogsRowHeight * (updateMin - 1);
+		auto updateHeight = st::dialogsRowHeight * (updateMax - updateMin + 3);
+		if (base::in_range(_aboveIndex, 0, _pinnedRows.size())) {
+			// Always include currently dragged chat in its current and old positions.
+			auto aboveRowBottom = top + (_aboveIndex + 1) * st::dialogsRowHeight;
+			auto aboveTopShift = qCeil(_pinnedRows[_aboveIndex].yadd.current());
+			accumulate_max(updateHeight, (aboveRowBottom - updateFrom) + _aboveTopShift);
+			accumulate_max(updateHeight, (aboveRowBottom - updateFrom) + aboveTopShift);
+			_aboveTopShift = aboveTopShift;
 		}
+		update(0, updateFrom, getFullWidth(), updateHeight);
 	}
 	if (!animating) {
 		_aboveIndex = _draggingIndex;
-		_a_pinnedShifting.stop();
 	}
+	return animating;
 }
 
 void DialogsInner::mouseReleaseEvent(QMouseEvent *e) {
@@ -1120,8 +1114,8 @@ void DialogsInner::mousePressReleased(
 		if (_draggingIndex >= 0) {
 			_pinnedRows[_draggingIndex].yadd.start(0.);
 			_pinnedRows[_draggingIndex].animStartTime = crl::now();
-			if (!_a_pinnedShifting.animating()) {
-				_a_pinnedShifting.start();
+			if (!_pinnedShiftAnimation.animating()) {
+				_pinnedShiftAnimation.start();
 			}
 		}
 		finishReorderPinned();

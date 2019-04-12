@@ -54,12 +54,6 @@ bool Panel::overlaps(const QRect &globalRect) {
 	return rect().marginsRemoved(QMargins(marginLeft, contentTop(), marginRight, contentBottom())).contains(QRect(mapFromGlobal(globalRect.topLeft()), globalRect.size()));
 }
 
-void Panel::windowActiveChanged() {
-	if (!App::wnd()->windowHandle()->isActive() && !isHidden()) {
-		leaveEvent(nullptr);
-	}
-}
-
 void Panel::resizeEvent(QResizeEvent *e) {
 	updateControlsGeometry();
 }
@@ -138,9 +132,9 @@ void Panel::paintEvent(QPaintEvent *e) {
 	Painter p(this);
 
 	if (!_cache.isNull()) {
-		bool animating = _a_appearance.animating(crl::now());
+		bool animating = _a_appearance.animating();
 		if (animating) {
-			p.setOpacity(_a_appearance.current(_hiding ? 0. : 1.));
+			p.setOpacity(_a_appearance.value(_hiding ? 0. : 1.));
 		} else if (_hiding || isHidden()) {
 			hideFinished();
 			return;
@@ -168,12 +162,12 @@ void Panel::enterEventHook(QEvent *e) {
 	if (_ignoringEnterEvents || contentTooSmall()) return;
 
 	_hideTimer.cancel();
-	if (_a_appearance.animating(crl::now())) {
+	if (_a_appearance.animating()) {
 		startShow();
 	} else {
 		_showTimer.callOnce(0);
 	}
-	return TWidget::enterEventHook(e);
+	return RpWidget::enterEventHook(e);
 }
 
 void Panel::leaveEventHook(QEvent *e) {
@@ -181,17 +175,17 @@ void Panel::leaveEventHook(QEvent *e) {
 		return;
 	}
 	_showTimer.cancel();
-	if (_a_appearance.animating(crl::now())) {
+	if (_a_appearance.animating()) {
 		startHide();
 	} else {
 		_hideTimer.callOnce(300);
 	}
-	return TWidget::leaveEventHook(e);
+	return RpWidget::leaveEventHook(e);
 }
 
 void Panel::showFromOther() {
 	_hideTimer.cancel();
-	if (_a_appearance.animating(crl::now())) {
+	if (_a_appearance.animating()) {
 		startShow();
 	} else {
 		_showTimer.callOnce(300);
@@ -200,7 +194,7 @@ void Panel::showFromOther() {
 
 void Panel::hideFromOther() {
 	_showTimer.cancel();
-	if (_a_appearance.animating(crl::now())) {
+	if (_a_appearance.animating()) {
 		startHide();
 	} else {
 		_hideTimer.callOnce(0);
@@ -217,15 +211,12 @@ void Panel::ensureCreated() {
 	});
 	refreshList();
 
-	if (cPlatform() == dbipMac || cPlatform() == dbipMacOld) {
-		if (const auto window = App::wnd()) {
-			connect(
-				window->windowHandle(),
-				&QWindow::activeChanged,
-				this,
-				&Panel::windowActiveChanged);
-		}
-	}
+	macWindowDeactivateEvents(
+	) | rpl::filter([=] {
+		return !isHidden();
+	}) | rpl::start_with_next([=] {
+		leaveEvent(nullptr);
+	}, _refreshListLifetime);
 
 	_ignoringEnterEvents = false;
 }
@@ -306,16 +297,6 @@ void Panel::performDestroy() {
 	_scroll->takeWidget<QWidget>().destroy();
 	_listPeer = _listMigratedPeer = nullptr;
 	_refreshListLifetime.destroy();
-
-	if (cPlatform() == dbipMac || cPlatform() == dbipMacOld) {
-		if (const auto window = App::wnd()) {
-			disconnect(
-				window->windowHandle(),
-				&QWindow::activeChanged,
-				this,
-				&Panel::windowActiveChanged);
-		}
-	}
 }
 
 Info::Key Panel::key() const {

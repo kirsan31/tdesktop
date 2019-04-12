@@ -73,7 +73,7 @@ private:
 
 	void showPreview();
 
-	std::vector<Animation> _packOvers;
+	std::vector<Ui::Animations::Simple> _packOvers;
 	Stickers::Pack _pack;
 	Stickers::ByEmojiMap _emoji;
 	bool _loaded = false;
@@ -225,7 +225,7 @@ void StickerSetBox::Inner::gotSet(const MTPmessages_StickerSet &set) {
 				}
 			});
 		}
-		data.vset.match([&](const MTPDstickerSet & set) {
+		data.vset.match([&](const MTPDstickerSet &set) {
 			_setTitle = Stickers::GetSetTitle(set);
 			_setShortName = qs(set.vshort_name);
 			_setId = set.vid.v;
@@ -237,7 +237,7 @@ void StickerSetBox::Inner::gotSet(const MTPmessages_StickerSet &set) {
 				? set.vinstalled_date.v
 				: TimeId(0);
 			_setThumbnail = set.has_thumb()
-				? App::image(set.vthumb)
+				? Images::Create(set, set.vthumb)
 				: ImagePtr();
 			auto &sets = Auth().data().stickerSetsRef();
 			const auto it = sets.find(_setId);
@@ -460,7 +460,6 @@ void StickerSetBox::Inner::paintEvent(QPaintEvent *e) {
 
 	if (_pack.isEmpty()) return;
 
-	auto ms = crl::now();
 	int32 rows = _pack.size() / kStickersPanelPerRow + ((_pack.size() % kStickersPanelPerRow) ? 1 : 0);
 	int32 from = qFloor(e->rect().top() / st::stickersSize.height()), to = qFloor(e->rect().bottom() / st::stickersSize.height()) + 1;
 
@@ -473,7 +472,7 @@ void StickerSetBox::Inner::paintEvent(QPaintEvent *e) {
 			DocumentData *doc = _pack.at(index);
 			QPoint pos(st::stickersPadding.left() + j * st::stickersSize.width(), st::stickersPadding.top() + i * st::stickersSize.height());
 
-			if (auto over = _packOvers[index].current(ms, (index == _selected) ? 1. : 0.)) {
+			if (auto over = _packOvers[index].value((index == _selected) ? 1. : 0.)) {
 				p.setOpacity(over);
 				QPoint tl(pos);
 				if (rtl()) tl.setX(width() - tl.x() - st::stickersSize.width());

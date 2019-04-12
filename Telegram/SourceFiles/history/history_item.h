@@ -10,6 +10,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/runtime_composer.h"
 #include "base/flags.h"
 #include "base/value_ordering.h"
+#include "data/data_media_types.h"
 
 enum class UnreadMentionType;
 struct HistoryMessageReplyMarkup;
@@ -122,6 +123,19 @@ public:
 	bool hasUnreadMediaFlag() const;
 	void markMediaRead();
 
+
+	// For edit media in history_message.
+	virtual void returnSavedMedia() {};
+	void savePreviousMedia() {
+		_savedMedia = _media->clone(this);
+	}
+	bool isEditingMedia() const {
+		return _savedMedia != nullptr;
+	}
+	void clearSavedMedia() {
+		_savedMedia = nullptr;
+	}
+
 	// Zero result means this message is not self-destructing right now.
 	virtual crl::time getSelfDestructIn(crl::time now) {
 		return 0;
@@ -138,6 +152,16 @@ public:
 	}
 	bool isGroupEssential() const {
 		return _flags & MTPDmessage_ClientFlag::f_is_group_essential;
+	}
+	bool isLocalUpdateMedia() const {
+		return _flags & MTPDmessage_ClientFlag::f_is_local_update_media;
+	}
+	void setIsLocalUpdateMedia(bool flag) {
+		if (flag) {
+			_flags |= MTPDmessage_ClientFlag::f_is_local_update_media;
+		} else {
+			_flags &= ~MTPDmessage_ClientFlag::f_is_local_update_media;
+		}
 	}
 	bool isGroupMigrate() const {
 		return isGroupEssential() && isEmpty();
@@ -164,6 +188,7 @@ public:
 	}
 	virtual void applyEdition(const MTPDmessageService &message) {
 	}
+	void applyEditionToHistoryCleared();
 	virtual void updateSentMedia(const MTPMessageMedia *media) {
 	}
 	virtual void updateReplyMarkup(const MTPReplyMarkup *markup) {
@@ -195,10 +220,10 @@ public:
 		return inDialogsText(DrawInDialog::WithoutSender);
 	}
 	virtual TextWithEntities originalText() const {
-		return { QString(), EntitiesInText() };
+		return TextWithEntities();
 	}
-	virtual TextWithEntities clipboardText() const {
-		return { QString(), EntitiesInText() };
+	virtual TextForMimeData clipboardText() const {
+		return TextForMimeData();
 	}
 
 	virtual void setViewsCount(int32 count) {
@@ -230,7 +255,6 @@ public:
 	bool suggestDeleteAllReport() const;
 
 	bool hasDirectLink() const;
-	QString directLink() const;
 
 	MsgId id;
 
@@ -310,6 +334,7 @@ protected:
 	int _textWidth = -1;
 	int _textHeight = 0;
 
+	std::unique_ptr<Data::Media> _savedMedia;
 	std::unique_ptr<Data::Media> _media;
 
 private:

@@ -25,7 +25,7 @@ public:
 		return _receiptMsgId;
 	}
 	QString getTitle() const {
-		return _title.originalText();
+		return _title.toString();
 	}
 
 	bool hideMessageText() const override {
@@ -52,7 +52,7 @@ public:
 		return _attach && _attach->dragItemByHandler(p);
 	}
 
-	TextWithEntities selectedText(TextSelection selection) const override;
+	TextForMimeData selectedText(TextSelection selection) const override;
 
 	void clickHandlerActiveChanged(const ClickHandlerPtr &p, bool active) override;
 	void clickHandlerPressedChanged(const ClickHandlerPtr &p, bool pressed) override;

@@ -529,8 +529,8 @@ TextState Service::textState(QPoint point, StateRequest request) const {
 void Service::updatePressed(QPoint point) {
 }
 
-TextWithEntities Service::selectedText(TextSelection selection) const {
-	return message()->_text.originalTextWithEntities(selection);
+TextForMimeData Service::selectedText(TextSelection selection) const {
+	return message()->_text.toTextForMimeData(selection);
 }
 
 TextSelection Service::adjustSelection(

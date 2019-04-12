@@ -18,6 +18,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/sandbox.h"
 #include "core/local_url_handlers.h"
 #include "core/launcher.h"
+#include "chat_helpers/emoji_keywords.h"
 #include "storage/localstorage.h"
 #include "platform/platform_specific.h"
 #include "mainwindow.h"
@@ -39,6 +40,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "media/audio/media_audio.h"
 #include "media/audio/media_audio_track.h"
 #include "media/player/media_player_instance.h"
+#include "media/clip/media_clip_reader.h" // For Media::Clip::Finish().
 #include "window/notifications_manager.h"
 #include "window/themes/window_theme.h"
 #include "window/window_lock_widgets.h"
@@ -84,6 +86,7 @@ Application::Application(not_null<Launcher*> launcher)
 , _databases(std::make_unique<Storage::Databases>())
 , _animationsManager(std::make_unique<Ui::Animations::Manager>())
 , _langpack(std::make_unique<Lang::Instance>())
+, _emojiKeywords(std::make_unique<ChatHelpers::EmojiKeywords>())
 , _audio(std::make_unique<Media::Audio::Instance>())
 , _logo(Window::LoadLogo())
 , _logoNoMargin(Window::LoadLogoNoMargin()) {
@@ -92,6 +95,40 @@ Application::Application(not_null<Launcher*> launcher)
 	Expects(Instance == nullptr);
 
 	Instance = this;
+}
+
+Application::~Application() {
+	_window.reset();
+	_mediaView.reset();
+
+	// Some MTP requests can be cancelled from data clearing.
+	authSessionDestroy();
+
+	// The langpack manager should be destroyed before MTProto instance,
+	// because it is MTP::Sender and it may have pending requests.
+	_langCloudManager.reset();
+
+	_mtproto.reset();
+	_mtprotoForKeysDestroy.reset();
+
+	Shortcuts::Finish();
+
+	Ui::Emoji::Clear();
+	Media::Clip::Finish();
+
+	stopWebLoadManager();
+	App::deinitMedia();
+
+	Window::Theme::Unload();
+
+	Media::Player::finish(_audio.get());
+	style::stopManager();
+
+	Local::finish();
+	Global::finish();
+	ThirdParty::finish();
+
+	Instance = nullptr;
 }
 
 void Application::run() {
@@ -117,7 +154,6 @@ void Application::run() {
 	QCoreApplication::instance()->installTranslator(_translator.get());
 
 	style::startManager();
-	anim::startManager();
 	Ui::InitTextOptions();
 	Ui::Emoji::Init();
 	Media::Player::start(_audio.get());
@@ -572,9 +608,6 @@ void Application::startMtp() {
 	if (_authSession) {
 		// Skip all pending self updates so that we won't Local::writeSelf.
 		Notify::peerUpdatedSendDelayed();
-
-		Media::Player::mixer()->setVoicePlaybackDoubled(
-			Global::VoiceMsgPlaybackDoubled());
 	}
 }
 
@@ -858,7 +891,7 @@ QString Application::createInternalLinkFull(const QString &query) const {
 
 void Application::checkStartUrl() {
 	if (!cStartUrl().isEmpty() && !locked()) {
-		auto url = cStartUrl();
+		const auto url = cStartUrl();
 		cSetStartUrl(QString());
 		if (!openLocalUrl(url, {})) {
 			cSetStartUrl(url);
@@ -952,10 +985,6 @@ rpl::producer<bool> Application::termsLockValue() const {
 	) | rpl::then(termsLockChanges());
 }
 
-void Application::termsDeleteNow() {
-	MTP::send(MTPaccount_DeleteAccount(MTP_string("Decline ToS update")));
-}
-
 bool Application::locked() const {
 	return passcodeLocked() || termsLocked();
 }
@@ -1038,7 +1067,6 @@ void Application::loggedOut() {
 	clearPasscodeLock();
 	Media::Player::mixer()->stopAndClear();
 	Global::SetVoiceMsgPlaybackDoubled(false);
-	Media::Player::mixer()->setVoicePlaybackDoubled(false);
 	if (const auto window = getActiveWindow()) {
 		window->tempDirDelete(Local::ClearManagerAll);
 		window->setupIntro();
@@ -1184,41 +1212,6 @@ void Application::startShortcuts() {
 			return closeActiveWindow();
 		});
 	}, _lifetime);
-}
-
-Application::~Application() {
-	_window.reset();
-	_mediaView.reset();
-
-	// Some MTP requests can be cancelled from data clearing.
-	authSessionDestroy();
-
-	// The langpack manager should be destroyed before MTProto instance,
-	// because it is MTP::Sender and it may have pending requests.
-	_langCloudManager.reset();
-
-	_mtproto.reset();
-	_mtprotoForKeysDestroy.reset();
-
-	Shortcuts::Finish();
-
-	Ui::Emoji::Clear();
-
-	anim::stopManager();
-
-	stopWebLoadManager();
-	App::deinitMedia();
-
-	Window::Theme::Unload();
-
-	Media::Player::finish(_audio.get());
-	style::stopManager();
-
-	Local::finish();
-	Global::finish();
-	ThirdParty::finish();
-
-	Instance = nullptr;
 }
 
 bool IsAppLaunched() {

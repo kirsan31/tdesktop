@@ -25,6 +25,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "inline_bots/inline_bot_layout_item.h"
 #include "storage/localstorage.h"
 #include "storage/storage_encrypted_file.h"
+#include "media/player/media_player_instance.h" // for instance()->play().
 #include "boxes/abstract_box.h"
 #include "passport/passport_form_controller.h"
 #include "window/themes/window_theme.h"
@@ -150,7 +151,9 @@ Session::Session(not_null<AuthSession*> session)
 	Local::cacheBigFilePath(),
 	Local::cacheBigFileSettings()))
 , _selfDestructTimer([=] { checkSelfDestructItems(); })
-, _a_sendActions(animation(this, &Session::step_typings))
+, _sendActionsAnimation([=](crl::time now) {
+	return sendActionsAnimationCallback(now);
+})
 , _groups(this)
 , _unmuteByFinishedTimer([=] { unmuteByFinished(); }) {
 	_cache->open(Local::cacheKey());
@@ -164,7 +167,7 @@ void Session::clear() {
 	_sendActions.clear();
 
 	for (const auto &[peerId, history] : _histories) {
-		history->unloadBlocks();
+		history->clear(History::ClearType::Unload);
 	}
 	App::historyClearMsgs();
 	_histories.clear();
@@ -240,7 +243,8 @@ not_null<UserData*> Session::processUser(const MTPUser &data) {
 		return data.vid.v;
 	}));
 	auto minimal = false;
-	const MTPUserStatus *status = 0, emptyStatus = MTP_userStatusEmpty();
+	const MTPUserStatus *status = nullptr;
+	const MTPUserStatus emptyStatus = MTP_userStatusEmpty();
 
 	Notify::PeerUpdate update;
 	using UpdateFlag = Notify::PeerUpdate::Flag;
@@ -723,7 +727,9 @@ void Session::deleteConversationLocally(not_null<PeerData*> peer) {
 	if (history) {
 		setPinnedDialog(history, false);
 		App::main()->removeDialog(history);
-		history->clear();
+		history->clear(peer->isChannel()
+			? History::ClearType::Unload
+			: History::ClearType::DeleteChat);
 	}
 	if (const auto channel = peer->asMegagroup()) {
 		channel->addFlags(MTPDchannel::Flag::f_left);
@@ -732,8 +738,6 @@ void Session::deleteConversationLocally(not_null<PeerData*> peer) {
 				migrated->updateChatListExistence();
 			}
 		}
-	} else if (history) {
-		history->markFullyLoaded();
 	}
 }
 
@@ -748,22 +752,20 @@ void Session::registerSendAction(
 		const auto i = _sendActions.find(history);
 		if (!_sendActions.contains(history)) {
 			_sendActions.emplace(history, crl::now());
-			_a_sendActions.start();
+			_sendActionsAnimation.start();
 		}
 	}
 }
 
-void Session::step_typings(crl::time ms, bool timer) {
+bool Session::sendActionsAnimationCallback(crl::time now) {
 	for (auto i = begin(_sendActions); i != end(_sendActions);) {
-		if (i->first->updateSendActionNeedsAnimating(ms)) {
+		if (i->first->updateSendActionNeedsAnimating(now)) {
 			++i;
 		} else {
 			i = _sendActions.erase(i);
 		}
 	}
-	if (_sendActions.empty()) {
-		_a_sendActions.stop();
-	}
+	return !_sendActions.empty();
 }
 
 Storage::Cache::Database &Session::cache() {
@@ -1099,6 +1101,15 @@ void Session::requestItemTextRefresh(not_null<HistoryItem*> item) {
 
 void Session::requestAnimationPlayInline(not_null<HistoryItem*> item) {
 	_animationPlayInlineRequest.fire_copy(item);
+
+	if (const auto media = item->media()) {
+		if (const auto data = media->document()) {
+			if (data && data->isVideoMessage()) {
+				const auto msgId = item->fullId();
+				::Media::Player::instance()->playPause({ data, msgId });
+			}
+		}
+	}
 }
 
 rpl::producer<not_null<HistoryItem*>> Session::animationPlayInlineRequest() const {
@@ -1690,6 +1701,7 @@ not_null<PhotoData*> Session::processPhoto(
 			data.vaccess_hash.v,
 			data.vfile_reference.v,
 			data.vdate.v,
+			data.vdc_id.v,
 			data.is_has_stickers(),
 			thumbnailInline,
 			thumbnailSmall,
@@ -1705,6 +1717,7 @@ not_null<PhotoData*> Session::photo(
 		const uint64 &access,
 		const QByteArray &fileReference,
 		TimeId date,
+		int32 dc,
 		bool hasSticker,
 		const ImagePtr &thumbnailInline,
 		const ImagePtr &thumbnailSmall,
@@ -1716,6 +1729,7 @@ not_null<PhotoData*> Session::photo(
 		access,
 		fileReference,
 		date,
+		dc,
 		hasSticker,
 		thumbnailInline,
 		thumbnailSmall,
@@ -1780,6 +1794,7 @@ PhotoData *Session::photoFromWeb(
 		uint64(0),
 		QByteArray(),
 		unixtime(),
+		0,
 		false,
 		thumbnailInline,
 		thumbnailSmall,
@@ -1818,7 +1833,7 @@ void Session::photoApplyFields(
 	};
 	const auto image = [&](const QByteArray &levels) {
 		const auto i = find(levels);
-		return (i == sizes.end()) ? ImagePtr() : App::image(*i);
+		return (i == sizes.end()) ? ImagePtr() : Images::Create(data, *i);
 	};
 	const auto thumbnailInline = image(InlineLevels);
 	const auto thumbnailSmall = image(SmallLevels);
@@ -1830,6 +1845,7 @@ void Session::photoApplyFields(
 			data.vaccess_hash.v,
 			data.vfile_reference.v,
 			data.vdate.v,
+			data.vdc_id.v,
 			data.is_has_stickers(),
 			thumbnailInline,
 			thumbnailSmall,
@@ -1843,6 +1859,7 @@ void Session::photoApplyFields(
 		const uint64 &access,
 		const QByteArray &fileReference,
 		TimeId date,
+		int32 dc,
 		bool hasSticker,
 		const ImagePtr &thumbnailInline,
 		const ImagePtr &thumbnailSmall,
@@ -1851,8 +1868,7 @@ void Session::photoApplyFields(
 	if (!date) {
 		return;
 	}
-	photo->access = access;
-	photo->fileReference = fileReference;
+	photo->setRemoteLocation(dc, access, fileReference);
 	photo->date = date;
 	photo->hasSticker = hasSticker;
 	photo->updateImages(
@@ -2014,7 +2030,6 @@ DocumentData *Session::documentFromWeb(
 		int32(0), // data.vsize.v
 		StorageImageLocation());
 	result->setWebLocation(WebFileLocation(
-		Global::WebFileDcId(),
 		data.vurl.v,
 		data.vaccess_hash.v));
 	return result;
@@ -2051,7 +2066,8 @@ void Session::documentApplyFields(
 		not_null<DocumentData*> document,
 		const MTPDdocument &data) {
 	const auto thumbnailInline = FindDocumentInlineThumbnail(data);
-	const auto thumbnail = FindDocumentThumbnail(data);
+	const auto thumbnailSize = FindDocumentThumbnail(data);
+	const auto thumbnail = Images::Create(data, thumbnailSize);
 	documentApplyFields(
 		document,
 		data.vaccess_hash.v,
@@ -2059,11 +2075,11 @@ void Session::documentApplyFields(
 		data.vdate.v,
 		data.vattributes.v,
 		qs(data.vmime_type),
-		App::image(thumbnailInline),
-		App::image(thumbnail),
+		Images::Create(data, thumbnailInline),
+		thumbnail,
 		data.vdc_id.v,
 		data.vsize.v,
-		StorageImageLocation::FromMTP(thumbnail));
+		thumbnail->location());
 }
 
 void Session::documentApplyFields(
@@ -2091,8 +2107,8 @@ void Session::documentApplyFields(
 	document->size = size;
 	document->recountIsImage();
 	if (document->sticker()
-		&& document->sticker()->loc.isNull()
-		&& !thumbLocation.isNull()) {
+		&& !document->sticker()->loc.valid()
+		&& thumbLocation.valid()) {
 		document->sticker()->loc = thumbLocation;
 	}
 }

@@ -15,6 +15,8 @@ class Manager;
 class Basic final {
 public:
 	Basic() = default;
+	Basic(const Basic &other) = delete;
+	Basic &operator=(const Basic &other) = delete;
 
 	template <typename Callback>
 	explicit Basic(Callback &&callback);
@@ -156,11 +158,13 @@ private:
 	void schedule();
 	void updateQueued();
 	void stopTimer();
+	not_null<const QObject*> delayedCallGuard() const;
 
 	crl::time _lastUpdateTime = 0;
 	int _timerId = 0;
 	bool _updating = false;
 	bool _scheduled = false;
+	bool _forceImmediateUpdate = false;
 	std::vector<ActiveBasicPointer> _active;
 	std::vector<ActiveBasicPointer> _starting;
 	rpl::lifetime _lifetime;
@@ -274,7 +278,9 @@ inline void Simple::start(
 		that = _data.get(),
 		callback = Prepare(std::forward<Callback>(callback))
 	](crl::time now) {
-		const auto time = (now - that->animation.started());
+		const auto time = anim::Disabled()
+			? that->duration
+			: (now - that->animation.started());
 		const auto finished = (time >= that->duration);
 		const auto progress = finished
 			? that->delta

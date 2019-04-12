@@ -18,6 +18,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/file_utilities.h"
 #include "core/mime_type.h"
 #include "core/event_filter.h"
+#include "ui/effects/animations.h"
 #include "ui/widgets/checkbox.h"
 #include "ui/widgets/buttons.h"
 #include "ui/widgets/input_fields.h"
@@ -39,6 +40,7 @@ namespace {
 constexpr auto kMinPreviewWidth = 20;
 constexpr auto kShrinkDuration = crl::time(150);
 constexpr auto kDragDuration = crl::time(200);
+const auto kStickerMimeString = qstr("image/webp");
 
 class SingleMediaPreview : public Ui::RpWidget {
 public:
@@ -52,6 +54,7 @@ public:
 		not_null<Window::Controller*> controller,
 		QImage preview,
 		bool animated,
+		bool sticker,
 		const QString &animatedPreviewPath);
 
 	bool canSendAsPhoto() const {
@@ -72,6 +75,7 @@ private:
 
 	not_null<Window::Controller*> _controller;
 	bool _animated = false;
+	bool _sticker = false;
 	bool _canSendAsPhoto = false;
 	QPixmap _preview;
 	int _previewLeft = 0;
@@ -122,8 +126,7 @@ public:
 		int left,
 		int top,
 		float64 shrinkProgress,
-		float64 moveProgress,
-		crl::time ms);
+		float64 moveProgress);
 	void paintPhoto(Painter &p, int left, int top, int outerWidth);
 	void paintFile(Painter &p, int left, int top, int outerWidth);
 
@@ -157,7 +160,7 @@ private:
 	int _statusWidth = 0;
 	bool _isVideo = false;
 	float64 _suggestedMove = 0.;
-	Animation _suggestedMoveAnimation;
+	Ui::Animations::Simple _suggestedMoveAnimation;
 	int _lastShrinkValue = 0;
 
 };
@@ -290,10 +293,8 @@ void AlbumThumb::paintInAlbum(
 		int left,
 		int top,
 		float64 shrinkProgress,
-		float64 moveProgress,
-		crl::time ms) {
+		float64 moveProgress) {
 	const auto shrink = anim::interpolate(0, _shrinkSize, shrinkProgress);
-	_suggestedMoveAnimation.step(ms);
 	_lastShrinkValue = shrink;
 	const auto geometry = countCurrentGeometry(moveProgress);
 	const auto x = left + geometry.x();
@@ -540,7 +541,7 @@ void AlbumThumb::suggestMove(float64 delta, Fn<void()> callback) {
 
 QRect AlbumThumb::countRealGeometry() const {
 	const auto addLeft = int(std::round(
-		_suggestedMoveAnimation.current(_suggestedMove) * _lastShrinkValue));
+		_suggestedMoveAnimation.value(_suggestedMove) * _lastShrinkValue));
 	const auto current = _layout.geometry;
 	const auto realTopLeft = current.topLeft()
 		+ _albumPosition
@@ -562,7 +563,7 @@ QRect AlbumThumb::countCurrentGeometry(float64 progress) const {
 }
 
 void AlbumThumb::finishAnimations() {
-	_suggestedMoveAnimation.finish();
+	_suggestedMoveAnimation.stop();
 }
 
 SingleMediaPreview *SingleMediaPreview::Create(
@@ -589,11 +590,13 @@ SingleMediaPreview *SingleMediaPreview::Create(
 			preview.height())) {
 		return nullptr;
 	}
+	const auto sticker = (file.information->filemime == kStickerMimeString);
 	return Ui::CreateChild<SingleMediaPreview>(
 		parent,
 		controller,
 		preview,
 		animated,
+		sticker,
 		animationPreview ? file.path : QString());
 }
 
@@ -602,15 +605,19 @@ SingleMediaPreview::SingleMediaPreview(
 	not_null<Window::Controller*> controller,
 	QImage preview,
 	bool animated,
+	bool sticker,
 	const QString &animatedPreviewPath)
 : RpWidget(parent)
 , _controller(controller)
-, _animated(animated) {
+, _animated(animated)
+, _sticker(sticker) {
 	Expects(!preview.isNull());
 
-	_canSendAsPhoto = !_animated && Storage::ValidateThumbDimensions(
-		preview.width(),
-		preview.height());
+	_canSendAsPhoto = !_animated
+		&& !_sticker
+		&& Storage::ValidateThumbDimensions(
+			preview.width(),
+			preview.height());
 
 	preparePreview(preview, animatedPreviewPath);
 }
@@ -714,11 +721,13 @@ void SingleMediaPreview::clipCallback(Media::Clip::Notification notification) {
 void SingleMediaPreview::paintEvent(QPaintEvent *e) {
 	Painter p(this);
 
-	if (_previewLeft > st::boxPhotoPadding.left()) {
-		p.fillRect(st::boxPhotoPadding.left(), st::boxPhotoPadding.top(), _previewLeft - st::boxPhotoPadding.left(), _previewHeight, st::confirmBg);
-	}
-	if (_previewLeft + _previewWidth < width() - st::boxPhotoPadding.right()) {
-		p.fillRect(_previewLeft + _previewWidth, st::boxPhotoPadding.top(), width() - st::boxPhotoPadding.right() - _previewLeft - _previewWidth, _previewHeight, st::confirmBg);
+	if (!_sticker) {
+		if (_previewLeft > st::boxPhotoPadding.left()) {
+			p.fillRect(st::boxPhotoPadding.left(), st::boxPhotoPadding.top(), _previewLeft - st::boxPhotoPadding.left(), _previewHeight, st::confirmBg);
+		}
+		if (_previewLeft + _previewWidth < width() - st::boxPhotoPadding.right()) {
+			p.fillRect(_previewLeft + _previewWidth, st::boxPhotoPadding.top(), width() - st::boxPhotoPadding.right() - _previewLeft - _previewWidth, _previewHeight, st::confirmBg);
+		}
 	}
 	if (_gifPreview && _gifPreview->started()) {
 		auto s = QSize(_previewWidth, _previewHeight);
@@ -961,9 +970,9 @@ private:
 	AlbumThumb *_paintedAbove = nullptr;
 	QPoint _draggedStartPosition;
 
-	mutable Animation _thumbsHeightAnimation;
-	mutable Animation _shrinkAnimation;
-	mutable Animation _finishDragAnimation;
+	mutable Ui::Animations::Simple _thumbsHeightAnimation;
+	mutable Ui::Animations::Simple _shrinkAnimation;
+	mutable Ui::Animations::Simple _finishDragAnimation;
 
 };
 
@@ -1087,9 +1096,9 @@ int SendFilesBox::AlbumPreview::orderIndex(
 }
 
 void SendFilesBox::AlbumPreview::cancelDrag() {
-	_thumbsHeightAnimation.finish();
-	_finishDragAnimation.finish();
-	_shrinkAnimation.finish();
+	_thumbsHeightAnimation.stop();
+	_finishDragAnimation.stop();
+	_shrinkAnimation.stop();
 	if (_draggedThumb) {
 		_draggedThumb->moveInAlbum({ 0, 0 });
 		_draggedThumb = nullptr;
@@ -1164,7 +1173,7 @@ void SendFilesBox::AlbumPreview::updateSize() {
 	const auto newHeight = [&] {
 		switch (_sendWay) {
 		case SendFilesWay::Album:
-			return int(std::round(_thumbsHeightAnimation.current(
+			return int(std::round(_thumbsHeightAnimation.value(
 				_thumbsHeight)));
 		case SendFilesWay::Photos: return _photosHeight;
 		case SendFilesWay::Files: return _filesHeight;
@@ -1187,20 +1196,17 @@ void SendFilesBox::AlbumPreview::paintEvent(QPaintEvent *e) {
 }
 
 void SendFilesBox::AlbumPreview::paintAlbum(Painter &p) const {
-	const auto ms = crl::now();
-	const auto shrink = _shrinkAnimation.current(
-		ms,
-		_draggedThumb ? 1. : 0.);
-	const auto moveProgress = _finishDragAnimation.current(ms, 1.);
+	const auto shrink = _shrinkAnimation.value(_draggedThumb ? 1. : 0.);
+	const auto moveProgress = _finishDragAnimation.value(1.);
 	const auto left = contentLeft();
 	const auto top = contentTop();
 	for (const auto &thumb : _thumbs) {
 		if (thumb.get() != _paintedAbove) {
-			thumb->paintInAlbum(p, left, top, shrink, moveProgress, ms);
+			thumb->paintInAlbum(p, left, top, shrink, moveProgress);
 		}
 	}
 	if (_paintedAbove) {
-		_paintedAbove->paintInAlbum(p, left, top, shrink, moveProgress, ms);
+		_paintedAbove->paintInAlbum(p, left, top, shrink, moveProgress);
 	}
 }
 

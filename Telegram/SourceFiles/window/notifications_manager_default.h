@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #pragma once
 
 #include "window/notifications_manager.h"
+#include "ui/effects/animations.h"
 #include "base/timer.h"
 
 namespace Ui {
@@ -92,7 +93,7 @@ private:
 	};
 	std::deque<QueuedNotification> _queuedNotifications;
 
-	Animation _demoMasterOpacity;
+	Ui::Animations::Simple _demoMasterOpacity;
 
 	mutable QPixmap _hiddenUserpicPlaceholder;
 
@@ -115,7 +116,7 @@ public:
 	void updateOpacity();
 	void changeShift(int top);
 	int currentShift() const {
-		return a_shift.current();
+		return _shift.current();
 	}
 	void updatePosition(QPoint startPosition, Direction shiftDirection);
 	void addToHeight(int add);
@@ -139,19 +140,19 @@ private:
 	void destroyDelayed();
 	void moveByShift();
 	void hideAnimated(float64 duration, const anim::transition &func);
-	void step_shift(float64 ms, bool timer);
+	bool shiftAnimationCallback(crl::time now);
 
 	Manager *_manager = nullptr;
 
 	bool _hiding = false;
 	bool _deleted = false;
 	base::binary_guard _hidingDelayed;
-	Animation _a_opacity;
+	Ui::Animations::Simple _a_opacity;
 
 	QPoint _startPosition;
 	Direction _direction;
-	anim::value a_shift;
-	BasicAnimation _a_shift;
+	anim::value _shift;
+	Ui::Animations::Basic _shiftAnimation;
 
 };
 
@@ -213,7 +214,7 @@ private:
 
 	bool _hideReplyButton = false;
 	bool _actionsVisible = false;
-	Animation a_actionsOpacity;
+	Ui::Animations::Simple a_actionsOpacity;
 	QPixmap _buttonsCache;
 
 	crl::time _started;

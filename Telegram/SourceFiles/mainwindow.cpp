@@ -106,7 +106,14 @@ void MainWindow::initHook() {
 	Platform::MainWindow::initHook();
 
 	QCoreApplication::instance()->installEventFilter(this);
-	connect(windowHandle(), &QWindow::activeChanged, this, [this] { checkHistoryActivation(); }, Qt::QueuedConnection);
+
+	// Non-queued activeChanged handlers must use QtSignalProducer.
+	connect(
+		windowHandle(),
+		&QWindow::activeChanged,
+		this,
+		[=] { checkHistoryActivation(); },
+		Qt::QueuedConnection);
 }
 
 void MainWindow::firstShow() {
@@ -668,9 +675,13 @@ void MainWindow::showFromTray(QSystemTrayIcon::ActivationReason reason) {
 	}
 }
 
-void MainWindow::toggleTray(QSystemTrayIcon::ActivationReason reason) {
+void MainWindow::handleTrayIconActication(
+		QSystemTrayIcon::ActivationReason reason) {
 	updateIsActive(0);
-	if ((cPlatform() == dbipMac || cPlatform() == dbipMacOld) && isActive()) return;
+	if ((cPlatform() == dbipMac || cPlatform() == dbipMacOld)
+		&& isActive()) {
+		return;
+	}
 	if (reason == QSystemTrayIcon::Context) {
 		updateTrayMenu(true);
 		QTimer::singleShot(1, this, SLOT(psShowTrayMenu()));

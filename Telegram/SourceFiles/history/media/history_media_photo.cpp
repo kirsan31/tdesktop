@@ -164,7 +164,7 @@ void HistoryPhoto::draw(Painter &p, const QRect &r, TextSelection selection, crl
 			_animation->radial.start(_data->progress());
 		}
 	}
-	bool radial = isRadialAnimation(ms);
+	const auto radial = isRadialAnimation();
 
 	auto rthumb = rtlrect(paintx, painty, paintw, painth, width());
 	if (_serviceWidth > 0) {
@@ -224,8 +224,8 @@ void HistoryPhoto::draw(Painter &p, const QRect &r, TextSelection selection, crl
 		p.setPen(Qt::NoPen);
 		if (selected) {
 			p.setBrush(st::msgDateImgBgSelected);
-		} else if (isThumbAnimation(ms)) {
-			auto over = _animation->a_thumbOver.current();
+		} else if (isThumbAnimation()) {
+			auto over = _animation->a_thumbOver.value(1.);
 			p.setBrush(anim::brush(st::msgDateImgBg, st::msgDateImgBgOver, over));
 		} else {
 			auto over = ClickHandler::showAsActive(_data->loading() ? _cancell : _savel);
@@ -240,16 +240,16 @@ void HistoryPhoto::draw(Painter &p, const QRect &r, TextSelection selection, crl
 		}
 
 		p.setOpacity(radialOpacity);
-		auto icon = ([radial, this, selected]() -> const style::icon* {
+		auto icon = [&]() -> const style::icon* {
 			if (radial || _data->loading()) {
 				if (_data->uploading()
-					|| !_data->large()->location().isNull()) {
+					|| _data->large()->location().valid()) {
 					return &(selected ? st::historyFileThumbCancelSelected : st::historyFileThumbCancel);
 				}
 				return nullptr;
 			}
 			return &(selected ? st::historyFileThumbDownloadSelected : st::historyFileThumbDownload);
-		})();
+		}();
 		if (icon) {
 			icon->paintInCenter(p, inner);
 		}
@@ -311,7 +311,7 @@ TextState HistoryPhoto::textState(QPoint point, StateRequest request) const {
 		} else if (_data->loaded()) {
 			result.link = _openl;
 		} else if (_data->loading()) {
-			if (!_data->large()->location().isNull()) {
+			if (_data->large()->location().valid()) {
 				result.link = _cancell;
 			}
 		} else {
@@ -365,7 +365,7 @@ void HistoryPhoto::drawGrouped(
 			_animation->radial.start(_data->progress());
 		}
 	}
-	const auto radial = isRadialAnimation(ms);
+	const auto radial = isRadialAnimation();
 
 	if (!bubble) {
 //		App::roundShadow(p, 0, 0, paintw, painth, selected ? st::msgInShadowSelected : st::msgInShadow, selected ? InSelectedShadowCorners : InShadowCorners);
@@ -395,8 +395,8 @@ void HistoryPhoto::drawGrouped(
 		p.setPen(Qt::NoPen);
 		if (selected) {
 			p.setBrush(st::msgDateImgBgSelected);
-		} else if (isThumbAnimation(ms)) {
-			auto over = _animation->a_thumbOver.current();
+		} else if (isThumbAnimation()) {
+			auto over = _animation->a_thumbOver.value(1.);
 			p.setBrush(anim::brush(st::msgDateImgBg, st::msgDateImgBgOver, over));
 		} else {
 			auto over = ClickHandler::showAsActive(_data->loading() ? _cancell : _savel);
@@ -414,7 +414,8 @@ void HistoryPhoto::drawGrouped(
 			if (_data->waitingForAlbum()) {
 				return &(selected ? st::historyFileThumbWaitingSelected : st::historyFileThumbWaiting);
 			} else if (radial || _data->loading()) {
-				if (_data->uploading() || !_data->large()->location().isNull()) {
+				if (_data->uploading()
+					|| _data->large()->location().valid()) {
 					return &(selected ? st::historyFileThumbCancelSelected : st::historyFileThumbCancel);
 				}
 				return nullptr;
@@ -459,9 +460,9 @@ TextState HistoryPhoto::getStateGrouped(
 		: _data->loaded()
 		? _openl
 		: _data->loading()
-		? (_data->large()->location().isNull()
-			? ClickHandlerPtr()
-			: _cancell)
+		? (_data->large()->location().valid()
+			? _cancell
+			: nullptr)
 		: _savel);
 }
 
@@ -534,8 +535,8 @@ void HistoryPhoto::validateGroupedCache(
 	*cache = image->pixNoCache(_realParent->fullId(), pixWidth, pixHeight, options, width, height);
 }
 
-TextWithEntities HistoryPhoto::selectedText(TextSelection selection) const {
-	return _caption.originalTextWithEntities(selection, ExpandLinksAll);
+TextForMimeData HistoryPhoto::selectedText(TextSelection selection) const {
+	return _caption.toTextForMimeData(selection);
 }
 
 bool HistoryPhoto::needsBubble() const {

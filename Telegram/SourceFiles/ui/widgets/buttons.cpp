@@ -117,9 +117,9 @@ void RippleButton::setForceRippled(
 	update();
 }
 
-void RippleButton::paintRipple(QPainter &p, int x, int y, crl::time ms, const QColor *colorOverride) {
+void RippleButton::paintRipple(QPainter &p, int x, int y, const QColor *colorOverride) {
 	if (_ripple) {
-		_ripple->paint(p, x, y, width(), ms, colorOverride);
+		_ripple->paint(p, x, y, width(), colorOverride);
 		if (_ripple->empty()) {
 			_ripple.reset();
 		}
@@ -207,7 +207,7 @@ void FlatButton::paintEvent(QPaintEvent *e) {
 	QRect r(0, height() - _st.height, width(), _st.height);
 	p.fillRect(r, isOver() ? _st.overBgColor : _st.bgColor);
 
-	paintRipple(p, 0, 0, crl::now());
+	paintRipple(p, 0, 0);
 
 	p.setFont(isOver() ? _st.overFont : _st.font);
 	p.setRenderHint(QPainter::TextAntialiasing);
@@ -255,12 +255,6 @@ void RoundButton::setWidthChangedCallback(Fn<void()> callback) {
 		});
 	}
 	_numbers->setWidthChangedCallback(std::move(callback));
-}
-
-void RoundButton::stepNumbersAnimation(crl::time ms) {
-	if (_numbers) {
-		_numbers->stepAnimation(ms);
-	}
 }
 
 void RoundButton::finishNumbersAnimation() {
@@ -357,8 +351,7 @@ void RoundButton::paintEvent(QPaintEvent *e) {
 		drawRect(_st.textBgOver);
 	}
 
-	auto ms = crl::now();
-	paintRipple(p, rounded.x(), rounded.y(), ms);
+	paintRipple(p, rounded.x(), rounded.y());
 
 	p.setFont(_st.font);
 	const auto textTop = _st.padding.top() + _st.textTop;
@@ -428,12 +421,10 @@ void IconButton::setRippleColorOverride(const style::color *colorOverride) {
 void IconButton::paintEvent(QPaintEvent *e) {
 	Painter p(this);
 
-	auto ms = crl::now();
-
-	paintRipple(p, _st.rippleAreaPosition.x(), _st.rippleAreaPosition.y(), ms, _rippleColorOverride ? &(*_rippleColorOverride)->c : nullptr);
+	paintRipple(p, _st.rippleAreaPosition.x(), _st.rippleAreaPosition.y(), _rippleColorOverride ? &(*_rippleColorOverride)->c : nullptr);
 
 	auto down = isDown();
-	auto overIconOpacity = (down || forceRippled()) ? 1. : _a_over.current(crl::now(), isOver() ? 1. : 0.);
+	auto overIconOpacity = (down || forceRippled()) ? 1. : _a_over.value(isOver() ? 1. : 0.);
 	auto overIcon = [this] {
 		if (_iconOverrideOver) {
 			return _iconOverrideOver;
@@ -532,7 +523,7 @@ void LeftOutlineButton::paintEvent(QPaintEvent *e) {
 	auto down = isDown();
 	if (width() > _st.outlineWidth) {
 		p.fillRect(rtlrect(_st.outlineWidth, 0, width() - _st.outlineWidth, height(), width()), (over || down) ? _st.textBgOver : _st.textBg);
-		paintRipple(p, 0, 0, crl::now());
+		paintRipple(p, 0, 0);
 		p.fillRect(rtlrect(0, 0, _st.outlineWidth, height(), width()), (over || down) ? _st.outlineFgOver : _st.outlineFg);
 	}
 	p.setFont(_st.font);
@@ -542,14 +533,14 @@ void LeftOutlineButton::paintEvent(QPaintEvent *e) {
 
 CrossButton::CrossButton(QWidget *parent, const style::CrossButton &st) : RippleButton(parent, st.ripple)
 , _st(st)
-, _a_loading([=](crl::time duration) { return loadingCallback(duration); }) {
+, _loadingAnimation([=](crl::time now) { return loadingCallback(now); }) {
 	resize(_st.width, _st.height);
 	setCursor(style::cur_pointer);
 	setVisible(false);
 }
 
-bool CrossButton::loadingCallback(crl::time duration) {
-	const auto result = !stopLoadingAnimation(duration);
+bool CrossButton::loadingCallback(crl::time now) {
+	const auto result = !stopLoadingAnimation(now);
 	if (!result || !anim::Disabled()) {
 		update();
 	}
@@ -563,7 +554,7 @@ void CrossButton::toggle(bool visible, anim::type animated) {
 			if (isHidden()) {
 				setVisible(true);
 			}
-			_a_show.start(
+			_showAnimation.start(
 				[=] { animationCallback(); },
 				_shown ? 0. : 1.,
 				_shown ? 1. : 0.,
@@ -577,7 +568,7 @@ void CrossButton::toggle(bool visible, anim::type animated) {
 
 void CrossButton::animationCallback() {
 	update();
-	if (!_a_show.animating()) {
+	if (!_showAnimation.animating()) {
 		setVisible(_shown);
 	}
 }
@@ -585,18 +576,17 @@ void CrossButton::animationCallback() {
 void CrossButton::paintEvent(QPaintEvent *e) {
 	Painter p(this);
 
-	auto ms = crl::now();
 	auto over = isOver();
-	auto shown = _a_show.value(_shown ? 1. : 0.);
+	auto shown = _showAnimation.value(_shown ? 1. : 0.);
 	p.setOpacity(shown);
 
-	paintRipple(p, _st.crossPosition.x(), _st.crossPosition.y(), ms);
+	paintRipple(p, _st.crossPosition.x(), _st.crossPosition.y());
 
 	auto loading = 0.;
-	if (_a_loading.animating()) {
-		const auto duration = (ms - _a_loading.started());
-		if (stopLoadingAnimation(duration)) {
-			_a_loading.stop();
+	if (_loadingAnimation.animating()) {
+		const auto now = crl::now();
+		if (stopLoadingAnimation(now)) {
+			_loadingAnimation.stop();
 		} else if (anim::Disabled()) {
 			CrossAnimation::paintStaticLoading(
 				p,
@@ -608,8 +598,8 @@ void CrossButton::paintEvent(QPaintEvent *e) {
 				shown);
 			return;
 		} else {
-			loading = (duration % _st.loadingPeriod)
-				/ float64(_st.loadingPeriod);
+			loading = ((now - _loadingAnimation.started())
+				% _st.loadingPeriod) / float64(_st.loadingPeriod);
 		}
 	}
 	CrossAnimation::paint(
@@ -623,13 +613,14 @@ void CrossButton::paintEvent(QPaintEvent *e) {
 		loading);
 }
 
-bool CrossButton::stopLoadingAnimation(crl::time duration) {
+bool CrossButton::stopLoadingAnimation(crl::time now) {
 	if (!_loadingStopMs) {
 		return false;
 	}
-	const auto stopPeriod = (_loadingStopMs - _a_loading.started())
+	const auto stopPeriod = (_loadingStopMs - _loadingAnimation.started())
 		/ _st.loadingPeriod;
-	const auto currentPeriod = duration / _st.loadingPeriod;
+	const auto currentPeriod = (now - _loadingAnimation.started())
+		/ _st.loadingPeriod;
 	if (currentPeriod != stopPeriod) {
 		Assert(currentPeriod > stopPeriod);
 		return true;
@@ -640,13 +631,14 @@ bool CrossButton::stopLoadingAnimation(crl::time duration) {
 void CrossButton::setLoadingAnimation(bool enabled) {
 	if (enabled) {
 		_loadingStopMs = 0;
-		if (!_a_loading.animating()) {
-			_a_loading.start();
+		if (!_loadingAnimation.animating()) {
+			_loadingAnimation.start();
 		}
-	} else if (_a_loading.animating()) {
+	} else if (_loadingAnimation.animating()) {
 		_loadingStopMs = crl::now();
-		if (!((_loadingStopMs - _a_loading.started()) % _st.loadingPeriod)) {
-			_a_loading.stop();
+		if (!((_loadingStopMs - _loadingAnimation.started())
+			% _st.loadingPeriod)) {
+			_loadingAnimation.stop();
 		}
 	}
 	if (anim::Disabled()) {

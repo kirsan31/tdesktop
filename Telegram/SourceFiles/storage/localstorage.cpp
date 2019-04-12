@@ -508,10 +508,10 @@ enum { // Local Storage Keys
 	lskUserMap = 0x00,
 	lskDraft = 0x01, // data: PeerId peer
 	lskDraftPosition = 0x02, // data: PeerId peer
-	lskImages = 0x03, // data: StorageKey location
+	lskLegacyImages = 0x03, // legacy
 	lskLocations = 0x04, // no data
-	lskStickerImages = 0x05, // data: StorageKey location
-	lskAudios = 0x06, // data: StorageKey location
+	lskLegacyStickerImages = 0x05, // legacy
+	lskLegacyAudios = 0x06, // legacy
 	lskRecentStickersOld = 0x07, // no data
 	lskBackgroundOld = 0x08, // no data
 	lskUserSettings = 0x09, // no data
@@ -2332,9 +2332,9 @@ ReadMapState _readMap(const QByteArray &pass) {
 				draftCursorsMap.insert(p, key);
 			}
 		} break;
-		case lskImages:
-		case lskStickerImages:
-		case lskAudios: {
+		case lskLegacyImages:
+		case lskLegacyStickerImages:
+		case lskLegacyAudios: {
 			quint32 count = 0;
 			map.stream >> count;
 			for (quint32 i = 0; i < count; ++i) {
@@ -3188,30 +3188,6 @@ FileLocation readFileLocation(MediaKey location, bool check) {
 	return FileLocation();
 }
 
-qint32 _storageImageSize(qint32 rawlen) {
-	// fulllen + storagekey + type + len + data
-	qint32 result = sizeof(uint32) + sizeof(quint64) * 2 + sizeof(quint32) + sizeof(quint32) + rawlen;
-	if (result & 0x0F) result += 0x10 - (result & 0x0F);
-	result += tdfMagicLen + sizeof(qint32) + sizeof(quint32) + 0x10 + 0x10; // magic + version + len of encrypted + part of sha1 + md5
-	return result;
-}
-
-qint32 _storageStickerSize(qint32 rawlen) {
-	// fulllen + storagekey + len + data
-	qint32 result = sizeof(uint32) + sizeof(quint64) * 2 + sizeof(quint32) + rawlen;
-	if (result & 0x0F) result += 0x10 - (result & 0x0F);
-	result += tdfMagicLen + sizeof(qint32) + sizeof(quint32) + 0x10 + 0x10; // magic + version + len of encrypted + part of sha1 + md5
-	return result;
-}
-
-qint32 _storageAudioSize(qint32 rawlen) {
-	// fulllen + storagekey + len + data
-	qint32 result = sizeof(uint32) + sizeof(quint64) * 2 + sizeof(quint32) + rawlen;
-	if (result & 0x0F) result += 0x10 - (result & 0x0F);
-	result += tdfMagicLen + sizeof(qint32) + sizeof(quint32) + 0x10 + 0x10; // magic + version + len of encrypted + part of sha1 + md5
-	return result;
-}
-
 Storage::EncryptionKey cacheKey() {
 	Expects(LocalKey != nullptr);
 
@@ -3507,8 +3483,7 @@ void _readStickerSets(FileKey &stickersKey, Stickers::Order *outOrder = nullptr,
 	qint32 version = 0;
 	stickers.stream >> versionTag >> version;
 	if (versionTag != kStickersVersionTag
-		|| version <= 0
-		|| version > kStickersSerializeVersion) {
+		|| version != kStickersSerializeVersion) {
 		// Old data, without sticker set thumbnails.
 		return failed();
 	}
@@ -3520,6 +3495,8 @@ void _readStickerSets(FileKey &stickersKey, Stickers::Order *outOrder = nullptr,
 		return failed();
 	}
 	for (auto i = 0; i != count; ++i) {
+		using LocationType = StorageFileLocation::Type;
+
 		quint64 setId = 0, setAccess = 0;
 		QString setTitle, setShortName;
 		qint32 scnt = 0;
@@ -3538,11 +3515,19 @@ void _readStickerSets(FileKey &stickersKey, Stickers::Order *outOrder = nullptr,
 			>> setHash
 			>> setFlagsValue
 			>> setInstallDate;
-		setThumbnail = Serialize::readStorageImageLocation(
+		const auto thumbnail = Serialize::readStorageImageLocation(
 			stickers.version,
 			stickers.stream);
-		if (!_checkStreamStatus(stickers.stream)) {
+		if (!thumbnail || !_checkStreamStatus(stickers.stream)) {
 			return failed();
+		} else if (thumbnail->valid()
+			&& thumbnail->type() == LocationType::Legacy) {
+			setThumbnail = thumbnail->convertToModern(
+				LocationType::StickerSetThumb,
+				setId,
+				setAccess);
+		} else {
+			setThumbnail = *thumbnail;
 		}
 
 		setFlags = MTPDstickerSet::Flags::from_raw(setFlagsValue);
@@ -3575,7 +3560,7 @@ void _readStickerSets(FileKey &stickersKey, Stickers::Order *outOrder = nullptr,
 				setHash,
 				MTPDstickerSet::Flags(setFlags),
 				setInstallDate,
-				setThumbnail.isNull() ? ImagePtr() : Images::Create(setThumbnail)));
+				Images::Create(setThumbnail)));
 		}
 		auto &set = it.value();
 		auto inputSet = MTP_inputStickerSetID(MTP_long(set.id), MTP_long(set.access));
@@ -4024,6 +4009,11 @@ void readSavedGifs() {
 	}
 
 	auto &saved = Auth().data().savedGifsRef();
+	const auto failed = [&] {
+		clearKey(_savedGifsKey);
+		_savedGifsKey = 0;
+		saved.clear();
+	};
 	saved.clear();
 
 	quint32 cnt;
@@ -4032,7 +4022,11 @@ void readSavedGifs() {
 	OrderedSet<DocumentId> read;
 	for (uint32 i = 0; i < cnt; ++i) {
 		auto document = Serialize::Document::readFromStream(gifs.version, gifs.stream);
-		if (!document || !document->isGifv()) continue;
+		if (!_checkStreamStatus(gifs.stream)) {
+			return failed();
+		} else if (!document || !document->isGifv()) {
+			continue;
+		}
 
 		if (read.contains(document->id)) continue;
 		read.insert(document->id);

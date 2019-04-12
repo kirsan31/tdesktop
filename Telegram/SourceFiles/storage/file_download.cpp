@@ -9,6 +9,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "data/data_document.h"
 #include "data/data_session.h"
+#include "data/data_file_origin.h"
 #include "mainwidget.h"
 #include "mainwindow.h"
 #include "core/application.h"
@@ -420,9 +421,7 @@ void FileLoader::start(bool loadFirst, bool prior) {
 
 void FileLoader::loadLocal(const Storage::Cache::Key &key) {
 	const auto readImage = (_locationType != AudioFileLocation);
-	auto [first, second] = base::make_binary_guard();
-	_localLoading = std::move(first);
-	auto done = [=, guard = std::move(second)](
+	auto done = [=, guard = _localLoading.make_guard()](
 			QByteArray &&value,
 			QImage &&image,
 			QByteArray &&format) mutable {
@@ -526,36 +525,7 @@ void FileLoader::startLoading(bool loadFirst, bool prior) {
 }
 
 mtpFileLoader::mtpFileLoader(
-	not_null<StorageImageLocation*> location,
-	Data::FileOrigin origin,
-	int32 size,
-	LoadFromCloudSetting fromCloud,
-	bool autoLoading,
-	uint8 cacheTag)
-: FileLoader(
-	QString(),
-	size,
-	UnknownFileLocation,
-	LoadToCacheAsWell,
-	fromCloud,
-	autoLoading,
-	cacheTag)
-, _dcId(location->dc())
-, _location(location)
-, _origin(origin) {
-	auto shiftedDcId = MTP::downloadDcId(_dcId, 0);
-	auto i = queues.find(shiftedDcId);
-	if (i == queues.cend()) {
-		i = queues.insert(shiftedDcId, FileLoaderQueue(kMaxFileQueries));
-	}
-	_queue = &i.value();
-}
-
-mtpFileLoader::mtpFileLoader(
-	int32 dc,
-	uint64 id,
-	uint64 accessHash,
-	const QByteArray &fileReference,
+	const StorageFileLocation &location,
 	Data::FileOrigin origin,
 	LocationType type,
 	const QString &to,
@@ -572,12 +542,9 @@ mtpFileLoader::mtpFileLoader(
 	fromCloud,
 	autoLoading,
 	cacheTag)
-, _dcId(dc)
-, _id(id)
-, _accessHash(accessHash)
-, _fileReference(fileReference)
+, _location(location)
 , _origin(origin) {
-	auto shiftedDcId = MTP::downloadDcId(_dcId, 0);
+	auto shiftedDcId = MTP::downloadDcId(dcId(), 0);
 	auto i = queues.find(shiftedDcId);
 	if (i == queues.cend()) {
 		i = queues.insert(shiftedDcId, FileLoaderQueue(kMaxFileQueries));
@@ -586,7 +553,7 @@ mtpFileLoader::mtpFileLoader(
 }
 
 mtpFileLoader::mtpFileLoader(
-	const WebFileLocation *location,
+	const WebFileLocation &location,
 	int32 size,
 	LoadFromCloudSetting fromCloud,
 	bool autoLoading,
@@ -599,9 +566,8 @@ mtpFileLoader::mtpFileLoader(
 	fromCloud,
 	autoLoading,
 	cacheTag)
-, _dcId(location->dc())
-, _urlLocation(location) {
-	auto shiftedDcId = MTP::downloadDcId(_dcId, 0);
+, _location(location) {
+	auto shiftedDcId = MTP::downloadDcId(dcId(), 0);
 	auto i = queues.find(shiftedDcId);
 	if (i == queues.cend()) {
 		i = queues.insert(shiftedDcId, FileLoaderQueue(kMaxFileQueries));
@@ -610,7 +576,7 @@ mtpFileLoader::mtpFileLoader(
 }
 
 mtpFileLoader::mtpFileLoader(
-	const GeoPointLocation *location,
+	const GeoPointLocation &location,
 	int32 size,
 	LoadFromCloudSetting fromCloud,
 	bool autoLoading,
@@ -623,9 +589,8 @@ mtpFileLoader::mtpFileLoader(
 	fromCloud,
 	autoLoading,
 	cacheTag)
-, _dcId(Global::WebFileDcId())
-, _geoLocation(location) {
-	auto shiftedDcId = MTP::downloadDcId(_dcId, 0);
+, _location(location) {
+	auto shiftedDcId = MTP::downloadDcId(dcId(), 0);
 	auto i = queues.find(shiftedDcId);
 	if (i == queues.cend()) {
 		i = queues.insert(shiftedDcId, FileLoaderQueue(kMaxFileQueries));
@@ -634,36 +599,34 @@ mtpFileLoader::mtpFileLoader(
 }
 
 int32 mtpFileLoader::currentOffset(bool includeSkipped) const {
-	return (_fileIsOpen ? _file.size() : _data.size()) - (includeSkipped ? 0 : _skippedBytes);
+	return (_fileIsOpen ? _file.size() : _data.size())
+		- (includeSkipped ? 0 : _skippedBytes);
 }
 
 Data::FileOrigin mtpFileLoader::fileOrigin() const {
 	return _origin;
 }
 
+uint64 mtpFileLoader::objId() const {
+	if (const auto storage = base::get_if<StorageFileLocation>(&_location)) {
+		return storage->objectId();
+	}
+	return 0;
+}
+
 void mtpFileLoader::refreshFileReferenceFrom(
 		const Data::UpdatedFileReferences &updates,
 		int requestId,
 		const QByteArray &current) {
-	const auto updated = [&] {
-		if (_location) {
-			const auto i = updates.data.find(Data::SimpleFileLocationId(
-				_location->volume(),
-				_location->dc(),
-				_location->local()));
-			return (i == end(updates.data)) ? QByteArray() : i->second;
+	if (const auto storage = base::get_if<StorageFileLocation>(&_location)) {
+		storage->refreshFileReference(updates);
+		if (storage->fileReference() == current) {
+			cancel(true);
+			return;
 		}
-		const auto i = updates.data.find(_id);
-		return (i == end(updates.data)) ? QByteArray() : i->second;
-	}();
-	if (updated.isEmpty() || updated == current) {
+	} else {
 		cancel(true);
 		return;
-	}
-	if (_location) {
-		_location->refreshFileReference(updated);
-	} else {
-		_fileReference = updated;
 	}
 	const auto offset = finishSentRequestGetOffset(requestId);
 	makeRequest(offset);
@@ -679,6 +642,13 @@ bool mtpFileLoader::loadPart() {
 	makeRequest(_nextRequestOffset);
 	_nextRequestOffset += partSize();
 	return true;
+}
+
+MTP::DcId mtpFileLoader::dcId() const {
+	if (const auto storage = base::get_if<StorageFileLocation>(&_location)) {
+		return storage->dcId();
+	}
+	return Global::WebFileDcId();
 }
 
 int mtpFileLoader::partSize() const {
@@ -699,95 +669,82 @@ int mtpFileLoader::partSize() const {
 
 mtpFileLoader::RequestData mtpFileLoader::prepareRequest(int offset) const {
 	auto result = RequestData();
-	result.dcId = _cdnDcId ? _cdnDcId : _dcId;
-	result.dcIndex = _size ? _downloader->chooseDcIndexForRequest(result.dcId) : 0;
+	result.dcId = _cdnDcId ? _cdnDcId : dcId();
+	result.dcIndex = _size
+		? _downloader->chooseDcIndexForRequest(result.dcId)
+		: 0;
 	result.offset = offset;
 	return result;
+}
+
+mtpRequestId mtpFileLoader::sendRequest(const RequestData &requestData) {
+	const auto offset = requestData.offset;
+	const auto limit = partSize();
+	const auto shiftedDcId = MTP::downloadDcId(
+		requestData.dcId,
+		requestData.dcIndex);
+	if (_cdnDcId) {
+		Assert(requestData.dcId == _cdnDcId);
+		return MTP::send(
+			MTPupload_GetCdnFile(
+				MTP_bytes(_cdnToken),
+				MTP_int(offset),
+				MTP_int(limit)),
+			rpcDone(&mtpFileLoader::cdnPartLoaded),
+			rpcFail(&mtpFileLoader::cdnPartFailed),
+			shiftedDcId,
+			50);
+	}
+	return _location.match([&](const WebFileLocation &location) {
+		return MTP::send(
+			MTPupload_GetWebFile(
+				MTP_inputWebFileLocation(
+					MTP_bytes(location.url()),
+					MTP_long(location.accessHash())),
+				MTP_int(offset),
+				MTP_int(limit)),
+			rpcDone(&mtpFileLoader::webPartLoaded),
+			rpcFail(&mtpFileLoader::partFailed),
+			shiftedDcId,
+			50);
+	}, [&](const GeoPointLocation &location) {
+		return MTP::send(
+			MTPupload_GetWebFile(
+				MTP_inputWebFileGeoPointLocation(
+					MTP_inputGeoPoint(
+						MTP_double(location.lat),
+						MTP_double(location.lon)),
+					MTP_long(location.access),
+					MTP_int(location.width),
+					MTP_int(location.height),
+					MTP_int(location.zoom),
+					MTP_int(location.scale)),
+				MTP_int(offset),
+				MTP_int(limit)),
+			rpcDone(&mtpFileLoader::webPartLoaded),
+			rpcFail(&mtpFileLoader::partFailed),
+			shiftedDcId,
+			50);
+	}, [&](const StorageFileLocation &location) {
+		return MTP::send(
+			MTPupload_GetFile(
+				location.tl(Auth().userId()),
+				MTP_int(offset),
+				MTP_int(limit)),
+			rpcDone(&mtpFileLoader::normalPartLoaded),
+			rpcFail(
+				&mtpFileLoader::normalPartFailed,
+				location.fileReference()),
+			shiftedDcId,
+			50);
+	});
 }
 
 void mtpFileLoader::makeRequest(int offset) {
 	Expects(!_finished);
 
 	auto requestData = prepareRequest(offset);
-	auto send = [this, &requestData] {
-		auto offset = requestData.offset;
-		auto limit = partSize();
-		auto shiftedDcId = MTP::downloadDcId(requestData.dcId, requestData.dcIndex);
-		if (_cdnDcId) {
-			Assert(requestData.dcId == _cdnDcId);
-			return MTP::send(
-				MTPupload_GetCdnFile(
-					MTP_bytes(_cdnToken),
-					MTP_int(offset),
-					MTP_int(limit)),
-				rpcDone(&mtpFileLoader::cdnPartLoaded),
-				rpcFail(&mtpFileLoader::cdnPartFailed),
-				shiftedDcId,
-				50);
-		} else if (_urlLocation) {
-			Assert(requestData.dcId == _dcId);
-			return MTP::send(
-				MTPupload_GetWebFile(
-					MTP_inputWebFileLocation(
-						MTP_bytes(_urlLocation->url()),
-						MTP_long(_urlLocation->accessHash())),
-					MTP_int(offset),
-					MTP_int(limit)),
-				rpcDone(&mtpFileLoader::webPartLoaded),
-				rpcFail(&mtpFileLoader::partFailed),
-				shiftedDcId,
-				50);
-		} else if (_geoLocation) {
-			Assert(requestData.dcId == _dcId);
-			return MTP::send(
-				MTPupload_GetWebFile(
-					MTP_inputWebFileGeoPointLocation(
-						MTP_inputGeoPoint(
-							MTP_double(_geoLocation->lat),
-							MTP_double(_geoLocation->lon)),
-						MTP_long(_geoLocation->access),
-						MTP_int(_geoLocation->width),
-						MTP_int(_geoLocation->height),
-						MTP_int(_geoLocation->zoom),
-						MTP_int(_geoLocation->scale)),
-					MTP_int(offset),
-					MTP_int(limit)),
-				rpcDone(&mtpFileLoader::webPartLoaded),
-				rpcFail(&mtpFileLoader::partFailed),
-				shiftedDcId,
-				50);
-		} else {
-			Assert(requestData.dcId == _dcId);
-			return MTP::send(
-				MTPupload_GetFile(
-					computeLocation(),
-					MTP_int(offset),
-					MTP_int(limit)),
-				rpcDone(&mtpFileLoader::normalPartLoaded),
-				rpcFail(&mtpFileLoader::partFailed),
-				shiftedDcId,
-				50);
-		}
-	};
-	placeSentRequest(send(), requestData);
-}
-
-MTPInputFileLocation mtpFileLoader::computeLocation() const {
-	if (_location) {
-		return MTP_inputFileLocation(
-			MTP_long(_location->volume()),
-			MTP_int(_location->local()),
-			MTP_long(_location->secret()),
-			MTP_bytes(_location->fileReference()));
-	} else if (_locationType == SecureFileLocation) {
-		return MTP_inputSecureFileLocation(
-			MTP_long(_id),
-			MTP_long(_accessHash));
-	}
-	return MTP_inputDocumentFileLocation(
-		MTP_long(_id),
-		MTP_long(_accessHash),
-		MTP_bytes(_fileReference));
+	placeSentRequest(sendRequest(requestData), requestData);
 }
 
 void mtpFileLoader::requestMoreCdnFileHashes() {
@@ -799,10 +756,12 @@ void mtpFileLoader::requestMoreCdnFileHashes() {
 
 	auto offset = _cdnUncheckedParts.cbegin()->first;
 	auto requestData = RequestData();
-	requestData.dcId = _dcId;
+	requestData.dcId = dcId();
 	requestData.dcIndex = 0;
 	requestData.offset = offset;
-	auto shiftedDcId = MTP::downloadDcId(requestData.dcId, requestData.dcIndex);
+	auto shiftedDcId = MTP::downloadDcId(
+		requestData.dcId,
+		requestData.dcIndex);
 	auto requestId = _cdnHashesRequestId = MTP::send(
 		MTPupload_GetCdnFileHashes(
 			MTP_bytes(_cdnToken),
@@ -850,7 +809,7 @@ void mtpFileLoader::cdnPartLoaded(const MTPupload_CdnFile &result, mtpRequestId 
 	auto offset = finishSentRequestGetOffset(requestId);
 	if (result.type() == mtpc_upload_cdnFileReuploadNeeded) {
 		auto requestData = RequestData();
-		requestData.dcId = _dcId;
+		requestData.dcId = dcId();
 		requestData.dcIndex = 0;
 		requestData.offset = offset;
 		auto shiftedDcId = MTP::downloadDcId(requestData.dcId, requestData.dcIndex);
@@ -1051,10 +1010,10 @@ bool mtpFileLoader::feedPart(int offset, bytes::const_span buffer) {
 			if (_locationType != UnknownFileLocation
 				&& !_filename.isEmpty()) {
 				Local::writeFileLocation(
-					mediaKey(_locationType, _dcId, _id),
+					mediaKey(_locationType, dcId(), objId()),
 					FileLocation(_filename));
 			}
-			if (_urlLocation
+			if (_location.is<WebFileLocation>()
 				|| _locationType == UnknownFileLocation
 				|| _toCache == LoadToCacheAsWell) {
 				if (const auto key = cacheKey()) {
@@ -1081,7 +1040,8 @@ void mtpFileLoader::partLoaded(int offset, bytes::const_span buffer) {
 	}
 }
 
-bool mtpFileLoader::partFailed(
+bool mtpFileLoader::normalPartFailed(
+		QByteArray fileReference,
 		const RPCError &error,
 		mtpRequestId requestId) {
 	if (MTP::isDefaultHandledError(error)) {
@@ -1093,8 +1053,18 @@ bool mtpFileLoader::partFailed(
 			_origin,
 			this,
 			requestId,
-			_location ? _location->fileReference() : _fileReference);
+			fileReference);
 		return true;
+	}
+	return partFailed(error, requestId);
+}
+
+
+bool mtpFileLoader::partFailed(
+		const RPCError &error,
+		mtpRequestId requestId) {
+	if (MTP::isDefaultHandledError(error)) {
+		return false;
 	}
 	cancel(true);
 	return true;
@@ -1197,16 +1167,15 @@ void mtpFileLoader::changeCDNParams(
 }
 
 std::optional<Storage::Cache::Key> mtpFileLoader::cacheKey() const {
-	if (_urlLocation) {
-		return Data::WebDocumentCacheKey(*_urlLocation);
-	} else if (_geoLocation) {
-		return Data::GeoPointCacheKey(*_geoLocation);
-	} else if (_location) {
-		return Data::StorageCacheKey(*_location);
-	} else if (_toCache == LoadToCacheAsWell && _id != 0) {
-		return Data::DocumentCacheKey(_dcId, _id);
-	}
-	return std::nullopt;
+	return _location.match([&](const WebFileLocation &location) {
+		return std::make_optional(Data::WebDocumentCacheKey(location));
+	}, [&](const GeoPointLocation &location) {
+		return std::make_optional(Data::GeoPointCacheKey(location));
+	}, [&](const StorageFileLocation &location) {
+		return (_toCache == LoadToCacheAsWell)
+			? std::make_optional(location.cacheKey())
+			: std::nullopt;
+	});
 }
 
 mtpFileLoader::~mtpFileLoader() {

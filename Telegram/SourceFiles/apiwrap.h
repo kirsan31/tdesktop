@@ -76,6 +76,7 @@ public:
 		ChannelData *channel,
 		MsgId msgId,
 		RequestMessageDataCallback callback);
+	QString exportDirectMessageLink(not_null<HistoryItem*> item);
 
 	void requestContacts();
 	void requestDialogEntry(not_null<Data::Feed*> feed);
@@ -333,6 +334,13 @@ public:
 		SendMediaType type,
 		const SendOptions &options, const QString &caption = QString());
 
+	void editMedia(
+		Storage::PreparedList &&list,
+		SendMediaType type,
+		TextWithTags &&caption,
+		const SendOptions &options,
+		MsgId msgIdToEdit);
+
 	void sendUploadedPhoto(
 		FullMsgId localId,
 		const MTPInputFile &file,
@@ -342,6 +350,13 @@ public:
 		const MTPInputFile &file,
 		const std::optional<MTPInputFile> &thumb,
 		bool silent);
+	void editUploadedFile(
+		FullMsgId localId,
+		const MTPInputFile &file,
+		const std::optional<MTPInputFile> &thumb,
+		bool silent,
+		bool isDocument);
+
 	void cancelLocalItem(not_null<HistoryItem*> item);
 
 	struct MessageToSend {
@@ -418,7 +433,7 @@ public:
 	void sendPollVotes(
 		FullMsgId itemId,
 		const std::vector<QByteArray> &options);
-	void closePoll(FullMsgId itemId);
+	void closePoll(not_null<HistoryItem*> item);
 	void reloadPollResults(not_null<HistoryItem*> item);
 
 	~ApiWrap();
@@ -812,5 +827,7 @@ private:
 	rpl::event_stream<bool> _contactSignupSilentChanges;
 
 	mtpRequestId _attachedStickerSetsRequestId = 0;
+
+	base::flat_map<FullMsgId, QString> _unlikelyMessageLinks;
 
 };

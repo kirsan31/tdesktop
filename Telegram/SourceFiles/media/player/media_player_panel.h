@@ -9,6 +9,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "base/timer.h"
 #include "ui/rp_widget.h"
+#include "ui/effects/animations.h"
 #include "info/info_controller.h"
 
 namespace Window {
@@ -59,7 +60,6 @@ private:
 	void listHeightUpdated(int newHeight);
 	int emptyInnerHeight() const;
 	bool contentTooSmall() const;
-	void windowActiveChanged();
 
 	void ensureCreated();
 	void performDestroy();
@@ -90,7 +90,7 @@ private:
 	bool _hiding = false;
 
 	QPixmap _cache;
-	Animation _a_appearance;
+	Ui::Animations::Simple _a_appearance;
 
 	bool _ignoringEnterEvents = false;
 

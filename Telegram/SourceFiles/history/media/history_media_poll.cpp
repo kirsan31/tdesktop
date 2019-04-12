@@ -14,6 +14,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/view/history_view_cursor_state.h"
 #include "calls/calls_instance.h"
 #include "ui/text_options.h"
+#include "ui/effects/animations.h"
 #include "ui/effects/radial_animation.h"
 #include "ui/effects/ripple_animation.h"
 #include "data/data_media_types.h"
@@ -138,13 +139,14 @@ struct HistoryPoll::AnswerAnimation {
 
 struct HistoryPoll::AnswersAnimation {
 	std::vector<AnswerAnimation> data;
-	Animation progress;
+	Ui::Animations::Simple progress;
 };
 
 struct HistoryPoll::SendingAnimation {
+	template <typename Callback>
 	SendingAnimation(
 		const QByteArray &option,
-		AnimationCallbacks &&callbacks);
+		Callback &&callback);
 
 	QByteArray option;
 	Ui::InfiniteRadialAnimation animation;
@@ -167,18 +169,21 @@ struct HistoryPoll::Answer {
 	mutable std::unique_ptr<Ui::RippleAnimation> ripple;
 };
 
+template <typename Callback>
 HistoryPoll::SendingAnimation::SendingAnimation(
 	const QByteArray &option,
-	AnimationCallbacks &&callbacks)
+	Callback &&callback)
 : option(option)
-, animation(std::move(callbacks), st::historyPollRadialAnimation) {
+, animation(
+	std::forward<Callback>(callback),
+	st::historyPollRadialAnimation) {
 }
 
 HistoryPoll::Answer::Answer() : text(st::msgMinWidth / 2) {
 }
 
 void HistoryPoll::Answer::fillText(const PollAnswer &original) {
-	if (!text.isEmpty() && text.originalText() == original.text) {
+	if (!text.isEmpty() && text.toString() == original.text) {
 		return;
 	}
 	text.setText(
@@ -315,7 +320,7 @@ void HistoryPoll::updateTexts() {
 
 	const auto willStartAnimation = checkAnimationStart();
 
-	if (_question.originalText() != _poll->question) {
+	if (_question.toString() != _poll->question) {
 		_question.setText(
 			st::historyPollQuestionStyle,
 			_poll->question,
@@ -397,9 +402,7 @@ void HistoryPoll::checkSendingAnimation() const {
 	}
 	_sendingAnimation = std::make_unique<SendingAnimation>(
 		sending,
-		animation(
-			const_cast<HistoryPoll*>(this),
-			&HistoryPoll::step_radial));
+		[=] { radialAnimationCallback(); });
 	_sendingAnimation->animation.start();
 }
 
@@ -510,7 +513,7 @@ void HistoryPoll::draw(Painter &p, const QRect &r, TextSelection selection, crl:
 	tshift += st::msgDateFont->height + st::historyPollAnswersSkip;
 
 	const auto progress = _answersAnimation
-		? _answersAnimation->progress.current(ms, 1.)
+		? _answersAnimation->progress.value(1.)
 		: 1.;
 	if (progress == 1.) {
 		resetAnswersAnimation();
@@ -536,8 +539,7 @@ void HistoryPoll::draw(Painter &p, const QRect &r, TextSelection selection, crl:
 			tshift,
 			paintw,
 			width(),
-			selection,
-			ms);
+			selection);
 		tshift += height;
 	}
 	if (!_totalVotesLabel.isEmpty()) {
@@ -561,8 +563,8 @@ void HistoryPoll::resetAnswersAnimation() const {
 	}
 }
 
-void HistoryPoll::step_radial(crl::time ms, bool timer) {
-	if (timer && !anim::Disabled()) {
+void HistoryPoll::radialAnimationCallback() const {
+	if (!anim::Disabled()) {
 		history()->owner().requestViewRepaint(_parent);
 	}
 }
@@ -575,8 +577,7 @@ int HistoryPoll::paintAnswer(
 		int top,
 		int width,
 		int outerWidth,
-		TextSelection selection,
-		crl::time ms) const {
+		TextSelection selection) const {
 	const auto height = countAnswerHeight(answer, width);
 	const auto outbg = _parent->hasOutLayout();
 	const auto aleft = left + st::historyPollAnswerPadding.left();
@@ -586,7 +587,7 @@ int HistoryPoll::paintAnswer(
 
 	if (answer.ripple) {
 		p.setOpacity(st::historyPollRippleOpacity);
-		answer.ripple->paint(p, left - st::msgPadding.left(), top, outerWidth, ms);
+		answer.ripple->paint(p, left - st::msgPadding.left(), top, outerWidth);
 		if (answer.ripple->empty()) {
 			answer.ripple.reset();
 		}

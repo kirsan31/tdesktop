@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/widgets/labels.h"
 
 #include "ui/widgets/popup_menu.h"
+#include "chat_helpers/message_field.h" // SetClipboardText/MimeDataFromText
 #include "mainwindow.h"
 #include "lang/lang_keys.h"
 
@@ -226,10 +227,6 @@ void FlatLabel::setContextCopyText(const QString &copyText) {
 	_contextCopyText = copyText;
 }
 
-void FlatLabel::setExpandLinksMode(ExpandLinksMode mode) {
-	_contextExpandLinksMode = mode;
-}
-
 void FlatLabel::setBreakEverywhere(bool breakEverywhere) {
 	_breakEverywhere = breakEverywhere;
 }
@@ -366,7 +363,7 @@ Text::StateResult FlatLabel::dragActionFinish(const QPoint &p, Qt::MouseButton b
 
 #if defined Q_OS_LINUX32 || defined Q_OS_LINUX64
 	if (!_selection.empty()) {
-		QApplication::clipboard()->setText(_text.originalText(_selection, _contextExpandLinksMode), QClipboard::Selection);
+		SetClipboardText(_text.toTextForMimeData(_selection), QClipboard::Selection);
 	}
 #endif // Q_OS_LINUX32 || Q_OS_LINUX64
 
@@ -437,7 +434,7 @@ void FlatLabel::keyPressEvent(QKeyEvent *e) {
 	} else if (e->key() == Qt::Key_E && e->modifiers().testFlag(Qt::ControlModifier)) {
 		auto selection = _selection.empty() ? (_contextMenu ? _savedSelection : _selection) : _selection;
 		if (!selection.empty()) {
-			QApplication::clipboard()->setText(_text.originalText(selection, _contextExpandLinksMode), QClipboard::FindBuffer);
+			SetClipboardText(_text.toTextForMimeData(selection), QClipboard::FindBuffer);
 		}
 #endif // Q_OS_MAC
 	}
@@ -571,14 +568,14 @@ void FlatLabel::showContextMenu(QContextMenuEvent *e, ContextMenuReason reason) 
 }
 
 void FlatLabel::onCopySelectedText() {
-	auto selection = _selection.empty() ? (_contextMenu ? _savedSelection : _selection) : _selection;
+	const auto selection = _selection.empty() ? (_contextMenu ? _savedSelection : _selection) : _selection;
 	if (!selection.empty()) {
-		QApplication::clipboard()->setText(_text.originalText(selection, _contextExpandLinksMode));
+		SetClipboardText(_text.toTextForMimeData(selection));
 	}
 }
 
 void FlatLabel::onCopyContextText() {
-	QApplication::clipboard()->setText(_text.originalText({ 0, 0xFFFF }, _contextExpandLinksMode));
+	SetClipboardText(_text.toTextForMimeData());
 }
 
 void FlatLabel::onTouchSelect() {
@@ -603,18 +600,18 @@ void FlatLabel::onExecuteDrag() {
 		}
 	}
 
-	ClickHandlerPtr pressedHandler = ClickHandler::getPressed();
-	QString selectedText;
-	if (uponSelected) {
-		selectedText = _text.originalText(_selection, ExpandLinksAll);
-	} else if (pressedHandler) {
-		selectedText = pressedHandler->dragText();
-	}
-	if (!selectedText.isEmpty()) {
-		auto mimeData = new QMimeData();
-		mimeData->setText(selectedText);
+	const auto pressedHandler = ClickHandler::getPressed();
+	const auto selectedText = [&] {
+		if (uponSelected) {
+			return _text.toTextForMimeData(_selection);
+		} else if (pressedHandler) {
+			return TextForMimeData::Simple(pressedHandler->dragText());
+		}
+		return TextForMimeData();
+	}();
+	if (auto mimeData = MimeDataFromText(selectedText)) {
 		auto drag = new QDrag(App::wnd());
-		drag->setMimeData(mimeData);
+		drag->setMimeData(mimeData.release());
 		drag->exec(Qt::CopyAction);
 
 		// We don't receive mouseReleaseEvent when drag is finished.

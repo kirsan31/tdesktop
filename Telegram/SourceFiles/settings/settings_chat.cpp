@@ -58,7 +58,7 @@ private:
 	QRect radialRect() const;
 	void radialStart();
 	crl::time radialTimeShift() const;
-	void step_radial(crl::time ms, bool timer);
+	void radialAnimationCallback(crl::time now);
 
 	QPixmap _background;
 	object_ptr<Ui::LinkButton> _chooseFromGallery;
@@ -93,8 +93,7 @@ public:
 		Painter &p,
 		int left,
 		int top,
-		int outerWidth,
-		crl::time ms) override;
+		int outerWidth) override;
 	QImage prepareRippleMask() const override;
 	bool checkRippleStartPosition(QPoint position) const override;
 
@@ -114,7 +113,7 @@ BackgroundRow::BackgroundRow(QWidget *parent) : RpWidget(parent)
 	lang(lng_settings_bg_from_gallery),
 	st::settingsLink)
 , _chooseFromFile(this, lang(lng_settings_bg_from_file), st::settingsLink)
-, _radial(animation(this, &BackgroundRow::step_radial)) {
+, _radial([=](crl::time now) { radialAnimationCallback(now); }) {
 	updateImage();
 
 	_chooseFromGallery->addClickHandler([] {
@@ -139,13 +138,8 @@ BackgroundRow::BackgroundRow(QWidget *parent) : RpWidget(parent)
 void BackgroundRow::paintEvent(QPaintEvent *e) {
 	Painter p(this);
 
-	bool radial = false;
-	float64 radialOpacity = 0;
-	if (_radial.animating()) {
-		_radial.step(crl::now());
-		radial = _radial.animating();
-		radialOpacity = _radial.opacity();
-	}
+	const auto radial = _radial.animating();
+	const auto radialOpacity = radial ? _radial.opacity() : 0.;
 	if (radial) {
 		const auto backThumb = App::main()->newBackgroundThumb();
 		if (!backThumb) {
@@ -249,12 +243,12 @@ crl::time BackgroundRow::radialTimeShift() const {
 	return st::radialDuration;
 }
 
-void BackgroundRow::step_radial(crl::time ms, bool timer) {
+void BackgroundRow::radialAnimationCallback(crl::time now) {
 	const auto updated = _radial.update(
 		radialProgress(),
 		!radialLoading(),
-		ms + radialTimeShift());
-	if (timer && _radial.animating() && (!anim::Disabled() || updated)) {
+		now + radialTimeShift());
+	if (!anim::Disabled() || updated) {
 		rtlupdate(radialRect());
 	}
 }
@@ -324,8 +318,7 @@ void DefaultTheme::paint(
 		Painter &p,
 		int left,
 		int top,
-		int outerWidth,
-		crl::time ms) {
+		int outerWidth) {
 	const auto received = QRect(
 		st::settingsThemeBubblePosition,
 		st::settingsThemeBubbleSize);
@@ -352,8 +345,7 @@ void DefaultTheme::paint(
 		p,
 		(outerWidth - radio.width()) / 2,
 		getSize().height() - radio.height() - st::settingsThemeRadioBottom,
-		outerWidth,
-		crl::now());
+		outerWidth);
 }
 
 QImage DefaultTheme::prepareRippleMask() const {
@@ -804,7 +796,7 @@ void SetupDefaultThemes(not_null<Ui::VerticalLayout*> container) {
 			return Type(-1);
 		}
 		const auto path = Window::Theme::Background()->themeAbsolutePath();
-		for (const auto scheme : schemes) {
+		for (const auto &scheme : schemes) {
 			if (path == scheme.path) {
 				return scheme.type;
 			}

@@ -17,6 +17,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/media/history_media_web_page.h"
 #include "ui/widgets/popup_menu.h"
 #include "ui/image/image.h"
+#include "ui/toast/toast.h"
 #include "chat_helpers/message_field.h"
 #include "boxes/confirm_box.h"
 #include "boxes/sticker_set_box.h"
@@ -36,6 +37,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 namespace HistoryView {
 namespace {
+
+// If we can't cloud-export link for such time we export it locally.
+constexpr auto kExportLocalTimeout = crl::time(1000);
 
 void AddToggleGroupingAction(
 		not_null<Ui::PopupMenu*> menu,
@@ -183,14 +187,6 @@ void AddDocumentActions(
 			[=] { ShowInFolder(document); });
 	}
 	AddSaveDocumentAction(menu, contextId, document);
-}
-
-void CopyPostLink(FullMsgId itemId) {
-	if (const auto item = App::histItemById(itemId)) {
-		if (item->hasDirectLink()) {
-			QApplication::clipboard()->setText(item->directLink());
-		}
-	}
 }
 
 void AddPostLinkAction(
@@ -458,14 +454,14 @@ base::unique_qptr<Ui::PopupMenu> FillContextMenu(
 	const auto isVoiceLink = document ? document->isVoiceMessage() : false;
 	const auto isAudioLink = document ? document->isAudioFile() : false;
 	const auto hasSelection = !request.selectedItems.empty()
-		|| !request.selectedText.text.isEmpty();
+		|| !request.selectedText.empty();
 
 	if (request.overSelection) {
 		const auto text = lang(request.selectedItems.empty()
 			? lng_context_copy_selected
 			: lng_context_copy_selected_items);
 		result->addAction(text, [=] {
-			SetClipboardWithEntities(list->getSelectedText());
+			SetClipboardText(list->getSelectedText());
 		});
 	}
 
@@ -497,11 +493,11 @@ base::unique_qptr<Ui::PopupMenu> FillContextMenu(
 				if (const auto item = App::histItemById(itemId)) {
 					if (asGroup) {
 						if (const auto group = Auth().data().groups().find(item)) {
-							SetClipboardWithEntities(HistoryGroupText(group));
+							SetClipboardText(HistoryGroupText(group));
 							return;
 						}
 					}
-					SetClipboardWithEntities(HistoryItemText(item));
+					SetClipboardText(HistoryItemText(item));
 				}
 			});
 		}
@@ -512,12 +508,34 @@ base::unique_qptr<Ui::PopupMenu> FillContextMenu(
 	return result;
 }
 
+void CopyPostLink(FullMsgId itemId) {
+	const auto item = App::histItemById(itemId);
+	if (!item || !item->hasDirectLink()) {
+		return;
+	}
+	QApplication::clipboard()->setText(
+		item->history()->session().api().exportDirectMessageLink(item));
+
+	const auto channel = item->history()->peer->asChannel();
+	Assert(channel != nullptr);
+
+	Ui::Toast::Show(lang(channel->isPublic()
+		? lng_channel_public_link_copied
+		: lng_context_about_private_link));
+}
+
 void StopPoll(FullMsgId itemId) {
+	const auto stop = [=] {
+		Ui::hideLayer();
+		if (const auto item = App::histItemById(itemId)) {
+			item->history()->session().api().closePoll(item);
+		}
+	};
 	Ui::show(Box<ConfirmBox>(
 		lang(lng_polls_stop_warning),
 		lang(lng_polls_stop_sure),
 		lang(lng_cancel),
-		[=] { Ui::hideLayer(); Auth().api().closePoll(itemId); }));
+		stop));
 }
 
 } // namespace HistoryView

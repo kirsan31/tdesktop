@@ -89,6 +89,7 @@ public:
 
 	void refreshMedia(const MTPMessageMedia *media);
 	void refreshSentMedia(const MTPMessageMedia *media);
+	void returnSavedMedia() override;
 	void setMedia(const MTPMessageMedia &media);
 	static std::unique_ptr<Data::Media> CreateMedia(
 		not_null<HistoryMessage*> item,
@@ -122,7 +123,7 @@ public:
 
 	void setText(const TextWithEntities &textWithEntities) override;
 	TextWithEntities originalText() const override;
-	TextWithEntities clipboardText() const override;
+	TextForMimeData clipboardText() const override;
 	bool textHasLinks() const override;
 
 	int viewsCount() const override;
@@ -157,8 +158,6 @@ private:
 	// For an invoice button we replace the button text with a "Receipt" key.
 	// It should show the receipt for the payed invoice. Still let mobile apps do that.
 	void replaceBuyWithReceiptInMarkup();
-
-	void applyEditionToEmpty();
 
 	void setReplyMarkup(const MTPReplyMarkup *markup);
 

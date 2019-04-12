@@ -8,6 +8,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #pragma once
 
 #include "base/timer.h"
+#include "ui/effects/animations.h"
+#include "ui/rp_widget.h"
 
 namespace style {
 struct Tooltip;
@@ -26,15 +28,10 @@ public:
 
 };
 
-class Tooltip : public TWidget {
-	Q_OBJECT
-
+class Tooltip : public Ui::RpWidget {
 public:
 	static void Show(int32 delay, const AbstractTooltipShower *shower);
 	static void Hide();
-
-private slots:
-	void onWndActiveChanged();
 
 protected:
 	void paintEvent(QPaintEvent *e) override;
@@ -80,8 +77,8 @@ public:
 	}
 
 protected:
-	void resizeEvent(QResizeEvent *e);
-	void paintEvent(QPaintEvent *e);
+	void resizeEvent(QResizeEvent *e) override;
+	void paintEvent(QPaintEvent *e) override;
 
 private:
 	void animationCallback();
@@ -99,7 +96,7 @@ private:
 	RectParts _side = RectPart::Top | RectPart::Left;
 	QPixmap _arrow;
 
-	Animation _visibleAnimation;
+	Ui::Animations::Simple _visibleAnimation;
 	bool _visible = false;
 	Fn<void()> _hiddenCallback;
 	bool _useTransparency = true;

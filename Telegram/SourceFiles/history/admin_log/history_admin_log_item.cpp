@@ -28,7 +28,10 @@ TextWithEntities PrepareText(const QString &value, const QString &emptyValue) {
 	if (result.text.isEmpty()) {
 		result.text = emptyValue;
 		if (!emptyValue.isEmpty()) {
-			result.entities.push_back(EntityInText(EntityInTextItalic, 0, emptyValue.size()));
+			result.entities.push_back({
+				EntityType::Italic,
+				0,
+				emptyValue.size() });
 		}
 	} else {
 		TextUtilities::ParseEntities(result, TextParseLinks | TextParseMentions | TextParseHashtags | TextParseBotCommands);
@@ -101,40 +104,6 @@ TextWithEntities ExtractEditedText(const MTPMessage &message) {
 		? TextUtilities::EntitiesFromMTP(data.ventities.v)
 		: EntitiesInText();
 	return { text, entities };
-}
-
-PhotoData *GenerateChatPhoto(
-		ChannelId channelId,
-		uint64 logEntryId,
-		TimeId date,
-		const MTPDchatPhoto &photo) {
-	// We try to make a unique photoId that will stay the same for each pair (channelId, logEntryId).
-	static const auto RandomIdPart = rand_value<uint64>();
-	auto mixinIdPart = (static_cast<uint64>(static_cast<uint32>(channelId)) << 32) ^ logEntryId;
-	auto photoId = RandomIdPart ^ mixinIdPart;
-
-	const auto fileReference = [&]() -> const MTPbytes * {
-		const auto takeFrom = [](const MTPFileLocation &location) {
-			return (location.type() == mtpc_fileLocation)
-				? &location.c_fileLocation().vfile_reference
-				: nullptr;
-		};
-		if (const auto result = takeFrom(photo.vphoto_big)) {
-			return result;
-		}
-		return takeFrom(photo.vphoto_small);
-	}();
-	auto photoSizes = QVector<MTPPhotoSize>();
-	photoSizes.reserve(2);
-	photoSizes.push_back(MTP_photoSize(MTP_string("a"), photo.vphoto_small, MTP_int(160), MTP_int(160), MTP_int(0)));
-	photoSizes.push_back(MTP_photoSize(MTP_string("c"), photo.vphoto_big, MTP_int(640), MTP_int(640), MTP_int(0)));
-	return Auth().data().processPhoto(MTP_photo(
-		MTP_flags(0),
-		MTP_long(photoId),
-		MTP_long(0),
-		fileReference ? (*fileReference) : MTP_bytes(QByteArray()),
-		MTP_int(date),
-		MTP_vector<MTPPhotoSize>(photoSizes)));
 }
 
 const auto CollectChanges = [](auto &phraseMap, auto plusFlags, auto minusFlags) {
@@ -258,17 +227,20 @@ auto GenerateUserString(MTPint userId) {
 	auto entityData = QString::number(user->id)
 		+ '.'
 		+ QString::number(user->accessHash());
-	name.entities.push_back(EntityInText(
-		EntityInTextMentionName,
+	name.entities.push_back({
+		EntityType::MentionName,
 		0,
 		name.text.size(),
-		entityData));
+		entityData });
 	auto username = user->userName();
 	if (username.isEmpty()) {
 		return name;
 	}
 	auto mention = TextWithEntities { '@' + username };
-	mention.entities.push_back(EntityInText(EntityInTextMention, 0, mention.text.size()));
+	mention.entities.push_back({
+		EntityType::Mention,
+		0,
+		mention.text.size() });
 	return lng_admin_log_user_with_username__generic(lt_name, name, lt_mention, mention);
 }
 
@@ -319,7 +291,7 @@ auto GenerateParticipantChangeTextInner(
 
 TextWithEntities GenerateParticipantChangeText(not_null<ChannelData*> channel, const MTPChannelParticipant &participant, const MTPChannelParticipant *oldParticipant = nullptr) {
 	auto result = GenerateParticipantChangeTextInner(channel, participant, oldParticipant);
-	result.entities.push_front(EntityInText(EntityInTextItalic, 0, result.text.size()));
+	result.entities.push_front(EntityInText(EntityType::Italic, 0, result.text.size()));
 	return result;
 }
 
@@ -329,7 +301,7 @@ TextWithEntities GenerateDefaultBannedRightsChangeText(not_null<ChannelData*> ch
 	if (!changes.isEmpty()) {
 		result.text.append('\n' + changes);
 	}
-	result.entities.push_front(EntityInText(EntityInTextItalic, 0, result.text.size()));
+	result.entities.push_front(EntityInText(EntityType::Italic, 0, result.text.size()));
 	return result;
 }
 
@@ -444,18 +416,14 @@ void GenerateItems(
 	};
 
 	auto createChangePhoto = [&](const MTPDchannelAdminLogEventActionChangePhoto &action) {
-		switch (action.vnew_photo.type()) {
-		case mtpc_chatPhoto: {
-			auto photo = GenerateChatPhoto(channel->bareId(), id, date, action.vnew_photo.c_chatPhoto());
+		action.vnew_photo.match([&](const MTPDphoto &data) {
+			auto photo = Auth().data().processPhoto(data);
 			auto text = (channel->isMegagroup() ? lng_admin_log_changed_photo_group : lng_admin_log_changed_photo_channel)(lt_from, fromLinkText);
 			addSimpleServiceMessage(text, photo);
-		} break;
-		case mtpc_chatPhotoEmpty: {
+		}, [&](const MTPDphotoEmpty &data) {
 			auto text = (channel->isMegagroup() ? lng_admin_log_removed_photo_group : lng_admin_log_removed_photo_channel)(lt_from, fromLinkText);
 			addSimpleServiceMessage(text);
-		} break;
-		default: Unexpected("ChatPhoto type in createChangePhoto()");
-		}
+		});
 	};
 
 	auto createToggleInvites = [&](const MTPDchannelAdminLogEventActionToggleInvites &action) {

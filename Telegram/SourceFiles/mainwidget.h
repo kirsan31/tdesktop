@@ -10,6 +10,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/timer.h"
 #include "base/weak_ptr.h"
 #include "ui/rp_widget.h"
+#include "ui/effects/animations.h"
 #include "media/player/media_player_float.h"
 #include "data/data_pts_waiter.h"
 
@@ -157,7 +158,9 @@ public:
 	QPixmap grabForShowAnimation(const Window::SectionSlideParams &params);
 	void checkMainSectionToLayer();
 
-	void onSendFileConfirm(const std::shared_ptr<FileLoadResult> &file);
+	void onSendFileConfirm(
+		const std::shared_ptr<FileLoadResult> &file,
+		const std::optional<FullMsgId> &oldId);
 	bool onSendSticker(DocumentData *sticker);
 
 	void destroyData();
@@ -451,13 +454,13 @@ private:
 	not_null<Window::Controller*> _controller;
 	bool _started = false;
 
-	Animation _a_show;
+	Ui::Animations::Simple _a_show;
 	bool _showBack = false;
 	QPixmap _cacheUnder, _cacheOver;
 
 	int _dialogsWidth = 0;
 	int _thirdColumnWidth = 0;
-	Animation _a_dialogsWidth;
+	Ui::Animations::Simple _a_dialogsWidth;
 
 	object_ptr<Ui::PlainShadow> _sideShadow;
 	object_ptr<Ui::PlainShadow> _thirdShadow = { nullptr };

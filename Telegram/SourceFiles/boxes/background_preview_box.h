@@ -12,6 +12,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "window/themes/window_theme.h"
 #include "history/admin_log/history_admin_log_item.h"
 #include "history/view/history_view_element.h"
+#include "ui/effects/animations.h"
 #include "ui/effects/radial_animation.h"
 
 namespace Ui {
@@ -50,7 +51,7 @@ private:
 
 	void apply();
 	void share();
-	void step_radial(crl::time ms, bool timer);
+	void radialAnimationCallback(crl::time now);
 	QRect radialRect() const;
 
 	void checkLoadedDocument();
@@ -58,8 +59,8 @@ private:
 	void setScaledFromImage(QImage &&image, QImage &&blurred);
 	void updateServiceBg(std::optional<QColor> background);
 	std::optional<QColor> patternBackgroundColor() const;
-	void paintImage(Painter &p, crl::time ms);
-	void paintRadial(Painter &p, crl::time ms);
+	void paintImage(Painter &p);
+	void paintRadial(Painter &p);
 	void paintTexts(Painter &p, crl::time ms);
 	void paintDate(Painter &p);
 	void createBlurCheckbox();
@@ -72,7 +73,7 @@ private:
 	Data::WallPaper _paper;
 	QImage _full;
 	QPixmap _scaled, _blurred, _fadeOutThumbnail;
-	Animation _fadeIn;
+	Ui::Animations::Simple _fadeIn;
 	Ui::RadialAnimation _radial;
 	base::binary_guard _generating;
 	std::optional<QColor> _serviceBg;

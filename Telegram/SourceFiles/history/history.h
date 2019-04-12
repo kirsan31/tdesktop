@@ -84,9 +84,12 @@ public:
 	QVector<MsgId> collectMessagesFromUserToDelete(
 		not_null<UserData*> user) const;
 
-	void clear();
-	void markFullyLoaded();
-	void unloadBlocks();
+	enum class ClearType {
+		Unload,
+		DeleteChat,
+		ClearHistory,
+	};
+	void clear(ClearType type);
 	void clearUpTill(MsgId availableMinId);
 
 	void applyGroupAdminChanges(
@@ -216,10 +219,19 @@ public:
 	void setHasPendingResizedItems();
 
 	bool mySendActionUpdated(SendAction::Type type, bool doing);
-	bool paintSendAction(Painter &p, int x, int y, int availableWidth, int outerWidth, style::color color, crl::time ms);
+	bool paintSendAction(
+		Painter &p,
+		int x,
+		int y,
+		int availableWidth,
+		int outerWidth,
+		style::color color,
+		crl::time now);
 
 	// Interface for Histories
-	bool updateSendActionNeedsAnimating(crl::time ms, bool force = false);
+	bool updateSendActionNeedsAnimating(
+		crl::time now,
+		bool force = false);
 	bool updateSendActionNeedsAnimating(
 		not_null<UserData*> user,
 		const MTPSendMessageAction &action);
@@ -368,8 +380,7 @@ private:
 	// when the last item from this block was detached and
 	// calls the required previousItemChanged()
 	void removeBlock(not_null<HistoryBlock*> block);
-
-	void clearBlocks(bool leaveItems);
+	void clearSharedMedia();
 
 	not_null<HistoryItem*> addNewItem(
 		not_null<HistoryItem*> item,
@@ -490,14 +501,12 @@ private:
 	TimeId _lastSentDraftTime = 0;
 	MessageIdsList _forwardDraft;
 
-	using TypingUsers = QMap<UserData*, crl::time>;
-	TypingUsers _typing;
-	using SendActionUsers = QMap<UserData*, SendAction>;
-	SendActionUsers _sendActions;
+	base::flat_map<not_null<UserData*>, crl::time> _typing;
+	base::flat_map<not_null<UserData*>, SendAction> _sendActions;
 	QString _sendActionString;
 	Text _sendActionText;
 	Ui::SendActionAnimation _sendActionAnimation;
-	QMap<SendAction::Type, crl::time> _mySendActions;
+	base::flat_map<SendAction::Type, crl::time> _mySendActions;
 
 	std::weak_ptr<AdminLog::LocalIdManager> _adminLogIdManager;
 

@@ -30,7 +30,7 @@ protected:
 	void paintEvent(QPaintEvent *e) override;
 
 private:
-	void step(crl::time ms, bool timer);
+	void animationStep();
 
 	Ui::InfiniteRadialAnimation _animation;
 
@@ -38,7 +38,7 @@ private:
 
 Progress::Progress(QWidget *parent)
 : RpWidget(parent)
-, _animation(animation(this, &Progress::step), st::connectingRadial) {
+, _animation([=] { animationStep(); }, st::connectingRadial) {
 	setAttribute(Qt::WA_OpaquePaintEvent);
 	setAttribute(Qt::WA_TransparentForMouseEvents);
 	resize(st::connectingRadial.size);
@@ -58,8 +58,8 @@ void Progress::paintEvent(QPaintEvent *e) {
 		width());
 }
 
-void Progress::step(crl::time ms, bool timer) {
-	if (timer && !anim::Disabled()) {
+void Progress::animationStep() {
+	if (!anim::Disabled()) {
 		update();
 	}
 }
@@ -245,11 +245,11 @@ void ConnectionState::raise() {
 
 void ConnectionState::finishAnimating() {
 	if (_contentWidth.animating()) {
-		_contentWidth.finish();
+		_contentWidth.stop();
 		updateWidth();
 	}
 	if (_visibility.animating()) {
-		_visibility.finish();
+		_visibility.stop();
 		updateVisibility();
 	}
 }
@@ -376,14 +376,14 @@ void ConnectionState::refreshProgressVisibility() {
 void ConnectionState::updateVisibility() {
 	const auto value = currentVisibility();
 	if (value == 0. && _contentWidth.animating()) {
-		_contentWidth.finish();
+		_contentWidth.stop();
 		updateWidth();
 	}
 	_visibilityValues.fire_copy(value);
 }
 
 float64 ConnectionState::currentVisibility() const {
-	return _visibility.current(_currentLayout.visible ? 1. : 0.);
+	return _visibility.value(_currentLayout.visible ? 1. : 0.);
 }
 
 rpl::producer<float64> ConnectionState::visibility() const {
@@ -427,7 +427,7 @@ auto ConnectionState::computeLayout(const State &state) const -> Layout {
 }
 
 void ConnectionState::updateWidth() {
-	const auto current = _contentWidth.current(_currentLayout.contentWidth);
+	const auto current = _contentWidth.value(_currentLayout.contentWidth);
 	const auto height = st::connectingLeft.height();
 	const auto desired = QRect(0, 0, current, height).marginsAdded(
 		style::margins(

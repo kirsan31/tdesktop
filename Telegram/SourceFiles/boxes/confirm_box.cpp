@@ -25,6 +25,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "window/window_controller.h"
 #include "storage/localstorage.h"
 #include "data/data_session.h"
+#include "data/data_photo.h"
 #include "data/data_channel.h"
 #include "data/data_chat.h"
 #include "data/data_user.h"
@@ -485,8 +486,7 @@ DeleteMessagesBox::DeleteMessagesBox(
 void DeleteMessagesBox::prepare() {
 	auto details = TextWithEntities();
 	const auto appendDetails = [&](TextWithEntities &&text) {
-		TextUtilities::Append(details, { "\n\n" });
-		TextUtilities::Append(details, std::move(text));
+		details.append(qstr("\n\n")).append(std::move(text));
 	};
 	auto deleteKey = lng_box_delete;
 	auto deleteStyle = &st::defaultBoxButton;
@@ -647,7 +647,7 @@ auto DeleteMessagesBox::revokeText(not_null<PeerData*> peer) const
 		if (const auto user = peer->asUser()) {
 			auto boldName = TextWithEntities{ user->firstName };
 			boldName.entities.push_back(
-				EntityInText(EntityInTextBold, 0, boldName.text.size()));
+				{ EntityType::Bold, 0, boldName.text.size() });
 			if (canRevokeOutgoingCount == 1) {
 				result.description = lng_selected_unsend_about_user_one__generic<TextWithEntities>(
 					lt_user,
@@ -802,24 +802,17 @@ ConfirmInviteBox::ConfirmInviteBox(
 	}();
 	_title->setText(title);
 	_status->setText(status);
-	if (data.vphoto.type() == mtpc_chatPhoto) {
-		const auto &photo = data.vphoto.c_chatPhoto();
-		const auto size = 160;
-		const auto location = StorageImageLocation::FromMTP(
-			size,
-			size,
-			photo.vphoto_small);
-		if (!location.isNull()) {
-			_photo = Images::Create(location);
-			if (!_photo->loaded()) {
-				subscribe(Auth().downloaderTaskFinished(), [=] {
-					update();
-				});
-				_photo->load(Data::FileOrigin());
-			}
+
+	const auto photo = Auth().data().processPhoto(data.vphoto);
+	if (!photo->isNull()) {
+		_photo = photo->thumbnail();
+		if (!_photo->loaded()) {
+			subscribe(Auth().downloaderTaskFinished(), [=] {
+				update();
+			});
+			_photo->load(Data::FileOrigin());
 		}
-	}
-	if (!_photo) {
+	} else {
 		_photoEmpty = std::make_unique<Ui::EmptyUserpic>(
 			Data::PeerUserpicColor(0),
 			title);

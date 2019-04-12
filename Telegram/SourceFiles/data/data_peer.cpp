@@ -247,19 +247,19 @@ bool PeerData::userpicLoaded() const {
 }
 
 bool PeerData::useEmptyUserpic() const {
-	return _userpicLocation.isNull()
+	return !_userpicLocation.valid()
 		|| !_userpic
 		|| !_userpic->loaded();
 }
 
-StorageKey PeerData::userpicUniqueKey() const {
+InMemoryKey PeerData::userpicUniqueKey() const {
 	if (useEmptyUserpic()) {
 		if (!_userpicEmpty) {
 			refreshEmptyUserpic();
 		}
 		return _userpicEmpty->uniqueKey();
 	}
-	return storageKey(_userpicLocation);
+	return inMemoryKey(_userpicLocation);
 }
 
 void PeerData::saveUserpic(const QString &path, int size) const {
@@ -310,11 +310,24 @@ Data::FileOrigin PeerData::userpicPhotoOrigin() const {
 
 void PeerData::updateUserpic(
 		PhotoId photoId,
+		MTP::DcId dcId,
 		const MTPFileLocation &location) {
 	const auto size = kUserpicSize;
-	const auto loc = StorageImageLocation::FromMTP(size, size, location);
-	const auto photo = loc.isNull() ? ImagePtr() : Images::Create(loc);
-	setUserpicChecked(photoId, loc, photo);
+	const auto loc = location.match([&](
+			const MTPDfileLocationToBeDeprecated &deprecated) {
+		return StorageImageLocation(
+			StorageFileLocation(
+				dcId,
+				isSelf() ? peerToUser(id) : 0,
+				MTP_inputPeerPhotoFileLocation(
+					MTP_flags(0),
+					input,
+					deprecated.vvolume_id,
+					deprecated.vlocal_id)),
+			size,
+			size);
+	});
+	setUserpicChecked(photoId, loc, Images::Create(loc));
 }
 
 void PeerData::clearUserpic() {

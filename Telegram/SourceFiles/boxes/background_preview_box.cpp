@@ -39,8 +39,7 @@ public:
 		Painter &p,
 		int left,
 		int top,
-		int outerWidth,
-		crl::time ms) override;
+		int outerWidth) override;
 	QImage prepareRippleMask() const override;
 	bool checkRippleStartPosition(QPoint position) const override;
 
@@ -241,14 +240,13 @@ void ServiceCheck::paint(
 		Painter &p,
 		int left,
 		int top,
-		int outerWidth,
-		crl::time ms) {
+		int outerWidth) {
 	Frames().paintFrame(
 		p,
 		left + _st.margin.left(),
 		top + _st.margin.top(),
 		&_st,
-		currentAnimationValue(ms));
+		currentAnimationValue());
 }
 
 QImage ServiceCheck::prepareRippleMask() const {
@@ -400,7 +398,7 @@ BackgroundPreviewBox::BackgroundPreviewBox(
 	lang(lng_background_text2),
 	true))
 , _paper(paper)
-, _radial(animation(this, &BackgroundPreviewBox::step_radial)) {
+, _radial([=](crl::time now) { radialAnimationCallback(now); }) {
 	subscribe(Auth().downloaderTaskFinished(), [=] { update(); });
 }
 
@@ -507,20 +505,20 @@ void BackgroundPreviewBox::paintEvent(QPaintEvent *e) {
 	}
 	if (!color || _paper.isPattern()) {
 		if (!_scaled.isNull() || setScaledFromThumb()) {
-			paintImage(p, ms);
-			paintRadial(p, ms);
+			paintImage(p);
+			paintRadial(p);
 		} else if (!color) {
 			p.fillRect(e->rect(), st::boxBg);
 			return;
 		} else {
 			// Progress of pattern loading.
-			paintRadial(p, ms);
+			paintRadial(p);
 		}
 	}
 	paintTexts(p, ms);
 }
 
-void BackgroundPreviewBox::paintImage(Painter &p, crl::time ms) {
+void BackgroundPreviewBox::paintImage(Painter &p) {
 	Expects(!_scaled.isNull());
 
 	const auto master = _paper.isPattern()
@@ -536,7 +534,7 @@ void BackgroundPreviewBox::paintImage(Painter &p, crl::time ms) {
 		height() * factor);
 	const auto guard = gsl::finally([&] { p.setOpacity(1.); });
 
-	const auto fade = _fadeIn.current(ms, 1.);
+	const auto fade = _fadeIn.value(1.);
 	if (fade < 1. && !_fadeOutThumbnail.isNull()) {
 		p.drawPixmap(rect(), _fadeOutThumbnail, from);
 	}
@@ -548,14 +546,9 @@ void BackgroundPreviewBox::paintImage(Painter &p, crl::time ms) {
 	checkBlurAnimationStart();
 }
 
-void BackgroundPreviewBox::paintRadial(Painter &p, crl::time ms) {
-	bool radial = false;
-	float64 radialOpacity = 0;
-	if (_radial.animating()) {
-		_radial.step(ms);
-		radial = _radial.animating();
-		radialOpacity = _radial.opacity();
-	}
+void BackgroundPreviewBox::paintRadial(Painter &p) {
+	const auto radial = _radial.animating();
+	const auto radialOpacity = radial ? _radial.opacity() : 0.;
 	if (!radial) {
 		return;
 	}
@@ -623,7 +616,7 @@ void BackgroundPreviewBox::paintDate(Painter &p) {
 	p.drawText(bubbleLeft + st::msgServicePadding.left(), bubbleTop + st::msgServicePadding.top() + st::msgServiceFont->ascent, text);
 }
 
-void BackgroundPreviewBox::step_radial(crl::time ms, bool timer) {
+void BackgroundPreviewBox::radialAnimationCallback(crl::time now) {
 	Expects(_paper.document() != nullptr);
 
 	const auto document = _paper.document();
@@ -631,9 +624,8 @@ void BackgroundPreviewBox::step_radial(crl::time ms, bool timer) {
 	const auto updated = _radial.update(
 		document->progress(),
 		!document->loading(),
-		ms);
-	if (timer
-		&& (wasAnimating || _radial.animating())
+		now);
+	if ((wasAnimating || _radial.animating())
 		&& (!anim::Disabled() || updated)) {
 		update(radialRect());
 	}
@@ -711,13 +703,11 @@ void BackgroundPreviewBox::checkLoadedDocument() {
 		return;
 	}
 	const auto generateCallback = [=](QImage &&image) {
-		auto [left, right] = base::make_binary_guard();
-		_generating = std::move(left);
 		crl::async([
 			this,
 			image = std::move(image),
 			patternBackground = patternBackgroundColor(),
-			guard = std::move(right)
+			guard = _generating.make_guard()
 		]() mutable {
 			auto scaled = PrepareScaledFromFull(image, patternBackground);
 			const auto ms = crl::now();

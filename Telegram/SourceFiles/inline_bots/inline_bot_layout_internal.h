@@ -9,6 +9,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "base/flags.h"
 #include "inline_bots/inline_bot_layout_item.h"
+#include "ui/effects/animations.h"
 #include "ui/effects/radial_animation.h"
 #include "ui/text/text.h"
 
@@ -92,22 +93,22 @@ private:
 	void prepareThumbnail(QSize size, QSize frame) const;
 
 	void ensureAnimation() const;
-	bool isRadialAnimation(crl::time ms) const;
-	void step_radial(crl::time ms, bool timer);
+	bool isRadialAnimation() const;
+	void radialAnimationCallback(crl::time now) const;
 
 	void clipCallback(Media::Clip::Notification notification);
 
 	struct AnimationData {
-		AnimationData(AnimationCallbacks &&callbacks)
-			: over(false)
-			, radial(std::move(callbacks)) {
+		template <typename Callback>
+		AnimationData(Callback &&callback)
+		: radial(std::forward<Callback>(callback)) {
 		}
-		bool over;
-		Animation _a_over;
+		bool over = false;
+		Ui::Animations::Simple _a_over;
 		Ui::RadialAnimation radial;
 	};
 	mutable std::unique_ptr<AnimationData> _animation;
-	mutable Animation _a_deleteOver;
+	mutable Ui::Animations::Simple _a_deleteOver;
 
 };
 
@@ -174,7 +175,7 @@ public:
 private:
 	QSize getThumbSize() const;
 
-	mutable Animation _a_over;
+	mutable Ui::Animations::Simple _a_over;
 	mutable bool _active = false;
 
 	mutable QPixmap _thumb;
@@ -250,21 +251,24 @@ public:
 
 private:
 	void thumbAnimationCallback();
-	void step_radial(crl::time ms, bool timer);
+	void radialAnimationCallback(crl::time now) const;
 
 	void ensureAnimation() const;
 	void checkAnimationFinished() const;
 	bool updateStatusText() const;
 
-	bool isRadialAnimation(crl::time ms) const {
-		if (!_animation || !_animation->radial.animating()) return false;
-
-		_animation->radial.step(ms);
-		return _animation && _animation->radial.animating();
-	}
-	bool isThumbAnimation(crl::time ms) const {
+	bool isRadialAnimation() const {
 		if (_animation) {
-			if (_animation->a_thumbOver.animating(ms)) {
+			if (_animation->radial.animating()) {
+				return true;
+			}
+			checkAnimationFinished();
+		}
+		return false;
+	}
+	bool isThumbAnimation() const {
+		if (_animation) {
+			if (_animation->a_thumbOver.animating()) {
 				return true;
 			}
 			checkAnimationFinished();
@@ -273,9 +277,11 @@ private:
 	}
 
 	struct AnimationData {
-		AnimationData(AnimationCallbacks &&radialCallbacks) : radial(std::move(radialCallbacks)) {
+		template <typename Callback>
+		AnimationData(Callback &&radialCallback)
+		: radial(std::forward<Callback>(radialCallback)) {
 		}
-		Animation a_thumbOver;
+		Ui::Animations::Simple a_thumbOver;
 		Ui::RadialAnimation radial;
 	};
 	mutable std::unique_ptr<AnimationData> _animation;
@@ -360,8 +366,8 @@ private:
 	void prepareThumbnail(QSize size) const;
 	void validateThumbnail(Image *image, QSize size, bool good) const;
 
-	bool isRadialAnimation(crl::time ms) const;
-	void step_radial(crl::time ms, bool timer);
+	bool isRadialAnimation() const;
+	void radialAnimationCallback(crl::time now) const;
 
 	void clipCallback(Media::Clip::Notification notification);
 

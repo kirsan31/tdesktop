@@ -860,7 +860,7 @@ void DocumentData::save(
 		status = FileReady;
 		if (hasWebLocation()) {
 			_loader = new mtpFileLoader(
-				&_urlLocation,
+				_urlLocation,
 				size,
 				fromCloud,
 				autoLoading,
@@ -874,10 +874,14 @@ void DocumentData::save(
 				cacheTag());
 		} else {
 			_loader = new mtpFileLoader(
-				_dc,
-				id,
-				_access,
-				_fileReference,
+				StorageFileLocation(
+					_dc,
+					session().userId(),
+					MTP_inputDocumentFileLocation(
+						MTP_long(id),
+						MTP_long(_access),
+						MTP_bytes(_fileReference),
+						MTP_string(QString()))),
 				origin,
 				locationType(),
 				toFile,
@@ -1204,18 +1208,21 @@ auto DocumentData::createStreamingLoader(Data::FileOrigin origin) const
 	return hasRemoteLocation()
 		? std::make_unique<Media::Streaming::LoaderMtproto>(
 			&session().api(),
-			_dc,
-			MTP_inputDocumentFileLocation(
-				MTP_long(id),
-				MTP_long(_access),
-				MTP_bytes(_fileReference)),
+			StorageFileLocation(
+				_dc,
+				session().userId(),
+				MTP_inputDocumentFileLocation(
+					MTP_long(id),
+					MTP_long(_access),
+					MTP_bytes(_fileReference),
+					MTP_string(QString()))),
 			size,
 			origin)
 		: nullptr;
 }
 
 bool DocumentData::hasWebLocation() const {
-	return _urlLocation.dc() != 0 && _urlLocation.accessHash() != 0;
+	return !_urlLocation.url().isEmpty();
 }
 
 bool DocumentData::isNull() const {
@@ -1238,6 +1245,10 @@ QByteArray DocumentData::fileReference() const {
 
 void DocumentData::refreshFileReference(const QByteArray &value) {
 	_fileReference = value;
+	_thumbnail->refreshFileReference(value);
+	if (const auto data = sticker()) {
+		data->loc.refreshFileReference(value);
+	}
 }
 
 void DocumentData::refreshStickerThumbFileReference() {
@@ -1557,12 +1568,12 @@ base::binary_guard ReadImageAsync(
 		not_null<DocumentData*> document,
 		FnMut<QImage(QImage)> postprocess,
 		FnMut<void(QImage&&)> done) {
-	auto [left, right] = base::make_binary_guard();
+	auto result = base::binary_guard();
 	crl::async([
 		bytes = document->data(),
 		path = document->filepath(),
 		postprocess = std::move(postprocess),
-		guard = std::move(left),
+		guard = result.make_guard(),
 		callback = std::move(done)
 	]() mutable {
 		auto format = QByteArray();
@@ -1586,7 +1597,7 @@ base::binary_guard ReadImageAsync(
 			callback(std::move(image));
 		});
 	});
-	return std::move(right);
+	return result;
 }
 
 //void HandleUnsupportedMedia(

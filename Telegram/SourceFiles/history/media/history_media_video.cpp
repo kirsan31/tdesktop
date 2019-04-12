@@ -170,7 +170,7 @@ void HistoryVideo::draw(Painter &p, const QRect &r, TextSelection selection, crl
 		}
 	}
 	updateStatusText();
-	bool radial = isRadialAnimation(ms);
+	const auto radial = isRadialAnimation();
 
 	if (bubble) {
 		if (!_caption.isEmpty()) {
@@ -222,8 +222,8 @@ void HistoryVideo::draw(Painter &p, const QRect &r, TextSelection selection, crl
 	p.setPen(Qt::NoPen);
 	if (selected) {
 		p.setBrush(st::msgDateImgBgSelected);
-	} else if (isThumbAnimation(ms)) {
-		auto over = _animation->a_thumbOver.current();
+	} else if (isThumbAnimation()) {
+		auto over = _animation->a_thumbOver.value(1.);
 		p.setBrush(anim::brush(st::msgDateImgBg, st::msgDateImgBgOver, over));
 	} else {
 		bool over = ClickHandler::showAsActive((_data->loading() || _data->uploading()) ? _cancell : _savel);
@@ -405,7 +405,7 @@ void HistoryVideo::drawGrouped(
 			_animation->radial.start(_data->progress());
 		}
 	}
-	const auto radial = isRadialAnimation(ms);
+	const auto radial = isRadialAnimation();
 
 	if (!bubble) {
 //		App::roundShadow(p, 0, 0, paintw, painth, selected ? st::msgInShadowSelected : st::msgInShadow, selected ? InSelectedShadowCorners : InShadowCorners);
@@ -431,8 +431,8 @@ void HistoryVideo::drawGrouped(
 	p.setPen(Qt::NoPen);
 	if (selected) {
 		p.setBrush(st::msgDateImgBgSelected);
-	} else if (isThumbAnimation(ms)) {
-		auto over = _animation->a_thumbOver.current();
+	} else if (isThumbAnimation()) {
+		auto over = _animation->a_thumbOver.value(1.);
 		p.setBrush(anim::brush(st::msgDateImgBg, st::msgDateImgBgOver, over));
 	} else {
 		auto over = ClickHandler::showAsActive(_data->loading() ? _cancell : _savel);
@@ -576,8 +576,8 @@ void HistoryVideo::setStatusSize(int newSize) const {
 	HistoryFileMedia::setStatusSize(newSize, _data->size, _data->getDuration(), 0);
 }
 
-TextWithEntities HistoryVideo::selectedText(TextSelection selection) const {
-	return _caption.originalTextWithEntities(selection, ExpandLinksAll);
+TextForMimeData HistoryVideo::selectedText(TextSelection selection) const {
+	return _caption.toTextForMimeData(selection);
 }
 
 bool HistoryVideo::needsBubble() const {

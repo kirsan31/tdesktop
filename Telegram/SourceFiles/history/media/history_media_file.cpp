@@ -67,28 +67,26 @@ void HistoryFileMedia::setStatusSize(int newSize, int fullSize, int duration, qi
 	}
 }
 
-void HistoryFileMedia::step_radial(crl::time ms, bool timer) {
-	const auto updateRadial = [&] {
+void HistoryFileMedia::radialAnimationCallback(crl::time now) const {
+	const auto updated = [&] {
 		return _animation->radial.update(
 			dataProgress(),
 			dataFinished(),
-			ms);
-	};
-	if (timer) {
-		if (!anim::Disabled() || updateRadial()) {
-			history()->owner().requestViewRepaint(_parent);
-		}
-	} else {
-		updateRadial();
-		if (!_animation->radial.animating()) {
-			checkAnimationFinished();
-		}
+			now);
+	}();
+	if (!anim::Disabled() || updated) {
+		history()->owner().requestViewRepaint(_parent);
+	}
+	if (!_animation->radial.animating()) {
+		checkAnimationFinished();
 	}
 }
 
 void HistoryFileMedia::ensureAnimation() const {
 	if (!_animation) {
-		_animation = std::make_unique<AnimationData>(animation(const_cast<HistoryFileMedia*>(this), &HistoryFileMedia::step_radial));
+		_animation = std::make_unique<AnimationData>([=](crl::time now) {
+			radialAnimationCallback(now);
+		});
 	}
 }
 
