@@ -13,7 +13,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "media/audio/media_audio.h"
 #include "history/history.h"
 #include "history/history_item_components.h"
-#include "history/feed/history_feed_section.h"
+//#include "history/feed/history_feed_section.h" // #feed
 #include "lang/lang_keys.h"
 #include "data/data_session.h"
 #include "data/data_channel.h"
@@ -192,7 +192,7 @@ void System::checkDelayed() {
 			const auto fullId = FullMsgId(
 				history->channelId(),
 				i.value().msg);
-			if (const auto item = App::histItemById(fullId)) {
+			if (const auto item = Auth().data().message(fullId)) {
 				if (!item->notificationReady()) {
 					loaded = false;
 				}
@@ -214,7 +214,7 @@ void System::checkDelayed() {
 }
 
 void System::showGrouped() {
-	if (const auto lastItem = App::histItemById(_lastHistoryItemId)) {
+	if (const auto lastItem = Auth().data().message(_lastHistoryItemId)) {
 		_waitForAllGroupedTimer.cancel();
 		_manager->showNotification(lastItem, _lastForwardedCount);
 		_lastForwardedCount = 0;
@@ -229,7 +229,7 @@ void System::showNext() {
 		if (!_lastHistoryItemId || !item) {
 			return false;
 		}
-		if (const auto lastItem = App::histItemById(_lastHistoryItemId)) {
+		if (const auto lastItem = Auth().data().message(_lastHistoryItemId)) {
 			return (lastItem->groupId() == item->groupId() || lastItem->author() == item->author());
 		}
 		return false;
@@ -474,23 +474,23 @@ void Manager::openNotificationMessage(
 			|| !IsServerMsgId(messageId)) {
 			return false;
 		}
-		const auto item = App::histItemById(history->channelId(), messageId);
+		const auto item = Auth().data().message(history->channelId(), messageId);
 		if (!item || !item->mentionsMe()) {
 			return false;
 		}
 		return true;
 	}();
-	const auto messageFeed = [&] {
-		if (const auto channel = history->peer->asChannel()) {
-			return channel->feed();
-		}
-		return (Data::Feed*)nullptr;
-	}();
+	//const auto messageFeed = [&] { // #feed
+	//	if (const auto channel = history->peer->asChannel()) {
+	//		return channel->feed();
+	//	}
+	//	return (Data::Feed*)nullptr;
+	//}();
 	if (openExactlyMessage) {
 		Ui::showPeerHistory(history, messageId);
-	} else if (messageFeed) {
-		App::wnd()->controller()->showSection(
-			HistoryFeed::Memento(messageFeed));
+	//} else if (messageFeed) { // #feed
+	//	App::wnd()->controller()->showSection(
+	//		HistoryFeed::Memento(messageFeed));
 	} else {
 		Ui::showPeerHistory(history, ShowAtUnreadMsgId);
 	}

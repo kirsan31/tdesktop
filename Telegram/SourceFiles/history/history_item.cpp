@@ -23,7 +23,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "storage/file_upload.h"
 #include "storage/storage_facade.h"
 #include "storage/storage_shared_media.h"
-#include "storage/storage_feed_messages.h"
+//#include "storage/storage_feed_messages.h" // #feed
 #include "auth_session.h"
 #include "apiwrap.h"
 #include "media/audio/media_audio.h"
@@ -34,7 +34,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_session.h"
 #include "data/data_messages.h"
 #include "data/data_media_types.h"
-#include "data/data_feed.h"
+#include "data/data_folder.h"
 #include "data/data_channel.h"
 #include "data/data_chat.h"
 #include "data/data_user.h"
@@ -69,7 +69,7 @@ not_null<HistoryItem*> CreateUnsupportedMessage(
 		EntityInText(EntityType::Italic, 0, text.text.size()));
 	flags &= ~MTPDmessage::Flag::f_post_author;
 	flags |= MTPDmessage_ClientFlag::f_is_unsupported;
-	return new HistoryMessage(
+	return history->owner().makeMessage(
 		history,
 		msgId,
 		flags,
@@ -169,7 +169,6 @@ HistoryItem::HistoryItem(
 , _from(from ? history->owner().user(from) : history->peer)
 , _flags(flags)
 , _date(date) {
-	App::historyRegItem(this);
 }
 
 TimeId HistoryItem::date() const {
@@ -193,7 +192,7 @@ void HistoryItem::finishEdition(int oldKeyboardTop) {
 	//	}
 	//}
 
-	App::historyUpdateDependent(this);
+	_history->owner().updateDependentMessages(this);
 }
 
 void HistoryItem::setGroupId(MessageGroupId groupId) {
@@ -229,12 +228,12 @@ void HistoryItem::invalidateChatListEntry() {
 	if (history()->textCachedFor == this) {
 		history()->textCachedFor = nullptr;
 	}
-	if (const auto feed = history()->peer->feed()) {
-		if (feed->textCachedFor == this) {
-			feed->textCachedFor = nullptr;
-			feed->updateChatListEntry();
-		}
-	}
+	//if (const auto feed = history()->peer->feed()) { // #TODO archive
+	//	if (feed->textCachedFor == this) {
+	//		feed->textCachedFor = nullptr;
+	//		feed->updateChatListEntry();
+	//	}
+	//}
 }
 
 void HistoryItem::finishEditionToEmpty() {
@@ -335,24 +334,7 @@ UserData *HistoryItem::getMessageBot() const {
 };
 
 void HistoryItem::destroy() {
-	if (isLogEntry()) {
-		Assert(!mainView());
-	} else {
-		// All this must be done for all items manually in History::clear()!
-		eraseFromUnreadMentions();
-		if (IsServerMsgId(id)) {
-			if (const auto types = sharedMediaTypes()) {
-				_history->session().storage().remove(Storage::SharedMediaRemoveOne(
-					_history->peer->id,
-					types,
-					id));
-			}
-		} else {
-			_history->session().api().cancelLocalItem(this);
-		}
-		_history->itemRemoved(this);
-	}
-	delete this;
+	_history->owner().destroyMessage(this);
 }
 
 void HistoryItem::refreshMainView() {
@@ -402,24 +384,23 @@ void HistoryItem::indexAsNewItem() {
 				types,
 				id));
 		}
-		if (const auto channel = history()->peer->asChannel()) {
-			if (const auto feed = channel->feed()) {
-				_history->session().storage().add(Storage::FeedMessagesAddNew(
-					feed->id(),
-					position()));
-			}
-		}
+		//if (const auto channel = history()->peer->asChannel()) { // #feed
+		//	if (const auto feed = channel->feed()) {
+		//		_history->session().storage().add(Storage::FeedMessagesAddNew(
+		//			feed->id(),
+		//			position()));
+		//	}
+		//}
 	}
 }
 
 void HistoryItem::setRealId(MsgId newId) {
 	Expects(!IsServerMsgId(id));
 
-	App::historyUnregItem(this);
 	const auto oldId = std::exchange(id, newId);
-	App::historyRegItem(this);
+	_history->owner().notifyItemIdChange({ this, oldId });
 
-	// We don't need to call Notify::replyMarkupUpdated(this) and update keyboard
+	// We don't call Notify::replyMarkupUpdated(this) and update keyboard
 	// in history widget, because it can't exist for an outgoing message.
 	// Only inline keyboards can be in outgoing messages.
 	if (const auto markup = inlineReplyMarkup()) {
@@ -428,7 +409,6 @@ void HistoryItem::setRealId(MsgId newId) {
 		}
 	}
 
-	_history->owner().notifyItemIdChange({ this, oldId });
 	_history->owner().requestItemRepaint(this);
 }
 
@@ -514,11 +494,13 @@ bool HistoryItem::canDeleteForEveryone(TimeId now) const {
 			return false;
 		}
 	}
-	if (!toHistoryMessage()) {
-		return false;
-	} else if (const auto media = this->media()) {
-		if (!media->allowsRevoke()) {
+	if (!peer->isUser()) {
+		if (!toHistoryMessage()) {
 			return false;
+		} else if (const auto media = this->media()) {
+			if (!media->allowsRevoke()) {
+				return false;
+			}
 		}
 	}
 	if (!out()) {
@@ -643,7 +625,9 @@ bool HistoryItem::needCheck() const {
 
 bool HistoryItem::unread() const {
 	// Messages from myself are always read.
-	if (history()->peer->isSelf()) return false;
+	if (history()->peer->isSelf()) {
+		return false;
+	}
 
 	if (out()) {
 		// Outgoing messages in converted chats are always read.
@@ -659,7 +643,7 @@ bool HistoryItem::unread() const {
 				if (user->botInfo) {
 					return false;
 				}
-			} else if (auto channel = history()->peer->asChannel()) {
+			} else if (const auto channel = history()->peer->asChannel()) {
 				if (!channel->isMegagroup()) {
 					return false;
 				}
@@ -675,6 +659,10 @@ bool HistoryItem::unread() const {
 		return true;
 	}
 	return (_flags & MTPDmessage_ClientFlag::f_clientside_unread);
+}
+
+void HistoryItem::markClientSideAsRead() {
+	_flags &= ~MTPDmessage_ClientFlag::f_clientside_unread;
 }
 
 MessageGroupId HistoryItem::groupId() const {
@@ -740,23 +728,21 @@ void HistoryItem::drawInDialog(
 		DrawInDialog way,
 		const HistoryItem *&cacheFor,
 		Text &cache) const {
+	if (r.isEmpty()) {
+		return;
+	}
 	if (cacheFor != this) {
 		cacheFor = this;
 		cache.setText(st::dialogsTextStyle, inDialogsText(way), Ui::DialogTextOptions());
 	}
-	if (r.width()) {
-		p.setTextPalette(active ? st::dialogsTextPaletteActive : (selected ? st::dialogsTextPaletteOver : st::dialogsTextPalette));
-		p.setFont(st::dialogsTextFont);
-		p.setPen(active ? st::dialogsTextFgActive : (selected ? st::dialogsTextFgOver : st::dialogsTextFg));
-		cache.drawElided(p, r.left(), r.top(), r.width(), r.height() / st::dialogsTextFont->height);
-		p.restoreTextPalette();
-	}
+	p.setTextPalette(active ? st::dialogsTextPaletteActive : (selected ? st::dialogsTextPaletteOver : st::dialogsTextPalette));
+	p.setFont(st::dialogsTextFont);
+	p.setPen(active ? st::dialogsTextFgActive : (selected ? st::dialogsTextFgOver : st::dialogsTextFg));
+	cache.drawElided(p, r.left(), r.top(), r.width(), r.height() / st::dialogsTextFont->height);
+	p.restoreTextPalette();
 }
 
-HistoryItem::~HistoryItem() {
-	_history->owner().notifyItemRemoved(this);
-	App::historyUnregItem(this);
-}
+HistoryItem::~HistoryItem() = default;
 
 QDateTime ItemDateTime(not_null<const HistoryItem*> item) {
 	return ParseDateTime(item->date());
@@ -777,7 +763,7 @@ ClickHandlerPtr goToMessageClickHandler(
 		FullMsgId returnToId) {
 	return std::make_shared<LambdaClickHandler>([=] {
 		if (const auto main = App::main()) {
-			if (const auto returnTo = App::histItemById(returnToId)) {
+			if (const auto returnTo = peer->owner().message(returnToId)) {
 				if (returnTo->history()->peer == peer) {
 					main->pushReplyReturn(returnTo);
 				}
@@ -810,7 +796,7 @@ not_null<HistoryItem*> HistoryItem::Create(
 			const auto text = HistoryService::PreparedText {
 				lang(lng_message_empty)
 			};
-			return new HistoryService(
+			return history->owner().makeServiceMessage(
 				history,
 				data.vid.v,
 				data.vdate.v,
@@ -818,18 +804,18 @@ not_null<HistoryItem*> HistoryItem::Create(
 				data.vflags.v,
 				data.has_from_id() ? data.vfrom_id.v : UserId(0));
 		} else if (checked == MediaCheckResult::HasTimeToLive) {
-			return new HistoryService(history, data);
+			return history->owner().makeServiceMessage(history, data);
 		}
-		return new HistoryMessage(history, data);
+		return history->owner().makeMessage(history, data);
 	}, [&](const MTPDmessageService &data) -> HistoryItem* {
 		if (data.vaction.type() == mtpc_messageActionPhoneCall) {
-			return new HistoryMessage(history, data);
+			return history->owner().makeMessage(history, data);
 		}
-		return new HistoryService(history, data);
+		return history->owner().makeServiceMessage(history, data);
 	}, [&](const MTPDmessageEmpty &data) -> HistoryItem* {
 		const auto text = HistoryService::PreparedText{
 			lang(lng_message_empty)
 		};
-		return new HistoryService(history, data.vid.v, TimeId(0), text);
+		return history->owner().makeServiceMessage(history, data.vid.v, TimeId(0), text);
 	});
 }

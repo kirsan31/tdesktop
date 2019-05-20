@@ -7,14 +7,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #pragma once
 
-namespace Data {
-class Feed;
-} // namespace Data
-
 namespace Dialogs {
 
 class Row;
 class FakeRow;
+class RippleRow;
 
 namespace Layout {
 
@@ -22,10 +19,10 @@ const style::icon *ChatTypeIcon(
 	not_null<PeerData*> peer,
 	bool active,
 	bool selected);
-const style::icon *FeedTypeIcon(
-	not_null<Data::Feed*> feed,
-	bool active,
-	bool selected);
+//const style::icon *FeedTypeIcon( // #feed
+//	not_null<Data::Feed*> feed,
+//	bool active,
+//	bool selected);
 
 class RowPainter {
 public:
@@ -35,7 +32,6 @@ public:
 		int fullWidth,
 		bool active,
 		bool selected,
-		bool onlyBackground,
 		crl::time ms);
 	static void paint(
 		Painter &p,
@@ -43,7 +39,6 @@ public:
 		int fullWidth,
 		bool active,
 		bool selected,
-		bool onlyBackground,
 		crl::time ms,
 		bool displayUnreadInfo);
 	static QRect sendActionAnimationRect(
@@ -54,12 +49,14 @@ public:
 
 };
 
-void paintImportantSwitch(
+void PaintCollapsedRow(
 	Painter &p,
-	Mode current,
+	const RippleRow &row,
+	Data::Folder *folder,
+	const QString &text,
+	int unread,
 	int fullWidth,
-	bool selected,
-	bool onlyBackground);
+	bool selected);
 
 enum UnreadBadgeSize {
 	UnreadBadgeInDialogs = 0,

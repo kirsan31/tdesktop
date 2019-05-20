@@ -14,10 +14,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/history.h"
 #include "history/history_item.h"
 #include "history/view/history_view_element.h"
-#include "history/feed/history_feed_section.h"
+//#include "history/feed/history_feed_section.h" // #feed
 #include "data/data_media_types.h"
 #include "data/data_session.h"
-#include "data/data_feed.h"
+#include "data/data_folder.h"
 #include "data/data_channel.h"
 #include "data/data_chat.h"
 #include "passport/passport_form_controller.h"
@@ -108,6 +108,16 @@ Controller::Controller(
 			Ui::show(Box<EditPeerInfoBox>(peer));
 		}
 	});
+
+	session->data().chatsListChanges(
+	) | rpl::filter([=](Data::Folder *folder) {
+		return (folder != nullptr)
+			&& (folder == _openedFolder.current())
+			&& folder->chatsList()->indexed(Global::DialogsMode())->empty();
+	}) | rpl::start_with_next([=](Data::Folder *folder) {
+		folder->updateChatListSortPosition();
+		closeFolder();
+	}, lifetime());
 }
 
 void Controller::showEditPeerBox(PeerData *peer) {
@@ -137,6 +147,24 @@ void Controller::initSupportMode() {
 	}, lifetime());
 }
 
+bool Controller::uniqueChatsInSearchResults() const {
+	return session().supportMode()
+		&& !session().settings().supportAllSearchResults()
+		&& !searchInChat.current();
+}
+
+void Controller::openFolder(not_null<Data::Folder*> folder) {
+	_openedFolder = folder.get();
+}
+
+void Controller::closeFolder() {
+	_openedFolder = nullptr;
+}
+
+const rpl::variable<Data::Folder*> &Controller::openedFolder() const {
+	return _openedFolder;
+}
+
 void Controller::setActiveChatEntry(Dialogs::RowDescriptor row) {
 	_activeChatEntry = row;
 	if (session().supportMode()) {
@@ -160,12 +188,12 @@ bool Controller::jumpToChatListEntry(Dialogs::RowDescriptor row) {
 	if (const auto history = row.key.history()) {
 		Ui::showPeerHistory(history, row.fullId.msg);
 		return true;
-	} else if (const auto feed = row.key.feed()) {
-		if (const auto item = App::histItemById(row.fullId)) {
-			showSection(HistoryFeed::Memento(feed, item->position()));
-		} else {
-			showSection(HistoryFeed::Memento(feed));
-		}
+	//} else if (const auto feed = row.key.feed()) { // #feed
+	//	if (const auto item = Auth().data().message(row.fullId)) {
+	//		showSection(HistoryFeed::Memento(feed, item->position()));
+	//	} else {
+	//		showSection(HistoryFeed::Memento(feed));
+	//	}
 	}
 	return false;
 }
@@ -465,12 +493,12 @@ void Controller::showJumpToDate(Dialogs::Key chat, QDate requestedDate) {
 			} else if (history->chatListTimeId() != 0) {
 				return ParseDateTime(history->chatListTimeId()).date();
 			}
-		} else if (const auto feed = chat.feed()) {
-			/*if (chatScrollPosition(feed)) { // #TODO feeds save position
+		//} else if (const auto feed = chat.feed()) { // #feed
+		//	if (chatScrollPosition(feed)) { // #TODO feeds save position
 
-			} else */if (feed->chatListTimeId() != 0) {
-				return ParseDateTime(feed->chatListTimeId()).date();
-			}
+		//	} else if (feed->chatListTimeId() != 0) {
+		//		return ParseDateTime(feed->chatListTimeId()).date();
+		//	}
 		}
 		return QDate::currentDate();
 	};
@@ -482,10 +510,10 @@ void Controller::showJumpToDate(Dialogs::Key chat, QDate requestedDate) {
 			if (history && history->chatListTimeId() != 0) {
 				return ParseDateTime(history->chatListTimeId()).date();
 			}
-		} else if (const auto feed = chat.feed()) {
-			if (feed->chatListTimeId() != 0) {
-				return ParseDateTime(feed->chatListTimeId()).date();
-			}
+		//} else if (const auto feed = chat.feed()) { // #feed
+		//	if (feed->chatListTimeId() != 0) {
+		//		return ParseDateTime(feed->chatListTimeId()).date();
+		//	}
 		}
 		return QDate::currentDate();
 	};
@@ -512,8 +540,8 @@ void Controller::showJumpToDate(Dialogs::Key chat, QDate requestedDate) {
 				}
 				return QDate::currentDate();
 			}
-		} else if (const auto feed = chat.feed()) {
-			return startDate();
+		//} else if (const auto feed = chat.feed()) { // #feed
+		//	return startDate();
 		}
 		return startDate();
 	};

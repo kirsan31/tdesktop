@@ -28,10 +28,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "storage/localstorage.h"
 #include "storage/storage_facade.h"
 #include "storage/storage_shared_media.h"
-#include "storage/storage_feed_messages.h"
+//#include "storage/storage_feed_messages.h" // #feed
 #include "support/support_helper.h"
 #include "data/data_channel_admins.h"
-#include "data/data_feed.h"
+#include "data/data_folder.h"
 #include "data/data_photo.h"
 #include "data/data_channel.h"
 #include "data/data_chat.h"
@@ -63,11 +63,10 @@ constexpr auto kSkipCloudDraftsFor = TimeId(3);
 } // namespace
 
 History::History(not_null<Data::Session*> owner, PeerId peerId)
-: Entry(this)
+: Entry(owner, this)
 , peer(owner->peer(peerId))
 , cloudDraftTextCache(st::dialogsTextWidthMin)
-, _owner(owner)
-, _mute(_owner->notifyIsMuted(peer))
+, _mute(owner->notifyIsMuted(peer))
 , _sendActionText(st::dialogsTextWidthMin) {
 	if (const auto user = peer->asUser()) {
 		if (user->botInfo) {
@@ -95,32 +94,31 @@ int History::height() const {
 }
 
 void History::removeNotification(not_null<HistoryItem*> item) {
-	if (!notifies.isEmpty()) {
-		for (auto i = notifies.begin(), e = notifies.end(); i != e; ++i) {
-			if ((*i) == item) {
-				notifies.erase(i);
-				break;
-			}
-		}
-	}
+	_notifications.erase(
+		ranges::remove(_notifications, item),
+		end(_notifications));
 }
 
 HistoryItem *History::currentNotification() {
-	return notifies.isEmpty() ? 0 : notifies.front();
+	return empty(_notifications)
+		? nullptr
+		: _notifications.front().get();
 }
 
 bool History::hasNotification() const {
-	return !notifies.isEmpty();
+	return !empty(_notifications);
 }
 
 void History::skipNotification() {
-	if (!notifies.isEmpty()) {
-		notifies.pop_front();
+	if (!empty(_notifications)) {
+		_notifications.pop_front();
 	}
 }
 
 void History::popNotification(HistoryItem *item) {
-	if (!notifies.isEmpty() && notifies.back() == item) notifies.pop_back();
+	if (!empty(_notifications) && (_notifications.back() == item)) {
+		_notifications.pop_back();
+	}
 }
 
 bool History::hasPendingResizedItems() const {
@@ -156,15 +154,15 @@ void History::checkChatListMessageRemoved(not_null<HistoryItem*> item) {
 	if (chatListMessage() != item) {
 		return;
 	}
-	_chatListMessage = std::nullopt;
+	setChatListMessageUnknown();
 	refreshChatListMessage();
-	if (const auto channel = peer->asChannel()) {
-		if (const auto feed = channel->feed()) {
-			// Must be after history->chatListMessage() is updated.
-			// Otherwise feed last message will be this value again.
-			feed->messageRemoved(item);
-		}
-	}
+	//if (const auto channel = peer->asChannel()) { // #feed
+	//	if (const auto feed = channel->feed()) {
+	//		// Must be after history->chatListMessage() is updated.
+	//		// Otherwise feed last message will be this value again.
+	//		feed->messageRemoved(item);
+	//	}
+	//}
 }
 
 void History::itemVanished(not_null<HistoryItem*> item) {
@@ -175,7 +173,7 @@ void History::itemVanished(not_null<HistoryItem*> item) {
 	if ((!item->out() || item->isPost())
 		&& item->unread()
 		&& unreadCount() > 0) {
-		changeUnreadCount(-1);
+		setUnreadCount(unreadCount() - 1);
 	}
 	if (peer->pinnedMessageId() == item->id) {
 		peer->clearPinnedMessage();
@@ -329,9 +327,9 @@ void History::draftSavedToCloud() {
 }
 
 HistoryItemsList History::validateForwardDraft() {
-	auto result = _owner->idsToItems(_forwardDraft);
+	auto result = owner().idsToItems(_forwardDraft);
 	if (result.size() != _forwardDraft.size()) {
-		setForwardDraft(_owner->itemsToIds(result));
+		setForwardDraft(owner().itemsToIds(result));
 	}
 	return result;
 }
@@ -561,7 +559,7 @@ bool History::updateSendActionNeedsAnimating(crl::time now, bool force) {
 	}
 	const auto result = (!_typing.empty() || !_sendActions.empty());
 	if (changed || (result && !anim::Disabled())) {
-		_owner->updateSendActionAnimation({
+		owner().updateSendActionAnimation({
 			this,
 			_sendActionAnimation.width(),
 			st::normalFont->height,
@@ -579,7 +577,7 @@ HistoryItem *History::createItem(
 		return nullptr;
 	}
 
-	if (const auto result = App::histItemById(channelId(), messageId)) {
+	if (const auto result = owner().message(channelId(), messageId)) {
 		if (detachExistingItem) {
 			result->removeMainView();
 		}
@@ -622,13 +620,13 @@ not_null<HistoryItem*> History::addNewService(
 HistoryItem *History::addNewMessage(
 		const MTPMessage &msg,
 		NewMessageType type) {
-	if (type == NewMessageExisting) {
+	if (type == NewMessageType::Existing) {
 		return addToHistory(msg);
 	}
 	if (!loadedAtBottom() || peer->migrateTo()) {
 		if (const auto item = addToHistory(msg)) {
 			setLastMessage(item);
-			if (type == NewMessageUnread) {
+			if (type == NewMessageType::Unread) {
 				newItemAdded(item);
 			}
 			return item;
@@ -642,20 +640,20 @@ HistoryItem *History::addNewMessage(
 HistoryItem *History::addNewToLastBlock(
 		const MTPMessage &msg,
 		NewMessageType type) {
-	Expects(type != NewMessageExisting);
+	Expects(type != NewMessageType::Existing);
 
-	const auto detachExistingItem = (type != NewMessageLast);
+	const auto detachExistingItem = (type != NewMessageType::Last);
 	const auto item = createItem(msg, detachExistingItem);
 	if (!item || item->mainView()) {
 		return item;
 	}
-	const auto newUnreadMessage = (type == NewMessageUnread);
+	const auto newUnreadMessage = (type == NewMessageType::Unread);
 	if (newUnreadMessage) {
 		applyMessageChanges(item, msg);
 	}
 	const auto result = addNewItem(item, newUnreadMessage);
 	checkForLoadedAtTop(result);
-	if (type == NewMessageLast) {
+	if (type == NewMessageType::Last) {
 		// When we add just one last item, like we do while loading dialogs,
 		// we want to remove a single added grouped media, otherwise it will
 		// jump once we open the message history (first we show only that
@@ -697,7 +695,7 @@ not_null<HistoryItem*> History::addNewForwarded(
 		const QString &postAuthor,
 		not_null<HistoryMessage*> original) {
 	return addNewItem(
-		new HistoryMessage(
+		owner().makeMessage(
 			this,
 			id,
 			flags,
@@ -720,7 +718,7 @@ not_null<HistoryItem*> History::addNewDocument(
 		const TextWithEntities &caption,
 		const MTPReplyMarkup &markup) {
 	return addNewItem(
-		new HistoryMessage(
+		owner().makeMessage(
 			this,
 			id,
 			flags,
@@ -747,7 +745,7 @@ not_null<HistoryItem*> History::addNewPhoto(
 		const TextWithEntities &caption,
 		const MTPReplyMarkup &markup) {
 	return addNewItem(
-		new HistoryMessage(
+		owner().makeMessage(
 			this,
 			id,
 			flags,
@@ -773,7 +771,7 @@ not_null<HistoryItem*> History::addNewGame(
 		not_null<GameData*> game,
 		const MTPReplyMarkup &markup) {
 	return addNewItem(
-		new HistoryMessage(
+		owner().makeMessage(
 			this,
 			id,
 			flags,
@@ -940,7 +938,7 @@ not_null<HistoryItem*> History::addNewItem(
 				}
 				if (auto megagroup = peer->asMegagroup()) {
 					Notify::peerUpdatedDelayed(peer, Notify::PeerUpdate::Flag::MembersChanged);
-					_owner->addNewMegagroupParticipant(megagroup, user);
+					owner().addNewMegagroupParticipant(megagroup, user);
 				}
 			}
 		}
@@ -1000,7 +998,7 @@ not_null<HistoryItem*> History::addNewItem(
 		newItemAdded(item);
 	}
 
-	_owner->notifyHistoryChangeDelayed(this);
+	owner().notifyHistoryChangeDelayed(this);
 	return item;
 }
 
@@ -1028,7 +1026,7 @@ void History::applyServiceChanges(
 					if (!base::contains(mgInfo->lastParticipants, user)) {
 						mgInfo->lastParticipants.push_front(user);
 						Notify::peerUpdatedDelayed(peer, Notify::PeerUpdate::Flag::MembersChanged);
-						_owner->addNewMegagroupParticipant(megagroup, user);
+						owner().addNewMegagroupParticipant(megagroup, user);
 					}
 					if (user->botInfo) {
 						peer->asChannel()->mgInfo->bots.insert(user);
@@ -1050,7 +1048,7 @@ void History::applyServiceChanges(
 				if (!base::contains(mgInfo->lastParticipants, user)) {
 					mgInfo->lastParticipants.push_front(user);
 					Notify::peerUpdatedDelayed(peer, Notify::PeerUpdate::Flag::MembersChanged);
-					_owner->addNewMegagroupParticipant(megagroup, user);
+					owner().addNewMegagroupParticipant(megagroup, user);
 				}
 				if (user->botInfo) {
 					mgInfo->bots.insert(user);
@@ -1086,7 +1084,7 @@ void History::applyServiceChanges(
 					mgInfo->lastParticipants.erase(i);
 					Notify::peerUpdatedDelayed(peer, Notify::PeerUpdate::Flag::MembersChanged);
 				}
-				_owner->removeMegagroupParticipant(megagroup, user);
+				owner().removeMegagroupParticipant(megagroup, user);
 				if (megagroup->membersCount() > 1) {
 					megagroup->setMembersCount(megagroup->membersCount() - 1);
 				} else {
@@ -1114,7 +1112,7 @@ void History::applyServiceChanges(
 		d.vphoto.match([&](const MTPDphoto &data) {
 			const auto &sizes = data.vsizes.v;
 			if (!sizes.isEmpty()) {
-				auto photo = _owner->processPhoto(data);
+				auto photo = owner().processPhoto(data);
 				photo->peer = peer;
 				auto &smallSize = sizes.front();
 				auto &bigSize = sizes.back();
@@ -1234,11 +1232,14 @@ void History::newItemAdded(not_null<HistoryItem*> item) {
 		}
 	} else if (item->unread()) {
 		if (!isChannel() || peer->asChannel()->amIn()) {
-			notifies.push_back(item);
+			_notifications.push_back(item);
 			App::main()->newUnreadMsg(this, item);
 		}
 	} else {
 		inboxRead(item);
+	}
+	if (!folderKnown()) {
+		session().api().requestDialogEntry(this);
 	}
 }
 
@@ -1493,8 +1494,11 @@ void History::addToSharedMedia(
 	}
 }
 
-int History::countUnread(MsgId upTo) {
-	int result = 0;
+std::optional<int> History::countUnread(MsgId upTo) const {
+	if (!folderKnown() || !loadedAtBottom()) {
+		return std::nullopt;
+	}
+	auto result = 0;
 	for (auto i = blocks.cend(), e = blocks.cbegin(); i != e;) {
 		--i;
 		const auto &messages = (*i)->messages;
@@ -1502,13 +1506,13 @@ int History::countUnread(MsgId upTo) {
 			--j;
 			const auto item = (*j)->data();
 			if (item->id > 0 && item->id <= upTo) {
-				break;
-			} else if (!item->out() && item->unread() && item->id > upTo) {
+				return result;
+			} else if (!item->out() && item->unread()) {
 				++result;
 			}
 		}
 	}
-	return result;
+	return std::nullopt;
 }
 
 void History::calculateFirstUnreadMessage() {
@@ -1536,21 +1540,57 @@ void History::calculateFirstUnreadMessage() {
 	}
 }
 
+void History::readClientSideMessages() {
+	for (const auto &block : blocks) {
+		for (const auto &view : block->messages) {
+			const auto item = view->data();
+			if (!item->out()) {
+				item->markClientSideAsRead();
+			}
+		}
+	}
+}
+
 MsgId History::readInbox() {
 	const auto upTo = msgIdForRead();
-	changeUnreadCount(-unreadCount());
+	if (unreadCountKnown()) {
+		setUnreadCount(0);
+	}
+	readClientSideMessages();
 	if (upTo) {
 		inboxRead(upTo);
 	}
 	return upTo;
 }
 
-void History::inboxRead(MsgId upTo) {
-	if (const auto nowUnreadCount = unreadCount()) {
-		if (loadedAtBottom()) {
-			App::main()->historyToDown(this);
-		}
-		changeUnreadCount(countUnread(upTo) - nowUnreadCount);
+void History::applyInboxReadUpdate(
+		FolderId folderId,
+		MsgId upTo,
+		int stillUnread,
+		int32 channelPts) {
+	const auto folder = folderId ? owner().folderLoaded(folderId) : nullptr;
+	if (folder && this->folder() != folder) {
+		// If history folder is unknown or not synced, request both.
+		session().api().requestDialogEntry(this);
+		session().api().requestDialogEntry(folder);
+	}
+	if (!peer->isChannel() || peer->asChannel()->pts() == channelPts) {
+		inboxRead(upTo, stillUnread);
+	} else {
+		inboxRead(upTo);
+	}
+}
+
+void History::inboxRead(MsgId upTo, std::optional<int> stillUnread) {
+	if (unreadCount() > 0 && loadedAtBottom()) {
+		App::main()->historyToDown(this);
+	}
+	if (stillUnread.has_value() && folderKnown()) {
+		setUnreadCount(*stillUnread);
+	} else if (const auto still = countUnread(upTo)) {
+		setUnreadCount(*still);
+	} else {
+		session().api().requestDialogEntry(this);
 	}
 	setInboxReadTill(upTo);
 	updateChatListEntry();
@@ -1603,120 +1643,79 @@ int History::unreadCount() const {
 	return _unreadCount ? *_unreadCount : 0;
 }
 
-int History::historiesUnreadCount() const {
+int History::unreadCountForBadge() const {
 	const auto result = unreadCount();
 	return (!result && unreadMark()) ? 1 : result;
 }
 
 bool History::unreadCountKnown() const {
-	return !!_unreadCount;
+	return _unreadCount.has_value();
 }
 
 void History::setUnreadCount(int newUnreadCount) {
-	if (!_unreadCount || *_unreadCount != newUnreadCount) {
-		const auto wasUnread = _unreadMark || unreadCount();
-		const auto unreadCountDelta = _unreadCount | [&](int count) {
-			return newUnreadCount - count;
-		};
-		if (newUnreadCount == 1) {
-			if (loadedAtBottom()) {
-				_firstUnreadView = !isEmpty()
-					? blocks.back()->messages.back().get()
-					: nullptr;
-			}
-			if (const auto last = msgIdForRead()) {
-				setInboxReadTill(last - 1);
-			}
-		} else if (!newUnreadCount) {
-			_firstUnreadView = nullptr;
-			if (const auto last = msgIdForRead()) {
-				setInboxReadTill(last);
-			}
-		} else {
-			if (!_firstUnreadView && !_unreadBarView && loadedAtBottom()) {
-				calculateFirstUnreadMessage();
-			}
-		}
-		const auto unreadMarkDelta = [&] {
-			if (_unreadMark) {
-				const auto was = _unreadCount && (*_unreadCount > 0);
-				const auto now = (newUnreadCount > 0);
-				if (was != now) {
-					return was ? 1 : -1;
-				}
-			}
-			return 0;
-		}();
-		_unreadCount = newUnreadCount;
+	Expects(folderKnown());
 
-		if (_unreadBarView) {
-			const auto count = chatListUnreadCount();
-			if (count > 0) {
-				_unreadBarView->setUnreadBarCount(count);
-			} else {
-				_unreadBarView->setUnreadBarFreezed();
-			}
-		}
-
-		if (inChatList(Dialogs::Mode::All)) {
-			const auto delta = unreadMarkDelta + (unreadCountDelta
-				? *unreadCountDelta
-				: newUnreadCount);
-			_owner->unreadIncrement(delta, mute());
-
-			const auto nowUnread = (*_unreadCount > 0) || _unreadMark;
-			const auto entriesDelta = (wasUnread && !nowUnread)
-				? -1
-				: (nowUnread && !wasUnread)
-				? 1
-				: 0;
-			_owner->unreadEntriesChanged(
-				entriesDelta,
-				mute() ? entriesDelta : 0);
-		}
-		Notify::peerUpdatedDelayed(
-			peer,
-			Notify::PeerUpdate::Flag::UnreadViewChanged);
+	if (_unreadCount == newUnreadCount) {
+		return;
 	}
+	const auto notifier = unreadStateChangeNotifier(true);
+
+	_unreadCount = newUnreadCount;
+
+	if (newUnreadCount == 1) {
+		if (loadedAtBottom()) {
+			_firstUnreadView = !isEmpty()
+				? blocks.back()->messages.back().get()
+				: nullptr;
+		}
+		if (const auto last = msgIdForRead()) {
+			setInboxReadTill(last - 1);
+		}
+	} else if (!newUnreadCount) {
+		_firstUnreadView = nullptr;
+		if (const auto last = msgIdForRead()) {
+			setInboxReadTill(last);
+		}
+	} else {
+		if (!_firstUnreadView && !_unreadBarView && loadedAtBottom()) {
+			calculateFirstUnreadMessage();
+		}
+	}
+	if (_unreadBarView) {
+		const auto count = chatListUnreadCount();
+		if (count > 0) {
+			_unreadBarView->setUnreadBarCount(count);
+		} else {
+			_unreadBarView->setUnreadBarFreezed();
+		}
+	}
+	Notify::peerUpdatedDelayed(
+		peer,
+		Notify::PeerUpdate::Flag::UnreadViewChanged);
 }
 
 void History::setUnreadMark(bool unread) {
 	if (clearUnreadOnClientSide()) {
 		unread = false;
 	}
-	if (_unreadMark != unread) {
-		_unreadMark = unread;
-		if (!_unreadCount || !*_unreadCount) {
-			if (inChatList(Dialogs::Mode::All)) {
-				const auto delta = _unreadMark ? 1 : -1;
-				_owner->unreadIncrement(delta, mute());
-				_owner->unreadEntriesChanged(
-					delta,
-					mute() ? delta : 0);
-
-				updateChatListEntry();
-			}
-		}
-		Notify::peerUpdatedDelayed(
-			peer,
-			Notify::PeerUpdate::Flag::UnreadViewChanged);
+	if (_unreadMark == unread) {
+		return;
 	}
+	const auto noUnreadMessages = !unreadCount();
+	const auto notifier = unreadStateChangeNotifier(noUnreadMessages);
+
+	_unreadMark = unread;
+
+	if (inChatList() && noUnreadMessages) {
+		updateChatListEntry();
+	}
+	Notify::peerUpdatedDelayed(
+		peer,
+		Notify::PeerUpdate::Flag::UnreadViewChanged);
 }
 
 bool History::unreadMark() const {
 	return _unreadMark;
-}
-
-void History::changeUnreadCount(int delta) {
-	if (_unreadCount) {
-		setUnreadCount(std::max(*_unreadCount + delta, 0));
-	}
-	if (const auto channel = peer->asChannel()) {
-		if (const auto feed = channel->feed()) {
-			const auto mutedCountDelta = mute() ? delta : 0;
-			feed->unreadCountChanged(delta, mutedCountDelta);
-		}
-	}
 }
 
 bool History::mute() const {
@@ -1727,38 +1726,15 @@ bool History::changeMute(bool newMute) {
 	if (_mute == newMute) {
 		return false;
 	}
+	const auto notify = (unreadCountForBadge() > 0);
+	const auto notifier = unreadStateChangeNotifier(notify);
+
 	_mute = newMute;
 
-	const auto feed = peer->isChannel()
-		? peer->asChannel()->feed()
-		: nullptr;
-	if (feed) {
-		if (_unreadCount) {
-			if (*_unreadCount) {
-				const auto unreadCountDelta = 0;
-				const auto mutedCountDelta = _mute ? *_unreadCount : -*_unreadCount;
-				feed->unreadCountChanged(unreadCountDelta, mutedCountDelta);
-			}
-		} else {
-			session().api().requestDialogEntry(this);
-			session().api().requestDialogEntry(feed);
-		}
-	}
-	if (inChatList(Dialogs::Mode::All)) {
-		if (const auto count = historiesUnreadCount()) {
-			_owner->unreadMuteChanged(count, _mute);
-
-			const auto entriesWithUnreadDelta = 0;
-			const auto mutedEntriesWithUnreadDelta = _mute ? 1 : -1;
-			_owner->unreadEntriesChanged(
-				entriesWithUnreadDelta,
-				mutedEntriesWithUnreadDelta);
-
-			Notify::unreadCounterUpdated();
-		}
+	if (inChatList()) {
 		Notify::historyMuteUpdated(this);
+		updateChatListEntry();
 	}
-	updateChatListEntry();
 	Notify::peerUpdatedDelayed(
 		peer,
 		Notify::PeerUpdate::Flag::NotificationsEnabled);
@@ -1807,7 +1783,78 @@ std::shared_ptr<AdminLog::LocalIdManager> History::adminLogIdManager() {
 	return result;
 }
 
-TimeId History::adjustChatListTimeId() const {
+bool History::folderKnown() const {
+	return _folder.has_value();
+}
+
+Data::Folder *History::folder() const {
+	return _folder.value_or(nullptr);
+}
+
+void History::setFolder(
+		not_null<Data::Folder*> folder,
+		HistoryItem *folderDialogItem) {
+	setFolderPointer(folder);
+	if (folderDialogItem && _lastMessage != folderDialogItem) {
+		setLastMessage(folderDialogItem);
+	}
+}
+
+void History::clearFolder() {
+	setFolderPointer(nullptr);
+}
+
+void History::setFolderPointer(Data::Folder *folder) {
+	using Mode = Dialogs::Mode;
+
+	if (_folder == folder) {
+		return;
+	}
+	if (isPinnedDialog()) {
+		owner().setChatPinned(this, false);
+	}
+	const auto wasKnown = folderKnown();
+	const auto wasInList = inChatList();
+	const auto wasInImportant = wasInList && inChatList(Mode::Important);
+	if (wasInList) {
+		removeFromChatList(Mode::All);
+		if (wasInImportant) {
+			removeFromChatList(Mode::Important);
+		}
+	}
+	const auto was = _folder.value_or(nullptr);
+	_folder = folder;
+	if (was) {
+		was->unregisterOne(this);
+	}
+	if (wasInList) {
+		addToChatList(Mode::All);
+		if (wasInImportant) {
+			addToChatList(Mode::Important);
+		}
+		owner().chatsListChanged(was);
+		owner().chatsListChanged(folder);
+	} else if (!wasKnown) {
+		updateChatListSortPosition();
+	}
+	if (folder) {
+		folder->registerOne(this);
+	}
+}
+
+void History::applyPinnedUpdate(const MTPDupdateDialogPinned &data) {
+	const auto folderId = data.has_folder_id() ? data.vfolder_id.v : 0;
+	if (!folderKnown()) {
+		if (folderId) {
+			setFolder(owner().folder(folderId));
+		} else {
+			clearFolder();
+		}
+	}
+	owner().setChatPinned(this, data.is_pinned());
+}
+
+TimeId History::adjustedChatListTimeId() const {
 	const auto result = chatListTimeId();
 	if (const auto draft = cloudDraft()) {
 		if (!Data::draftIsNull(draft) && !session().supportMode()) {
@@ -1996,6 +2043,20 @@ bool History::chatListMutedBadge() const {
 	return mute();
 }
 
+Dialogs::UnreadState History::chatListUnreadState() const {
+	auto result = Dialogs::UnreadState();
+	const auto count = _unreadCount.value_or(0);
+	const auto mark = !count && _unreadMark;
+	result.messages = count;
+	result.messagesMuted = mute() ? count : 0;
+	result.chats = count ? 1 : 0;
+	result.chatsMuted = (count && mute()) ? 1 : 0;
+	result.marks = mark ? 1 : 0;
+	result.marksMuted = (mark && mute()) ? 1 : 0;
+	result.known = _unreadCount.has_value();
+	return result;
+}
+
 HistoryItem *History::chatListMessage() const {
 	return _chatListMessage.value_or(nullptr);
 }
@@ -2056,7 +2117,7 @@ void History::finishBuildingFrontBlock() {
 }
 
 void History::clearNotifications() {
-	notifies.clear();
+	_notifications.clear();
 }
 
 bool History::loadedAtBottom() const {
@@ -2093,7 +2154,7 @@ bool History::isReadyFor(MsgId msgId) {
 		}
 		return loadedAtBottom();
 	}
-	HistoryItem *item = App::histItemById(channelId(), msgId);
+	const auto item = owner().message(channelId(), msgId);
 	return item && (item->history() == this) && item->mainView();
 }
 
@@ -2135,26 +2196,26 @@ void History::setNotLoadedAtBottom() {
 
 	session().storage().invalidate(
 		Storage::SharedMediaInvalidateBottom(peer->id));
-	if (const auto channel = peer->asChannel()) {
-		if (const auto feed = channel->feed()) {
-			session().storage().invalidate(
-				Storage::FeedMessagesInvalidateBottom(
-					feed->id()));
-		}
-	}
+	//if (const auto channel = peer->asChannel()) { // #feed
+	//	if (const auto feed = channel->feed()) {
+	//		session().storage().invalidate(
+	//			Storage::FeedMessagesInvalidateBottom(
+	//				feed->id()));
+	//	}
+	//}
 }
 
 void History::clearSharedMedia() {
 	session().storage().remove(
 		Storage::SharedMediaRemoveAll(peer->id));
-	if (const auto channel = peer->asChannel()) {
-		if (const auto feed = channel->feed()) {
-			session().storage().remove(
-				Storage::FeedMessagesRemoveAll(
-					feed->id(),
-					channel->bareId()));
-		}
-	}
+	//if (const auto channel = peer->asChannel()) { // #feed
+	//	if (const auto feed = channel->feed()) {
+	//		session().storage().remove(
+	//			Storage::FeedMessagesRemoveAll(
+	//				feed->id(),
+	//				channel->bareId()));
+	//	}
+	//}
 }
 
 void History::setLastMessage(HistoryItem *item) {
@@ -2169,12 +2230,16 @@ void History::setLastMessage(HistoryItem *item) {
 		}
 	}
 	_lastMessage = item;
-	_chatListMessage = std::nullopt;
-	if (!peer->migrateTo()) {
+	if (peer->migrateTo()) {
 		// We don't want to request last message for all deactivated chats.
 		// This is a heavy request for them, because we need to get last
 		// two items by messages.getHistory to skip the migration message.
-		requestChatListMessage();
+		setChatListMessageUnknown();
+	} else {
+		setChatListMessageFromLast();
+		if (!chatListMessageKnown()) {
+			setFakeChatListMessage();
+		}
 	}
 }
 
@@ -2190,10 +2255,11 @@ void History::setChatListMessage(HistoryItem *item) {
 	if (_chatListMessage && *_chatListMessage == item) {
 		return;
 	}
+	const auto was = _chatListMessage.value_or(nullptr);
 	if (item) {
-		if (!_chatListMessage || !*_chatListMessage) {
-			Local::removeSavedPeer(peer);
-		} else if (!IsServerMsgId((*_chatListMessage)->id)
+		if (_chatListMessage
+			&& *_chatListMessage
+			&& !IsServerMsgId((*_chatListMessage)->id)
 			&& (*_chatListMessage)->date() > item->date()) {
 			return;
 		}
@@ -2202,6 +2268,9 @@ void History::setChatListMessage(HistoryItem *item) {
 	} else if (!_chatListMessage || *_chatListMessage) {
 		_chatListMessage = nullptr;
 		updateChatListEntry();
+	}
+	if (const auto folder = this->folder()) {
+		folder->oneListMessageChanged(was, item);
 	}
 	if (const auto to = peer->migrateTo()) {
 		if (const auto history = owner().historyLoaded(to)) {
@@ -2265,7 +2334,18 @@ void History::setChatListMessageFromLast() {
 	if (const auto good = computeChatListMessageFromLast()) {
 		setChatListMessage(*good);
 	} else {
-		_chatListMessage = std::nullopt;
+		setChatListMessageUnknown();
+	}
+}
+
+void History::setChatListMessageUnknown() {
+	if (!_chatListMessage.has_value()) {
+		return;
+	}
+	const auto was = *_chatListMessage;
+	_chatListMessage = std::nullopt;
+	if (const auto folder = this->folder()) {
+		folder->oneListMessageChanged(was, nullptr);
 	}
 }
 
@@ -2330,7 +2410,9 @@ void History::setFakeChatListMessageFrom(const MTPmessages_Messages &data) {
 		// Other (non equal to the last one) message not found.
 		return;
 	}
-	const auto item = owner().addNewMessage(*other, NewMessageExisting);
+	const auto item = owner().addNewMessage(
+		*other,
+		NewMessageType::Existing);
 	if (!item || item->isGroupMigrate()) {
 		// Not better than the last one.
 		return;
@@ -2348,15 +2430,15 @@ bool History::lastMessageKnown() const {
 
 void History::updateChatListExistence() {
 	Entry::updateChatListExistence();
-	if (const auto channel = peer->asChannel()) {
-		if (!channel->feed()) {
-			// After ungrouping from a feed we need to load dialog.
-			requestChatListMessage();
-			if (!unreadCountKnown()) {
-				session().api().requestDialogEntry(this);
-			}
-		}
-	}
+	//if (const auto channel = peer->asChannel()) { // #feed
+	//	if (!channel->feed()) {
+	//		// After ungrouping from a feed we need to load dialog.
+	//		requestChatListMessage();
+	//		if (!unreadCountKnown()) {
+	//			session().api().requestDialogEntry(this);
+	//		}
+	//	}
+	//}
 }
 
 bool History::useProxyPromotion() const {
@@ -2368,16 +2450,20 @@ bool History::useProxyPromotion() const {
 	return false;
 }
 
+int History::fixedOnTopIndex() const {
+	return useProxyPromotion() ? kProxyPromotionFixOnTopIndex : 0;
+}
+
 bool History::shouldBeInChatList() const {
-	if (peer->migrateTo()) {
+	if (peer->migrateTo() || !folderKnown()) {
 		return false;
 	} else if (isPinnedDialog()) {
 		return true;
 	} else if (const auto channel = peer->asChannel()) {
 		if (!channel->amIn()) {
 			return isProxyPromoted();
-		} else if (const auto feed = channel->feed()) {
-			return !feed->needUpdateInChatList();
+		//} else if (const auto feed = channel->feed()) { // #feed
+		//	return !feed->needUpdateInChatList();
 		}
 	} else if (const auto chat = peer->asChat()) {
 		return chat->amIn()
@@ -2394,7 +2480,7 @@ bool History::toImportant() const {
 
 void History::unknownMessageDeleted(MsgId messageId) {
 	if (_inboxReadBefore && messageId >= *_inboxReadBefore) {
-		changeUnreadCount(-1);
+		session().api().requestDialogEntry(this);
 	}
 }
 
@@ -2406,8 +2492,16 @@ bool History::isServerSideUnread(not_null<const HistoryItem*> item) const {
 		: (!_inboxReadBefore || (item->id >= *_inboxReadBefore));
 }
 
-void History::applyDialog(const MTPDdialog &data) {
+void History::applyDialog(
+		Data::Folder *requestFolder,
+		const MTPDdialog &data) {
+	const auto folder = data.has_folder_id()
+		? (data.vfolder_id.v
+			? owner().folder(data.vfolder_id.v).get()
+			: nullptr)
+		: requestFolder;
 	applyDialogFields(
+		folder,
 		data.vunread_count.v,
 		data.vread_inbox_max_id.v,
 		data.vread_outbox_max_id.v);
@@ -2422,14 +2516,14 @@ void History::applyDialog(const MTPDdialog &data) {
 			const auto topMessageId = FullMsgId(
 				peerToChannel(channel->id),
 				data.vtop_message.v);
-			if (const auto item = App::histItemById(topMessageId)) {
+			if (const auto item = owner().message(topMessageId)) {
 				if (item->date() <= channel->date) {
 					session().api().requestSelfParticipant(channel);
 				}
 			}
 		}
 	}
-	_owner->applyNotifySetting(
+	owner().applyNotifySetting(
 		MTP_notifyPeer(data.vpeer),
 		data.vnotify_settings);
 
@@ -2491,26 +2585,20 @@ bool History::clearUnreadOnClientSide() const {
 	return false;
 }
 
-bool History::skipUnreadUpdateForClientSideUnread() const {
-	if (peer->id != PeerData::kServiceNotificationsId) {
-		return false;
-	} else if (!_unreadCount || !*_unreadCount) {
-		return false;
-	} else if (!_lastMessage || IsServerMsgId((*_lastMessage)->id)) {
-		return false;
-	}
-	return true;
-}
-
 bool History::skipUnreadUpdate() const {
-	return skipUnreadUpdateForClientSideUnread()
-		|| clearUnreadOnClientSide();
+	return clearUnreadOnClientSide();
 }
 
 void History::applyDialogFields(
+		Data::Folder *folder,
 		int unreadCount,
 		MsgId maxInboxRead,
 		MsgId maxOutboxRead) {
+	if (folder) {
+		setFolder(folder);
+	} else {
+		clearFolder();
+	}
 	if (!skipUnreadUpdate()) {
 		setUnreadCount(unreadCount);
 		setInboxReadTill(maxInboxRead);
@@ -2523,7 +2611,7 @@ void History::applyDialogTopMessage(MsgId topMessageId) {
 		const auto itemId = FullMsgId(
 			channelId(),
 			topMessageId);
-		if (const auto item = App::histItemById(itemId)) {
+		if (const auto item = owner().message(itemId)) {
 			setLastMessage(item);
 		} else {
 			setLastMessage(nullptr);
@@ -2632,14 +2720,6 @@ void History::resizeToWidth(int newWidth) {
 		y += block->resizeGetHeight(newWidth, resizeAllItems);
 	}
 	_height = y;
-}
-
-Data::Session &History::owner() const {
-	return *_owner;
-}
-
-AuthSession &History::session() const {
-	return _owner->session();
 }
 
 ChannelId History::channelId() const {
@@ -2938,13 +3018,15 @@ void History::clear(ClearType type) {
 	forgetScrollState();
 	if (type == ClearType::Unload) {
 		blocks.clear();
-		_owner->notifyHistoryUnloaded(this);
+		owner().notifyHistoryUnloaded(this);
 		lastKeyboardInited = false;
 		_loadedAtTop = _loadedAtBottom = false;
 	} else {
-		notifies.clear();
-		_owner->notifyHistoryCleared(this);
-		changeUnreadCount(-unreadCount());
+		_notifications.clear();
+		owner().notifyHistoryCleared(this);
+		if (unreadCountKnown()) {
+			setUnreadCount(0);
+		}
 		if (type == ClearType::DeleteChat) {
 			setLastMessage(nullptr);
 		} else if (_lastMessage && *_lastMessage) {
@@ -2966,13 +3048,13 @@ void History::clear(ClearType type) {
 		clearLastKeyboard();
 		if (const auto channel = peer->asChannel()) {
 			channel->clearPinnedMessage();
-			if (const auto feed = channel->feed()) {
-				// Should be after resetting the _lastMessage.
-				feed->historyCleared(this);
-			}
+			//if (const auto feed = channel->feed()) { // #feed
+			//	// Should be after resetting the _lastMessage.
+			//	feed->historyCleared(this);
+			//}
 		}
 	}
-	_owner->notifyHistoryChangeDelayed(this);
+	owner().notifyHistoryChangeDelayed(this);
 
 	if (const auto chat = peer->asChat()) {
 		chat->lastAuthors.clear();
@@ -3000,7 +3082,7 @@ void History::clearUpTill(MsgId availableMinId) {
 	} while (!isEmpty());
 
 	requestChatListMessage();
-	_owner->sendHistoryChangeNotifications();
+	owner().sendHistoryChangeNotifications();
 }
 
 void History::applyGroupAdminChanges(
@@ -3008,19 +3090,6 @@ void History::applyGroupAdminChanges(
 	for (const auto &block : blocks) {
 		for (const auto &message : block->messages) {
 			message->data()->applyGroupAdminChanges(changes);
-		}
-	}
-}
-
-void History::changedInChatListHook(Dialogs::Mode list, bool added) {
-	if (list == Dialogs::Mode::All) {
-		if (const auto delta = historiesUnreadCount() * (added ? 1 : -1)) {
-			_owner->unreadIncrement(delta, mute());
-
-			const auto entriesDelta = added ? 1 : -1;
-			_owner->unreadEntriesChanged(
-				entriesDelta,
-				mute() ? entriesDelta : 0);
 		}
 	}
 }

@@ -375,9 +375,9 @@ QSize Service::performCountOptimalSize() {
 }
 
 bool Service::isHidden() const {
-	if (context() == Context::Feed) {
-		return true;
-	}
+	//if (context() == Context::Feed) { // #feed
+	//	return true;
+	//}
 	return Element::isHidden();
 }
 

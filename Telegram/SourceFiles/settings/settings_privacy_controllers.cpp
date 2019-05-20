@@ -39,7 +39,9 @@ namespace {
 
 constexpr auto kBlockedPerPage = 40;
 
-class BlockUserBoxController : public ChatsListBoxController {
+class BlockUserBoxController
+	: public ChatsListBoxController
+	, private base::Subscriber {
 public:
 	void rowClicked(not_null<PeerListRow*> row) override;
 
@@ -139,9 +141,9 @@ AdminLog::OwnedItem GenerateForwardedItem(
 		MTPint(), // edit_date
 		MTPstring(), // post_author
 		MTPlong() // grouped_id
-	).match([&](const MTPDmessage & data) {
-		return new HistoryMessage(history, data);
-	}, [](auto &&) -> HistoryMessage* {
+	).match([&](const MTPDmessage &data) {
+		return history->owner().makeMessage(history, data);
+	}, [](auto &&) -> not_null<HistoryMessage*> {
 		Unexpected("Type in GenerateForwardedItem.");
 	});
 

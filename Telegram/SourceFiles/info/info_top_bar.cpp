@@ -17,6 +17,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "boxes/confirm_box.h"
 #include "boxes/peer_list_controllers.h"
 #include "mainwidget.h"
+#include "auth_session.h"
 #include "ui/widgets/buttons.h"
 #include "ui/widgets/labels.h"
 #include "ui/widgets/input_fields.h"
@@ -25,6 +26,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/wrap/padding_wrap.h"
 #include "ui/search_field_controller.h"
 #include "window/window_peer_menu.h"
+#include "data/data_session.h"
 #include "data/data_channel.h"
 #include "data/data_user.h"
 #include "styles/style_info.h"
@@ -511,8 +513,8 @@ MessageIdsList TopBar::collectItems() const {
 		_selectedItems.list
 	) | ranges::view::transform([](auto &&item) {
 		return item.msgId;
-	}) | ranges::view::filter([](const FullMsgId &msgId) {
-		return App::histItemById(msgId) != nullptr;
+	}) | ranges::view::filter([](FullMsgId msgId) {
+		return Auth().data().message(msgId) != nullptr;
 	}) | ranges::to_vector;
 }
 
@@ -554,9 +556,9 @@ rpl::producer<QString> TitleValue(
 
 		switch (section.type()) {
 		case Section::Type::Profile:
-			if (const auto feed = key.feed()) {
+			/*if (const auto feed = key.feed()) {
 				return lng_info_feed_title;
-			} else if (const auto user = peer->asUser()) {
+			} else */if (const auto user = peer->asUser()) {
 				return (user->isBot() && !user->isSupport())
 					? lng_info_bot_title
 					: lng_info_user_title;
@@ -597,8 +599,8 @@ rpl::producer<QString> TitleValue(
 		case Section::Type::Members:
 			return lng_profile_participants_section;
 
-		case Section::Type::Channels:
-			return lng_info_feed_channels;
+		//case Section::Type::Channels: // #feed
+		//	return lng_info_feed_channels;
 
 		case Section::Type::Settings:
 			switch (section.settingsType()) {

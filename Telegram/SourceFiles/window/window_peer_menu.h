@@ -12,7 +12,7 @@ class RpWidget;
 } // namespace Ui
 
 namespace Data {
-class Feed;
+class Folder;
 } // namespace Data
 
 namespace Window {
@@ -34,9 +34,9 @@ void FillPeerMenu(
 	not_null<PeerData*> peer,
 	const PeerMenuCallback &addAction,
 	PeerMenuSource source);
-void FillFeedMenu(
+void FillFolderMenu(
 	not_null<Controller*> controller,
-	not_null<Data::Feed*> feed,
+	not_null<Data::Folder*> folder,
 	const PeerMenuCallback &addAction,
 	PeerMenuSource source);
 
@@ -52,7 +52,7 @@ void PeerMenuAddChannelMembers(not_null<ChannelData*> channel);
 //void PeerMenuUngroupFeed(not_null<Data::Feed*> feed); // #feed
 void PeerMenuCreatePoll(not_null<PeerData*> peer);
 
-//void ToggleChannelGrouping(not_null<ChannelData*> channel, bool group); // #feed
+void ToggleHistoryArchived(not_null<History*> history, bool archived);
 Fn<void()> ClearHistoryHandler(not_null<PeerData*> peer);
 Fn<void()> DeleteAndLeaveHandler(not_null<PeerData*> peer);
 

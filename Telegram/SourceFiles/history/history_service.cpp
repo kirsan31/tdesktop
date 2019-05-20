@@ -17,7 +17,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/history_message.h"
 #include "history/history_item_components.h"
 #include "history/view/history_view_service_message.h"
-#include "data/data_feed.h"
+#include "data/data_folder.h"
 #include "data/data_session.h"
 #include "data/data_media_types.h"
 #include "data/data_game.h"
@@ -330,14 +330,14 @@ bool HistoryService::updateDependent(bool force) {
 	}
 	auto gotDependencyItem = false;
 	if (!dependent->msg) {
-		dependent->msg = App::histItemById(channelId(), dependent->msgId);
+		dependent->msg = history()->owner().message(channelId(), dependent->msgId);
 		if (dependent->msg) {
 			if (dependent->msg->isEmpty()) {
 				// Really it is deleted.
 				dependent->msg = nullptr;
 				force = true;
 			} else {
-				App::historyRegDependency(this, dependent->msg);
+				history()->owner().registerDependentMessage(this, dependent->msg);
 				gotDependencyItem = true;
 			}
 		}
@@ -722,23 +722,23 @@ void HistoryService::updateDependentText() {
 	if (history()->textCachedFor == this) {
 		history()->textCachedFor = nullptr;
 	}
-	if (const auto feed = history()->peer->feed()) {
-		if (feed->textCachedFor == this) {
-			feed->textCachedFor = nullptr;
-			feed->updateChatListEntry();
-		}
-	}
+	//if (const auto feed = history()->peer->feed()) { // #TODO archive
+	//	if (feed->textCachedFor == this) {
+	//		feed->textCachedFor = nullptr;
+	//		feed->updateChatListEntry();
+	//	}
+	//}
 	if (const auto main = App::main()) {
 		// #TODO feeds search results
 		main->repaintDialogRow({ history(), fullId() });
 	}
-	App::historyUpdateDependent(this);
+	history()->owner().updateDependentMessages(this);
 }
 
 void HistoryService::clearDependency() {
-	if (auto dependent = GetDependentData()) {
+	if (const auto dependent = GetDependentData()) {
 		if (dependent->msg) {
-			App::historyUnregDependency(this, dependent->msg);
+			history()->owner().unregisterDependentMessage(this, dependent->msg);
 		}
 	}
 }

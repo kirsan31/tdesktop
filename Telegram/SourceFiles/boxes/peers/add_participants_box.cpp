@@ -14,6 +14,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_chat.h"
 #include "data/data_user.h"
 #include "data/data_session.h"
+#include "data/data_folder.h"
 #include "history/history.h"
 #include "dialogs/dialogs_indexed_list.h"
 #include "auth_session.h"
@@ -1060,17 +1061,16 @@ void AddSpecialBoxSearchController::addChatsContacts() {
 		}
 		return true;
 	};
-
-	const auto getSmallestIndex = [&](
-			Dialogs::IndexedList *list) -> const Dialogs::List* {
-		if (list->isEmpty()) {
+	const auto getSmallestIndex = [&](not_null<Dialogs::IndexedList*> list)
+	-> const Dialogs::List* {
+		if (list->empty()) {
 			return nullptr;
 		}
 
 		auto result = (const Dialogs::List*)nullptr;
 		for (const auto &word : wordList) {
 			const auto found = list->filtered(word[0]);
-			if (found->isEmpty()) {
+			if (!found || found->empty()) {
 				return nullptr;
 			}
 			if (!result || result->size() > found->size()) {
@@ -1079,16 +1079,12 @@ void AddSpecialBoxSearchController::addChatsContacts() {
 		}
 		return result;
 	};
-	const auto dialogsIndex = getSmallestIndex(App::main()->dialogsList());
-	const auto contactsIndex = getSmallestIndex(
-		App::main()->contactsNoDialogsList());
-
-	const auto filterAndAppend = [&](const Dialogs::List *list) {
-		if (!list) {
+	const auto filterAndAppend = [&](not_null<Dialogs::IndexedList*> list) {
+		const auto index = getSmallestIndex(list);
+		if (!index) {
 			return;
 		}
-
-		for (const auto row : *list) {
+		for (const auto row : *index) {
 			if (const auto history = row->history()) {
 				if (const auto user = history->peer->asUser()) {
 					if (allWordsAreFound(user->nameWords())) {
@@ -1098,7 +1094,11 @@ void AddSpecialBoxSearchController::addChatsContacts() {
 			}
 		}
 	};
-	filterAndAppend(dialogsIndex);
-	filterAndAppend(contactsIndex);
+	filterAndAppend(_peer->owner().chatsList()->indexed());
+	const auto id = Data::Folder::kId;
+	if (const auto folder = _peer->owner().folderLoaded(id)) {
+		filterAndAppend(folder->chatsList()->indexed());
+	}
+	filterAndAppend(_peer->owner().contactsNoChatsList());
 	delegate()->peerListSearchRefreshRows();
 }

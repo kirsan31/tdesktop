@@ -41,16 +41,16 @@ namespace {
 // If we can't cloud-export link for such time we export it locally.
 constexpr auto kExportLocalTimeout = crl::time(1000);
 
-void AddToggleGroupingAction(
-		not_null<Ui::PopupMenu*> menu,
-		not_null<PeerData*> peer) {
-	if (const auto channel = peer->asChannel()) {
-		const auto grouped = (channel->feed() != nullptr);
-		//menu->addAction( // #feed
-		//	lang(grouped ? lng_feed_ungroup : lng_feed_group),
-		//	[=] { Window::ToggleChannelGrouping(channel, !grouped); });
-	}
-}
+//void AddToggleGroupingAction( // #feed
+//		not_null<Ui::PopupMenu*> menu,
+//		not_null<PeerData*> peer) {
+//	if (const auto channel = peer->asChannel()) {
+//		const auto grouped = (channel->feed() != nullptr);
+//		menu->addAction( // #feed
+//			lang(grouped ? lng_feed_ungroup : lng_feed_group),
+//			[=] { Window::ToggleChannelGrouping(channel, !grouped); });
+//	}
+//}
 
 void SavePhotoToFile(not_null<PhotoData*> photo) {
 	if (photo->isNull() || !photo->loaded()) {
@@ -105,7 +105,7 @@ void AddPhotoActions(
 }
 
 void OpenGif(FullMsgId itemId) {
-	if (const auto item = App::histItemById(itemId)) {
+	if (const auto item = Auth().data().message(itemId)) {
 		if (const auto media = item->media()) {
 			if (const auto document = media->document()) {
 				Core::App().showDocument(document, item);
@@ -264,7 +264,7 @@ bool AddForwardMessageAction(
 	}
 	const auto itemId = item->fullId();
 	menu->addAction(lang(lng_context_forward_msg), [=] {
-		if (const auto item = App::histItemById(itemId)) {
+		if (const auto item = Auth().data().message(itemId)) {
 			Window::ShowForwardMessagesBox(asGroup
 				? Auth().data().itemOrItsGroup(item)
 				: MessageIdsList{ 1, itemId });
@@ -329,7 +329,7 @@ bool AddDeleteMessageAction(
 	}
 	const auto itemId = item->fullId();
 	menu->addAction(lang(lng_context_delete_msg), [=] {
-		if (const auto item = App::histItemById(itemId)) {
+		if (const auto item = Auth().data().message(itemId)) {
 			if (asGroup) {
 				if (const auto group = Auth().data().groups().find(item)) {
 					Ui::show(Box<DeleteMessagesBox>(
@@ -385,7 +385,7 @@ bool AddSelectMessageAction(
 	const auto itemId = item->fullId();
 	const auto asGroup = (request.pointState != PointState::GroupPart);
 	menu->addAction(lang(lng_context_select_msg), [=] {
-		if (const auto item = App::histItemById(itemId)) {
+		if (const auto item = Auth().data().message(itemId)) {
 			if (asGroup) {
 				list->selectItemAsGroup(item);
 			} else {
@@ -469,18 +469,18 @@ base::unique_qptr<Ui::PopupMenu> FillContextMenu(
 		AddPhotoActions(result, photo);
 	} else if (linkDocument) {
 		AddDocumentActions(result, document, itemId);
-	} else if (linkPeer) {
-		const auto peer = linkPeer->peer();
-		if (peer->isChannel()
-			&& peer->asChannel()->feed() != nullptr
-			&& (list->delegate()->listContext() == Context::Feed)) {
-			Window::PeerMenuAddMuteAction(peer, [&](
-					const QString &text,
-					Fn<void()> handler) {
-				return result->addAction(text, handler);
-			});
-			AddToggleGroupingAction(result, linkPeer->peer());
-		}
+	//} else if (linkPeer) { // #feed
+	//	const auto peer = linkPeer->peer();
+	//	if (peer->isChannel()
+	//		&& peer->asChannel()->feed() != nullptr
+	//		&& (list->delegate()->listContext() == Context::Feed)) {
+	//		Window::PeerMenuAddMuteAction(peer, [&](
+	//				const QString &text,
+	//				Fn<void()> handler) {
+	//			return result->addAction(text, handler);
+	//		});
+	//		AddToggleGroupingAction(result, linkPeer->peer());
+	//	}
 	} else if (!request.overSelection && view && !hasSelection) {
 		const auto media = view->media();
 		const auto mediaHasTextForCopy = media && media->hasTextForCopy();
@@ -490,7 +490,7 @@ base::unique_qptr<Ui::PopupMenu> FillContextMenu(
 		if (!link && (view->hasVisibleText() || mediaHasTextForCopy)) {
 			const auto asGroup = (request.pointState != PointState::GroupPart);
 			result->addAction(lang(lng_context_copy_text), [=] {
-				if (const auto item = App::histItemById(itemId)) {
+				if (const auto item = Auth().data().message(itemId)) {
 					if (asGroup) {
 						if (const auto group = Auth().data().groups().find(item)) {
 							SetClipboardText(HistoryGroupText(group));
@@ -509,7 +509,7 @@ base::unique_qptr<Ui::PopupMenu> FillContextMenu(
 }
 
 void CopyPostLink(FullMsgId itemId) {
-	const auto item = App::histItemById(itemId);
+	const auto item = Auth().data().message(itemId);
 	if (!item || !item->hasDirectLink()) {
 		return;
 	}
@@ -527,7 +527,7 @@ void CopyPostLink(FullMsgId itemId) {
 void StopPoll(FullMsgId itemId) {
 	const auto stop = [=] {
 		Ui::hideLayer();
-		if (const auto item = App::histItemById(itemId)) {
+		if (const auto item = Auth().data().message(itemId)) {
 			item->history()->session().api().closePoll(item);
 		}
 	};

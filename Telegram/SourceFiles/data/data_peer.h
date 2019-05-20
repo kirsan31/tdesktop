@@ -25,7 +25,6 @@ class ChannelData;
 
 namespace Data {
 
-class Feed;
 class Session;
 
 int PeerColorIndex(PeerId peerId);
@@ -179,7 +178,6 @@ public:
 	[[nodiscard]] ChannelData *migrateTo() const;
 	[[nodiscard]] not_null<PeerData*> migrateToOrMe();
 	[[nodiscard]] not_null<const PeerData*> migrateToOrMe() const;
-	[[nodiscard]] Data::Feed *feed() const;
 
 	void updateFull();
 	void updateFullForced();
@@ -283,6 +281,8 @@ public:
 	const QString &about() const {
 		return _about;
 	}
+
+	void checkFolder(FolderId folderId);
 
 	enum LoadedStatus {
 		NotLoaded = 0x00,

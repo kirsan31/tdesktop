@@ -80,9 +80,9 @@ void UnreadBar::init(int newCount) {
 		return;
 	}
 	count = newCount;
-	text = (count == kCountUnknown)
+	text = /*(count == kCountUnknown) // #feed
 		? lang(lng_unread_bar_some)
-		: lng_unread_bar(lt_count, count);
+		: */lng_unread_bar(lt_count, count);
 	width = st::semiboldFont->width(text);
 }
 
@@ -326,9 +326,10 @@ bool Element::computeIsAttachToPrevious(not_null<Element*> previous) {
 		const auto prev = previous->data();
 		const auto possible = !item->serviceMsg() && !prev->serviceMsg()
 			&& !item->isEmpty() && !prev->isEmpty()
-			&& (std::abs(prev->date() - item->date()) < kAttachMessageToPreviousSecondsDelta)
-			&& (_context == Context::Feed
-				|| (!item->isPost() && !prev->isPost()));
+			&& (std::abs(prev->date() - item->date())
+				< kAttachMessageToPreviousSecondsDelta)
+			&& (/*_context == Context::Feed // #feed
+				|| */(!item->isPost() && !prev->isPost()));
 		if (possible) {
 			if (item->history()->peer->isSelf()) {
 				return IsAttachedToPreviousInSavedMessages(prev, item);

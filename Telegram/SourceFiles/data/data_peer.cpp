@@ -11,7 +11,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_chat.h"
 #include "data/data_channel.h"
 #include "data/data_photo.h"
-#include "data/data_feed.h"
+#include "data/data_folder.h"
 #include "data/data_session.h"
 #include "lang/lang_keys.h"
 #include "observer_peer.h"
@@ -115,7 +115,7 @@ void PeerData::updateNameDelayed(
 		const QString &newName,
 		const QString &newNameOrPhone,
 		const QString &newUsername) {
-	if (name == newName) {
+	if (name == newName && nameVersion > 1) {
 		if (isUser()) {
 			if (asUser()->nameOrPhone == newNameOrPhone
 				&& asUser()->username == newUsername) {
@@ -129,15 +129,14 @@ void PeerData::updateNameDelayed(
 			return;
 		}
 	}
-	++nameVersion;
 	name = newName;
 	nameText.setText(st::msgNameStyle, name, Ui::NameTextOptions());
 	refreshEmptyUserpic();
-
 	Notify::PeerUpdate update(this);
-	update.flags |= UpdateFlag::NameChanged;
-	update.oldNameFirstLetters = nameFirstLetters();
-
+	if (nameVersion++ > 1) {
+		update.flags |= UpdateFlag::NameChanged;
+		update.oldNameFirstLetters = nameFirstLetters();
+	}
 	if (isUser()) {
 		if (asUser()->username != newUsername) {
 			asUser()->username = newUsername;
@@ -157,7 +156,9 @@ void PeerData::updateNameDelayed(
 		}
 	}
 	fillNames();
-	Notify::PeerUpdated().notify(update, true);
+	if (update.flags) {
+		Notify::PeerUpdated().notify(update, true);
+	}
 }
 
 std::unique_ptr<Ui::EmptyUserpic> PeerData::createEmptyUserpic() const {
@@ -356,13 +357,13 @@ void PeerData::setUserpicChecked(
 		|| _userpicLocation != location) {
 		setUserpic(photoId, location, userpic);
 		Notify::peerUpdatedDelayed(this, UpdateFlag::PhotoChanged);
-		if (const auto channel = asChannel()) {
-			if (const auto feed = channel->feed()) {
-				owner().notifyFeedUpdated(
-					feed,
-					Data::FeedUpdateFlag::ChannelPhoto);
-			}
-		}
+		//if (const auto channel = asChannel()) { // #feed
+		//	if (const auto feed = channel->feed()) {
+		//		owner().notifyFeedUpdated(
+		//			feed,
+		//			Data::FeedUpdateFlag::ChannelPhoto);
+		//	}
+		//}
 	}
 }
 
@@ -414,6 +415,17 @@ bool PeerData::setAbout(const QString &newAbout) {
 	_about = newAbout;
 	Notify::peerUpdatedDelayed(this, UpdateFlag::AboutChanged);
 	return true;
+}
+
+void PeerData::checkFolder(FolderId folderId) {
+	const auto folder = folderId
+		? owner().folderLoaded(folderId)
+		: nullptr;
+	if (const auto history = owner().historyLoaded(this)) {
+		if (folder && history->folder() != folder) {
+			session().api().requestDialogEntry(history);
+		}
+	}
 }
 
 void PeerData::fillNames() {
@@ -574,13 +586,6 @@ not_null<const PeerData*> PeerData::migrateToOrMe() const {
 		return channel;
 	}
 	return this;
-}
-
-Data::Feed *PeerData::feed() const {
-	if (const auto channel = asChannel()) {
-		return channel->feed();
-	}
-	return nullptr;
 }
 
 const Text &PeerData::dialogName() const {

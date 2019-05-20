@@ -20,6 +20,39 @@ namespace {
 
 uint64 InstallationTag = 0;
 
+class FilteredCommandLineArguments {
+public:
+	FilteredCommandLineArguments(int argc, char **argv);
+
+	int &count();
+	char **values();
+
+private:
+	static constexpr auto kForwardArgumentCount = 1;
+
+	int _count = 0;
+	char *_arguments[kForwardArgumentCount + 1] = { nullptr };
+
+};
+
+FilteredCommandLineArguments::FilteredCommandLineArguments(
+	int argc,
+	char **argv)
+: _count(std::clamp(argc, 0, kForwardArgumentCount)) {
+	// For now just pass only the first argument, the executable path.
+	for (auto i = 0; i != _count; ++i) {
+		_arguments[i] = argv[i];
+	}
+}
+
+int &FilteredCommandLineArguments::count() {
+	return _count;
+}
+
+char **FilteredCommandLineArguments::values() {
+	return _arguments;
+}
+
 QString DebugModeSettingPath() {
 	return cWorkingDir() + qsl("tdata/withdebug");
 }
@@ -208,6 +241,9 @@ void Launcher::init() {
 
 	QApplication::setApplicationName(qsl("TelegramDesktop"));
 
+#if defined(Q_OS_LINUX) && QT_VERSION >= QT_VERSION_CHECK(5, 7, 0)
+	QApplication::setDesktopFileName(qsl("telegramdesktop.desktop"));
+#endif
 #ifndef OS_MAC_OLD
 	QApplication::setAttribute(Qt::AA_DisableHighDpiScaling, true);
 #endif // OS_MAC_OLD
@@ -437,7 +473,8 @@ void Launcher::processArguments() {
 }
 
 int Launcher::executeApplication() {
-	Sandbox sandbox(this, _argc, _argv);
+	FilteredCommandLineArguments arguments(_argc, _argv);
+	Sandbox sandbox(this, arguments.count(), arguments.values());
 	MainQueueProcessor processor;
 	base::ConcurrentTimerEnvironment environment;
 	return sandbox.start();

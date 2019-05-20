@@ -42,11 +42,7 @@ class Row : public RippleRow {
 public:
 	explicit Row(std::nullptr_t) {
 	}
-	Row(Key key, Row *prev, Row *next, int pos)
-	: _id(key)
-	, _prev(prev)
-	, _next(next)
-	, _pos(pos) {
+	Row(Key key, int pos) : _id(key), _pos(pos) {
 	}
 
 	Key key() const {
@@ -55,8 +51,8 @@ public:
 	History *history() const {
 		return _id.history();
 	}
-	Data::Feed *feed() const {
-		return _id.feed();
+	Data::Folder *folder() const {
+		return _id.folder();
 	}
 	not_null<Entry*> entry() const {
 		return _id.entry();
@@ -66,6 +62,11 @@ public:
 	}
 	uint64 sortKey() const;
 
+	void validateListEntryCache() const;
+	const Text &listEntryCache() const {
+		return _listEntryCache;
+	}
+
 	// for any attached data, for example View in contacts list
 	void *attached = nullptr;
 
@@ -73,9 +74,9 @@ private:
 	friend class List;
 
 	Key _id;
-	Row *_prev = nullptr;
-	Row *_next = nullptr;
 	int _pos = 0;
+	mutable uint32 _listEntryCacheVersion = 0;
+	mutable Text _listEntryCache;
 
 };
 

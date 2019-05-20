@@ -15,11 +15,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_channel.h"
 #include "data/data_chat.h"
 #include "data/data_user.h"
+#include "data/data_folder.h"
 #include "apiwrap.h"
 #include "mainwidget.h"
 #include "lang/lang_keys.h"
 #include "history/history.h"
-#include "dialogs/dialogs_indexed_list.h"
+#include "dialogs/dialogs_main_list.h"
 #include "styles/style_boxes.h"
 #include "styles/style_profile.h"
 
@@ -225,18 +226,24 @@ void ChatsListBoxController::prepare() {
 
 	prepareViewHook();
 
-	rebuildRows();
+	if (!Auth().data().chatsListLoaded()) {
+		Auth().data().chatsListLoadedEvents(
+		) | rpl::filter([=](Data::Folder *folder) {
+			return !folder;
+		}) | rpl::start_with_next([=] {
+			checkForEmptyRows();
+		}, lifetime());
+	}
 
-	auto &sessionData = Auth().data();
-	subscribe(sessionData.contactsLoaded(), [this](bool loaded) {
+	Auth().data().chatsListChanges(
+	) | rpl::start_with_next([=] {
 		rebuildRows();
-	});
-	subscribe(sessionData.moreChatsLoaded(), [this] {
+	}, lifetime());
+
+	Auth().data().contactsLoaded().value(
+	) | rpl::start_with_next([=] {
 		rebuildRows();
-	});
-	subscribe(sessionData.allChatsLoaded(), [this](bool loaded) {
-		checkForEmptyRows();
-	});
+	}, lifetime());
 }
 
 void ChatsListBoxController::rebuildRows() {
@@ -258,13 +265,17 @@ void ChatsListBoxController::rebuildRows() {
 			++added;
 		}
 	}
-	added += appendList(App::main()->dialogsList());
-	added += appendList(App::main()->contactsNoDialogsList());
+	added += appendList(Auth().data().chatsList()->indexed());
+	const auto id = Data::Folder::kId;
+	if (const auto folder = Auth().data().folderLoaded(id)) {
+		added += appendList(folder->chatsList()->indexed());
+	}
+	added += appendList(Auth().data().contactsNoChatsList());
 	if (!wasEmpty && added > 0) {
 		// Place dialogs list before contactsNoDialogs list.
 		delegate()->peerListPartitionRows([](const PeerListRow &a) {
-			auto history = static_cast<const Row&>(a).history();
-			return history->inChatList(Dialogs::Mode::All);
+			const auto history = static_cast<const Row&>(a).history();
+			return history->inChatList();
 		});
 		if (respectSavedMessagesChat()) {
 			delegate()->peerListPartitionRows([](const PeerListRow &a) {
@@ -280,8 +291,8 @@ void ChatsListBoxController::checkForEmptyRows() {
 	if (delegate()->peerListFullRowsCount()) {
 		setDescriptionText(QString());
 	} else {
-		auto &sessionData = Auth().data();
-		auto loaded = sessionData.contactsLoaded().value() && sessionData.allChatsLoaded().value();
+		const auto loaded = Auth().data().contactsLoaded().current()
+			&& Auth().data().chatsListLoaded();
 		setDescriptionText(loaded ? emptyBoxText() : lang(lng_contacts_loading));
 	}
 }
@@ -318,16 +329,14 @@ void ContactsBoxController::prepare() {
 
 	prepareViewHook();
 
-	rebuildRows();
-
-	auto &sessionData = Auth().data();
-	subscribe(sessionData.contactsLoaded(), [this](bool loaded) {
+	Auth().data().contactsLoaded().value(
+	) | rpl::start_with_next([=] {
 		rebuildRows();
-	});
+	}, lifetime());
 }
 
 void ContactsBoxController::rebuildRows() {
-	auto appendList = [this](auto chats) {
+	const auto appendList = [&](auto chats) {
 		auto count = 0;
 		for (const auto row : chats->all()) {
 			if (const auto history = row->history()) {
@@ -340,7 +349,7 @@ void ContactsBoxController::rebuildRows() {
 		}
 		return count;
 	};
-	appendList(App::main()->contactsList());
+	appendList(Auth().data().contactsList());
 	checkForEmptyRows();
 	delegate()->peerListRefreshRows();
 }
@@ -349,8 +358,7 @@ void ContactsBoxController::checkForEmptyRows() {
 	if (delegate()->peerListFullRowsCount()) {
 		setDescriptionText(QString());
 	} else {
-		auto &sessionData = Auth().data();
-		auto loaded = sessionData.contactsLoaded().value();
+		const auto loaded = Auth().data().contactsLoaded().current();
 		setDescriptionText(lang(loaded ? lng_contacts_not_found : lng_contacts_loading));
 	}
 }
@@ -473,13 +481,13 @@ bool AddBotToGroupBoxController::sharingBotGame() const {
 }
 
 QString AddBotToGroupBoxController::emptyBoxText() const {
-	return lang(Auth().data().allChatsLoaded().value()
+	return lang(Auth().data().chatsListLoaded()
 		? (sharingBotGame() ? lng_bot_no_chats : lng_bot_no_groups)
 		: lng_contacts_loading);
 }
 
 QString AddBotToGroupBoxController::noResultsText() const {
-	return lang(Auth().data().allChatsLoaded().value()
+	return lang(Auth().data().chatsListLoaded()
 		? (sharingBotGame() ? lng_bot_chats_not_found : lng_bot_groups_not_found)
 		: lng_contacts_loading);
 }
@@ -493,7 +501,12 @@ void AddBotToGroupBoxController::prepareViewHook() {
 		? lng_bot_choose_chat
 		: lng_bot_choose_group));
 	updateLabels();
-	subscribe(Auth().data().allChatsLoaded(), [this](bool) { updateLabels(); });
+	Auth().data().chatsListLoadedEvents(
+	) | rpl::filter([=](Data::Folder *folder) {
+		return !folder;
+	}) | rpl::start_with_next([=] {
+		updateLabels();
+	}, lifetime());
 }
 
 ChooseRecipientBoxController::ChooseRecipientBoxController(
