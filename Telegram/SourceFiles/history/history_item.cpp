@@ -68,7 +68,7 @@ not_null<HistoryItem*> CreateUnsupportedMessage(
 	text.entities.push_front(
 		EntityInText(EntityType::Italic, 0, text.text.size()));
 	flags &= ~MTPDmessage::Flag::f_post_author;
-	flags |= MTPDmessage_ClientFlag::f_is_unsupported;
+	flags |= MTPDmessage::Flag::f_legacy;
 	return history->owner().makeMessage(
 		history,
 		msgId,
@@ -218,6 +218,32 @@ ReplyKeyboard *HistoryItem::inlineReplyKeyboard() {
 	return nullptr;
 }
 
+ChannelData *HistoryItem::discussionPostOriginalSender() const {
+	if (!history()->peer->isMegagroup()) {
+		return nullptr;
+	}
+	if (const auto forwarded = Get<HistoryMessageForwarded>()) {
+		const auto from = forwarded->savedFromPeer;
+		if (const auto result = from ? from->asChannel() : nullptr) {
+			return result;
+		}
+	}
+	return nullptr;
+}
+
+bool HistoryItem::isDiscussionPost() const {
+	return (discussionPostOriginalSender() != nullptr);
+}
+
+PeerData *HistoryItem::displayFrom() const {
+	if (const auto sender = discussionPostOriginalSender()) {
+		return sender;
+	} else if (history()->peer->isSelf()) {
+		return senderOriginal();
+	}
+	return author().get();
+}
+
 void HistoryItem::invalidateChatListEntry() {
 	if (const auto main = App::main()) {
 		// #TODO feeds search results
@@ -253,6 +279,14 @@ bool HistoryItem::hasUnreadMediaFlag() const {
 
 bool HistoryItem::isUnreadMention() const {
 	return mentionsMe() && (_flags & MTPDmessage::Flag::f_media_unread);
+}
+
+bool HistoryItem::mentionsMe() const {
+	if (Has<HistoryServicePinned>()
+		&& !history()->session().settings().notifyAboutPinned()) {
+		return false;
+	}
+	return _flags & MTPDmessage::Flag::f_mentioned;
 }
 
 bool HistoryItem::isUnreadMedia() const {
@@ -706,7 +740,7 @@ QString HistoryItem::inDialogsText(DrawInDialog way) const {
 		if (isPost() || isEmpty() || (way == DrawInDialog::WithoutSender)) {
 			return nullptr;
 		} else if (!_history->peer->isUser() || out()) {
-			return author();
+			return displayFrom();
 		} else if (_history->peer->isSelf() && !Has<HistoryMessageForwarded>()) {
 			return senderOriginal();
 		}

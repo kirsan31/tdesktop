@@ -131,9 +131,12 @@ public:
 	}
 
 	int membersCount() const {
-		return _membersCount;
+		return std::max(_membersCount, 1);
 	}
 	void setMembersCount(int newMembersCount);
+	bool membersCountKnown() const {
+		return (_membersCount >= 0);
+	}
 
 	int adminsCount() const {
 		return _adminsCount;
@@ -276,6 +279,9 @@ public:
 	QString inviteLink() const;
 	bool canHaveInviteLink() const;
 
+	void setLinkedChat(ChannelData *linked);
+	ChannelData *linkedChat() const;
+
 	void ptsInit(int32 pts) {
 		_ptsWaiter.init(pts);
 	}
@@ -364,7 +370,7 @@ private:
 
 	PtsWaiter _ptsWaiter;
 
-	int _membersCount = 1;
+	int _membersCount = -1;
 	int _adminsCount = 1;
 	int _restrictedCount = 0;
 	int _kickedCount = 0;
@@ -377,8 +383,8 @@ private:
 	TimeId _restrictedUntil;
 
 	QString _unavailableReason;
-
 	QString _inviteLink;
+	ChannelData *_linkedChat = nullptr;
 
 	rpl::lifetime _lifetime;
 

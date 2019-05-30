@@ -30,6 +30,7 @@ enum class NewMessageType;
 namespace HistoryView {
 struct Group;
 class Element;
+class ElementDelegate;
 } // namespace HistoryView
 
 class AuthSession;
@@ -198,6 +199,15 @@ public:
 	[[nodiscard]] rpl::producer<not_null<History*>> historyChanged() const;
 	void sendHistoryChangeNotifications();
 
+	void registerHeavyViewPart(not_null<ViewElement*> view);
+	void unregisterHeavyViewPart(not_null<ViewElement*> view);
+	void unloadHeavyViewParts(
+		not_null<HistoryView::ElementDelegate*> delegate);
+	void unloadHeavyViewParts(
+		not_null<HistoryView::ElementDelegate*> delegate,
+		int from,
+		int till);
+
 	using MegagroupParticipant = std::tuple<
 		not_null<ChannelData*>,
 		not_null<UserData*>>;
@@ -218,6 +228,8 @@ public:
 	[[nodiscard]] rpl::producer<> stickersUpdated() const;
 	void notifySavedGifsUpdated();
 	[[nodiscard]] rpl::producer<> savedGifsUpdated() const;
+	void notifyPinnedDialogsOrderUpdated();
+	[[nodiscard]] rpl::producer<> pinnedDialogsOrderUpdated() const;
 
 	bool stickersUpdateNeeded(crl::time now) const {
 		return stickersUpdateNeeded(_lastStickersUpdate, now);
@@ -820,6 +832,7 @@ private:
 
 	rpl::event_stream<> _stickersUpdated;
 	rpl::event_stream<> _savedGifsUpdated;
+	rpl::event_stream<> _pinnedDialogsOrderUpdated;
 	crl::time _lastStickersUpdate = 0;
 	crl::time _lastRecentStickersUpdate = 0;
 	crl::time _lastFavedStickersUpdate = 0;
@@ -908,6 +921,8 @@ private:
 	std::unordered_map<
 		not_null<const HistoryItem*>,
 		std::vector<not_null<ViewElement*>>> _views;
+
+	base::flat_set<not_null<ViewElement*>> _heavyViewParts;
 
 	PeerData *_proxyPromoted = nullptr;
 

@@ -25,6 +25,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "media/streaming/media_streaming_player.h"
 #include "media/streaming/media_streaming_loader.h"
 #include "media/player/media_player_instance.h"
+#include "lottie/lottie_animation.h"
 #include "history/history.h"
 #include "history/history_message.h"
 #include "data/data_media_types.h"
@@ -38,6 +39,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "auth_session.h"
 #include "layout.h"
 #include "storage/file_download.h"
+#include "lottie/lottie_animation.h"
 #include "calls/calls_instance.h"
 #include "styles/style_mediaview.h"
 #include "styles/style_history.h"
@@ -125,6 +127,21 @@ void PaintImageProfile(QPainter &p, const QImage &image, QRect rect, QRect fill)
 	});
 }
 
+QPixmap PrepareStaticImage(const QString &path) {
+	auto image = App::readImage(path, nullptr, false);
+#if defined Q_OS_MAC && !defined OS_MAC_OLD
+	if (image.width() > kMaxDisplayImageSize
+		|| image.height() > kMaxDisplayImageSize) {
+		image = image.scaled(
+			kMaxDisplayImageSize,
+			kMaxDisplayImageSize,
+			Qt::KeepAspectRatio,
+			Qt::SmoothTransformation);
+	}
+#endif // Q_OS_MAC && !OS_MAC_OLD
+	return App::pixmapFromImageInPlace(std::move(image));
+}
+
 } // namespace
 
 struct OverlayWidget::SharedMedia {
@@ -174,6 +191,12 @@ struct OverlayWidget::Streamed {
 	bool resumeOnCallEnd = false;
 };
 
+struct OverlayWidget::LottieFile {
+	LottieFile(std::unique_ptr<Lottie::Animation> data);
+
+	std::unique_ptr<Lottie::Animation> data;
+};
+
 template <typename Callback>
 OverlayWidget::Streamed::Streamed(
 	not_null<Data::Session*> owner,
@@ -186,6 +209,11 @@ OverlayWidget::Streamed::Streamed(
 , radial(
 	std::forward<Callback>(loadingCallback),
 	st::mediaviewStreamingRadial) {
+}
+
+OverlayWidget::LottieFile::LottieFile(
+	std::unique_ptr<Lottie::Animation> data)
+: data(std::move(data)) {
 }
 
 OverlayWidget::OverlayWidget()
@@ -400,12 +428,20 @@ bool OverlayWidget::documentContentShown() const {
 
 bool OverlayWidget::documentBubbleShown() const {
 	return (!_photo && !_doc)
-		|| (_doc && !_themePreviewShown && _current.isNull() && !_streamed);
+		|| (_doc
+			&& !_themePreviewShown
+			&& !_streamed
+			&& !_lottie
+			&& _current.isNull());
 }
 
 void OverlayWidget::clearStreaming() {
 	_fullScreenVideo = false;
 	_streamed = nullptr;
+}
+
+void OverlayWidget::clearLottie() {
+	_lottie = nullptr;
 }
 
 void OverlayWidget::documentUpdated(DocumentData *doc) {
@@ -926,6 +962,7 @@ void OverlayWidget::clearData() {
 		_animationOpacities.clear();
 	}
 	clearStreaming();
+	clearLottie();
 	delete _menu;
 	_menu = nullptr;
 	setContext(std::nullopt);
@@ -1720,6 +1757,7 @@ void OverlayWidget::displayPhoto(not_null<PhotoData*> photo, HistoryItem *item) 
 	}
 
 	clearStreaming();
+	clearLottie();
 	destroyThemePreview();
 	_doc = nullptr;
 	_fullScreenVideo = false;
@@ -1771,6 +1809,7 @@ void OverlayWidget::displayDocument(DocumentData *doc, HistoryItem *item) {
 	_fullScreenVideo = false;
 	_current = QPixmap();
 	clearStreaming();
+	clearLottie();
 	destroyThemePreview();
 	_doc = doc;
 	_photo = nullptr;
@@ -1800,19 +1839,16 @@ void OverlayWidget::displayDocument(DocumentData *doc, HistoryItem *item) {
 			} else {
 				auto &location = _doc->location(true);
 				if (location.accessEnable()) {
-					if (QImageReader(location.name()).canRead()) {
-						auto image = App::readImage(location.name(), nullptr, false);
-#if defined Q_OS_MAC && !defined OS_MAC_OLD
-						if (image.width() > kMaxDisplayImageSize
-							|| image.height() > kMaxDisplayImageSize) {
-							image = image.scaled(
-								kMaxDisplayImageSize,
-								kMaxDisplayImageSize,
-								Qt::KeepAspectRatio,
-								Qt::SmoothTransformation);
-						}
-#endif // Q_OS_MAC && !OS_MAC_OLD
-						_current = App::pixmapFromImageInPlace(std::move(image));
+					const auto &path = location.name();
+					if (QImageReader(path).canRead()) {
+						_current = PrepareStaticImage(path);
+					//} else if (auto lottie = Lottie::FromFile(path)) {
+					//	_lottie = std::make_unique<LottieFile>(
+					//		std::move(lottie));
+					//	_lottie->data->updates(
+					//	) | rpl::start_with_next([=] {
+					//		update();
+					//	}, lifetime());
 					}
 				}
 				location.accessDisable();
@@ -2512,6 +2548,8 @@ void OverlayWidget::paintEvent(QPaintEvent *e) {
 		}
 	} else if (_themePreviewShown) {
 		paintThemePreview(p, r);
+	} else if (_lottie) {
+		paintLottieFrame(p, r);
 	} else if (documentBubbleShown()) {
 		if (_docRect.intersects(r)) {
 			p.fillRect(_docRect, st::mediaviewFileBg);
@@ -2878,6 +2916,20 @@ void OverlayWidget::paintThemePreview(Painter &p, QRect clip) {
 	}
 }
 
+void OverlayWidget::paintLottieFrame(Painter &p, QRect clip) {
+	Expects(_lottie != nullptr);
+
+	if (_lottie->data->ready()) {
+		_lottie->data->markFrameShown();
+		const auto frame = _lottie->data->frame(Lottie::FrameRequest());
+		const auto x = (width() - frame.width()) / 2;
+		const auto y = (height() - frame.height()) / 2;
+		const auto background = _lottieDark ? Qt::black : Qt::white;
+		p.fillRect(x, y, frame.width(), frame.height(), background);
+		p.drawImage(x, y, frame);
+	}
+}
+
 void OverlayWidget::keyPressEvent(QKeyEvent *e) {
 	const auto ctrl = e->modifiers().testFlag(Qt::ControlModifier);
 	if (_streamed) {
@@ -2930,6 +2982,9 @@ void OverlayWidget::keyPressEvent(QKeyEvent *e) {
 			zoomOut();
 		} else if (e->key() == Qt::Key_0) {
 			zoomReset();
+		} else if (e->key() == Qt::Key_I) {
+			_lottieDark = !_lottieDark;
+			update();
 		}
 	}
 }
@@ -3123,6 +3178,7 @@ bool OverlayWidget::moveToEntity(const Entity &entity, int preloadDelta) {
 		setContext(std::nullopt);
 	}
 	clearStreaming();
+	clearLottie();
 	_streamingStartPaused = false;
 	if (auto photo = base::get_if<not_null<PhotoData*>>(&entity.data)) {
 		displayPhoto(*photo, entity.item);
@@ -3613,6 +3669,7 @@ void OverlayWidget::setVisibleHook(bool visible) {
 		QCoreApplication::instance()->removeEventFilter(this);
 
 		clearStreaming();
+		clearLottie();
 		destroyThemePreview();
 		_radial.stop();
 		_current = QPixmap();

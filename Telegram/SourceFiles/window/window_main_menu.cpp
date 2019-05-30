@@ -33,6 +33,30 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_settings.h"
 #include "styles/style_boxes.h"
 
+namespace {
+
+constexpr auto kMinDiffIntensity = 0.25;
+
+float64 IntensityOfColor(QColor color) {
+	return (0.299 * color.red()
+			+ 0.587 * color.green()
+			+ 0.114 * color.blue()) / 255.0;
+}
+
+bool IsShadowShown(const QImage &img, const QRect r, float64 intensityText) {
+	for (auto x = r.x(); x < r.x() + r.width(); x++) {
+		for (auto y = r.y(); y < r.y() + r.height(); y++) {
+			const auto intensity = IntensityOfColor(QColor(img.pixel(x, y)));
+			if ((std::abs(intensity - intensityText)) < kMinDiffIntensity) {
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
+}
+
 namespace Window {
 
 class MainMenu::ResetScaleButton : public Ui::AbstractButton {
@@ -130,6 +154,7 @@ MainMenu::MainMenu(
 		emit action->triggered();
 	});
 	refreshMenu();
+	refreshBackground();
 
 	_telegram->setRichText(textcmdLink(1, qsl("Telegram Desktop mod")));
 	_telegram->setLink(1, std::make_shared<UrlClickHandler>(qsl("https://github.com/kirsan31/tdesktop")));
@@ -148,6 +173,9 @@ MainMenu::MainMenu(
 	subscribe(Window::Theme::Background(), [this](const Window::Theme::BackgroundUpdate &update) {
 		if (update.type == Window::Theme::BackgroundUpdate::Type::ApplyingTheme) {
 			refreshMenu();
+		}
+		if (update.type == Window::Theme::BackgroundUpdate::Type::New) {
+			refreshBackground();
 		}
 	});
 	updatePhone();
@@ -220,6 +248,58 @@ void MainMenu::refreshMenu() {
 	updatePhone();
 }
 
+void MainMenu::refreshBackground() {
+	const auto fill = QRect(0, 0, width(), st::mainMenuCoverHeight);
+	const auto intensityText = IntensityOfColor(st::mainMenuCoverFg->c);
+	QImage backgroundImage(
+		st::mainMenuWidth * cIntRetinaFactor(),
+		st::mainMenuCoverHeight * cIntRetinaFactor(),
+		QImage::Format_ARGB32_Premultiplied);
+	QPainter p(&backgroundImage);
+
+	const auto drawShadow = [](QPainter &p) {
+		st::mainMenuShadow.paint(
+			p,
+			0,
+			st::mainMenuCoverHeight - st::mainMenuShadow.height(),
+			st::mainMenuWidth,
+			IntensityOfColor(st::mainMenuCoverFg->c) < 0.5
+				? Qt::white
+				: Qt::black);
+	};
+
+	// Solid color.
+	if (const auto color = Window::Theme::Background()->colorForFill()) {
+		const auto intensity = IntensityOfColor(*color);
+		p.fillRect(fill, *color);
+		if (std::abs(intensity - intensityText) < kMinDiffIntensity) {
+			drawShadow(p);
+		}
+		_background = backgroundImage;
+		return;
+	}
+
+	// Background image.
+	const auto &pixmap = Window::Theme::Background()->pixmap();
+	QRect to, from;
+	Window::Theme::ComputeBackgroundRects(fill, pixmap.size(), to, from);
+
+	// Cut off the part of the background that is under text.
+	const QRect underText(
+		st::mainMenuCoverTextLeft,
+		st::mainMenuCoverNameTop,
+		std::max(
+			st::semiboldFont->width(Auth().user()->nameText.toString()),
+			st::normalFont->width(_phoneText)),
+		st::semiboldFont->height * 2);
+
+	p.drawPixmap(to, pixmap, from);
+	if (IsShadowShown(backgroundImage, underText, intensityText)) {
+		drawShadow(p);
+	}
+	_background = backgroundImage;
+}
+
 void MainMenu::resizeEvent(QResizeEvent *e) {
 	_menu->setForceWidth(width());
 	updateControlsGeometry();
@@ -247,17 +327,26 @@ void MainMenu::updatePhone() {
 
 void MainMenu::paintEvent(QPaintEvent *e) {
 	Painter p(this);
-	auto clip = e->rect();
-	auto cover = QRect(0, 0, width(), st::mainMenuCoverHeight).intersected(clip);
+	const auto clip = e->rect();
+	const auto cover = QRect(0, 0, width(), st::mainMenuCoverHeight)
+		.intersected(e->rect());
+
+	if (!_background.isNull()) {
+		PainterHighQualityEnabler hq(p);
+		p.drawImage(0, 0, _background);
+	}
+
 	if (!cover.isEmpty()) {
-		p.fillRect(cover, st::mainMenuCoverBg);
+		const auto widthText = _cloudButton
+			? _cloudButton->x() - st::mainMenuCloudSize
+			: width() - 2 * st::mainMenuCoverTextLeft;
 		p.setPen(st::mainMenuCoverFg);
 		p.setFont(st::semiboldFont);
 		Auth().user()->nameText.drawLeftElided(
 			p,
 			st::mainMenuCoverTextLeft,
 			st::mainMenuCoverNameTop,
-			width() - 2 * st::mainMenuCoverTextLeft,
+			widthText,
 			width());
 		p.setFont(st::normalFont);
 		p.drawTextLeft(st::mainMenuCoverTextLeft, st::mainMenuCoverStatusTop, width(), _phoneText);

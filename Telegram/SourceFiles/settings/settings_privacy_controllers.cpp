@@ -30,6 +30,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "window/section_widget.h"
 #include "boxes/peer_list_controllers.h"
 #include "boxes/confirm_box.h"
+#include "settings/settings_privacy_security.h"
 #include "styles/style_history.h"
 #include "styles/style_boxes.h"
 #include "styles/style_settings.h"
@@ -163,7 +164,21 @@ void BlockedBoxController::prepare() {
 		}
 	}));
 
-	loadMoreRows();
+	_loadRequestId = -1;
+	Auth().api().blockedUsersSlice(
+	) | rpl::take(
+		1
+	) | rpl::start_with_next([=](const ApiWrap::BlockedUsersSlice &result) {
+		setDescriptionText(lang(lng_blocked_list_about));
+		_loadRequestId = 0;
+		_offset = result.list.size();
+		_allLoaded = (_offset >= result.total);
+		for (const auto item : result.list) {
+			appendRow(item.user);
+		};
+		delegate()->peerListRefreshRows();
+		loadMoreRows();
+	}, lifetime());
 }
 
 void BlockedBoxController::loadMoreRows() {
@@ -176,10 +191,6 @@ void BlockedBoxController::loadMoreRows() {
 		MTP_int(kBlockedPerPage)
 	)).done([=](const MTPcontacts_Blocked &result) {
 		_loadRequestId = 0;
-
-		if (!_offset) {
-			setDescriptionText(lang(lng_blocked_list_about));
-		}
 
 		auto handleContactsBlocked = [](auto &list) {
 			Auth().data().processUsers(list.vusers);
@@ -218,17 +229,14 @@ void BlockedBoxController::receivedUsers(const QVector<MTPContactBlocked> &resul
 		_allLoaded = true;
 	}
 
-	for_const (auto &item, result) {
-		++_offset;
-		if (item.type() != mtpc_contactBlocked) {
-			continue;
-		}
-		auto &contactBlocked = item.c_contactBlocked();
-		auto userId = contactBlocked.vuser_id.v;
-		if (auto user = Auth().data().userLoaded(userId)) {
-			appendRow(user);
-			user->setBlockStatus(UserData::BlockStatus::Blocked);
-		}
+	_offset += result.size();
+	for (const auto &item : result) {
+		item.match([&](const MTPDcontactBlocked &data) {
+			if (const auto user = Auth().data().userLoaded(data.vuser_id.v)) {
+				appendRow(user);
+				user->setBlockStatus(UserData::BlockStatus::Blocked);
+			}
+		});
 	}
 	delegate()->peerListRefreshRows();
 }
@@ -293,6 +301,49 @@ std::unique_ptr<PeerListRow> BlockedBoxController::createRow(
 	}();
 	row->setCustomStatus(status);
 	return std::move(row);
+}
+
+ApiWrap::Privacy::Key PhoneNumberPrivacyController::key() {
+	return Key::PhoneNumber;
+}
+
+MTPInputPrivacyKey PhoneNumberPrivacyController::apiKey() {
+	return MTP_inputPrivacyKeyPhoneNumber();
+}
+
+QString PhoneNumberPrivacyController::title() {
+	return lang(lng_edit_privacy_phone_number_title);
+}
+
+LangKey PhoneNumberPrivacyController::optionsTitleKey() {
+	return lng_edit_privacy_phone_number_header;
+}
+
+rpl::producer<QString> PhoneNumberPrivacyController::warning() {
+	return Lang::Viewer(lng_edit_privacy_phone_number_warning);
+}
+
+LangKey PhoneNumberPrivacyController::exceptionButtonTextKey(
+		Exception exception) {
+	switch (exception) {
+	case Exception::Always:
+		return lng_edit_privacy_phone_number_always_empty;
+	case Exception::Never:
+		return lng_edit_privacy_phone_number_never_empty;
+	}
+	Unexpected("Invalid exception value.");
+}
+
+QString PhoneNumberPrivacyController::exceptionBoxTitle(Exception exception) {
+	switch (exception) {
+	case Exception::Always: return lang(lng_edit_privacy_phone_number_always_title);
+	case Exception::Never: return lang(lng_edit_privacy_phone_number_never_title);
+	}
+	Unexpected("Invalid exception value.");
+}
+
+rpl::producer<QString> PhoneNumberPrivacyController::exceptionsDescription() {
+	return Lang::Viewer(lng_edit_privacy_phone_number_exceptions);
 }
 
 ApiWrap::Privacy::Key LastSeenPrivacyController::key() {
@@ -437,6 +488,24 @@ QString CallsPrivacyController::exceptionBoxTitle(Exception exception) {
 
 rpl::producer<QString> CallsPrivacyController::exceptionsDescription() {
 	return Lang::Viewer(lng_edit_privacy_calls_exceptions);
+}
+
+object_ptr<Ui::RpWidget> CallsPrivacyController::setupBelowWidget(
+		not_null<QWidget*> parent) {
+	auto result = object_ptr<Ui::VerticalLayout>(parent);
+	const auto content = result.data();
+
+	AddDivider(content);
+	AddSkip(content);
+	AddSubsectionTitle(content, lng_settings_calls_peer_to_peer_title);
+	Settings::AddPrivacyButton(
+		content,
+		lng_settings_calls_peer_to_peer_button,
+		ApiWrap::Privacy::Key::CallsPeer2Peer,
+		[] { return std::make_unique<CallsPeer2PeerPrivacyController>(); });
+	AddSkip(content);
+
+	return result;
 }
 
 ApiWrap::Privacy::Key CallsPeer2PeerPrivacyController::key() {
@@ -680,36 +749,6 @@ auto ForwardsPrivacyController::delegate()
 
 HistoryView::Context ForwardsPrivacyController::elementContext() {
 	return HistoryView::Context::ContactPreview;
-}
-
-auto ForwardsPrivacyController::elementCreate(
-	not_null<HistoryMessage*> message)
--> std::unique_ptr<HistoryView::Element> {
-	return std::make_unique<HistoryView::Message>(delegate(), message);
-}
-
-auto ForwardsPrivacyController::elementCreate(
-	not_null<HistoryService*> message)
--> std::unique_ptr<HistoryView::Element> {
-	Unexpected("Service message in ForwardsPrivacyController.");
-}
-
-bool ForwardsPrivacyController::elementUnderCursor(
-		not_null<const Element*> view) {
-	return false;
-}
-
-void ForwardsPrivacyController::elementAnimationAutoplayAsync(
-	not_null<const Element*> element) {
-}
-
-crl::time ForwardsPrivacyController::elementHighlightTime(
-		not_null<const Element*> element) {
-	return crl::time(0);
-}
-
-bool ForwardsPrivacyController::elementInSelectionMode() {
-	return false;
 }
 
 ApiWrap::Privacy::Key ProfilePhotoPrivacyController::key() {

@@ -970,3 +970,10 @@ backgroundCheck: ServiceCheck {
 	color: msgServiceFg;
 	duration: 200;
 }
+
+urlAuthCheckbox: Checkbox(defaultBoxCheckbox) {
+	width: 240px;
+}
+
+linkedChatAbout: membersAbout;
+linkedChatAboutPadding: margins(20px, 20px, 20px, 20px);

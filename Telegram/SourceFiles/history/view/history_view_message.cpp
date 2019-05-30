@@ -16,6 +16,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/toast/toast.h"
 #include "data/data_session.h"
 #include "data/data_user.h"
+#include "data/data_channel.h"
 #include "lang/lang_keys.h"
 #include "mainwidget.h"
 #include "mainwindow.h"
@@ -84,16 +85,16 @@ void KeyboardStyle::paintButtonIcon(
 		const QRect &rect,
 		int outerWidth,
 		HistoryMessageMarkupButton::Type type) const {
-	using Button = HistoryMessageMarkupButton;
-	auto getIcon = [](Button::Type type) -> const style::icon* {
+	using Type = HistoryMessageMarkupButton::Type;
+	const auto getIcon = [](Type type) -> const style::icon* {
 		switch (type) {
-		case Button::Type::Url: return &st::msgBotKbUrlIcon;
-		case Button::Type::SwitchInlineSame:
-		case Button::Type::SwitchInline: return &st::msgBotKbSwitchPmIcon;
+		case Type::Url: return &st::msgBotKbUrlIcon;
+		case Type::SwitchInlineSame:
+		case Type::SwitchInline: return &st::msgBotKbSwitchPmIcon;
 		}
 		return nullptr;
 	};
-	if (auto icon = getIcon(type)) {
+	if (const auto icon = getIcon(type)) {
 		icon->paint(p, rect.x() + rect.width() - icon->width() - st::msgBotKbIconPadding, rect.y() + st::msgBotKbIconPadding, outerWidth);
 	}
 }
@@ -105,14 +106,15 @@ void KeyboardStyle::paintButtonLoading(Painter &p, const QRect &rect) const {
 
 int KeyboardStyle::minButtonWidth(
 		HistoryMessageMarkupButton::Type type) const {
-	using Button = HistoryMessageMarkupButton;
+	using Type = HistoryMessageMarkupButton::Type;
 	int result = 2 * buttonPadding(), iconWidth = 0;
 	switch (type) {
-	case Button::Type::Url: iconWidth = st::msgBotKbUrlIcon.width(); break;
-	case Button::Type::SwitchInlineSame:
-	case Button::Type::SwitchInline: iconWidth = st::msgBotKbSwitchPmIcon.width(); break;
-	case Button::Type::Callback:
-	case Button::Type::Game: iconWidth = st::historySendingInvertedIcon.width(); break;
+	case Type::Url: iconWidth = st::msgBotKbUrlIcon.width(); break;
+	case Type::SwitchInlineSame:
+	case Type::SwitchInline: iconWidth = st::msgBotKbSwitchPmIcon.width(); break;
+	case Type::Callback:
+	case Type::Game:
+	case Type::Auth: iconWidth = st::historySendingInvertedIcon.width(); break;
 	}
 	if (iconWidth > 0) {
 		result = std::max(result, 2 * iconWidth + 4 * int(st::msgBotKbIconPadding));
@@ -120,8 +122,10 @@ int KeyboardStyle::minButtonWidth(
 	return result;
 }
 
-QString AdminBadgeText() {
-	return lang(lng_admin_badge);
+QString MessageBadgeText(not_null<const HistoryMessage*> message) {
+	return lang(message->hasAdminBadge()
+		? lng_admin_badge
+		: lng_channel_badge);
 }
 
 QString FastReplyText() {
@@ -301,9 +305,9 @@ QSize Message::performCountOptimalSize() {
 				const auto replyWidth = hasFastReply()
 					? st::msgFont->width(FastReplyText())
 					: 0;
-				if (item->hasAdminBadge()) {
+				if (item->hasMessageBadge()) {
 					const auto badgeWidth = st::msgFont->width(
-						AdminBadgeText());
+						MessageBadgeText(item));
 					namew += st::msgPadding.right()
 						+ std::max(badgeWidth, replyWidth);
 				} else if (replyWidth) {
@@ -520,8 +524,8 @@ void Message::paintFromName(
 	const auto item = message();
 	if (displayFromName()) {
 		const auto badgeWidth = [&] {
-			if (item->hasAdminBadge()) {
-				return st::msgFont->width(AdminBadgeText());
+			if (item->hasMessageBadge()) {
+				return st::msgFont->width(MessageBadgeText(item));
 			}
 			return 0;
 		}();
@@ -576,7 +580,7 @@ void Message::paintFromName(
 			p.drawText(
 				trect.left() + trect.width() - rightWidth,
 				trect.top() + st::msgFont->ascent,
-				replyWidth ? FastReplyText() : AdminBadgeText());
+				replyWidth ? FastReplyText() : MessageBadgeText(item));
 		}
 		trect.setY(trect.y() + st::msgNameFont->height);
 	}
@@ -1334,9 +1338,14 @@ bool Message::displayFromName() const {
 
 bool Message::displayForwardedFrom() const {
 	const auto item = message();
+	if (item->history()->peer->isSelf()) {
+		return false;
+	}
 	if (const auto forwarded = item->Get<HistoryMessageForwarded>()) {
-		if (item->history()->peer->isSelf()) {
-			return false;
+		if (const auto sender = item->discussionPostOriginalSender()) {
+			if (sender == forwarded->originalSender) {
+				return false;
+			}
 		}
 		const auto media = this->media();
 		return item->Has<HistoryMessageVia>()
@@ -1418,11 +1427,8 @@ bool Message::displayFastShare() const {
 
 bool Message::displayGoToOriginal() const {
 	const auto item = message();
-	const auto peer = item->history()->peer;
-	if (peer->isSelf()) {
-		if (const auto forwarded = item->Get<HistoryMessageForwarded>()) {
-			return forwarded->savedFromPeer && forwarded->savedFromMsgId;
-		}
+	if (const auto forwarded = item->Get<HistoryMessageForwarded>()) {
+		return forwarded->savedFromPeer && forwarded->savedFromMsgId;
 	}
 	return false;
 }
@@ -1544,8 +1550,8 @@ void Message::fromNameUpdated(int width) const {
 	const auto replyWidth = hasFastReply()
 		? st::msgFont->width(FastReplyText())
 		: 0;
-	if (item->hasAdminBadge()) {
-		const auto badgeWidth = st::msgFont->width(AdminBadgeText());
+	if (item->hasMessageBadge()) {
+		const auto badgeWidth = st::msgFont->width(MessageBadgeText(item));
 		width -= st::msgPadding.right() + std::max(badgeWidth, replyWidth);
 	} else if (replyWidth) {
 		width -= st::msgPadding.right() + replyWidth;
@@ -1799,8 +1805,8 @@ void Message::initTime() {
 		item->_timeWidth = st::msgDateFont->width(item->_timeText);
 	}
 	if (const auto views = item->Get<HistoryMessageViews>()) {
-		views->_viewsText = (views->_views >= 0)
-			? FormatViewsCount(views->_views)
+		views->_viewsText = (views->_views > 0)
+			? Lang::FormatCountToShort(views->_views).string
 			: QString();
 		views->_viewsWidth = views->_viewsText.isEmpty()
 			? 0

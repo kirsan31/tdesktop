@@ -63,6 +63,7 @@ enum UnreadBadgeSize {
 	UnreadBadgeInHistoryToDown,
 	UnreadBadgeInStickersPanel,
 	UnreadBadgeInStickersBox,
+	UnreadBadgeInTouchBar,
 
 	UnreadBadgeSizesCount
 };
@@ -81,11 +82,12 @@ struct UnreadBadgeStyle {
 };
 void paintUnreadCount(
 	Painter &p,
-	const QString &text,
+	const QString &t,
 	int x,
 	int y,
 	const UnreadBadgeStyle &st,
-	int *outUnreadWidth = nullptr);
+	int *outUnreadWidth = nullptr,
+	int allowDigits = 0);
 
 void clearUnreadBadgesCache();
 

@@ -30,6 +30,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <IOKit/hidsystem/ev_keymap.h>
 #include <SPMediaKeyTap.h>
 
+#include "media/player/media_player_instance.h"
+#include "media/audio/media_audio.h"
+#include "platform/mac/touchbar.h"
+#include "data/data_session.h"
+
 @interface MainWindowObserver : NSObject {
 }
 
@@ -107,6 +112,8 @@ public:
 	void willExitFullScreen();
 
 	bool clipboardHasText();
+
+	TouchBar *_touchBar = nil;
 
 	~Private();
 
@@ -386,6 +393,40 @@ MainWindow::MainWindow()
 	subscribe(Window::Theme::Background(), [this](const Window::Theme::BackgroundUpdate &data) {
 		if (data.paletteChanged()) {
 			_private->updateNativeTitle();
+		}
+	});
+
+	initTouchBar();
+}
+
+void MainWindow::initTouchBar() {
+	const int version = QSysInfo::macVersion();
+	constexpr int kShift = 2;
+	if (version == QSysInfo::MV_Unknown
+#ifndef OS_MAC_OLD
+		|| version == QSysInfo::MV_None
+#endif // OS_MAC_OLD
+		// Allow touch bar only starting with 10.13.
+		|| version < kShift + 13) {
+		return;
+	}
+
+	subscribe(Core::App().authSessionChanged(), [this] {
+		if (AuthSession::Exists()) {
+			// We need only common pinned dialogs.
+			if (!_private->_touchBar) {
+				if (auto view = reinterpret_cast<NSView*>(winId())) {
+					// Create TouchBar.
+					[NSApplication sharedApplication].automaticCustomizeTouchBarMenuItemEnabled = YES;
+					_private->_touchBar = [[TouchBar alloc] init:view];
+				}
+			}
+		} else {
+			if (_private->_touchBar) {
+				[_private->_touchBar setTouchBar:Platform::TouchBarType::None];
+				[_private->_touchBar release];
+			}
+			_private->_touchBar = nil;
 		}
 	});
 }

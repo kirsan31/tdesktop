@@ -169,9 +169,7 @@ void TopBarWidget::refreshLang() {
 }
 
 void TopBarWidget::onSearch() {
-	if (_activeChat.folder()) {
-		_controller->closeFolder();
-	} else if (_activeChat) {
+	if (_activeChat) {
 		App::main()->searchInChat(_activeChat);
 	}
 }
@@ -523,13 +521,6 @@ void TopBarWidget::updateControlsGeometry() {
 			&& (width() < _back->width() + _search->width());
 		_leftTaken = smallDialogsColumn ? (width() - _back->width()) / 2 : 0;
 		_back->moveToLeft(_leftTaken, otherButtonsTop);
-		if (_unreadBadge) {
-			_unreadBadge->setGeometryToLeft(
-				_leftTaken,
-				otherButtonsTop + st::titleUnreadCounterTop,
-				_back->width(),
-				st::dialogsUnreadHeight);
-		}
 		_leftTaken += _back->width();
 		if (_info && !_info->isHidden()) {
 			_info->moveToLeft(_leftTaken, otherButtonsTop);
@@ -708,11 +699,16 @@ void TopBarWidget::refreshUnreadBadge() {
 		return;
 	}
 	_unreadBadge.create(this);
-	_unreadBadge->setGeometryToLeft(
-		0,
-		st::titleUnreadCounterTop,
-		_back->width(),
-		st::dialogsUnreadHeight);
+
+	rpl::combine(
+		_back->geometryValue(),
+		_unreadBadge->widthValue()
+	) | rpl::start_with_next([=](QRect geometry, int width) {
+		_unreadBadge->move(
+			geometry.x() + geometry.width() - width,
+			geometry.y() + st::titleUnreadCounterTop);
+	}, _unreadBadge->lifetime());
+
 	_unreadBadge->show();
 	_unreadBadge->setAttribute(Qt::WA_TransparentForMouseEvents);
 	_unreadCounterSubscription = subscribe(
@@ -775,7 +771,7 @@ void TopBarWidget::updateOnlineDisplay() {
 			} else if (chat->count <= 0) {
 				text = lang(lng_group_status);
 			} else {
-				text = lng_chat_status_members(lt_count, chat->count);
+				text = lng_chat_status_members(lt_count_decimal, chat->count);
 			}
 		} else {
 			const auto self = Auth().user();
@@ -788,11 +784,11 @@ void TopBarWidget::updateOnlineDisplay() {
 				}
 			}
 			if (online > 0 && !onlyMe) {
-				auto membersCount = lng_chat_status_members(lt_count, chat->participants.size());
+				auto membersCount = lng_chat_status_members(lt_count_decimal, chat->participants.size());
 				auto onlineCount = lng_chat_status_online(lt_count, online);
 				text = lng_chat_status_members_online(lt_members_count, membersCount, lt_online_count, onlineCount);
 			} else if (chat->participants.size() > 0) {
-				text = lng_chat_status_members(lt_count, chat->participants.size());
+				text = lng_chat_status_members(lt_count_decimal, chat->participants.size());
 			} else {
 				text = lang(lng_group_status);
 			}
@@ -814,16 +810,16 @@ void TopBarWidget::updateOnlineDisplay() {
 				}
 			}
 			if (online && !onlyMe) {
-				auto membersCount = lng_chat_status_members(lt_count, channel->membersCount());
+				auto membersCount = lng_chat_status_members(lt_count_decimal, channel->membersCount());
 				auto onlineCount = lng_chat_status_online(lt_count, online);
 				text = lng_chat_status_members_online(lt_members_count, membersCount, lt_online_count, onlineCount);
 			} else if (channel->membersCount() > 0) {
-				text = lng_chat_status_members(lt_count, channel->membersCount());
+				text = lng_chat_status_members(lt_count_decimal, channel->membersCount());
 			} else {
 				text = lang(lng_group_status);
 			}
 		} else if (channel->membersCount() > 0) {
-			text = lng_chat_status_members(lt_count, channel->membersCount());
+			text = lng_chat_status_members(lt_count_decimal, channel->membersCount());
 		} else {
 			text = lang(channel->isMegagroup() ? lng_group_status : lng_channel_status);
 		}

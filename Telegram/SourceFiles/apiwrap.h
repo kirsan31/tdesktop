@@ -60,6 +60,45 @@ inline int32 CountHash(IntRange &&range) {
 
 class ApiWrap : public MTP::Sender, private base::Subscriber {
 public:
+	struct Privacy {
+		enum class Key {
+			PhoneNumber,
+			LastSeen,
+			Calls,
+			Invites,
+			CallsPeer2Peer,
+			Forwards,
+			ProfilePhoto,
+		};
+		enum class Option {
+			Everyone,
+			Contacts,
+			Nobody,
+		};
+		Option option = Option::Everyone;
+		std::vector<not_null<PeerData*>> always;
+		std::vector<not_null<PeerData*>> never;
+
+		static MTPInputPrivacyKey Input(Key key);
+		static std::optional<Key> KeyFromMTP(mtpTypeId type);
+	};
+
+	struct BlockedUsersSlice {
+		struct Item {
+			UserData *user = nullptr;
+			TimeId date = 0;
+
+			bool operator==(const Item &other) const;
+			bool operator!=(const Item &other) const;
+		};
+
+		QVector<Item> list;
+		int total = 0;
+
+		bool operator==(const BlockedUsersSlice &other) const;
+		bool operator!=(const BlockedUsersSlice &other) const;
+	};
+
 	ApiWrap(not_null<AuthSession*> session);
 
 	void applyUpdates(const MTPUpdates &updates, uint64 sentMessageRandomId = 0);
@@ -214,8 +253,12 @@ public:
 	void updateNotifySettingsDelayed(not_null<const PeerData*> peer);
 	void saveDraftToCloudDelayed(not_null<History*> history);
 
-	void savePrivacy(const MTPInputPrivacyKey &key, QVector<MTPInputPrivacyRule> &&rules);
-	void handlePrivacyChange(mtpTypeId keyTypeId, const MTPVector<MTPPrivacyRule> &rules);
+	void savePrivacy(
+		const MTPInputPrivacyKey &key,
+		QVector<MTPInputPrivacyRule> &&rules);
+	void handlePrivacyChange(
+		Privacy::Key key,
+		const MTPVector<MTPPrivacyRule> &rules);
 	static int OnlineTillFromStatus(
 		const MTPUserStatus &status,
 		int currentOnlineTill);
@@ -406,28 +449,11 @@ public:
 
 	void saveSelfBio(const QString &text, FnMut<void()> done);
 
-	struct Privacy {
-		enum class Key {
-			LastSeen,
-			Calls,
-			Invites,
-			CallsPeer2Peer,
-			Forwards,
-			ProfilePhoto,
-		};
-		enum class Option {
-			Everyone,
-			Contacts,
-			Nobody,
-		};
-		Option option = Option::Everyone;
-		std::vector<not_null<UserData*>> always;
-		std::vector<not_null<UserData*>> never;
-
-		static MTPInputPrivacyKey Input(Key key);
-	};
 	void reloadPrivacy(Privacy::Key key);
 	rpl::producer<Privacy> privacyValue(Privacy::Key key);
+
+	void reloadBlockedUsers();
+	rpl::producer<BlockedUsersSlice> blockedUsersSlice();
 
 	void reloadSelfDestruct();
 	rpl::producer<int> selfDestructValue() const;
@@ -839,6 +865,10 @@ private:
 	base::flat_map<Privacy::Key, mtpRequestId> _privacyRequestIds;
 	base::flat_map<Privacy::Key, Privacy> _privacyValues;
 	std::map<Privacy::Key, rpl::event_stream<Privacy>> _privacyChanges;
+
+	mtpRequestId _blockedUsersRequestId = 0;
+	std::optional<BlockedUsersSlice> _blockedUsersSlice;
+	rpl::event_stream<BlockedUsersSlice> _blockedUsersChanges;
 
 	mtpRequestId _selfDestructRequestId = 0;
 	std::optional<int> _selfDestructDays;

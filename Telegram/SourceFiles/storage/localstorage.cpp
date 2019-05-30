@@ -1521,7 +1521,10 @@ bool _readSetting(quint32 blockId, QDataStream &stream, int version, ReadSetting
 		stream >> v;
 		if (!_checkStreamStatus(stream)) return false;
 
-		SetScaleChecked(v);
+		// If cConfigScale() has value then it was set via command line.
+		if (cConfigScale() == kInterfaceScaleAuto) {
+			SetScaleChecked(v);
+		}
 	} break;
 
 	case dbiLangOld: {
@@ -4712,14 +4715,14 @@ void WriteExportSettings(const Export::Settings &settings) {
 			<< quint32(settings.format)
 			<< settings.path
 			<< quint32(settings.availableAt);
-		settings.singlePeer.match([&](const MTPDinputPeerUser &user) {
+		settings.singlePeer.match([&](const MTPDinputPeerUser & user) {
 			data.stream
 				<< kSinglePeerTypeUser
 				<< qint32(user.vuser_id.v)
 				<< quint64(user.vaccess_hash.v);
-		}, [&](const MTPDinputPeerChat &chat) {
+		}, [&](const MTPDinputPeerChat & chat) {
 			data.stream << kSinglePeerTypeChat << qint32(chat.vchat_id.v);
-		}, [&](const MTPDinputPeerChannel &channel) {
+		}, [&](const MTPDinputPeerChannel & channel) {
 			data.stream
 				<< kSinglePeerTypeChannel
 				<< qint32(channel.vchannel_id.v)
@@ -4728,6 +4731,10 @@ void WriteExportSettings(const Export::Settings &settings) {
 			data.stream << kSinglePeerTypeSelf;
 		}, [&](const MTPDinputPeerEmpty &) {
 			data.stream << kSinglePeerTypeEmpty;
+		}, [&](const MTPDinputPeerUserFromMessage &) {
+			Unexpected("From message peer in single peer export settings.");
+		}, [&](const MTPDinputPeerChannelFromMessage &) {
+			Unexpected("From message peer in single peer export settings.");
 		});
 		data.stream << qint32(settings.singlePeerFrom);
 		data.stream << qint32(settings.singlePeerTill);

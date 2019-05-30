@@ -241,7 +241,11 @@ void Launcher::init() {
 
 	QApplication::setApplicationName(qsl("TelegramDesktop"));
 
-#if defined(Q_OS_LINUX) && QT_VERSION >= QT_VERSION_CHECK(5, 7, 0)
+#ifdef TDESKTOP_LAUNCHER_FILENAME
+#define TDESKTOP_LAUNCHER_FILENAME_TO_STRING_HELPER(V) #V
+#define TDESKTOP_LAUNCHER_FILENAME_TO_STRING(V) TDESKTOP_LAUNCHER_FILENAME_TO_STRING_HELPER(V)
+	QApplication::setDesktopFileName(qsl(TDESKTOP_LAUNCHER_FILENAME_TO_STRING(TDESKTOP_LAUNCHER_FILENAME)));
+#elif defined(Q_OS_LINUX) && QT_VERSION >= QT_VERSION_CHECK(5, 7, 0)
 	QApplication::setDesktopFileName(qsl("telegramdesktop.desktop"));
 #endif
 #ifndef OS_MAC_OLD
@@ -421,6 +425,7 @@ void Launcher::processArguments() {
 		{ "-sendpath"       , KeyFormat::AllLeftValues },
 		{ "-workdir"        , KeyFormat::OneValue },
 		{ "--"              , KeyFormat::OneValue },
+		{ "-scale"          , KeyFormat::OneValue },
 	};
 	auto parseResult = QMap<QByteArray, QStringList>();
 	auto parsingKey = QByteArray();
@@ -470,6 +475,14 @@ void Launcher::processArguments() {
 		}
 	}
 	gStartUrl = parseResult.value("--", {}).join(QString());
+
+	const auto scaleKey = parseResult.value("-scale", {});
+	if (scaleKey.size() > 0) {
+		const auto value = scaleKey[0].toInt();
+		gConfigScale = ((value < 75) || (value > 300))
+			? kInterfaceScaleAuto
+			: value;
+	}
 }
 
 int Launcher::executeApplication() {

@@ -71,6 +71,31 @@ MTPDmessage::Flags NewForwardedFlags(
 	return result;
 }
 
+bool CopyMarkupToForward(not_null<const HistoryItem*> item) {
+	auto mediaOriginal = item->media();
+	if (mediaOriginal && mediaOriginal->game()) {
+		// Copy inline keyboard when forwarding messages with a game.
+		return true;
+	}
+	const auto markup = item->inlineReplyMarkup();
+	if (!markup) {
+		return false;
+	}
+	using Type = HistoryMessageMarkupButton::Type;
+	for (const auto &row : markup->rows) {
+		for (const auto &button : row) {
+			const auto switchInline = (button.type == Type::SwitchInline)
+				|| (button.type == Type::SwitchInlineSame);
+			const auto url = (button.type == Type::Url)
+				|| (button.type == Type::Auth);
+			if ((!switchInline || !item->viaBot()) && !url) {
+				return false;
+			}
+		}
+	}
+	return true;
+}
+
 bool HasInlineItems(const HistoryItemsList &items) {
 	for (const auto item : items) {
 		if (item->viaBot()) {
@@ -435,9 +460,8 @@ HistoryMessage::HistoryMessage(
 		config.viewsCount = 1;
 	}
 
-	// Copy inline keyboard when forwarding messages with a game.
-	auto mediaOriginal = original->media();
-	if (mediaOriginal && mediaOriginal->game()) {
+	const auto mediaOriginal = original->media();
+	if (CopyMarkupToForward(original)) {
 		config.inlineMarkup = original->inlineReplyMarkup();
 	}
 
@@ -553,12 +577,6 @@ int HistoryMessage::viewsCount() const {
 	return HistoryItem::viewsCount();
 }
 
-PeerData *HistoryMessage::displayFrom() const {
-	return history()->peer->isSelf()
-		? senderOriginal()
-		: author().get();
-}
-
 bool HistoryMessage::updateDependencyItem() {
 	if (const auto reply = Get<HistoryMessageReply>()) {
 		return reply->updateData(this, true);
@@ -602,6 +620,10 @@ bool HistoryMessage::allowsForward() const {
 	return !_media || _media->allowsForward();
 }
 
+bool HistoryMessage::hasMessageBadge() const {
+	return hasAdminBadge() || isDiscussionPost();
+}
+
 bool HistoryMessage::isTooOldForEdit(TimeId now) const {
 	const auto peer = _history->peer;
 	if (peer->isSelf()) {
@@ -618,7 +640,7 @@ bool HistoryMessage::allowsEdit(TimeId now) const {
 	return canStopPoll()
 		&& !isTooOldForEdit(now)
 		&& (!_media || _media->allowsEdit())
-		&& !isUnsupportedMessage()
+		&& !isLegacyMessage()
 		&& !isEditingMedia();
 }
 
@@ -640,13 +662,6 @@ void HistoryMessage::createComponents(const CreateConfig &config) {
 	if (!config.author.isEmpty()) {
 		mask |= HistoryMessageSigned::Bit();
 	}
-	auto hasViaBot = (config.viaBotId != 0);
-	auto hasInlineMarkup = [&config] {
-		if (config.mtpMarkup) {
-			return (config.mtpMarkup->type() == mtpc_replyInlineMarkup);
-		}
-		return (config.inlineMarkup != nullptr);
-	};
 	if (config.editDate != TimeId(0)) {
 		mask |= HistoryMessageEdited::Bit();
 	}
@@ -719,25 +734,6 @@ void HistoryMessage::setupForwardedComponent(const CreateConfig &config) {
 	forwarded->savedFromPeer = history()->owner().peerLoaded(
 		config.savedFromPeer);
 	forwarded->savedFromMsgId = config.savedFromMsgId;
-}
-
-QString FormatViewsCount(int views) {
-	if (views > 999999) {
-		views /= 100000;
-		if (views % 10) {
-			return QString::number(views / 10) + '.' + QString::number(views % 10) + 'M';
-		}
-		return QString::number(views / 10) + 'M';
-	} else if (views > 9999) {
-		views /= 100;
-		if (views % 10) {
-			return QString::number(views / 10) + '.' + QString::number(views % 10) + 'K';
-		}
-		return QString::number(views / 10) + 'K';
-	} else if (views > 0) {
-		return QString::number(views);
-	}
-	return qsl("1");
 }
 
 void HistoryMessage::refreshMedia(const MTPMessageMedia *media) {
@@ -1117,8 +1113,8 @@ void HistoryMessage::setViewsCount(int32 count) {
 
 	const auto was = views->_viewsWidth;
 	views->_views = count;
-	views->_viewsText = (views->_views >= 0)
-		? FormatViewsCount(views->_views)
+	views->_viewsText = (views->_views > 0)
+		? Lang::FormatCountToShort(views->_views).string
 		: QString();
 	views->_viewsWidth = views->_viewsText.isEmpty()
 		? 0

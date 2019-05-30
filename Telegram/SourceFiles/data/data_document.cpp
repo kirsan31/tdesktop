@@ -28,12 +28,14 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/image/image_source.h"
 #include "mainwindow.h"
 #include "core/application.h"
+#include "lottie/lottie_animation.h"
 #include "media/streaming/media_streaming_loader_mtproto.h"
 #include "media/streaming/media_streaming_loader_local.h"
 
 namespace {
 
 constexpr auto kMemoryForCache = 32 * 1024 * 1024;
+const auto kAnimatedStickerDimensions = QSize(512, 512);
 
 using FilePathResolve = DocumentData::FilePathResolve;
 
@@ -306,9 +308,13 @@ void DocumentOpenClickHandler::Open(
 				Core::App().showHtmlDocument(location.name());
 				return;
 			}
-			if (QImageReader(location.name()).canRead()) {
+			const auto path = location.name();
+			if (QImageReader(path).canRead()) {
 				Core::App().showDocument(data, context);
 				return;
+			//} else if (Lottie::ValidateFile(path)) {
+			//	Core::App().showDocument(data, context);
+			//	return;
 			}
 		}
 		LaunchWithWarning(location.name(), context);
@@ -537,6 +543,7 @@ void DocumentData::setattributes(
 		}, [&](const MTPDdocumentAttributeHasStickers &data) {
 		});
 	}
+	validateLottieSticker();
 	if (type == StickerDocument) {
 		if (dimensions.width() <= 0
 			|| dimensions.height() <= 0
@@ -552,6 +559,18 @@ void DocumentData::setattributes(
 		|| (isAnimation() && !isVideoMessage())
 		|| isVoiceMessage()) {
 		setMaybeSupportsStreaming(true);
+	}
+}
+
+void DocumentData::validateLottieSticker() {
+	if (type == FileDocument
+		&& _filename.endsWith(qstr(".tgs"))
+		&& _mimeString == qstr("application/x-tgsticker")
+		&& _thumbnail) {
+		type = StickerDocument;
+		_additional = std::make_unique<StickerData>();
+		sticker()->animated = true;
+		dimensions = kAnimatedStickerDimensions;
 	}
 }
 
@@ -1080,7 +1099,7 @@ void DocumentData::checkStickerLarge() {
 	if (!data) return;
 
 	automaticLoad(stickerSetOrigin(), nullptr);
-	if (!data->image && loaded()) {
+	if (!data->image && !data->animated && loaded()) {
 		if (_data.isEmpty()) {
 			const auto &loc = location(true);
 			if (loc.accessEnable()) {

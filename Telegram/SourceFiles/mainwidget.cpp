@@ -385,23 +385,13 @@ MainWidget::MainWidget(
 
 	connect(_dialogs, SIGNAL(cancelled()), this, SLOT(dialogsCancelled()));
 	connect(this, SIGNAL(dialogsUpdated()), _dialogs, SLOT(onListScroll()));
-	connect(_history, &HistoryWidget::cancelled, [=] {
-		const auto historyFromFolder = _history->history()
-			? _history->history()->folder()
-			: nullptr;
-		const auto openedFolder = controller->openedFolder().current();
-		if (!openedFolder
-			|| historyFromFolder == openedFolder
-			|| Adaptive::OneColumn()) {
-			controller->showBackFromStack();
-			_dialogs->setInnerFocus();
-		} else {
-			controller->closeFolder();
-		}
-	});
-	subscribe(
-		Media::Player::instance()->updatedNotifier(),
-		[=](const Media::Player::TrackState &state) { handleAudioUpdate(state); });
+	connect(_history, &HistoryWidget::cancelled, [=] { handleHistoryBack(); });
+
+	Media::Player::instance()->updatedNotifier(
+	) | rpl::start_with_next([=](const Media::Player::TrackState &state) {
+		handleAudioUpdate(state);
+	}, lifetime());
+
 	subscribe(session().calls().currentCallChanged(), [this](Calls::Call *call) { setCurrentCall(call); });
 
 	session().data().currentExportView(
@@ -606,7 +596,10 @@ bool MainWidget::setForwardDraft(PeerId peerId, MessageIdsList &&items) {
 	}
 
 	peer->owner().history(peer)->setForwardDraft(std::move(items));
-	Ui::showPeerHistory(peer, ShowAtUnreadMsgId);
+	_controller->showPeerHistory(
+		peer,
+		SectionShow::Way::Forward,
+		ShowAtUnreadMsgId);
 	_history->cancelReply();
 	return true;
 }
@@ -978,10 +971,6 @@ void MainWidget::cacheBackground() {
 
 crl::time MainWidget::highlightStartTime(not_null<const HistoryItem*> item) const {
 	return _history->highlightStartTime(item);
-}
-
-bool MainWidget::historyInSelectionMode() const {
-	return _history->inSelectionMode();
 }
 
 MsgId MainWidget::currentReplyToIdFor(not_null<History*> history) const {
@@ -2717,7 +2706,7 @@ bool MainWidget::eventFilter(QObject *o, QEvent *e) {
 		}
 	} else if (e->type() == QEvent::MouseButtonPress) {
 		if (static_cast<QMouseEvent*>(e)->button() == Qt::BackButton) {
-			_controller->showBackFromStack();
+			handleHistoryBack();
 			return true;
 		}
 	} else if (e->type() == QEvent::Wheel) {
@@ -2735,6 +2724,21 @@ void MainWidget::handleAdaptiveLayoutUpdate() {
 		_player->updateAdaptiveLayout();
 	}
 	resize(width()+1,height()); // ugly, but without real resizing long hystory msg not recalculating... 
+}
+
+void MainWidget::handleHistoryBack() {
+	const auto historyFromFolder = _history->history()
+		? _history->history()->folder()
+		: nullptr;
+	const auto openedFolder = _controller->openedFolder().current();
+	if (!openedFolder
+		|| historyFromFolder == openedFolder
+		|| _dialogs->isHidden()) {
+		_controller->showBackFromStack();
+		_dialogs->setInnerFocus();
+	} else {
+		_controller->closeFolder();
+	}
 }
 
 void MainWidget::updateWindowAdaptiveLayout() {
@@ -3781,30 +3785,31 @@ void MainWidget::feedUpdates(const MTPUpdates &updates, uint64 randomId) {
 		if (!IsServerMsgId(d.vid.v)) {
 			LOG(("API Error: Bad msgId got from server: %1").arg(d.vid.v));
 		} else if (randomId) {
-			PeerId peerId = 0;
-			QString text;
-			session().data().registerMessageSentData(randomId, peerId, text);
-
-			const auto wasAlready = (peerId != 0)
-				&& (session().data().message(peerToChannel(peerId), d.vid.v) != nullptr);
+			const auto sent = session().data().messageSentData(randomId);
+			const auto lookupMessage = [&] {
+				return sent.peerId
+					? session().data().message(
+						peerToChannel(sent.peerId),
+						d.vid.v)
+					: nullptr;
+			};
+			const auto wasAlready = (lookupMessage() != nullptr);
 			feedUpdate(MTP_updateMessageID(d.vid, MTP_long(randomId))); // ignore real date
-			if (peerId) {
-				if (auto item = session().data().message(peerToChannel(peerId), d.vid.v)) {
-					if (d.has_entities() && !MentionUsersLoaded(&session(), d.ventities)) {
-						session().api().requestMessageData(
-							item->history()->peer->asChannel(),
-							item->id,
-							ApiWrap::RequestMessageDataCallback());
-					}
-					const auto entities = d.has_entities()
-						? TextUtilities::EntitiesFromMTP(d.ventities.v)
-						: EntitiesInText();
-					const auto media = d.has_media() ? &d.vmedia : nullptr;
-					item->setText({ text, entities });
-					item->updateSentMedia(media);
-					if (!wasAlready) {
-						item->indexAsNewItem();
-					}
+			if (const auto item = lookupMessage()) {
+				if (d.has_entities() && !MentionUsersLoaded(&session(), d.ventities)) {
+					session().api().requestMessageData(
+						item->history()->peer->asChannel(),
+						item->id,
+						ApiWrap::RequestMessageDataCallback());
+				}
+				const auto entities = d.has_entities()
+					? TextUtilities::EntitiesFromMTP(d.ventities.v)
+					: EntitiesInText();
+				const auto media = d.has_media() ? &d.vmedia : nullptr;
+				item->setText({ sent.text, entities });
+				item->updateSentMedia(media);
+				if (!wasAlready) {
+					item->indexAsNewItem();
 				}
 			}
 		}
@@ -4295,7 +4300,36 @@ void MainWidget::feedUpdate(const MTPUpdate &update) {
 
 	case mtpc_updatePrivacy: {
 		auto &d = update.c_updatePrivacy();
-		session().api().handlePrivacyChange(d.vkey.type(), d.vrules);
+		const auto allChatsLoaded = [&](const MTPVector<MTPint> &ids) {
+			for (const auto &chatId : ids.v) {
+				if (!session().data().chatLoaded(chatId.v)
+					&& !session().data().channelLoaded(chatId.v)) {
+					return false;
+				}
+			}
+			return true;
+		};
+		const auto allLoaded = [&] {
+			for (const auto &rule : d.vrules.v) {
+				const auto loaded = rule.match([&](
+					const MTPDprivacyValueAllowChatParticipants & data) {
+					return allChatsLoaded(data.vchats);
+				}, [&](const MTPDprivacyValueDisallowChatParticipants & data) {
+					return allChatsLoaded(data.vchats);
+				}, [](auto &&) { return true; });
+				if (!loaded) {
+					return false;
+				}
+			}
+			return true;
+		};
+		if (const auto key = ApiWrap::Privacy::KeyFromMTP(d.vkey.type())) {
+			if (allLoaded()) {
+				session().api().handlePrivacyChange(*key, d.vrules);
+			} else {
+				session().api().reloadPrivacy(*key);
+			}
+		}
 	} break;
 
 	case mtpc_updatePinnedDialogs: {

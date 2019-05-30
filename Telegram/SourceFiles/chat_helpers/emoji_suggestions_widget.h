@@ -96,9 +96,17 @@ private:
 
 class SuggestionsController {
 public:
+	struct Options {
+		Options() : suggestExactFirstWord(true) {
+		}
+
+		bool suggestExactFirstWord;
+	};
+
 	SuggestionsController(
 		not_null<QWidget*> outer,
-		not_null<QTextEdit*> field);
+		not_null<QTextEdit*> field,
+		const Options &options);
 
 	void raise();
 	void setReplaceCallback(Fn<void(
@@ -108,7 +116,8 @@ public:
 
 	static SuggestionsController *Init(
 		not_null<QWidget*> outer,
-		not_null<Ui::InputField*> field);
+		not_null<Ui::InputField*> field,
+		const Options &options = Options());
 
 private:
 	void handleCursorPositionChange();
@@ -139,6 +148,7 @@ private:
 	base::Timer _showExactTimer;
 	bool _keywordsRefreshed = false;
 	QString _lastShownQuery;
+	Options _options;
 
 	rpl::lifetime _lifetime;
 

@@ -1,5 +1,7 @@
 <(src_loc)/boxes/peers/add_participants_box.cpp
 <(src_loc)/boxes/peers/add_participants_box.h
+<(src_loc)/boxes/peers/edit_linked_chat_box.cpp
+<(src_loc)/boxes/peers/edit_linked_chat_box.h
 <(src_loc)/boxes/peers/edit_participant_box.cpp
 <(src_loc)/boxes/peers/edit_participant_box.h
 <(src_loc)/boxes/peers/edit_participants_box.cpp
@@ -78,6 +80,8 @@
 <(src_loc)/boxes/sticker_set_box.h
 <(src_loc)/boxes/stickers_box.cpp
 <(src_loc)/boxes/stickers_box.h
+<(src_loc)/boxes/url_auth_box.cpp
+<(src_loc)/boxes/url_auth_box.h
 <(src_loc)/boxes/username_box.cpp
 <(src_loc)/boxes/username_box.h
 <(src_loc)/calls/calls_box_controller.cpp
@@ -585,6 +589,8 @@
 <(src_loc)/platform/mac/specific_mac_p.h
 <(src_loc)/platform/mac/window_title_mac.mm
 <(src_loc)/platform/mac/window_title_mac.h
+<(src_loc)/platform/mac/touchbar.h
+<(src_loc)/platform/mac/touchbar.mm
 <(src_loc)/platform/win/audio_win.cpp
 <(src_loc)/platform/win/audio_win.h
 <(src_loc)/platform/win/file_utilities_win.cpp

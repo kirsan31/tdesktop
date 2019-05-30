@@ -479,7 +479,7 @@ not_null<PeerData*> Session::processChat(const MTPChat &data) {
 		const auto &migratedTo = data.has_migrated_to()
 			? data.vmigrated_to
 			: MTPInputChannel(MTP_inputChannelEmpty());
-		migratedTo.match([&](const MTPDinputChannel &input) {
+		migratedTo.match([&](const MTPDinputChannel & input) {
 			const auto channel = this->channel(input.vchannel_id.v);
 			channel->addFlags(MTPDchannel::Flag::f_megagroup);
 			if (!channel->access) {
@@ -490,6 +490,8 @@ not_null<PeerData*> Session::processChat(const MTPChat &data) {
 				channel->access = input.vaccess_hash.v;
 			}
 			ApplyMigration(chat, channel);
+		}, [](const MTPDinputChannelFromMessage &) {
+			LOG(("API Error: migrated_to contains channel from message."));
 		}, [](const MTPDinputChannelEmpty &) {
 		});
 
@@ -1251,6 +1253,58 @@ void Session::sendHistoryChangeNotifications() {
 	}
 }
 
+void Session::registerHeavyViewPart(not_null<ViewElement*> view) {
+	_heavyViewParts.emplace(view);
+}
+
+void Session::unregisterHeavyViewPart(not_null<ViewElement*> view) {
+	_heavyViewParts.remove(view);
+}
+
+void Session::unloadHeavyViewParts(
+		not_null<HistoryView::ElementDelegate*> delegate) {
+	if (_heavyViewParts.empty()) {
+		return;
+	}
+	const auto remove = ranges::count(_heavyViewParts, delegate, [](not_null<ViewElement*> element) {
+		return element->delegate();
+	});
+	if (remove == _heavyViewParts.size()) {
+		for (const auto view : base::take(_heavyViewParts)) {
+			view->unloadHeavyPart();
+		}
+	} else {
+		auto remove = std::vector<not_null<ViewElement*>>();
+		for (const auto view : _heavyViewParts) {
+			if (view->delegate() == delegate) {
+				remove.push_back(view);
+			}
+		}
+		for (const auto view : remove) {
+			view->unloadHeavyPart();
+		}
+	}
+}
+
+void Session::unloadHeavyViewParts(
+		not_null<HistoryView::ElementDelegate*> delegate,
+		int from,
+		int till) {
+	if (_heavyViewParts.empty()) {
+		return;
+	}
+	auto remove = std::vector<not_null<ViewElement*>>();
+	for (const auto view : _heavyViewParts) {
+		if (view->delegate() == delegate
+			&& !delegate->elementIntersectsRange(view, from, till)) {
+			remove.push_back(view);
+		}
+	}
+	for (const auto view : remove) {
+		view->unloadHeavyPart();
+	}
+}
+
 void Session::removeMegagroupParticipant(
 		not_null<ChannelData*> channel,
 		not_null<UserData*> user) {
@@ -1309,6 +1363,14 @@ rpl::producer<> Session::savedGifsUpdated() const {
 	return _savedGifsUpdated.events();
 }
 
+void Session::notifyPinnedDialogsOrderUpdated() {
+	_pinnedDialogsOrderUpdated.fire({});
+}
+
+rpl::producer<> Session::pinnedDialogsOrderUpdated() const {
+	return _pinnedDialogsOrderUpdated.events();
+}
+
 void Session::userIsContactUpdated(not_null<UserData*> user) {
 	const auto i = _contactViews.find(peerToUser(user->id));
 	if (i != _contactViews.end()) {
@@ -1352,6 +1414,7 @@ void Session::setChatPinned(const Dialogs::Key &key, bool pinned) {
 
 	const auto list = chatsList(key.entry()->folder())->pinned();
 	list->setPinned(key, pinned);
+	notifyPinnedDialogsOrderUpdated();
 }
 
 void Session::setPinnedFromDialog(const Dialogs::Key &key, bool pinned) {
@@ -1383,6 +1446,7 @@ void Session::applyPinnedChats(
 		});
 	}
 	chatsList(folder)->pinned()->applyList(this, list);
+	notifyPinnedDialogsOrderUpdated();
 }
 
 void Session::applyDialogs(
@@ -1461,6 +1525,7 @@ void Session::reorderTwoPinnedChats(
 	Expects(key1.entry()->folder() == key2.entry()->folder());
 
 	chatsList(key1.entry()->folder())->pinned()->reorder(key1, key2);
+	notifyPinnedDialogsOrderUpdated();
 }
 
 bool Session::checkEntitiesAndViewsUpdate(const MTPDmessage &data) {
@@ -2392,7 +2457,6 @@ void Session::documentApplyFields(
 	if (!date) {
 		return;
 	}
-	document->setattributes(attributes);
 	if (dc != 0 && access != 0) {
 		document->setRemoteLocation(dc, access, fileReference);
 	}
@@ -2401,6 +2465,7 @@ void Session::documentApplyFields(
 	document->updateThumbnails(thumbnailInline, thumbnail);
 	document->size = size;
 	document->recountIsImage();
+	document->setattributes(attributes);
 	if (document->sticker()
 		&& !document->sticker()->loc.valid()
 		&& thumbLocation.valid()) {

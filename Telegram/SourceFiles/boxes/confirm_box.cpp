@@ -33,7 +33,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "observer_peer.h"
 
 TextParseOptions _confirmBoxTextOptions = {
-	TextParseLinks | TextParseMultiline | TextParseRichText, // flags
+	TextParseLinks | TextParseMultiline | TextParseMarkdown | TextParseRichText, // flags
 	0, // maxw
 	0, // maxh
 	Qt::LayoutDirectionAuto, // dir
@@ -790,7 +790,7 @@ ConfirmInviteBox::ConfirmInviteBox(
 	const auto status = [&] {
 		if (_participants.empty() || _participants.size() >= count) {
 			if (count > 0) {
-				return lng_chat_status_members(lt_count, count);
+				return lng_chat_status_members(lt_count_decimal, count);
 			} else {
 				return lang(_isChannel
 					? lng_channel_status
