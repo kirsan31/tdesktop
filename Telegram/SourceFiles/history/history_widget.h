@@ -369,6 +369,7 @@ private:
 	void refreshAboutProxyPromotion();
 	void unreadCountUpdated();
 
+	[[nodiscard]] int computeMaxFieldHeight() const;
 	void toggleMuteUnmute();
 	void toggleKeyboard(bool manual = true);
 	void startBotCommand();

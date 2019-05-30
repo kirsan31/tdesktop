@@ -9,6 +9,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "lang/lang_keys.h"
 #include "data/data_channel.h"
+#include "data/data_chat.h"
 #include "ui/widgets/labels.h"
 #include "ui/wrap/vertical_layout.h"
 #include "info/profile/info_profile_button.h"
@@ -16,10 +17,14 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "boxes/peer_list_box.h"
 #include "boxes/confirm_box.h"
 #include "boxes/add_contact_box.h"
+#include "apiwrap.h"
+#include "auth_session.h"
 #include "styles/style_boxes.h"
 #include "styles/style_info.h"
 
 namespace {
+
+constexpr auto kEnableSearchRowsCount = 10;
 
 TextWithEntities BoldText(const QString &text) {
 	auto result = TextWithEntities{ text };
@@ -28,109 +33,162 @@ TextWithEntities BoldText(const QString &text) {
 	return result;
 }
 
-class ListController
-	: public PeerListController
-	, public PeerListContentDelegate {
+class Controller : public PeerListController, public base::has_weak_ptr {
 public:
-	ListController(Fn<void(not_null<ChannelData*>)> callback)
-	: _callback(std::move(callback)) {
-	}
-	void prepare() override {
-	}
-	void rowClicked(not_null<PeerListRow*> row) override {
-		const auto onstack = _callback;
-		onstack(row->peer()->asChannel());
-	}
-	void peerListSetTitle(Fn<QString()> title) override {
-	}
-	void peerListSetAdditionalTitle(Fn<QString()> title) override {
-	}
-	bool peerListIsRowSelected(not_null<PeerData*> peer) override {
-		return false;
-	}
-	int peerListSelectedRowsCount() override {
-		return 0;
-	}
-	auto peerListCollectSelectedRows()
-		-> std::vector<not_null<PeerData*>> override {
-		return {};
-	}
-	void peerListScrollToTop() override {
-	}
-	void peerListAddSelectedRowInBunch(
-		not_null<PeerData*> peer) override {
-	}
-	void peerListFinishSelectedRowsBunch() override {
-	}
-	void peerListSetDescription(
-		object_ptr<Ui::FlatLabel> description) override {
-	}
+	Controller(
+		not_null<ChannelData*> channel,
+		ChannelData *chat,
+		const std::vector<not_null<PeerData*>> &chats,
+		Fn<void(ChannelData*)> callback);
+
+	void prepare() override;
+	void rowClicked(not_null<PeerListRow*> row) override;
+	int contentWidth() const override;
 
 private:
-	Fn<void(not_null<ChannelData*>)> _callback;
+	void choose(not_null<ChannelData*> chat);
+	void choose(not_null<ChatData*> chat);
+
+	not_null<ChannelData*> _channel;
+	ChannelData *_chat = nullptr;
+	std::vector<not_null<PeerData*>> _chats;
+	Fn<void(ChannelData*)> _callback;
+
+	ChannelData *_waitForFull = nullptr;
 
 };
 
-object_ptr<Ui::RpWidget> SetupList(
-		not_null<QWidget*> parent,
-		not_null<ChannelData*> channel,
-		ChannelData *chat,
-		const std::vector<not_null<ChannelData*>> &chats,
-		Fn<void(ChannelData*)> callback) {
-	const auto already = (chat != nullptr);
-	const auto selected = [=](not_null<ChannelData*> chat) {
-		if (already) {
-			Ui::showPeerHistory(chat, ShowAtUnreadMsgId);
-		} else {
-			auto text = lng_manage_discussion_group_sure__generic<
-				TextWithEntities
-			>(
-				lt_group,
-				BoldText(chat->name),
-				lt_channel,
-				BoldText(channel->name));
-			if (!channel->isPublic()) {
-				text.append(
-					"\n\n" + lang(lng_manage_linked_channel_private));
-			}
-			const auto box = std::make_shared<QPointer<BoxContent>>();
-			const auto sure = [=] {
-				if (*box) {
-					(*box)->closeBox();
-				}
-				callback(chat);
-			};
-			*box = Ui::show(
-				Box<ConfirmBox>(
-					text,
-					lang(lng_manage_discussion_group_link),
-					sure),
-				LayerOption::KeepOther);
+Controller::Controller(
+	not_null<ChannelData*> channel,
+	ChannelData *chat,
+	const std::vector<not_null<PeerData*>> &chats,
+	Fn<void(ChannelData*)> callback)
+: _channel(channel)
+, _chat(chat)
+, _chats(std::move(chats))
+, _callback(std::move(callback)) {
+	base::ObservableViewer(
+		channel->session().api().fullPeerUpdated()
+	) | rpl::start_with_next([=](PeerData *peer) {
+		if (peer == _waitForFull) {
+			choose(std::exchange(_waitForFull, nullptr));
 		}
+	}, lifetime());
+}
+
+int Controller::contentWidth() const {
+	return st::boxWidth;
+}
+
+void Controller::prepare() {
+	const auto appendRow = [&](not_null<PeerData*> chat) {
+		if (delegate()->peerListFindRow(chat->id)) {
+			return;
+		}
+		auto row = std::make_unique<PeerListRow>(chat);
+		const auto username = chat->userName();
+		row->setCustomStatus(username.isEmpty()
+			? lang(lng_manage_discussion_group_private)
+			: ('@' + username));
+		delegate()->peerListAppendRow(std::move(row));
 	};
-	const auto controller = Ui::CreateChild<ListController>(
-		parent.get(),
-		selected);
-	controller->setDelegate(controller);
-	auto list = object_ptr<PeerListContent>(
-		parent,
-		controller,
-		st::peerListBox);
-	const auto createRow = [](not_null<ChannelData*> chat) {
-		auto result = std::make_unique<PeerListRow>(chat);
-		result->setCustomStatus(chat->isPublic()
-			? ('@' + chat->username)
-			: lang(lng_manage_discussion_group_private));
-		return result;
-	};
-	if (chat) {
-		list->appendRow(createRow(chat));
+	if (_chat) {
+		appendRow(_chat);
 	} else {
-		for (const auto chat : chats) {
-			list->appendRow(createRow(chat));
+		for (const auto chat : _chats) {
+			appendRow(chat);
+		}
+		if (_chats.size() >= kEnableSearchRowsCount) {
+			delegate()->peerListSetSearchMode(PeerListSearchMode::Enabled);
 		}
 	}
-	return std::move(list);
+}
+
+void Controller::rowClicked(not_null<PeerListRow*> row) {
+	if (_chat != nullptr) {
+		Ui::showPeerHistory(_chat, ShowAtUnreadMsgId);
+		return;
+	}
+	const auto peer = row->peer();
+	if (const auto channel = peer->asChannel()) {
+		if (channel->wasFullUpdated()) {
+			choose(channel);
+			return;
+		}
+		_waitForFull = channel;
+		channel->updateFull();
+	} else if (const auto chat = peer->asChat()) {
+		choose(chat);
+	}
+}
+
+void Controller::choose(not_null<ChannelData*> chat) {
+	auto text = lng_manage_discussion_group_sure__generic<
+		TextWithEntities
+	>(
+		lt_group,
+		BoldText(chat->name),
+		lt_channel,
+		BoldText(_channel->name));
+	if (!_channel->isPublic()) {
+		text.append(
+			"\n\n" + lang(lng_manage_linked_channel_private));
+	}
+	if (chat->hiddenPreHistory()) {
+		text.append("\n\n");
+		text.append(lng_manage_discussion_group_warning__generic(
+			lt_visible,
+			BoldText(lang(lng_manage_discussion_group_visible))));
+	}
+	const auto box = std::make_shared<QPointer<BoxContent>>();
+	const auto sure = [=] {
+		if (*box) {
+			(*box)->closeBox();
+		}
+		const auto onstack = _callback;
+		onstack(chat);
+	};
+	*box = Ui::show(
+		Box<ConfirmBox>(
+			text,
+			lang(lng_manage_discussion_group_link),
+			sure),
+		LayerOption::KeepOther);
+}
+
+void Controller::choose(not_null<ChatData*> chat) {
+	auto text = lng_manage_discussion_group_sure__generic<
+		TextWithEntities
+	>(
+		lt_group,
+		BoldText(chat->name),
+		lt_channel,
+		BoldText(_channel->name));
+	if (!_channel->isPublic()) {
+		text.append(
+			"\n\n" + lang(lng_manage_linked_channel_private));
+	}
+	text.append("\n\n");
+	text.append(lng_manage_discussion_group_warning__generic(
+		lt_visible,
+		BoldText(lang(lng_manage_discussion_group_visible))));
+	const auto box = std::make_shared<QPointer<BoxContent>>();
+	const auto sure = [=] {
+		if (*box) {
+			(*box)->closeBox();
+		}
+		const auto done = [=](not_null<ChannelData*> chat) {
+			const auto onstack = _callback;
+			onstack(chat);
+		};
+		chat->session().api().migrateChat(chat, crl::guard(this, done));
+	};
+	*box = Ui::show(
+		Box<ConfirmBox>(
+			text,
+			lang(lng_manage_discussion_group_link),
+			sure),
+		LayerOption::KeepOther);
 }
 
 object_ptr<Ui::RpWidget> SetupAbout(
@@ -211,58 +269,57 @@ object_ptr<Ui::RpWidget> SetupUnlink(
 	return result;
 }
 
-} // namespace
-
-EditLinkedChatBox::EditLinkedChatBox(
-	QWidget*,
-	not_null<ChannelData*> channel,
-	const std::vector<not_null<ChannelData*>> &chats,
-	Fn<void(ChannelData*)> callback)
-: _channel(channel)
-, _content(setupContent(channel, nullptr, chats, callback)) {
-}
-
-EditLinkedChatBox::EditLinkedChatBox(
-	QWidget*,
-	not_null<ChannelData*> channel,
-	not_null<ChannelData*> chat,
-	Fn<void(ChannelData*)> callback)
-: _channel(channel)
-, _content(setupContent(channel, chat, {}, callback)) {
-}
-
-object_ptr<Ui::RpWidget> EditLinkedChatBox::setupContent(
+object_ptr<BoxContent> EditLinkedChatBox(
 		not_null<ChannelData*> channel,
 		ChannelData *chat,
-		const std::vector<not_null<ChannelData*>> &chats,
+		std::vector<not_null<PeerData*>> &&chats,
 		Fn<void(ChannelData*)> callback) {
 	Expects(channel->isBroadcast() || (chat != nullptr));
 
-	auto result = object_ptr<Ui::VerticalLayout>(this);
-	result->add(
-		SetupAbout(result, channel, chat),
-		st::linkedChatAboutPadding);
-	if (!chat) {
-		result->add(SetupCreateGroup(result, channel, callback));
-	}
-	result->add(SetupList(result, channel, chat, chats, callback));
-	if (chat) {
-		result->add(SetupUnlink(result, channel, callback));
-	}
-	result->add(
-		SetupFooter(result, channel),
-		st::linkedChatAboutPadding);
-	return result;
+	const auto init = [=](not_null<PeerListBox*> box) {
+		auto above = object_ptr<Ui::VerticalLayout>(box);
+		above->add(
+			SetupAbout(above, channel, chat),
+			st::linkedChatAboutPadding);
+		if (!chat) {
+			above->add(SetupCreateGroup(above, channel, callback));
+		}
+		box->peerListSetAboveWidget(std::move(above));
+
+		auto below = object_ptr<Ui::VerticalLayout>(box);
+		if (chat) {
+			below->add(SetupUnlink(below, channel, callback));
+		}
+		below->add(
+			SetupFooter(below, channel),
+			st::linkedChatAboutPadding);
+		box->peerListSetBelowWidget(std::move(below));
+
+		box->setTitle(langFactory(channel->isBroadcast()
+			? lng_manage_discussion_group
+			: lng_manage_linked_channel));
+		box->addButton(langFactory(lng_close), [=] { box->closeBox(); });
+	};
+	auto controller = std::make_unique<Controller>(
+		channel,
+		chat,
+		std::move(chats),
+		std::move(callback));
+	return Box<PeerListBox>(std::move(controller), init);
 }
 
-void EditLinkedChatBox::prepare() {
-	setTitle(langFactory(_channel->isBroadcast()
-		? lng_manage_discussion_group
-		: lng_manage_linked_channel));
+} // namespace
 
-	setDimensionsToContent(
-		st::boxWidth,
-		setInnerWidget(std::move(_content)));
+object_ptr<BoxContent> EditLinkedChatBox(
+		not_null<ChannelData*> channel,
+		std::vector<not_null<PeerData*>> &&chats,
+		Fn<void(ChannelData*)> callback) {
+	return EditLinkedChatBox(channel, nullptr, std::move(chats), callback);
+}
 
-	addButton(langFactory(lng_close), [=] { closeBox(); });
+object_ptr<BoxContent> EditLinkedChatBox(
+		not_null<ChannelData*> channel,
+		not_null<ChannelData*> chat,
+		Fn<void(ChannelData*)> callback) {
+	return EditLinkedChatBox(channel, chat, {}, callback);
 }
