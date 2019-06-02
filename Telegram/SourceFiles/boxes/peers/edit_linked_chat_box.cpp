@@ -88,7 +88,7 @@ void Controller::prepare() {
 		auto row = std::make_unique<PeerListRow>(chat);
 		const auto username = chat->userName();
 		row->setCustomStatus(username.isEmpty()
-			? lang(lng_manage_discussion_group_private)
+			? lang(lng_manage_discussion_group_private_status)
 			: ('@' + username));
 		delegate()->peerListAppendRow(std::move(row));
 	};
@@ -134,11 +134,14 @@ void Controller::choose(not_null<ChannelData*> chat) {
 		text.append(
 			"\n\n" + lang(lng_manage_linked_channel_private));
 	}
-	if (chat->hiddenPreHistory()) {
-		text.append("\n\n");
-		text.append(lng_manage_discussion_group_warning__generic(
-			lt_visible,
-			BoldText(lang(lng_manage_discussion_group_visible))));
+	if (!chat->isPublic()) {
+		text.append("\n\n" + lang(lng_manage_discussion_group_private));
+		if (chat->hiddenPreHistory()) {
+			text.append("\n\n");
+			text.append(lng_manage_discussion_group_warning__generic(
+				lt_visible,
+				BoldText(lang(lng_manage_discussion_group_visible))));
+		}
 	}
 	const auto box = std::make_shared<QPointer<BoxContent>>();
 	const auto sure = [=] {
@@ -168,6 +171,7 @@ void Controller::choose(not_null<ChatData*> chat) {
 		text.append(
 			"\n\n" + lang(lng_manage_linked_channel_private));
 	}
+	text.append("\n\n" + lang(lng_manage_discussion_group_private));
 	text.append("\n\n");
 	text.append(lng_manage_discussion_group_warning__generic(
 		lt_visible,
@@ -273,8 +277,9 @@ object_ptr<BoxContent> EditLinkedChatBox(
 		not_null<ChannelData*> channel,
 		ChannelData *chat,
 		std::vector<not_null<PeerData*>> &&chats,
+		bool canEdit,
 		Fn<void(ChannelData*)> callback) {
-	Expects(channel->isBroadcast() || (chat != nullptr));
+	Expects((channel->isBroadcast() && canEdit) || (chat != nullptr));
 
 	const auto init = [=](not_null<PeerListBox*> box) {
 		auto above = object_ptr<Ui::VerticalLayout>(box);
@@ -287,7 +292,7 @@ object_ptr<BoxContent> EditLinkedChatBox(
 		box->peerListSetAboveWidget(std::move(above));
 
 		auto below = object_ptr<Ui::VerticalLayout>(box);
-		if (chat) {
+		if (chat && canEdit) {
 			below->add(SetupUnlink(below, channel, callback));
 		}
 		below->add(
@@ -314,12 +319,18 @@ object_ptr<BoxContent> EditLinkedChatBox(
 		not_null<ChannelData*> channel,
 		std::vector<not_null<PeerData*>> &&chats,
 		Fn<void(ChannelData*)> callback) {
-	return EditLinkedChatBox(channel, nullptr, std::move(chats), callback);
+	return EditLinkedChatBox(
+		channel,
+		nullptr,
+		std::move(chats),
+		true,
+		callback);
 }
 
 object_ptr<BoxContent> EditLinkedChatBox(
 		not_null<ChannelData*> channel,
 		not_null<ChannelData*> chat,
+		bool canEdit,
 		Fn<void(ChannelData*)> callback) {
-	return EditLinkedChatBox(channel, chat, {}, callback);
+	return EditLinkedChatBox(channel, chat, {}, canEdit, callback);
 }
