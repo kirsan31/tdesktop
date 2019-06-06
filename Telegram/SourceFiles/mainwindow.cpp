@@ -26,6 +26,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/application.h"
 #include "auth_session.h"
 #include "intro/introwidget.h"
+#include "main/main_account.h" // Account::sessionValue.
 #include "mainwidget.h"
 #include "boxes/confirm_box.h"
 #include "boxes/add_contact_box.h"
@@ -42,7 +43,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "window/themes/window_theme_warning.h"
 #include "window/window_lock_widgets.h"
 #include "window/window_main_menu.h"
-#include "window/window_controller.h"
+#include "window/window_session_controller.h"
 
 namespace {
 
@@ -65,7 +66,8 @@ void FeedLangTestingKey(int key) {
 
 } // namespace
 
-MainWindow::MainWindow() {
+MainWindow::MainWindow(not_null<Window::Controller*> controller)
+: Platform::MainWindow(controller) {
 	auto logo = Core::App().logo();
 	icon16 = logo.scaledToWidth(16, Qt::SmoothTransformation);
 	icon32 = logo.scaledToWidth(32, Qt::SmoothTransformation);
@@ -80,12 +82,13 @@ MainWindow::MainWindow() {
 
 	setLocale(QLocale(QLocale::English, QLocale::UnitedStates));
 
-	subscribe(Core::App().authSessionChanged(), [this] {
+	account().sessionValue(
+	) | rpl::start_with_next([=](AuthSession *session) {
 		updateGlobalMenu();
-		if (!AuthSession::Exists()) {
+		if (!session) {
 			_mediaPreview.destroy();
 		}
-	});
+	}, lifetime());
 	subscribe(Window::Theme::Background(), [this](const Window::Theme::BackgroundUpdate &data) {
 		themeUpdated(data);
 	});
@@ -198,7 +201,7 @@ void MainWindow::clearPasscodeLock() {
 		Core::App().checkStartUrl();
 	} else {
 		Core::App().startMtp();
-		if (AuthSession::Exists()) {
+		if (account().sessionExists()) {
 			setupMain();
 		} else {
 			setupIntro();
@@ -226,14 +229,14 @@ void MainWindow::setupIntro() {
 }
 
 void MainWindow::setupMain() {
-	Expects(AuthSession::Exists());
+	Expects(account().sessionExists());
 
 	auto animated = (_intro || _passcodeLock);
 	auto bg = animated ? grabInner() : QPixmap();
 
 	clearWidgets();
 
-	_main.create(bodyWidget(), controller());
+	_main.create(bodyWidget(), sessionController());
 	_main->show();
 	updateControlsGeometry();
 
@@ -255,7 +258,7 @@ void MainWindow::showSettings() {
 		return;
 	}
 
-	if (const auto controller = this->controller()) {
+	if (const auto controller = sessionController()) {
 		controller->showSettings();
 	} else {
 		showSpecialLayer(Box<Settings::LayerWidget>(), anim::type::normal);
@@ -292,7 +295,7 @@ void MainWindow::showMainMenu() {
 	if (isHidden()) showFromTray();
 
 	ensureLayerCreated();
-	_layer->showMainMenu(controller(), anim::type::normal);
+	_layer->showMainMenu(sessionController(), anim::type::normal);
 }
 
 void MainWindow::ensureLayerCreated() {
@@ -307,8 +310,8 @@ void MainWindow::ensureLayerCreated() {
 		destroyLayer();
 	}, _layer->lifetime());
 
-	if (controller()) {
-		controller()->enableGifPauseReason(Window::GifPauseReason::Layer);
+	if (const auto controller = sessionController()) {
+		controller->enableGifPauseReason(Window::GifPauseReason::Layer);
 	}
 }
 
@@ -322,8 +325,8 @@ void MainWindow::destroyLayer() {
 		setFocus();
 	}
 	layer = nullptr;
-	if (controller()) {
-		controller()->disableGifPauseReason(Window::GifPauseReason::Layer);
+	if (const auto controller = sessionController()) {
+		controller->disableGifPauseReason(Window::GifPauseReason::Layer);
 	}
 	if (resetFocus) {
 		setInnerFocus();
@@ -383,7 +386,7 @@ void MainWindow::ui_showMediaPreview(
 		return;
 	}
 	if (!_mediaPreview) {
-		_mediaPreview.create(bodyWidget(), controller());
+		_mediaPreview.create(bodyWidget(), sessionController());
 		updateControlsGeometry();
 	}
 	if (_mediaPreview->isHidden()) {
@@ -399,7 +402,7 @@ void MainWindow::ui_showMediaPreview(
 		return;
 	}
 	if (!_mediaPreview) {
-		_mediaPreview.create(bodyWidget(), controller());
+		_mediaPreview.create(bodyWidget(), sessionController());
 		updateControlsGeometry();
 	}
 	if (_mediaPreview->isHidden()) {
@@ -581,7 +584,7 @@ void MainWindow::updateTrayMenu(bool force) {
 void MainWindow::onShowAddContact() {
 	if (isHidden()) showFromTray();
 
-	if (AuthSession::Exists()) {
+	if (account().sessionExists()) {
 		Ui::show(Box<AddContactBox>(), LayerOption::KeepOther);
 	}
 }
@@ -589,7 +592,7 @@ void MainWindow::onShowAddContact() {
 void MainWindow::onShowNewGroup() {
 	if (isHidden()) showFromTray();
 
-	if (AuthSession::Exists()) {
+	if (account().sessionExists()) {
 		Ui::show(
 			Box<GroupInfoBox>(GroupInfoBox::Type::Group),
 			LayerOption::KeepOther);
@@ -615,9 +618,10 @@ void MainWindow::onLogout() {
 		Core::App().logOut();
 	};
 	const auto callback = [=] {
-		if (AuthSession::Exists() && Auth().data().exportInProgress()) {
+		if (account().sessionExists()
+			&& account().session().data().exportInProgress()) {
 			Ui::hideLayer();
-			Auth().data().stopExportWithConfirmation(logout);
+			account().session().data().stopExportWithConfirmation(logout);
 		} else {
 			logout();
 		}
@@ -705,7 +709,7 @@ void MainWindow::toggleDisplayNotifyFromTray() {
 		Ui::show(Box<InformBox>(lang(lng_passcode_need_unblock)));
 		return;
 	}
-	if (!AuthSession::Exists()) {
+	if (!account().sessionExists()) {
 		return;
 	}
 
@@ -727,9 +731,11 @@ void MainWindow::toggleDisplayNotifyFromTray() {
 		}
 	}
 	Local::writeUserSettings();
-	Auth().notifications().settingsChanged().notify(Window::Notifications::ChangeType::DesktopEnabled);
+	account().session().notifications().settingsChanged().notify(
+		Window::Notifications::ChangeType::DesktopEnabled);
 	if (soundNotifyChanged) {
-		Auth().notifications().settingsChanged().notify(Window::Notifications::ChangeType::SoundEnabled);
+		account().session().notifications().settingsChanged().notify(
+			Window::Notifications::ChangeType::SoundEnabled);
 	}
 }
 
@@ -739,7 +745,7 @@ void MainWindow::closeEvent(QCloseEvent *e) {
 		App::quit();
 	} else {
 		e->ignore();
-		if (!AuthSession::Exists() || !hideNoQuit()) {
+		if (!account().sessionExists() || !hideNoQuit()) {
 			App::quit();
 		}
 	}
@@ -901,7 +907,7 @@ QImage MainWindow::iconWithCounter(int size, int count, style::color bg, style::
 	}
 
 	QImage img(smallIcon ? ((size == 16) ? iconbig16 : (size == 32 ? iconbig32 : iconbig64)) : ((size == 16) ? icon16 : (size == 32 ? icon32 : icon64)));
-	if (AuthSession::Exists() && Auth().supportMode()) {
+	if (account().sessionExists() && account().session().supportMode()) {
 		Window::ConvertIconToBlack(img);
 	}
 	if (!count) return img;

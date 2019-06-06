@@ -17,7 +17,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_session.h"
 #include "data/data_user.h"
 #include "chat_helpers/emoji_suggestions_widget.h"
-#include "window/window_controller.h"
+#include "window/window_session_controller.h"
 #include "lang/lang_keys.h"
 #include "mainwindow.h"
 #include "auth_session.h"
@@ -180,7 +180,7 @@ TextWithEntities StripSupportHashtag(TextWithEntities &&text) {
 		QRegularExpression::CaseInsensitiveOption);
 	const auto match = expression.match(text.text);
 	if (!match.hasMatch()) {
-		return text;
+		return std::move(text);
 	}
 	text.text.chop(match.capturedLength());
 	const auto length = text.text.size();
@@ -199,7 +199,7 @@ TextWithEntities StripSupportHashtag(TextWithEntities &&text) {
 	if (!text.text.isEmpty() && !text.text.endsWith('\n')) {
 		text.text.append('\n');
 	}
-	return text;
+	return std::move(text);
 }
 
 } // namespace
@@ -353,9 +353,8 @@ Fn<bool(
 	};
 }
 
-
 void InitMessageField(
-		not_null<Window::Controller*> controller,
+		not_null<Window::SessionController*> controller,
 		not_null<Ui::InputField*> field) {
 	field->setMinHeight(st::historySendSize.height() - 2 * st::historySendPadding);
 	field->setMaxHeight(st::historyComposeFieldMaxHeight);

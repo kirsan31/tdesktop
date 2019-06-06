@@ -193,7 +193,8 @@ quint32 djbStringHash(QString string) {
 
 } // namespace
 
-MainWindow::MainWindow() {
+MainWindow::MainWindow(not_null<Window::Controller*> controller)
+: Window::MainWindow(controller) {
 	connect(&_psCheckStatusIconTimer, SIGNAL(timeout()), this, SLOT(psStatusIconCheck()));
 	_psCheckStatusIconTimer.setSingleShot(false);
 
@@ -264,7 +265,7 @@ void MainWindow::psSetupTrayIcon() {
 				QByteArray path = QFile::encodeName(iconFile.absoluteFilePath());
 				icon = QIcon(path.constData());
 			} else {
-				icon = Window::CreateIcon();
+				icon = Window::CreateIcon(&account());
 			}
 			trayIcon->setIcon(icon);
 

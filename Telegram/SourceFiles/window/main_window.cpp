@@ -12,10 +12,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "platform/platform_info.h"
 #include "history/history.h"
 #include "window/themes/window_theme.h"
-#include "window/window_controller.h"
+#include "window/window_session_controller.h"
 #include "window/window_lock_widgets.h"
 #include "window/window_outdated_bar.h"
+#include "window/window_controller.h"
 #include "boxes/confirm_box.h"
+#include "main/main_account.h" // Account::authSessionValue.
 #include "core/click_handler_types.h"
 #include "core/application.h"
 #include "core/sandbox.h"
@@ -91,27 +93,29 @@ void ConvertIconToBlack(QImage &image) {
 	}
 }
 
-QIcon CreateOfficialIcon() {
+QIcon CreateOfficialIcon(Main::Account *account) {
 	auto image = Core::IsAppLaunched() ? Core::App().logo() : LoadLogo();
-	if (AuthSession::Exists() && Auth().supportMode()) {
+	if (account
+		&& account->sessionExists()
+		&& account->session().supportMode()) {
 		ConvertIconToBlack(image);
 	}
 	return QIcon(App::pixmapFromImageInPlace(std::move(image)));
 }
 
-QIcon CreateIcon() {
-	auto result = CreateOfficialIcon();
+QIcon CreateIcon(Main::Account *account) {
+	auto result = CreateOfficialIcon(account);
 	if (Platform::IsLinux()) {
 		return QIcon::fromTheme("telegram", result);
 	}
 	return result;
 }
 
-MainWindow::MainWindow()
-: _positionUpdatedTimer([=] { savePosition(); })
+MainWindow::MainWindow(not_null<Controller*> controller)
+: _controller(controller)
+, _positionUpdatedTimer([=] { savePosition(); })
 , _outdated(CreateOutdatedBar(this))
 , _body(this)
-, _icon(CreateIcon())
 , _titleText(qsl("Telegram")) {
 	subscribe(Theme::Background(), [=](
 			const Theme::BackgroundUpdate &data) {
@@ -125,11 +129,6 @@ MainWindow::MainWindow()
 	subscribe(Global::RefWorkMode(), [=](DBIWorkMode mode) {
 		workmodeUpdated(mode);
 	});
-	subscribe(Core::App().authSessionChanged(), [=] {
-		checkAuthSession();
-		updateWindowIcon();
-	});
-	checkAuthSession();
 
 	Core::App().termsLockValue(
 	) | rpl::start_with_next([=] {
@@ -152,9 +151,17 @@ MainWindow::MainWindow()
 	_inactivePressTimer.setCallback([this] { setInactivePress(false); });
 }
 
+Main::Account &MainWindow::account() const {
+	return _controller->account();
+}
+
+Window::SessionController *MainWindow::sessionController() const {
+	return _controller->sessionController();
+}
+
 void MainWindow::checkLockByTerms() {
 	const auto data = Core::App().termsLocked();
-	if (!data || !AuthSession::Exists()) {
+	if (!data || !account().sessionExists()) {
 		if (_termsBox) {
 			_termsBox->closeBox();
 		}
@@ -173,8 +180,8 @@ void MainWindow::checkLockByTerms() {
 	box->agreeClicks(
 	) | rpl::start_with_next([=] {
 		const auto mention = box ? box->lastClickedMention() : QString();
-		if (AuthSession::Exists()) {
-			Auth().api().acceptTerms(id);
+		if (account().sessionExists()) {
+			account().session().api().acceptTerms(id);
 			if (!mention.isEmpty()) {
 				MentionClickHandler(mention).onClick({});
 			}
@@ -222,8 +229,8 @@ void MainWindow::showTermsDecline() {
 void MainWindow::showTermsDelete() {
 	const auto box = std::make_shared<QPointer<BoxContent>>();
 	const auto deleteByTerms = [=] {
-		if (AuthSession::Exists()) {
-			Auth().termsDeleteNow();
+		if (account().sessionExists()) {
+			account().session().termsDeleteNow();
 		} else {
 			Ui::hideLayer();
 		}
@@ -276,9 +283,10 @@ bool MainWindow::computeIsActive() const {
 }
 
 void MainWindow::updateWindowIcon() {
-	const auto supportIcon = AuthSession::Exists() && Auth().supportMode();
-	if (supportIcon != _usingSupportIcon) {
-		_icon = CreateIcon();
+	const auto supportIcon = account().sessionExists()
+		&& account().session().supportMode();
+	if (supportIcon != _usingSupportIcon || _icon.isNull()) {
+		_icon = CreateIcon(&account());
 		_usingSupportIcon = supportIcon;
 	}
 	setWindowIcon(_icon);
@@ -483,8 +491,8 @@ void MainWindow::updateControlsGeometry() {
 void MainWindow::updateUnreadCounter() {
 	if (!Global::started() || App::quitting()) return;
 
-	const auto counter = AuthSession::Exists()
-		? Auth().data().unreadBadge()
+	const auto counter = account().sessionExists()
+		? account().session().data().unreadBadge()
 		: 0;
 	_titleText = (counter > 0) ? qsl("Telegram (%1)").arg(counter) : qsl("Telegram");
 
@@ -636,14 +644,6 @@ void MainWindow::launchDrag(std::unique_ptr<QMimeData> data) {
 	ClickHandler::unpressed();
 	if (weak) {
 		weak->dragFinished().notify();
-	}
-}
-
-void MainWindow::checkAuthSession() {
-	if (AuthSession::Exists()) {
-		_controller = std::make_unique<Window::Controller>(&Auth(), this);
-	} else {
-		_controller = nullptr;
 	}
 }
 

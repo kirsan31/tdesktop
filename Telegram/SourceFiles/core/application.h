@@ -11,8 +11,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "mtproto/auth_key.h"
 #include "base/timer.h"
 
-class AuthSession;
 class AuthSessionSettings;
+class MainWindow;
 class MainWidget;
 class FileUploader;
 class Translator;
@@ -24,6 +24,7 @@ class Databases;
 
 namespace Window {
 struct TermsLock;
+class Controller;
 } // namespace Window
 
 namespace ChatHelpers {
@@ -33,6 +34,10 @@ class EmojiKeywords;
 namespace App {
 void quit();
 } // namespace App
+
+namespace Main {
+class Account;
+} // namespace Main
 
 namespace Ui {
 namespace Animations {
@@ -86,7 +91,7 @@ public:
 	}
 
 	// Windows interface.
-	MainWindow *getActiveWindow() const;
+	Window::Controller *activeWindow() const;
 	bool closeActiveWindow();
 	bool minimizeActiveWindow();
 	QWidget *getFileDialogParent();
@@ -144,19 +149,18 @@ public:
 	void configUpdated();
 	[[nodiscard]] rpl::producer<> configUpdates() const;
 
-	// Databases
+	// Databases.
 	Storage::Databases &databases() {
 		return *_databases;
 	}
 
+	// Account component.
+	Main::Account &activeAccount() const {
+		return *_account;
+	}
+
 	// AuthSession component.
-	AuthSession *authSession() {
-		return _authSession.get();
-	}
 	void authSessionCreate(const MTPUser &user);
-	base::Observable<void> &authSessionChanged() {
-		return _authSessionChanged;
-	}
 	int unreadBadge() const;
 	bool unreadBadgeMuted() const;
 	void logOut();
@@ -270,7 +274,8 @@ private:
 
 	const std::unique_ptr<Storage::Databases> _databases;
 	const std::unique_ptr<Ui::Animations::Manager> _animationsManager;
-	std::unique_ptr<MainWindow> _window;
+	const std::unique_ptr<Main::Account> _account;
+	std::unique_ptr<Window::Controller> _window;
 	std::unique_ptr<Media::View::OverlayWidget> _mediaView;
 	const std::unique_ptr<Lang::Instance> _langpack;
 	std::unique_ptr<Lang::CloudManager> _langCloudManager;
@@ -280,8 +285,6 @@ private:
 	std::unique_ptr<MTP::Instance> _mtproto;
 	std::unique_ptr<MTP::Instance> _mtprotoForKeysDestroy;
 	rpl::event_stream<> _configUpdates;
-	std::unique_ptr<AuthSession> _authSession;
-	base::Observable<void> _authSessionChanged;
 	base::Observable<void> _passcodedChanged;
 	QPointer<BoxContent> _badProxyDisableBox;
 
