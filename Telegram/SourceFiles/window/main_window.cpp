@@ -9,10 +9,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "storage/localstorage.h"
 #include "platform/platform_window_title.h"
+#include "platform/platform_info.h"
 #include "history/history.h"
 #include "window/themes/window_theme.h"
 #include "window/window_controller.h"
 #include "window/window_lock_widgets.h"
+#include "window/window_outdated_bar.h"
 #include "boxes/confirm_box.h"
 #include "core/click_handler_types.h"
 #include "core/application.h"
@@ -26,9 +28,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_boxes.h"
 
 namespace Window {
+namespace {
 
 constexpr auto kInactivePressTimeout = crl::time(200);
 constexpr auto kSaveWindowPositionTimeout = crl::time(1000);
+
+} // namespace
 
 QImage LoadLogo() {
 	return QImage(qsl(":/gui/art/logo_256.png"));
@@ -96,7 +101,7 @@ QIcon CreateOfficialIcon() {
 
 QIcon CreateIcon() {
 	auto result = CreateOfficialIcon();
-	if (cPlatform() == dbipLinux32 || cPlatform() == dbipLinux64) {
+	if (Platform::IsLinux()) {
 		return QIcon::fromTheme("telegram", result);
 	}
 	return result;
@@ -104,6 +109,7 @@ QIcon CreateIcon() {
 
 MainWindow::MainWindow()
 : _positionUpdatedTimer([=] { savePosition(); })
+, _outdated(CreateOutdatedBar(this))
 , _body(this)
 , _icon(CreateIcon())
 , _titleText(qsl("Telegram")) {
@@ -129,6 +135,18 @@ MainWindow::MainWindow()
 	) | rpl::start_with_next([=] {
 		checkLockByTerms();
 	}, lifetime());
+
+	if (_outdated) {
+		_outdated->heightValue(
+		) | rpl::filter([=] {
+			return window()->windowHandle() != nullptr;
+		}) | rpl::start_with_next([=](int height) {
+			if (!height) {
+				crl::on_main(this, [=] { _outdated.destroy(); });
+			}
+			updateControlsGeometry();
+		}, _outdated->lifetime());
+	}
 
 	_isActiveTimer.setCallback([this] { updateIsActive(0); });
 	_inactivePressTimer.setCallback([this] { setInactivePress(false); });
@@ -229,7 +247,7 @@ bool MainWindow::hideNoQuit() {
 			Ui::showChatsList();
 			return true;
 		}
-	} else if (cPlatform() == dbipMac || cPlatform() == dbipMacOld) {
+	} else if (Platform::IsMac()) {
 		closeWithoutDestroy();
 		updateIsActive(Global::OfflineBlurTimeout());
 		updateGlobalMenu();
@@ -335,9 +353,21 @@ HitTestResult MainWindow::hitTest(const QPoint &p) const {
 	return Window::HitTestResult::None;
 }
 
+int MainWindow::computeMinHeight() const {
+	const auto title = _title ? _title->height() : 0;
+	const auto outdated = [&] {
+		if (!_outdated) {
+			return 0;
+		}
+		_outdated->resizeToWidth(st::windowMinWidth);
+		return _outdated->height();
+	}();
+	return title + outdated + st::windowMinHeight;
+}
+
 void MainWindow::initSize() {
 	setMinimumWidth(st::windowMinWidth);
-	setMinimumHeight((_title ? _title->height() : 0) + st::windowMinHeight);
+	setMinimumHeight(computeMinHeight());
 
 	auto position = cWindowPos();
 	DEBUG_LOG(("Window Pos: Initializing first %1, %2, %3, %4 (maximized %5)").arg(position.x).arg(position.y).arg(position.w).arg(position.h).arg(Logs::b(position.maximized)));
@@ -436,6 +466,12 @@ void MainWindow::updateControlsGeometry() {
 	if (_title && !_title->isHidden()) {
 		_title->setGeometry(0, bodyTop, width(), _title->height());
 		bodyTop += _title->height();
+	}
+	if (_outdated) {
+		Ui::SendPendingMoveResizeEvents(_outdated.data());
+		_outdated->resizeToWidth(width());
+		_outdated->moveToLeft(0, bodyTop);
+		bodyTop += _outdated->height();
 	}
 	if (_rightColumn) {
 		bodyWidth -= _rightColumn->width();

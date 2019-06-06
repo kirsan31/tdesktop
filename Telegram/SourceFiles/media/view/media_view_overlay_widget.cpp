@@ -14,6 +14,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/application.h"
 #include "core/file_utilities.h"
 #include "core/mime_type.h"
+#include "platform/platform_info.h"
 #include "ui/widgets/popup_menu.h"
 #include "ui/widgets/buttons.h"
 #include "ui/image/image.h"
@@ -23,7 +24,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "media/view/media_view_playback_controls.h"
 #include "media/view/media_view_group_thumbs.h"
 #include "media/streaming/media_streaming_player.h"
-#include "media/streaming/media_streaming_loader.h"
+#include "media/streaming/media_streaming_reader.h"
 #include "media/player/media_player_instance.h"
 #include "lottie/lottie_animation.h"
 #include "history/history.h"
@@ -171,7 +172,7 @@ struct OverlayWidget::Streamed {
 	template <typename Callback>
 	Streamed(
 		not_null<Data::Session*> owner,
-		std::unique_ptr<Streaming::Loader> loader,
+		std::shared_ptr<Streaming::Reader> reader,
 		QWidget *controlsParent,
 		not_null<PlaybackControls::Delegate*> controlsDelegate,
 		Callback &&loadingCallback);
@@ -200,11 +201,11 @@ struct OverlayWidget::LottieFile {
 template <typename Callback>
 OverlayWidget::Streamed::Streamed(
 	not_null<Data::Session*> owner,
-	std::unique_ptr<Streaming::Loader> loader,
+	std::shared_ptr<Streaming::Reader> reader,
 	QWidget *controlsParent,
 	not_null<PlaybackControls::Delegate*> controlsDelegate,
 	Callback &&loadingCallback)
-: player(owner, std::move(loader))
+: player(owner, std::move(reader))
 , controls(controlsParent, controlsDelegate)
 , radial(
 	std::forward<Callback>(loadingCallback),
@@ -289,11 +290,11 @@ OverlayWidget::OverlayWidget()
 
 	hide();
 	createWinId();
-	if (cPlatform() == dbipLinux32 || cPlatform() == dbipLinux64) {
+	if (Platform::IsLinux()) {
 		windowHandle()->setTransientParent(App::wnd()->windowHandle());
 		setWindowModality(Qt::WindowModal);
 	}
-	if (cPlatform() != dbipMac && cPlatform() != dbipMacOld) {
+	if (!Platform::IsMac()) {
 		setWindowState(Qt::WindowFullScreen);
 	}
 
@@ -445,12 +446,21 @@ void OverlayWidget::clearLottie() {
 }
 
 void OverlayWidget::documentUpdated(DocumentData *doc) {
-	if (documentBubbleShown() && _doc && _doc == doc) {
-		if ((_doc->loading() && _docCancel->isHidden()) || (!_doc->loading() && !_docCancel->isHidden())) {
-			updateControls();
-		} else if (_doc->loading()) {
-			updateDocSize();
-			update(_docRect);
+	if (_doc && _doc == doc) {
+		if (documentBubbleShown()) {
+			if ((_doc->loading() && _docCancel->isHidden()) || (!_doc->loading() && !_docCancel->isHidden())) {
+				updateControls();
+			} else if (_doc->loading()) {
+				updateDocSize();
+				update(_docRect);
+			}
+		} else if (_streamed) {
+			const auto ready = _doc->loaded()
+				? _doc->size
+				: _doc->loading()
+				? std::clamp(_doc->loadOffset(), 0, _doc->size)
+				: 0;
+			_streamed->controls.setLoadingProgress(ready, _doc->size);
 		}
 	}
 }
@@ -543,7 +553,9 @@ void OverlayWidget::updateControls() {
 	updateThemePreviewGeometry();
 
 	_saveVisible = (_photo && _photo->loaded())
-		|| (_doc && _doc->filepath(DocumentData::FilePathResolve::Checked).isEmpty());
+		|| (_doc
+			&& _doc->filepath(DocumentData::FilePathResolve::Checked).isEmpty()
+			&& !_doc->loading());
 	_saveNav = myrtlrect(width() - st::mediaviewIconSize.width() * 2, height() - st::mediaviewIconSize.height(), st::mediaviewIconSize.width(), st::mediaviewIconSize.height());
 	_saveNavIcon = centerrect(_saveNav, st::mediaviewSave);
 	_moreNav = myrtlrect(width() - st::mediaviewIconSize.width(), height() - st::mediaviewIconSize.height(), st::mediaviewIconSize.width(), st::mediaviewIconSize.height());
@@ -646,7 +658,7 @@ void OverlayWidget::updateActions() {
 		_actions.push_back({ lang(lng_context_to_msg), SLOT(onToMessage()) });
 	}
 	if (_doc && !_doc->filepath(DocumentData::FilePathResolve::Checked).isEmpty()) {
-		_actions.push_back({ lang((cPlatform() == dbipMac || cPlatform() == dbipMacOld) ? lng_context_show_in_finder : lng_context_show_in_folder), SLOT(onShowInFolder()) });
+		_actions.push_back({ lang(Platform::IsMac() ? lng_context_show_in_finder : lng_context_show_in_folder), SLOT(onShowInFolder()) });
 	}
 	if ((_doc && documentContentShown()) || (_photo && _photo->loaded())) {
 		_actions.push_back({ lang(lng_mediaview_copy), SLOT(onCopy()) });
@@ -1202,7 +1214,8 @@ void OverlayWidget::onDownload() {
 			}
 			location.accessDisable();
 		} else {
-			if (_doc->filepath(DocumentData::FilePathResolve::Checked).isEmpty()) {
+			if (_doc->filepath(DocumentData::FilePathResolve::Checked).isEmpty()
+				&& !_doc->loading()) {
 				DocumentSaveClickHandler::Save(
 					fileOrigin(),
 					_doc,
@@ -1830,7 +1843,7 @@ void OverlayWidget::displayDocument(DocumentData *doc, HistoryItem *item) {
 		} else {
 			_doc->automaticLoad(fileOrigin(), item);
 
-			if (_doc->canBePlayed() && !_doc->loading()) {
+			if (_doc->canBePlayed()) {
 				initStreaming();
 			} else if (_doc->isVideoFile()) {
 				initStreamingThumbnail();
@@ -1973,11 +1986,17 @@ void OverlayWidget::initStreaming() {
 	createStreamingObjects();
 
 	Core::App().updateNonIdle();
+
 	_streamed->player.updates(
 	) | rpl::start_with_next_error([=](Streaming::Update &&update) {
 		handleStreamingUpdate(std::move(update));
 	}, [=](Streaming::Error &&error) {
 		handleStreamingError(std::move(error));
+	}, _streamed->player.lifetime());
+
+	_streamed->player.fullInCache(
+	) | rpl::start_with_next([=](bool fullInCache) {
+		_doc->setLoadedInMediaCache(fullInCache);
 	}, _streamed->player.lifetime());
 
 	restartAtSeekPosition(0);
@@ -2041,7 +2060,7 @@ void OverlayWidget::streamingReady(Streaming::Information &&info) {
 void OverlayWidget::createStreamingObjects() {
 	_streamed = std::make_unique<Streamed>(
 		&_doc->owner(),
-		_doc->createStreamingLoader(fileOrigin()),
+		_doc->owner().documentStreamedReader(_doc, fileOrigin()),
 		this,
 		static_cast<PlaybackControls::Delegate*>(this),
 		[=] { waitingAnimationCallback(); });
@@ -2455,19 +2474,7 @@ void OverlayWidget::validatePhotoCurrentImage() {
 	}
 }
 
-void OverlayWidget::checkLoadingWhileStreaming() {
-	if (_streamed && _doc->loading()) {
-		crl::on_main(this, [=, doc = _doc] {
-			if (!isHidden() && _doc == doc) {
-				redisplayContent();
-			}
-		});
-	}
-}
-
 void OverlayWidget::paintEvent(QPaintEvent *e) {
-	checkLoadingWhileStreaming();
-
 	const auto r = e->rect();
 	const auto &region = e->region();
 	const auto rects = region.rects();
@@ -2950,7 +2957,7 @@ void OverlayWidget::keyPressEvent(QKeyEvent *e) {
 		}
 	}
 	if (!_menu && e->key() == Qt::Key_Escape) {
-		if (_doc && _doc->loading()) {
+		if (_doc && _doc->loading() && !_streamed) {
 			onDocClick();
 		} else {
 			close();
@@ -2960,10 +2967,10 @@ void OverlayWidget::keyPressEvent(QKeyEvent *e) {
 	} else if (e->key() == Qt::Key_Copy || (e->key() == Qt::Key_C && ctrl)) {
 		onCopy();
 	} else if (e->key() == Qt::Key_Enter || e->key() == Qt::Key_Return || e->key() == Qt::Key_Space) {
-		if (_doc && !_doc->loading() && (documentBubbleShown() || !_doc->loaded())) {
-			onDocClick();
-		} else if (_streamed) {
+		if (_streamed) {
 			playbackPauseResume();
+		} else if (_doc && !_doc->loading() && (documentBubbleShown() || !_doc->loaded())) {
+			onDocClick();
 		}
 	} else if (e->key() == Qt::Key_Left) {
 		if (_controlsHideTimer.isActive()) {

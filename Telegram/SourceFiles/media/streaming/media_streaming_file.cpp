@@ -55,11 +55,14 @@ int File::Context::read(bytes::span buffer) {
 		_semaphore.acquire();
 		if (_interrupted) {
 			return -1;
-		} else if (const auto error = _reader->failed()) {
+		} else if (const auto error = _reader->streamingError()) {
 			fail(*error);
 			return -1;
 		}
 	}
+
+	sendFullInCache();
+
 	_offset += amount;
 	return amount;
 }
@@ -244,6 +247,9 @@ void File::Context::start(crl::time position) {
 	}
 
 	_reader->headerDone();
+	if (_reader->isRemoteLoader()) {
+		sendFullInCache(true);
+	}
 	if (video.codec || audio.codec) {
 		seekToPosition(format.get(), video.codec ? video : audio, position);
 	}
@@ -251,10 +257,22 @@ void File::Context::start(crl::time position) {
 		return;
 	}
 
-	if (!_delegate->fileReady(std::move(video), std::move(audio))) {
+	const auto header = _reader->headerSize();
+	if (!_delegate->fileReady(header, std::move(video), std::move(audio))) {
 		return fail(Error::OpenFailed);
 	}
 	_format = std::move(format);
+}
+
+void File::Context::sendFullInCache(bool force) {
+	const auto started = _fullInCache.has_value();
+	if (force || started) {
+		const auto nowFullInCache = _reader->fullInCache();
+		if (!started || *_fullInCache != nowFullInCache) {
+			_fullInCache = nowFullInCache;
+			_delegate->fileFullInCache(nowFullInCache);
+		}
+	}
 }
 
 void File::Context::readNextPacket() {
@@ -265,7 +283,9 @@ void File::Context::readNextPacket() {
 		const auto more = _delegate->fileProcessPacket(std::move(*packet));
 		if (!more) {
 			do {
+				_reader->startSleep(&_semaphore);
 				_semaphore.acquire();
+				_reader->stopSleep();
 			} while (!unroll() && !_delegate->fileReadMore());
 		}
 	} else {
@@ -327,14 +347,15 @@ bool File::Context::finished() const {
 
 File::File(
 	not_null<Data::Session*> owner,
-	std::unique_ptr<Loader> loader)
-: _reader(owner, std::move(loader)) {
+	std::shared_ptr<Reader> reader)
+: _reader(std::move(reader)) {
 }
 
 void File::start(not_null<FileDelegate*> delegate, crl::time position) {
-	stop();
+	stop(true);
 
-	_context.emplace(delegate, &_reader);
+	_reader->startStreaming();
+	_context.emplace(delegate, _reader.get());
 	_thread = std::thread([=, context = &*_context] {
 		context->start(position);
 		while (!context->finished()) {
@@ -349,17 +370,17 @@ void File::wake() {
 	_context->wake();
 }
 
-void File::stop() {
+void File::stop(bool stillActive) {
 	if (_thread.joinable()) {
 		_context->interrupt();
 		_thread.join();
 	}
-	_reader.stop();
+	_reader->stopStreaming(stillActive);
 	_context.reset();
 }
 
 bool File::isRemoteLoader() const {
-	return _reader.isRemoteLoader();
+	return _reader->isRemoteLoader();
 }
 
 File::~File() {

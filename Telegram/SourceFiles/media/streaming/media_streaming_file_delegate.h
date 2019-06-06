@@ -17,10 +17,12 @@ enum class Error;
 class FileDelegate {
 public:
 	[[nodiscard]] virtual bool fileReady(
+		int headerSize,
 		Stream &&video,
 		Stream &&audio) = 0;
 	virtual void fileError(Error error) = 0;
 	virtual void fileWaitingForData() = 0;
+	virtual void fileFullInCache(bool fullInCache) = 0;
 
 	// Return true if reading and processing more packets is desired.
 	// Return false if sleeping until 'wake()' is called is desired.

@@ -9,6 +9,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "media/streaming/media_streaming_loader.h"
 #include "base/bytes.h"
+#include "base/weak_ptr.h"
+#include "base/thread_safe_wrap.h"
+
+namespace Storage {
+class StreamedFileDownloader;
+} // namespace Storage
 
 namespace Storage {
 namespace Cache {
@@ -27,22 +33,39 @@ class Loader;
 struct LoadedPart;
 enum class Error;
 
-class Reader final {
+class Reader final : public base::has_weak_ptr {
 public:
+	// Main thread.
 	Reader(not_null<Data::Session*> owner, std::unique_ptr<Loader> loader);
 
+	// Any thread.
 	[[nodiscard]] int size() const;
+	[[nodiscard]] bool isRemoteLoader() const;
+
+	// Single thread.
 	[[nodiscard]] bool fill(
 		int offset,
 		bytes::span buffer,
 		not_null<crl::semaphore*> notify);
-	[[nodiscard]] std::optional<Error> failed() const;
-
+	[[nodiscard]] std::optional<Error> streamingError() const;
 	void headerDone();
+	[[nodiscard]] int headerSize() const;
+	[[nodiscard]] bool fullInCache() const;
 
-	void stop();
+	// Thread safe.
+	void startSleep(not_null<crl::semaphore*> wake);
+	void wakeFromSleep();
+	void stopSleep();
 
-	[[nodiscard]] bool isRemoteLoader() const;
+	// Main thread.
+	void startStreaming();
+	void stopStreaming(bool stillActive = false);
+	[[nodiscard]] rpl::producer<LoadedPart> partsForDownloader() const;
+	void loadForDownloader(
+		Storage::StreamedFileDownloader *downloader,
+		int offset);
+	void doneForDownloader(int offset);
+	void cancelForDownloader(Storage::StreamedFileDownloader *downloader);
 
 	~Reader();
 
@@ -50,6 +73,8 @@ private:
 	static constexpr auto kLoadFromRemoteMax = 8;
 
 	struct CacheHelper;
+
+	using PartsMap = base::flat_map<int, QByteArray>;
 
 	template <int Size>
 	class StackIntVector {
@@ -80,23 +105,19 @@ private:
 			LoadingFromCache = 0x01,
 			LoadedFromCache = 0x02,
 			ChangedSinceCache = 0x04,
+			FullInCache = 0x08,
 		};
 		friend constexpr inline bool is_flag_type(Flag) { return true; }
 		using Flags = base::flags<Flag>;
 
 		struct PrepareFillResult {
 			StackIntVector<kLoadFromRemoteMax> offsetsFromLoader;
-			base::flat_map<int, QByteArray>::const_iterator start;
-			base::flat_map<int, QByteArray>::const_iterator finish;
+			PartsMap::const_iterator start;
+			PartsMap::const_iterator finish;
 			bool ready = true;
 		};
 
-		bytes::const_span processCacheData(
-			bytes::const_span data,
-			int maxSize);
-		bytes::const_span processComplexCacheData(
-			bytes::const_span data,
-			int maxSize);
+		void processCacheData(PartsMap &&data);
 		void addPart(int offset, QByteArray bytes);
 		PrepareFillResult prepareFill(int from, int till);
 
@@ -105,7 +126,7 @@ private:
 			int from,
 			int till) const;
 
-		base::flat_map<int, QByteArray> parts;
+		PartsMap parts;
 		Flags flags;
 
 	};
@@ -115,16 +136,25 @@ private:
 		Slices(int size, bool useCache);
 
 		void headerDone(bool fromCache);
+		[[nodiscard]] int headerSize() const;
+		[[nodiscard]] bool fullInCache() const;
 		[[nodiscard]] bool headerWontBeFilled() const;
 		[[nodiscard]] bool headerModeUnknown() const;
 		[[nodiscard]] bool isFullInHeader() const;
 		[[nodiscard]] bool isGoodHeader() const;
+		[[nodiscard]] bool waitingForHeaderCache() const;
 
-		void processCacheResult(int sliceNumber, bytes::const_span result);
+		[[nodiscard]] int requestSliceSizesCount() const;
+
+		void processCacheResult(int sliceNumber, PartsMap &&result);
+		void processCachedSizes(const std::vector<int> &sizes);
 		void processPart(int offset, QByteArray &&bytes);
 
 		[[nodiscard]] FillResult fill(int offset, bytes::span buffer);
 		[[nodiscard]] SerializedSlice unloadToCache();
+
+		[[nodiscard]] QByteArray partForDownloader(int offset) const;
+		[[nodiscard]] bool readCacheForDownloaderRequired(int offset);
 
 	private:
 		enum class HeaderMode {
@@ -148,17 +178,23 @@ private:
 		[[nodiscard]] FillResult fillFromHeader(
 			int offset,
 			bytes::span buffer);
+		void unloadSlice(Slice &slice) const;
+		void checkSliceFullLoaded(int sliceNumber);
+		[[nodiscard]] bool checkFullInCache() const;
 
 		std::vector<Slice> _data;
 		Slice _header;
 		std::deque<int> _usedSlices;
 		int _size = 0;
 		HeaderMode _headerMode = HeaderMode::Unknown;
+		bool _fullInCache = false;
 
 	};
 
 	// 0 is for headerData, slice index = sliceNumber - 1.
+	// returns false if asked for a known-empty downloader slice cache.
 	void readFromCache(int sliceNumber);
+	[[nodiscard]] bool readFromCacheForDownloader(int sliceNumber);
 	bool processCacheResults();
 	void putToCache(SerializedSlice &&data);
 
@@ -167,9 +203,21 @@ private:
 	void checkLoadWillBeFirst(int offset);
 	bool processLoadedParts();
 
+	bool checkForSomethingMoreReceived();
+
 	bool fillFromSlices(int offset, bytes::span buffer);
 
 	void finalizeCache();
+
+	void processDownloaderRequests();
+	void checkCacheResultsForDownloader();
+	void pruneDownloaderCache(int minimalOffset);
+	void pruneDoneDownloaderRequests();
+	void sendDownloaderRequests();
+	[[nodiscard]] bool downloaderWaitForCachedSlice(int offset);
+	void enqueueDownloaderOffsets();
+	void checkForDownloaderChange(int checkItemsCount);
+	void checkForDownloaderReadyOffsets();
 
 	static std::shared_ptr<CacheHelper> InitCacheHelper(
 		std::optional<Storage::Cache::Key> baseKey);
@@ -178,13 +226,34 @@ private:
 	const std::unique_ptr<Loader> _loader;
 	const std::shared_ptr<CacheHelper> _cacheHelper;
 
-	QMutex _loadedPartsMutex;
-	std::vector<LoadedPart> _loadedParts;
+	base::thread_safe_queue<LoadedPart, std::vector> _loadedParts;
 	std::atomic<crl::semaphore*> _waiting = nullptr;
+	std::atomic<crl::semaphore*> _sleeping = nullptr;
 	PriorityQueue _loadingOffsets;
 
 	Slices _slices;
-	std::optional<Error> _failed;
+
+	// Even if streaming had failed, the Reader can work for the downloader.
+	std::optional<Error> _streamingError;
+
+	// In case streaming is active both main and streaming threads have work.
+	// In case only downloader is active, all work is done on main thread.
+
+	// Main thread.
+	Storage::StreamedFileDownloader *_attachedDownloader = nullptr;
+	rpl::event_stream<LoadedPart> _partsForDownloader;
+	bool _streamingActive = false;
+
+	// Streaming thread.
+	std::deque<int> _offsetsForDownloader;
+	base::flat_set<int> _downloaderOffsetsRequested;
+	base::flat_map<int, std::optional<PartsMap>> _downloaderReadCache;
+
+	// Communication from main thread to streaming thread.
+	// Streaming thread to main thread communicates using crl::on_main.
+	base::thread_safe_queue<int> _downloaderOffsetRequests;
+	base::thread_safe_queue<int> _downloaderOffsetAcks;
+
 	rpl::lifetime _lifetime;
 
 };

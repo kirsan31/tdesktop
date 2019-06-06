@@ -22,19 +22,18 @@ class Session;
 namespace Media {
 namespace Streaming {
 
-class Loader;
 class FileDelegate;
 
 class File final {
 public:
-	File(not_null<Data::Session*> owner, std::unique_ptr<Loader> loader);
+	File(not_null<Data::Session*> owner, std::shared_ptr<Reader> reader);
 
 	File(const File &other) = delete;
 	File &operator=(const File &other) = delete;
 
 	void start(not_null<FileDelegate*> delegate, crl::time position);
 	void wake();
-	void stop();
+	void stop(bool stillActive = false);
 
 	[[nodiscard]] bool isRemoteLoader() const;
 
@@ -82,6 +81,7 @@ private:
 		[[nodiscard]] base::variant<Packet, AvErrorWrap> readPacket();
 
 		void handleEndOfFile();
+		void sendFullInCache(bool force = false);
 
 		const not_null<FileDelegate*> _delegate;
 		const not_null<Reader*> _reader;
@@ -90,6 +90,7 @@ private:
 		int _size = 0;
 		bool _failed = false;
 		bool _readTillEnd = false;
+		std::optional<bool> _fullInCache;
 		crl::semaphore _semaphore;
 		std::atomic<bool> _interrupted = false;
 
@@ -98,7 +99,7 @@ private:
 	};
 
 	std::optional<Context> _context;
-	Reader _reader;
+	std::shared_ptr<Reader> _reader;
 	std::thread _thread;
 
 };

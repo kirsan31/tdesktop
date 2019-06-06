@@ -13,6 +13,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "emoji_suggestions_data.h"
 #include "chat_helpers/emoji_suggestions_helper.h"
 #include "chat_helpers/message_field.h" // ConvertTextTagsToEntities
+#include "platform/platform_info.h"
 #include "window/themes/window_theme.h"
 #include "lang/lang_keys.h"
 #include "data/data_user.h"
@@ -1642,17 +1643,13 @@ void InputField::paintEvent(QPaintEvent *e) {
 
 		p.restore();
 	} else if (!_placeholder.isEmpty()) {
-		auto placeholderHiddenDegree = _a_placeholderShifted.value(_placeholderShifted ? 1. : 0.);
+		const auto placeholderHiddenDegree = _a_placeholderShifted.value(_placeholderShifted ? 1. : 0.);
 		if (placeholderHiddenDegree < 1.) {
 			p.setOpacity(1. - placeholderHiddenDegree);
 			p.save();
 			p.setClipRect(r);
 
-			auto placeholderLeft = anim::interpolate(0, -_st.placeholderShift, placeholderHiddenDegree);
-
-			QRect r(rect().marginsRemoved(_st.textMargins + _st.placeholderMargins));
-			r.moveLeft(r.left() + placeholderLeft);
-			if (rtl()) r.moveLeft(width() - r.left() - r.width());
+			const auto placeholderLeft = anim::interpolate(0, -_st.placeholderShift, placeholderHiddenDegree);
 
 			p.setFont(_st.placeholderFont);
 			p.setPen(anim::pen(_st.placeholderFg, _st.placeholderFgActive, focusedDegree));
@@ -2584,7 +2581,7 @@ bool InputField::ShouldSubmit(
 
 void InputField::keyPressEventInner(QKeyEvent *e) {
 	bool shift = e->modifiers().testFlag(Qt::ShiftModifier), alt = e->modifiers().testFlag(Qt::AltModifier);
-	bool macmeta = (cPlatform() == dbipMac || cPlatform() == dbipMacOld) && e->modifiers().testFlag(Qt::ControlModifier) && !e->modifiers().testFlag(Qt::MetaModifier) && !e->modifiers().testFlag(Qt::AltModifier);
+	bool macmeta = Platform::IsMac() && e->modifiers().testFlag(Qt::ControlModifier) && !e->modifiers().testFlag(Qt::MetaModifier) && !e->modifiers().testFlag(Qt::AltModifier);
 	bool ctrl = e->modifiers().testFlag(Qt::ControlModifier) || e->modifiers().testFlag(Qt::MetaModifier);
 	bool enterSubmit = (_mode != Mode::MultiLine)
 		|| ShouldSubmit(_submitSettings, e->modifiers());

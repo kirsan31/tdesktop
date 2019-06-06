@@ -9,6 +9,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "apiwrap.h"
 #include "auth_session.h"
+#include "storage/streamed_file_downloader.h"
 #include "storage/cache/storage_cache_types.h"
 
 namespace Media {
@@ -20,14 +21,21 @@ constexpr auto kMaxConcurrentRequests = 4;
 } // namespace
 
 LoaderMtproto::LoaderMtproto(
-	not_null<ApiWrap*> api,
+	not_null<Storage::Downloader*> owner,
 	const StorageFileLocation &location,
 	int size,
 	Data::FileOrigin origin)
-: _api(api)
+: _owner(owner)
 , _location(location)
+, _dcId(location.dcId())
 , _size(size)
 , _origin(origin) {
+}
+
+LoaderMtproto::~LoaderMtproto() {
+	for (const auto [index, amount] : _amountByDcIndex) {
+		changeRequestedAmount(index, -amount);
+	}
 }
 
 std::optional<Storage::Cache::Key> LoaderMtproto::baseCacheKey() const {
@@ -40,6 +48,14 @@ int LoaderMtproto::size() const {
 
 void LoaderMtproto::load(int offset) {
 	crl::on_main(this, [=] {
+		if (_downloader) {
+			auto bytes = _downloader->readLoadedPart(offset);
+			if (!bytes.isEmpty()) {
+				cancelForOffset(offset);
+				_parts.fire({ offset, std::move(bytes) });
+				return;
+			}
+		}
 		if (_requests.contains(offset)) {
 			return;
 		} else if (_requested.add(offset)) {
@@ -60,19 +76,37 @@ void LoaderMtproto::stop() {
 
 void LoaderMtproto::cancel(int offset) {
 	crl::on_main(this, [=] {
-		if (const auto requestId = _requests.take(offset)) {
-			_sender.request(*requestId).cancel();
-			sendNext();
-		} else {
-			_requested.remove(offset);
-		}
+		cancelForOffset(offset);
 	});
+}
+
+void LoaderMtproto::cancelForOffset(int offset) {
+	if (const auto requestId = _requests.take(offset)) {
+		_sender.request(*requestId).cancel();
+		sendNext();
+	} else {
+		_requested.remove(offset);
+	}
+}
+
+void LoaderMtproto::attachDownloader(
+		Storage::StreamedFileDownloader *downloader) {
+	_downloader = downloader;
+}
+
+void LoaderMtproto::clearAttachedDownloader() {
+	_downloader = nullptr;
 }
 
 void LoaderMtproto::increasePriority() {
 	crl::on_main(this, [=] {
 		_requested.increasePriority();
 	});
+}
+
+void LoaderMtproto::changeRequestedAmount(int index, int amount) {
+	_owner->requestedAmountIncrement(_dcId, index, amount);
+	_amountByDcIndex[index] += amount;
 }
 
 void LoaderMtproto::sendNext() {
@@ -84,20 +118,23 @@ void LoaderMtproto::sendNext() {
 		return;
 	}
 
-	static auto DcIndex = 0;
+	const auto index = _owner->chooseDcIndexForRequest(_dcId);
+	changeRequestedAmount(index, kPartSize);
+
 	const auto usedFileReference = _location.fileReference();
 	const auto id = _sender.request(MTPupload_GetFile(
 		_location.tl(Auth().userId()),
 		MTP_int(offset),
 		MTP_int(kPartSize)
 	)).done([=](const MTPupload_File &result) {
+		changeRequestedAmount(index, -kPartSize);
 		requestDone(offset, result);
 	}).fail([=](const RPCError &error) {
+		changeRequestedAmount(index, -kPartSize);
 		requestFailed(offset, error, usedFileReference);
-	}).toDC(MTP::downloadDcId(
-		_location.dcId(),
-		(++DcIndex) % MTP::kDownloadSessionsCount
-	)).send();
+	}).toDC(
+		MTP::downloadDcId(_dcId, index)
+	).send();
 	_requests.emplace(offset, id);
 
 	sendNext();
@@ -153,14 +190,14 @@ void LoaderMtproto::requestFailed(
 			sendNext();
 		}
 	};
-	_api->refreshFileReference(_origin, crl::guard(this, callback));
+	_owner->api().refreshFileReference(
+		_origin,
+		crl::guard(this, callback));
 }
 
 rpl::producer<LoadedPart> LoaderMtproto::parts() const {
 	return _parts.events();
 }
-
-LoaderMtproto::~LoaderMtproto() = default;
 
 } // namespace Streaming
 } // namespace Media

@@ -72,14 +72,17 @@ void SaveValidStartInformation(Information &to, Information &&from) {
 	if (from.video.state.duration != kTimeUnknown) {
 		SaveValidVideoInformation(to.video, std::move(from.video));
 	}
+	if (from.headerSize && !to.headerSize) {
+		to.headerSize = from.headerSize;
+	}
 }
 
 } // namespace
 
 Player::Player(
 	not_null<Data::Session*> owner,
-	std::unique_ptr<Loader> loader)
-: _file(std::make_unique<File>(owner, std::move(loader)))
+	std::shared_ptr<Reader> reader)
+: _file(std::make_unique<File>(owner, std::move(reader)))
 , _remoteLoader(_file->isRemoteLoader())
 , _renderFrameTimer([=] { checkNextFrameRender(); }) {
 }
@@ -171,7 +174,7 @@ void Player::trackSendReceivedTill(
 	Expects(state.duration != kTimeUnknown);
 	Expects(state.receivedTill != kTimeUnknown);
 
-	if (!_remoteLoader) {
+	if (!_remoteLoader || _fullInCacheSinceStart.value_or(false)) {
 		return;
 	}
 	const auto receivedTill = std::max(
@@ -209,12 +212,13 @@ void Player::videoPlayedTill(crl::time position) {
 	trackPlayedTill(*_video, _information.video.state, position);
 }
 
-bool Player::fileReady(Stream &&video, Stream &&audio) {
+bool Player::fileReady(int headerSize, Stream &&video, Stream &&audio) {
 	_waitingForData = false;
 
 	const auto weak = base::make_weak(&_sessionGuard);
 	const auto ready = [=](const Information &data) {
 		crl::on_main(weak, [=, data = data]() mutable {
+			data.headerSize = headerSize;
 			streamReady(std::move(data));
 		});
 	};
@@ -295,6 +299,15 @@ void Player::fileError(Error error) {
 
 	crl::on_main(&_sessionGuard, [=] {
 		fail(error);
+	});
+}
+
+void Player::fileFullInCache(bool fullInCache) {
+	crl::on_main(&_sessionGuard, [=] {
+		if (!_fullInCacheSinceStart.has_value()) {
+			_fullInCacheSinceStart = fullInCache;
+		}
+		_fullInCache.fire_copy(fullInCache);
 	});
 }
 
@@ -464,7 +477,7 @@ void Player::play(const PlaybackOptions &options) {
 
 	const auto previous = getCurrentReceivedTill(computeTotalDuration());
 
-	stop();
+	stop(true);
 	_lastFailure = std::nullopt;
 
 	savePreviousReceivedTill(options, previous);
@@ -540,6 +553,10 @@ void Player::resume() {
 
 	_pausedByUser = false;
 	updatePausedState();
+}
+
+void Player::stop() {
+	stop(false);
 }
 
 void Player::updatePausedState() {
@@ -680,8 +697,8 @@ void Player::checkVideoStep() {
 	}
 }
 
-void Player::stop() {
-	_file->stop();
+void Player::stop(bool stillActive) {
+	_file->stop(stillActive);
 	_sessionLifetime = rpl::lifetime();
 	_stage = Stage::Uninitialized;
 	_audio = nullptr;
@@ -698,7 +715,9 @@ void Player::stop() {
 	_durationByPackets = 0;
 	_durationByLastAudioPacket = 0;
 	_durationByLastVideoPacket = 0;
+	const auto header = _information.headerSize;
 	_information = Information();
+	_information.headerSize = header;
 }
 
 std::optional<Error> Player::failed() const {
@@ -724,6 +743,10 @@ bool Player::finished() const {
 	return (_stage == Stage::Started)
 		&& (!_audio || _audioFinished)
 		&& (!_video || _videoFinished);
+}
+
+float64 Player::speed() const {
+	return _options.speed;
 }
 
 void Player::setSpeed(float64 speed) {
@@ -755,6 +778,10 @@ bool Player::ready() const {
 
 rpl::producer<Update, Error> Player::updates() const {
 	return _updates.events();
+}
+
+rpl::producer<bool> Player::fullInCache() const {
+	return _fullInCache.events();
 }
 
 QSize Player::videoSize() const {
@@ -793,10 +820,12 @@ Media::Player::TrackState Player::prepareLegacyState() const {
 	} else if (_options.loop && result.length > 0) {
 		result.position %= result.length;
 	}
-	result.receivedTill = _remoteLoader
+	result.receivedTill = (_remoteLoader
+		&& !_fullInCacheSinceStart.value_or(false))
 		? getCurrentReceivedTill(result.length)
 		: 0;
 	result.frequency = kMsFrequency;
+	result.fileHeaderSize = _information.headerSize;
 
 	if (result.length == kTimeUnknown) {
 		const auto document = _options.audioId.audio();

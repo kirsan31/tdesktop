@@ -20,6 +20,7 @@ namespace {
 constexpr auto kDocumentBaseCacheTag = 0x0000000000010000ULL;
 constexpr auto kDocumentBaseCacheMask = 0x000000000000FF00ULL;
 constexpr auto kSerializeTypeShift = quint8(0x08);
+const auto kInMediaCacheLocation = QString("*media_cache*");
 
 MTPInputPeer GenerateInputPeer(
 		uint64 id,
@@ -496,6 +497,57 @@ bool operator==(const StorageFileLocation &a, const StorageFileLocation &b) {
 	Unexpected("Type in StorageFileLocation::operator==.");
 }
 
+bool operator<(const StorageFileLocation &a, const StorageFileLocation &b) {
+	const auto valid = a.valid();
+	if (valid != b.valid()) {
+		return !valid;
+	} else if (!valid) {
+		return false;
+	}
+	const auto type = a._type;
+	if (type != b._type) {
+		return (type < b._type);
+	}
+
+	using Type = StorageFileLocation::Type;
+	switch (type) {
+	case Type::Legacy:
+		return std::tie(a._localId, a._volumeId, a._dcId)
+			< std::tie(b._localId, b._volumeId, b._dcId);
+
+	case Type::Encrypted:
+	case Type::Secure:
+		return std::tie(a._id, a._dcId) < std::tie(b._id, b._dcId);
+
+	case Type::Photo:
+	case Type::Document:
+		return std::tie(a._id, a._dcId, a._sizeLetter)
+			< std::tie(b._id, b._dcId, b._sizeLetter);
+
+	case Type::Takeout:
+		return false;
+
+	case Type::PeerPhoto:
+		return std::tie(
+			a._id,
+			a._sizeLetter,
+			a._localId,
+			a._volumeId,
+			a._dcId)
+			< std::tie(
+				b._id,
+				b._sizeLetter,
+				b._localId,
+				b._volumeId,
+				b._dcId);
+
+	case Type::StickerSetThumb:
+		return std::tie(a._id, a._localId, a._volumeId, a._dcId)
+			< std::tie(b._id, b._localId, b._volumeId, b._dcId);
+	};
+	Unexpected("Type in StorageFileLocation::operator==.");
+}
+
 InMemoryKey inMemoryKey(const StorageFileLocation &location) {
 	const auto key = location.cacheKey();
 	return { key.high, key.low };
@@ -571,7 +623,7 @@ ReadAccessEnabler::~ReadAccessEnabler() {
 }
 
 FileLocation::FileLocation(const QString &name) : fname(name) {
-	if (fname.isEmpty()) {
+	if (fname.isEmpty() || fname == kInMediaCacheLocation) {
 		size = 0;
 	} else {
 		setBookmark(psPathBookmark(name));
@@ -595,8 +647,14 @@ FileLocation::FileLocation(const QString &name) : fname(name) {
 	}
 }
 
+FileLocation FileLocation::InMediaCacheLocation() {
+	return FileLocation(kInMediaCacheLocation);
+}
+
 bool FileLocation::check() const {
-	if (fname.isEmpty()) return false;
+	if (fname.isEmpty() || fname == kInMediaCacheLocation) {
+		return false;
+	}
 
 	ReadAccessEnabler enabler(_bookmark);
 	if (enabler.failed()) {
@@ -630,6 +688,10 @@ const QString &FileLocation::name() const {
 
 QByteArray FileLocation::bookmark() const {
 	return _bookmark ? _bookmark->bookmark() : QByteArray();
+}
+
+bool FileLocation::inMediaCache() const {
+	return (fname == kInMediaCacheLocation);
 }
 
 void FileLocation::setBookmark(const QByteArray &bm) {

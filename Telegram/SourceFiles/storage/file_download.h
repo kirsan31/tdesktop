@@ -12,6 +12,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/binary_guard.h"
 #include "data/data_file_origin.h"
 
+class ApiWrap;
+
 namespace Storage {
 namespace Cache {
 struct Key;
@@ -26,7 +28,21 @@ constexpr auto kMaxWallPaperDimension = 4096; // 4096x4096 is max area.
 
 class Downloader final {
 public:
-	Downloader();
+	struct Queue {
+		Queue(int queriesLimit) : queriesLimit(queriesLimit) {
+		}
+		int queriesCount = 0;
+		int queriesLimit = 0;
+		FileLoader *start = nullptr;
+		FileLoader *end = nullptr;
+	};
+
+	explicit Downloader(not_null<ApiWrap*> api);
+	~Downloader();
+
+	ApiWrap &api() const {
+		return *_api;
+	}
 
 	int currentPriority() const {
 		return _priority;
@@ -40,12 +56,15 @@ public:
 	void requestedAmountIncrement(MTP::DcId dcId, int index, int amount);
 	int chooseDcIndexForRequest(MTP::DcId dcId) const;
 
-	~Downloader();
+	not_null<Queue*> queueForDc(MTP::DcId dcId);
+	not_null<Queue*> queueForWeb();
 
 private:
 	void killDownloadSessionsStart(MTP::DcId dcId);
 	void killDownloadSessionsStop(MTP::DcId dcId);
 	void killDownloadSessions();
+
+	not_null<ApiWrap*> _api;
 
 	base::Observable<void> _taskFinishedObservable;
 	int _priority = 1;
@@ -55,6 +74,9 @@ private:
 
 	base::flat_map<MTP::DcId, crl::time> _killDownloadSessionTimes;
 	base::Timer _killDownloadSessionsTimer;
+
+	std::map<MTP::DcId, Queue> _queuesForDc;
+	Queue _queueForWeb;
 
 };
 
@@ -72,7 +94,6 @@ struct StorageImageSaved {
 class mtpFileLoader;
 class webFileLoader;
 
-struct FileLoaderQueue;
 class FileLoader : public QObject {
 	Q_OBJECT
 
@@ -106,24 +127,20 @@ public:
 	}
 	virtual Data::FileOrigin fileOrigin() const;
 	float64 currentProgress() const;
-	virtual int32 currentOffset(bool includeSkipped = false) const = 0;
-	int32 fullSize() const;
+	virtual int currentOffset() const;
+	int fullSize() const;
 
 	bool setFileName(const QString &filename); // set filename for loaders to cache
 	void permitLoadFromCloud();
 
-	void pause();
-	void start(bool loadFirst = false, bool prior = true);
+	void start();
 	void cancel();
 
 	bool loading() const {
 		return _inQueue;
 	}
-	bool paused() const {
-		return _paused;
-	}
 	bool started() const {
-		return _inQueue || _paused;
+		return _inQueue;
 	}
 	bool loadingLocal() const {
 		return (_localStatus == LocalStatus::Loading);
@@ -146,6 +163,8 @@ signals:
 	void failed(FileLoader *loader, bool started);
 
 protected:
+	using Queue = Storage::Downloader::Queue;
+
 	enum class LocalStatus {
 		NotTried,
 		NotFound,
@@ -157,24 +176,28 @@ protected:
 
 	bool tryLoadLocal();
 	void loadLocal(const Storage::Cache::Key &key);
-	virtual std::optional<Storage::Cache::Key> cacheKey() const = 0;
+	virtual Storage::Cache::Key cacheKey() const = 0;
+	virtual std::optional<MediaKey> fileLocationKey() const = 0;
 	virtual void cancelRequests() = 0;
 
-	void startLoading(bool loadFirst, bool prior);
+	void startLoading();
 	void removeFromQueue();
 	void cancel(bool failed);
 
 	void notifyAboutProgress();
-	static void LoadNextFromQueue(not_null<FileLoaderQueue*> queue);
+	static void LoadNextFromQueue(not_null<Queue*> queue);
 	virtual bool loadPart() = 0;
+
+	bool writeResultPart(int offset, bytes::const_span buffer);
+	bool finalizeResult();
+	[[nodiscard]] QByteArray readLoadedPartBack(int offset, int size);
 
 	not_null<Storage::Downloader*> _downloader;
 	FileLoader *_prev = nullptr;
 	FileLoader *_next = nullptr;
 	int _priority = 0;
-	FileLoaderQueue *_queue = nullptr;
+	Queue *_queue = nullptr;
 
-	bool _paused = false;
 	bool _autoLoading = false;
 	uint8 _cacheTag = 0;
 	bool _inQueue = false;
@@ -191,8 +214,9 @@ protected:
 
 	QByteArray _data;
 
-	int32 _size;
-	LocationType _locationType;
+	int _size = 0;
+	int _skippedBytes = 0;
+	LocationType _locationType = LocationType();
 
 	base::binary_guard _localLoading;
 	mutable QByteArray _imageFormat;
@@ -227,7 +251,6 @@ public:
 		bool autoLoading,
 		uint8 cacheTag);
 
-	int32 currentOffset(bool includeSkipped = false) const override;
 	Data::FileOrigin fileOrigin() const override;
 
 	uint64 objId() const override;
@@ -254,11 +277,11 @@ private:
 		int limit = 0;
 		QByteArray hash;
 	};
-	std::optional<Storage::Cache::Key> cacheKey() const override;
+	Storage::Cache::Key cacheKey() const override;
+	std::optional<MediaKey> fileLocationKey() const override;
 	void cancelRequests() override;
 
 	MTP::DcId dcId() const;
-	int partSize() const;
 	RequestData prepareRequest(int offset) const;
 	void makeRequest(int offset);
 
@@ -270,8 +293,8 @@ private:
 	void requestMoreCdnFileHashes();
 	void getCdnFileHashesDone(const MTPVector<MTPFileHash> &result, mtpRequestId requestId);
 
-	bool feedPart(int offset, bytes::const_span buffer);
 	void partLoaded(int offset, bytes::const_span buffer);
+	bool feedPart(int offset, bytes::const_span buffer);
 
 	bool partFailed(const RPCError &error, mtpRequestId requestId);
 	bool normalPartFailed(QByteArray fileReference, const RPCError &error, mtpRequestId requestId);
@@ -294,7 +317,6 @@ private:
 	std::map<mtpRequestId, RequestData> _sentRequests;
 
 	bool _lastComplete = false;
-	int32 _skippedBytes = 0;
 	int32 _nextRequestOffset = 0;
 
 	base::variant<
@@ -325,11 +347,11 @@ public:
 		bool autoLoading,
 		uint8 cacheTag);
 
-	int32 currentOffset(bool includeSkipped = false) const override;
+	int currentOffset() const override;
 
-	void onProgress(qint64 already, qint64 size);
-	void onFinished(const QByteArray &data);
-	void onError();
+	void loadProgress(qint64 already, qint64 size);
+	void loadFinished(const QByteArray &data);
+	void loadError();
 
 	void stop() override {
 		cancelRequests();
@@ -339,16 +361,17 @@ public:
 
 protected:
 	void cancelRequests() override;
-	std::optional<Storage::Cache::Key> cacheKey() const override;
+	Storage::Cache::Key cacheKey() const override;
+	std::optional<MediaKey> fileLocationKey() const override;
 	bool loadPart() override;
 
 	QString _url;
 
-	bool _requestSent;
-	int32 _already;
+	bool _requestSent = false;
+	int32 _already = 0;
 
 	friend class WebLoadManager;
-	webFileLoaderPrivate *_private;
+	webFileLoaderPrivate *_private = nullptr;
 
 };
 
@@ -414,9 +437,6 @@ public slots:
 
 };
 
-static FileLoader * const CancelledFileLoader = SharedMemoryLocation<FileLoader, 0>();
-static mtpFileLoader * const CancelledMtpFileLoader = static_cast<mtpFileLoader*>(CancelledFileLoader);
-static webFileLoader * const CancelledWebFileLoader = static_cast<webFileLoader*>(CancelledFileLoader);
 static WebLoadManager * const FinishedWebLoadManager = SharedMemoryLocation<WebLoadManager, 0>();
 
 void stopWebLoadManager();

@@ -231,7 +231,9 @@ bool CodeWidget::codeSubmitFail(const RPCError &error) {
 	stopCheck();
 	_sentRequest = 0;
 	auto &err = error.type();
-	if (err == qstr("PHONE_NUMBER_INVALID") || err == qstr("PHONE_CODE_EXPIRED")) { // show error
+	if (err == qstr("PHONE_NUMBER_INVALID")
+		|| err == qstr("PHONE_CODE_EXPIRED")
+		|| err == qstr("PHONE_NUMBER_BANNED")) { // show error
 		goBack();
 		return true;
 	} else if (err == qstr("PHONE_CODE_EMPTY") || err == qstr("PHONE_CODE_INVALID")) {
@@ -348,6 +350,8 @@ void CodeWidget::onNoTelegramCode() {
 }
 
 void CodeWidget::noTelegramCodeDone(const MTPauth_SentCode &result) {
+	_noTelegramCodeRequestId = 0;
+
 	if (result.type() != mtpc_auth_sentCode) {
 		showCodeError(&Lang::Hard::ServerError);
 		return;
@@ -369,11 +373,15 @@ void CodeWidget::noTelegramCodeDone(const MTPauth_SentCode &result) {
 
 bool CodeWidget::noTelegramCodeFail(const RPCError &error) {
 	if (MTP::isFloodError(error)) {
+		_noTelegramCodeRequestId = 0;
 		showCodeError(langFactory(lng_flood_error));
 		return true;
 	}
-	if (MTP::isDefaultHandledError(error)) return false;
+	if (MTP::isDefaultHandledError(error)) {
+		return false;
+	}
 
+	_noTelegramCodeRequestId = 0;
 	if (Logs::DebugEnabled()) { // internal server error
 		auto text = error.type() + ": " + error.description();
 		showCodeError([text] { return text; });

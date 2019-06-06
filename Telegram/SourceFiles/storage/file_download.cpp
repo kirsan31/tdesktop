@@ -28,10 +28,24 @@ namespace {
 // How much time without download causes additional session kill.
 constexpr auto kKillSessionTimeout = crl::time(5000);
 
+// Max 16 file parts downloaded at the same time, 128 KB each.
+constexpr auto kMaxFileQueries = 16;
+
+// Max 8 http[s] files downloaded at the same time.
+constexpr auto kMaxWebFileQueries = 8;
+
+// Different part sizes are not supported for now :(
+// Because we start downloading with some part size
+// and then we get a cdn-redirect where we support only
+// fixed part size download for hash checking.
+constexpr auto kPartSize = 128 * 1024;
+
 } // namespace
 
-Downloader::Downloader()
-: _killDownloadSessionsTimer([=] { killDownloadSessions(); }) {
+Downloader::Downloader(not_null<ApiWrap*> api)
+: _api(api)
+, _killDownloadSessionsTimer([=] { killDownloadSessions(); })
+, _queueForWeb(kMaxWebFileQueries) {
 }
 
 void Downloader::clearPriorities() {
@@ -41,14 +55,16 @@ void Downloader::clearPriorities() {
 void Downloader::requestedAmountIncrement(MTP::DcId dcId, int index, int amount) {
 	Expects(index >= 0 && index < MTP::kDownloadSessionsCount);
 
+	using namespace rpl::mappers;
+
 	auto it = _requestedBytesAmount.find(dcId);
 	if (it == _requestedBytesAmount.cend()) {
 		it = _requestedBytesAmount.emplace(dcId, RequestedInDc { { 0 } }).first;
 	}
 	it->second[index] += amount;
-	if (it->second[index]) {
+	if (amount > 0) {
 		killDownloadSessionsStop(dcId);
-	} else {
+	} else if (ranges::find_if(it->second, _1 > 0) == end(it->second)) {
 		killDownloadSessionsStart(dcId);
 	}
 }
@@ -106,6 +122,18 @@ int Downloader::chooseDcIndexForRequest(MTP::DcId dcId) const {
 	return result;
 }
 
+not_null<Downloader::Queue*> Downloader::queueForDc(MTP::DcId dcId) {
+	const auto i = _queuesForDc.find(dcId);
+	const auto result = (i != end(_queuesForDc))
+		? i
+		: _queuesForDc.emplace(dcId, Queue(kMaxFileQueries)).first;
+	return &result->second;
+}
+
+not_null<Downloader::Queue*> Downloader::queueForWeb() {
+	return &_queueForWeb;
+}
+
 Downloader::~Downloader() {
 	killDownloadSessions();
 }
@@ -113,30 +141,6 @@ Downloader::~Downloader() {
 } // namespace Storage
 
 namespace {
-
-constexpr auto kDownloadPhotoPartSize = 64 * 1024; // 64kb for photo
-constexpr auto kDownloadDocumentPartSize = 128 * 1024; // 128kb for document
-constexpr auto kMaxFileQueries = 16; // max 16 file parts downloaded at the same time
-constexpr auto kMaxWebFileQueries = 8; // max 8 http[s] files downloaded at the same time
-constexpr auto kDownloadCdnPartSize = 128 * 1024; // 128kb for cdn requests
-
-} // namespace
-
-struct FileLoaderQueue {
-	FileLoaderQueue(int queriesLimit) : queriesLimit(queriesLimit) {
-	}
-	int queriesCount = 0;
-	int queriesLimit = 0;
-	FileLoader *start = nullptr;
-	FileLoader *end = nullptr;
-};
-
-namespace {
-
-using LoaderQueues = QMap<int32, FileLoaderQueue>;
-LoaderQueues queues;
-
-FileLoaderQueue _webQueue(kMaxWebFileQueries);
 
 QThread *_webLoadThread = nullptr;
 WebLoadManager *_webLoadManager = nullptr;
@@ -176,6 +180,7 @@ void FileLoader::finishWithBytes(const QByteArray &data) {
 			cancel(true);
 			return;
 		}
+		_file.seek(0);
 		if (_file.write(_data) != qint64(_data.size())) {
 			cancel(true);
 			return;
@@ -229,7 +234,7 @@ float64 FileLoader::currentProgress() const {
 	return snap(float64(currentOffset()) / fullSize(), 0., 1.);
 }
 
-int32 FileLoader::fullSize() const {
+int FileLoader::fullSize() const {
 	return _size;
 }
 
@@ -252,7 +257,7 @@ void FileLoader::notifyAboutProgress() {
 	LoadNextFromQueue(queue);
 }
 
-void FileLoader::LoadNextFromQueue(not_null<FileLoaderQueue*> queue) {
+void FileLoader::LoadNextFromQueue(not_null<Queue*> queue) {
 	if (queue->queriesCount >= queue->queriesLimit) {
 		return;
 	}
@@ -281,13 +286,8 @@ void FileLoader::removeFromQueue() {
 	if (_queue->start == this) {
 		_queue->start = _next;
 	}
-	_next = _prev = 0;
+	_next = _prev = nullptr;
 	_inQueue = false;
-}
-
-void FileLoader::pause() {
-	removeFromQueue();
-	_paused = true;
 }
 
 FileLoader::~FileLoader() {
@@ -301,7 +301,7 @@ void FileLoader::localLoaded(
 	_localLoading = nullptr;
 	if (result.data.isEmpty()) {
 		_localStatus = LocalStatus::NotFound;
-		start(true);
+		start();
 		return;
 	}
 	if (!imageData.isNull()) {
@@ -312,10 +312,7 @@ void FileLoader::localLoaded(
 	notifyAboutProgress();
 }
 
-void FileLoader::start(bool loadFirst, bool prior) {
-	if (_paused) {
-		_paused = false;
-	}
+void FileLoader::start() {
 	if (_finished || tryLoadLocal()) {
 		return;
 	} else if (_fromCloud == LoadFromLocalOnly) {
@@ -331,60 +328,37 @@ void FileLoader::start(bool loadFirst, bool prior) {
 	}
 
 	auto currentPriority = _downloader->currentPriority();
-	FileLoader *before = 0, *after = 0;
-	if (prior) {
-		if (_inQueue && _priority == currentPriority) {
-			if (loadFirst) {
-				if (!_prev) return startLoading(loadFirst, prior);
-				before = _queue->start;
-			} else {
-				if (!_next || _next->_priority < currentPriority) return startLoading(loadFirst, prior);
-				after = _next;
-				while (after->_next && after->_next->_priority == currentPriority) {
-					after = after->_next;
-				}
-			}
-		} else {
-			_priority = currentPriority;
-			if (loadFirst) {
-				if (_inQueue && !_prev) return startLoading(loadFirst, prior);
-				before = _queue->start;
-			} else {
-				if (_inQueue) {
-					if (_next && _next->_priority == currentPriority) {
-						after = _next;
-					} else if (_prev && _prev->_priority < currentPriority) {
-						before = _prev;
-						while (before->_prev && before->_prev->_priority < currentPriority) {
-							before = before->_prev;
-						}
-					} else {
-						return startLoading(loadFirst, prior);
-					}
-				} else {
-					if (_queue->start && _queue->start->_priority == currentPriority) {
-						after = _queue->start;
-					} else {
-						before = _queue->start;
-					}
-				}
-				if (after) {
-					while (after->_next && after->_next->_priority == currentPriority) {
-						after = after->_next;
-					}
-				}
-			}
+	FileLoader *before = nullptr, *after = nullptr;
+	if (_inQueue && _priority == currentPriority) {
+		if (!_next || _next->_priority < currentPriority) return startLoading();
+		after = _next;
+		while (after->_next && after->_next->_priority == currentPriority) {
+			after = after->_next;
 		}
 	} else {
-		if (loadFirst) {
-			if (_inQueue && (!_prev || _prev->_priority == currentPriority)) return startLoading(loadFirst, prior);
-			before = _prev;
-			while (before->_prev && before->_prev->_priority != currentPriority) {
-				before = before->_prev;
+		_priority = currentPriority;
+		if (_inQueue) {
+			if (_next && _next->_priority == currentPriority) {
+				after = _next;
+			} else if (_prev && _prev->_priority < currentPriority) {
+				before = _prev;
+				while (before->_prev && before->_prev->_priority < currentPriority) {
+					before = before->_prev;
+				}
+			} else {
+				return startLoading();
 			}
 		} else {
-			if (_inQueue && !_next) return startLoading(loadFirst, prior);
-			after = _queue->end;
+			if (_queue->start && _queue->start->_priority == currentPriority) {
+				after = _queue->start;
+			} else {
+				before = _queue->start;
+			}
+		}
+		if (after) {
+			while (after->_next && after->_next->_priority == currentPriority) {
+				after = after->_next;
+			}
 		}
 	}
 
@@ -416,7 +390,7 @@ void FileLoader::start(bool loadFirst, bool prior) {
 	} else {
 		LOG(("Queue Error: _start && !before && !after"));
 	}
-	return startLoading(loadFirst, prior);
+	return startLoading();
 }
 
 void FileLoader::loadLocal(const Storage::Cache::Key &key) {
@@ -470,8 +444,8 @@ bool FileLoader::tryLoadLocal() {
 	}
 
 	const auto weak = make_weak(this);
-	if (const auto key = cacheKey()) {
-		loadLocal(*key);
+	if (_toCache == LoadToCacheAsWell) {
+		loadLocal(cacheKey());
 		emit progress(this);
 	}
 	if (!weak) {
@@ -491,7 +465,7 @@ void FileLoader::cancel() {
 }
 
 void FileLoader::cancel(bool fail) {
-	bool started = currentOffset(true) > 0;
+	const auto started = (currentOffset() > 0);
 	cancelRequests();
 	_cancelled = true;
 	_finished = true;
@@ -517,11 +491,120 @@ void FileLoader::cancel(bool fail) {
 	LoadNextFromQueue(queue);
 }
 
-void FileLoader::startLoading(bool loadFirst, bool prior) {
-	if ((_queue->queriesCount >= _queue->queriesLimit && (!loadFirst || !prior)) || _finished) {
+void FileLoader::startLoading() {
+	if ((_queue->queriesCount >= _queue->queriesLimit) || _finished) {
 		return;
 	}
 	loadPart();
+}
+
+int FileLoader::currentOffset() const {
+	return (_fileIsOpen ? _file.size() : _data.size()) - _skippedBytes;
+}
+
+bool FileLoader::writeResultPart(int offset, bytes::const_span buffer) {
+	Expects(!_finished);
+
+	if (buffer.empty()) {
+		return true;
+	}
+	if (_fileIsOpen) {
+		auto fsize = _file.size();
+		if (offset < fsize) {
+			_skippedBytes -= buffer.size();
+		} else if (offset > fsize) {
+			_skippedBytes += offset - fsize;
+		}
+		_file.seek(offset);
+		if (_file.write(reinterpret_cast<const char*>(buffer.data()), buffer.size()) != qint64(buffer.size())) {
+			cancel(true);
+			return false;
+		}
+		return true;
+	}
+	_data.reserve(offset + buffer.size());
+	if (offset > _data.size()) {
+		_skippedBytes += offset - _data.size();
+		_data.resize(offset);
+	}
+	if (offset == _data.size()) {
+		_data.append(reinterpret_cast<const char*>(buffer.data()), buffer.size());
+	} else {
+		_skippedBytes -= buffer.size();
+		if (int64(offset + buffer.size()) > _data.size()) {
+			_data.resize(offset + buffer.size());
+		}
+		const auto dst = bytes::make_detached_span(_data).subspan(
+			offset,
+			buffer.size());
+		bytes::copy(dst, buffer);
+	}
+	return true;
+}
+
+QByteArray FileLoader::readLoadedPartBack(int offset, int size) {
+	Expects(offset >= 0 && size > 0);
+
+	if (_fileIsOpen) {
+		if (_file.openMode() == QIODevice::WriteOnly) {
+			_file.close();
+			_fileIsOpen = _file.open(QIODevice::ReadWrite);
+			if (!_fileIsOpen) {
+				cancel(true);
+				return QByteArray();
+			}
+		}
+		if (!_file.seek(offset)) {
+			return QByteArray();
+		}
+		auto result = _file.read(size);
+		return (result.size() == size) ? result : QByteArray();
+	}
+	return (offset + size <= _data.size())
+		? _data.mid(offset, size)
+		: QByteArray();
+}
+
+bool FileLoader::finalizeResult() {
+	Expects(!_finished);
+
+	if (!_filename.isEmpty() && (_toCache == LoadToCacheAsWell)) {
+		if (!_fileIsOpen) {
+			_fileIsOpen = _file.open(QIODevice::WriteOnly);
+		}
+		_file.seek(0);
+		if (!_fileIsOpen || _file.write(_data) != qint64(_data.size())) {
+			cancel(true);
+			return false;
+		}
+	}
+
+	_finished = true;
+	if (_fileIsOpen) {
+		_file.close();
+		_fileIsOpen = false;
+		Platform::File::PostprocessDownloaded(
+			QFileInfo(_file).absoluteFilePath());
+	}
+	removeFromQueue();
+
+	if (_localStatus == LocalStatus::NotFound) {
+		if (const auto key = fileLocationKey()) {
+			if (!_filename.isEmpty()) {
+				Local::writeFileLocation(*key, FileLocation(_filename));
+			}
+		}
+		if ((_toCache == LoadToCacheAsWell)
+			&& (_data.size() <= Storage::kMaxFileInMemory)) {
+			Auth().data().cache().put(
+				cacheKey(),
+				Storage::Cache::Database::TaggedValue(
+					base::duplicate(_data),
+					_cacheTag));
+		}
+	}
+	_downloader->taskFinished().notify();
+	return true;
 }
 
 mtpFileLoader::mtpFileLoader(
@@ -544,12 +627,7 @@ mtpFileLoader::mtpFileLoader(
 	cacheTag)
 , _location(location)
 , _origin(origin) {
-	auto shiftedDcId = MTP::downloadDcId(dcId(), 0);
-	auto i = queues.find(shiftedDcId);
-	if (i == queues.cend()) {
-		i = queues.insert(shiftedDcId, FileLoaderQueue(kMaxFileQueries));
-	}
-	_queue = &i.value();
+	_queue = _downloader->queueForDc(dcId());
 }
 
 mtpFileLoader::mtpFileLoader(
@@ -567,12 +645,7 @@ mtpFileLoader::mtpFileLoader(
 	autoLoading,
 	cacheTag)
 , _location(location) {
-	auto shiftedDcId = MTP::downloadDcId(dcId(), 0);
-	auto i = queues.find(shiftedDcId);
-	if (i == queues.cend()) {
-		i = queues.insert(shiftedDcId, FileLoaderQueue(kMaxFileQueries));
-	}
-	_queue = &i.value();
+	_queue = _downloader->queueForDc(dcId());
 }
 
 mtpFileLoader::mtpFileLoader(
@@ -590,17 +663,7 @@ mtpFileLoader::mtpFileLoader(
 	autoLoading,
 	cacheTag)
 , _location(location) {
-	auto shiftedDcId = MTP::downloadDcId(dcId(), 0);
-	auto i = queues.find(shiftedDcId);
-	if (i == queues.cend()) {
-		i = queues.insert(shiftedDcId, FileLoaderQueue(kMaxFileQueries));
-	}
-	_queue = &i.value();
-}
-
-int32 mtpFileLoader::currentOffset(bool includeSkipped) const {
-	return (_fileIsOpen ? _file.size() : _data.size())
-		- (includeSkipped ? 0 : _skippedBytes);
+	_queue = _downloader->queueForDc(dcId());
 }
 
 Data::FileOrigin mtpFileLoader::fileOrigin() const {
@@ -640,7 +703,7 @@ bool mtpFileLoader::loadPart() {
 	}
 
 	makeRequest(_nextRequestOffset);
-	_nextRequestOffset += partSize();
+	_nextRequestOffset += Storage::kPartSize;
 	return true;
 }
 
@@ -649,22 +712,6 @@ MTP::DcId mtpFileLoader::dcId() const {
 		return storage->dcId();
 	}
 	return Global::WebFileDcId();
-}
-
-int mtpFileLoader::partSize() const {
-	return kDownloadCdnPartSize;
-
-	// Different part sizes are not supported for now :(
-	// Because we start downloading with some part size
-	// and then we get a cdn-redirect where we support only
-	// fixed part size download for hash checking.
-	//
-	//if (_cdnDcId) {
-	//	return kDownloadCdnPartSize;
-	//} else if (_locationType == UnknownFileLocation) {
-	//	return kDownloadPhotoPartSize;
-	//}
-	//return kDownloadDocumentPartSize;
 }
 
 mtpFileLoader::RequestData mtpFileLoader::prepareRequest(int offset) const {
@@ -679,7 +726,7 @@ mtpFileLoader::RequestData mtpFileLoader::prepareRequest(int offset) const {
 
 mtpRequestId mtpFileLoader::sendRequest(const RequestData &requestData) {
 	const auto offset = requestData.offset;
-	const auto limit = partSize();
+	const auto limit = Storage::kPartSize;
 	const auto shiftedDcId = MTP::downloadDcId(
 		requestData.dcId,
 		requestData.dcIndex);
@@ -789,90 +836,107 @@ void mtpFileLoader::normalPartLoaded(
 void mtpFileLoader::webPartLoaded(
 		const MTPupload_WebFile &result,
 		mtpRequestId requestId) {
-	Expects(result.type() == mtpc_upload_webFile);
-
-	auto offset = finishSentRequestGetOffset(requestId);
-	auto &webFile = result.c_upload_webFile();
-	if (!_size) {
-		_size = webFile.vsize.v;
-	} else if (webFile.vsize.v != _size) {
-		LOG(("MTP Error: Bad size provided by bot for webDocument: %1, real: %2").arg(_size).arg(webFile.vsize.v));
-		return cancel(true);
-	}
-	auto buffer = bytes::make_span(webFile.vbytes.v);
-	return partLoaded(offset, buffer);
+	result.match([&](const MTPDupload_webFile &data) {
+		const auto offset = finishSentRequestGetOffset(requestId);
+		if (!_size) {
+			_size = data.vsize.v;
+		} else if (data.vsize.v != _size) {
+			LOG(("MTP Error: "
+				"Bad size provided by bot for webDocument: %1, real: %2"
+				).arg(_size
+				).arg(data.vsize.v));
+			cancel(true);
+			return;
+		}
+		partLoaded(offset, bytes::make_span(data.vbytes.v));
+	});
 }
 
 void mtpFileLoader::cdnPartLoaded(const MTPupload_CdnFile &result, mtpRequestId requestId) {
 	Expects(!_finished);
 
-	auto offset = finishSentRequestGetOffset(requestId);
-	if (result.type() == mtpc_upload_cdnFileReuploadNeeded) {
+	const auto offset = finishSentRequestGetOffset(requestId);
+	result.match([&](const MTPDupload_cdnFileReuploadNeeded &data) {
 		auto requestData = RequestData();
 		requestData.dcId = dcId();
 		requestData.dcIndex = 0;
 		requestData.offset = offset;
-		auto shiftedDcId = MTP::downloadDcId(requestData.dcId, requestData.dcIndex);
-		auto requestId = MTP::send(MTPupload_ReuploadCdnFile(MTP_bytes(_cdnToken), result.c_upload_cdnFileReuploadNeeded().vrequest_token), rpcDone(&mtpFileLoader::reuploadDone), rpcFail(&mtpFileLoader::cdnPartFailed), shiftedDcId);
+		const auto shiftedDcId = MTP::downloadDcId(
+			requestData.dcId,
+			requestData.dcIndex);
+		const auto requestId = MTP::send(
+			MTPupload_ReuploadCdnFile(
+				MTP_bytes(_cdnToken),
+				data.vrequest_token),
+			rpcDone(&mtpFileLoader::reuploadDone),
+			rpcFail(&mtpFileLoader::cdnPartFailed),
+			shiftedDcId);
 		placeSentRequest(requestId, requestData);
-		return;
-	}
-	Expects(result.type() == mtpc_upload_cdnFile);
+	}, [&](const MTPDupload_cdnFile &data) {
+		auto key = bytes::make_span(_cdnEncryptionKey);
+		auto iv = bytes::make_span(_cdnEncryptionIV);
+		Expects(key.size() == MTP::CTRState::KeySize);
+		Expects(iv.size() == MTP::CTRState::IvecSize);
 
-	auto key = bytes::make_span(_cdnEncryptionKey);
-	auto iv = bytes::make_span(_cdnEncryptionIV);
-	Expects(key.size() == MTP::CTRState::KeySize);
-	Expects(iv.size() == MTP::CTRState::IvecSize);
+		auto state = MTP::CTRState();
+		auto ivec = bytes::make_span(state.ivec);
+		std::copy(iv.begin(), iv.end(), ivec.begin());
 
-	auto state = MTP::CTRState();
-	auto ivec = bytes::make_span(state.ivec);
-	std::copy(iv.begin(), iv.end(), ivec.begin());
+		auto counterOffset = static_cast<uint32>(offset) >> 4;
+		state.ivec[15] = static_cast<uchar>(counterOffset & 0xFF);
+		state.ivec[14] = static_cast<uchar>((counterOffset >> 8) & 0xFF);
+		state.ivec[13] = static_cast<uchar>((counterOffset >> 16) & 0xFF);
+		state.ivec[12] = static_cast<uchar>((counterOffset >> 24) & 0xFF);
 
-	auto counterOffset = static_cast<uint32>(offset) >> 4;
-	state.ivec[15] = static_cast<uchar>(counterOffset & 0xFF);
-	state.ivec[14] = static_cast<uchar>((counterOffset >> 8) & 0xFF);
-	state.ivec[13] = static_cast<uchar>((counterOffset >> 16) & 0xFF);
-	state.ivec[12] = static_cast<uchar>((counterOffset >> 24) & 0xFF);
+		auto decryptInPlace = data.vbytes.v;
+		auto buffer = bytes::make_detached_span(decryptInPlace);
+		MTP::aesCtrEncrypt(buffer, key.data(), &state);
 
-	auto decryptInPlace = result.c_upload_cdnFile().vbytes.v;
-	auto buffer = bytes::make_detached_span(decryptInPlace);
-	MTP::aesCtrEncrypt(buffer, key.data(), &state);
+		switch (checkCdnFileHash(offset, buffer)) {
+		case CheckCdnHashResult::NoHash: {
+			_cdnUncheckedParts.emplace(offset, decryptInPlace);
+			requestMoreCdnFileHashes();
+		} return;
 
-	switch (checkCdnFileHash(offset, buffer)) {
-	case CheckCdnHashResult::NoHash: {
-		_cdnUncheckedParts.emplace(offset, decryptInPlace);
-		requestMoreCdnFileHashes();
-	} return;
+		case CheckCdnHashResult::Invalid: {
+			LOG(("API Error: Wrong cdnFileHash for offset %1.").arg(offset));
+			cancel(true);
+		} return;
 
-	case CheckCdnHashResult::Invalid: {
-		LOG(("API Error: Wrong cdnFileHash for offset %1.").arg(offset));
-		cancel(true);
-	} return;
-
-	case CheckCdnHashResult::Good: return partLoaded(offset, buffer);
-	}
-	Unexpected("Result of checkCdnFileHash()");
+		case CheckCdnHashResult::Good: {
+			partLoaded(offset, buffer);
+		} return;
+		}
+		Unexpected("Result of checkCdnFileHash()");
+	});
 }
 
-mtpFileLoader::CheckCdnHashResult mtpFileLoader::checkCdnFileHash(int offset, bytes::const_span buffer) {
-	auto cdnFileHashIt = _cdnFileHashes.find(offset);
+mtpFileLoader::CheckCdnHashResult mtpFileLoader::checkCdnFileHash(
+		int offset,
+		bytes::const_span buffer) {
+	const auto cdnFileHashIt = _cdnFileHashes.find(offset);
 	if (cdnFileHashIt == _cdnFileHashes.cend()) {
 		return CheckCdnHashResult::NoHash;
 	}
-	auto realHash = openssl::Sha256(buffer);
-	if (bytes::compare(realHash, bytes::make_span(cdnFileHashIt->second.hash))) {
+	const auto realHash = openssl::Sha256(buffer);
+	const auto receivedHash = bytes::make_span(cdnFileHashIt->second.hash);
+	if (bytes::compare(realHash, receivedHash)) {
 		return CheckCdnHashResult::Invalid;
 	}
 	return CheckCdnHashResult::Good;
 }
 
-void mtpFileLoader::reuploadDone(const MTPVector<MTPFileHash> &result, mtpRequestId requestId) {
+void mtpFileLoader::reuploadDone(
+		const MTPVector<MTPFileHash> &result,
+		mtpRequestId requestId) {
 	auto offset = finishSentRequestGetOffset(requestId);
 	addCdnHashes(result.v);
 	makeRequest(offset);
 }
 
-void mtpFileLoader::getCdnFileHashesDone(const MTPVector<MTPFileHash> &result, mtpRequestId requestId) {
+void mtpFileLoader::getCdnFileHashesDone(
+		const MTPVector<MTPFileHash> &result,
+		mtpRequestId requestId) {
 	Expects(!_finished);
 	Expects(_cdnHashesRequestId == requestId);
 
@@ -922,14 +986,22 @@ void mtpFileLoader::getCdnFileHashesDone(const MTPVector<MTPFileHash> &result, m
 		}
 		return;
 	}
-	LOG(("API Error: Could not find cdnFileHash for offset %1 after getCdnFileHashes request.").arg(offset));
+	LOG(("API Error: "
+		"Could not find cdnFileHash for offset %1 "
+		"after getCdnFileHashes request."
+		).arg(offset));
 	cancel(true);
 }
 
-void mtpFileLoader::placeSentRequest(mtpRequestId requestId, const RequestData &requestData) {
+void mtpFileLoader::placeSentRequest(
+		mtpRequestId requestId,
+		const RequestData &requestData) {
 	Expects(!_finished);
 
-	_downloader->requestedAmountIncrement(requestData.dcId, requestData.dcIndex, partSize());
+	_downloader->requestedAmountIncrement(
+		requestData.dcId,
+		requestData.dcIndex,
+		Storage::kPartSize);
 	++_queue->queriesCount;
 	_sentRequests.emplace(requestId, requestData);
 }
@@ -939,7 +1011,10 @@ int mtpFileLoader::finishSentRequestGetOffset(mtpRequestId requestId) {
 	Assert(it != _sentRequests.cend());
 
 	auto requestData = it->second;
-	_downloader->requestedAmountIncrement(requestData.dcId, requestData.dcIndex, -partSize());
+	_downloader->requestedAmountIncrement(
+		requestData.dcId,
+		requestData.dcIndex,
+		-Storage::kPartSize);
 
 	--_queue->queriesCount;
 	_sentRequests.erase(it);
@@ -948,88 +1023,17 @@ int mtpFileLoader::finishSentRequestGetOffset(mtpRequestId requestId) {
 }
 
 bool mtpFileLoader::feedPart(int offset, bytes::const_span buffer) {
-	Expects(!_finished);
-
-	if (!buffer.empty()) {
-		if (_fileIsOpen) {
-			auto fsize = _file.size();
-			if (offset < fsize) {
-				_skippedBytes -= buffer.size();
-			} else if (offset > fsize) {
-				_skippedBytes += offset - fsize;
-			}
-			_file.seek(offset);
-			if (_file.write(reinterpret_cast<const char*>(buffer.data()), buffer.size()) != qint64(buffer.size())) {
-				cancel(true);
-				return false;
-			}
-		} else {
-			_data.reserve(offset + buffer.size());
-			if (offset > _data.size()) {
-				_skippedBytes += offset - _data.size();
-				_data.resize(offset);
-			}
-			if (offset == _data.size()) {
-				_data.append(reinterpret_cast<const char*>(buffer.data()), buffer.size());
-			} else {
-				_skippedBytes -= buffer.size();
-				if (int64(offset + buffer.size()) > _data.size()) {
-					_data.resize(offset + buffer.size());
-				}
-				const auto dst = bytes::make_detached_span(_data).subspan(
-					offset,
-					buffer.size());
-				bytes::copy(dst, buffer);
-			}
-		}
+	if (!writeResultPart(offset, buffer)) {
+		return false;
 	}
 	if (buffer.empty() || (buffer.size() % 1024)) { // bad next offset
 		_lastComplete = true;
 	}
-	if (_sentRequests.empty()
+	const auto finished = _sentRequests.empty()
 		&& _cdnUncheckedParts.empty()
-		&& (_lastComplete || (_size && _nextRequestOffset >= _size))) {
-		if (!_filename.isEmpty() && (_toCache == LoadToCacheAsWell)) {
-			if (!_fileIsOpen) {
-				_fileIsOpen = _file.open(QIODevice::WriteOnly);
-			}
-			if (!_fileIsOpen || _file.write(_data) != qint64(_data.size())) {
-				cancel(true);
-				return false;
-			}
-		}
-		_finished = true;
-		if (_fileIsOpen) {
-			_file.close();
-			_fileIsOpen = false;
-			Platform::File::PostprocessDownloaded(QFileInfo(_file).absoluteFilePath());
-		}
-		removeFromQueue();
-
-		if (_localStatus == LocalStatus::NotFound) {
-			if (_locationType != UnknownFileLocation
-				&& !_filename.isEmpty()) {
-				Local::writeFileLocation(
-					mediaKey(_locationType, dcId(), objId()),
-					FileLocation(_filename));
-			}
-			if (_location.is<WebFileLocation>()
-				|| _locationType == UnknownFileLocation
-				|| _toCache == LoadToCacheAsWell) {
-				if (const auto key = cacheKey()) {
-					if (_data.size() <= Storage::kMaxFileInMemory) {
-						Auth().data().cache().put(
-							*key,
-							Storage::Cache::Database::TaggedValue(
-								base::duplicate(_data),
-								_cacheTag));
-					}
-				}
-			}
-		}
-	}
-	if (_finished) {
-		_downloader->taskFinished().notify();
+		&& (_lastComplete || (_size && _nextRequestOffset >= _size));
+	if (finished && !finalizeResult()) {
+		return false;
 	}
 	return true;
 }
@@ -1116,12 +1120,12 @@ void mtpFileLoader::switchToCDN(
 }
 
 void mtpFileLoader::addCdnHashes(const QVector<MTPFileHash> &hashes) {
-	for_const (auto &hash, hashes) {
-		Assert(hash.type() == mtpc_fileHash);
-		auto &data = hash.c_fileHash();
-		_cdnFileHashes.emplace(
-			data.voffset.v,
-			CdnFileHash { data.vlimit.v, data.vhash.v });
+	for (const auto &hash : hashes) {
+		hash.match([&](const MTPDfileHash &data) {
+			_cdnFileHashes.emplace(
+				data.voffset.v,
+				CdnFileHash{ data.vlimit.v, data.vhash.v });
+		});
 	}
 }
 
@@ -1166,16 +1170,21 @@ void mtpFileLoader::changeCDNParams(
 	makeRequest(offset);
 }
 
-std::optional<Storage::Cache::Key> mtpFileLoader::cacheKey() const {
+Storage::Cache::Key mtpFileLoader::cacheKey() const {
 	return _location.match([&](const WebFileLocation &location) {
-		return std::make_optional(Data::WebDocumentCacheKey(location));
+		return Data::WebDocumentCacheKey(location);
 	}, [&](const GeoPointLocation &location) {
-		return std::make_optional(Data::GeoPointCacheKey(location));
+		return Data::GeoPointCacheKey(location);
 	}, [&](const StorageFileLocation &location) {
-		return (_toCache == LoadToCacheAsWell)
-			? std::make_optional(location.cacheKey())
-			: std::nullopt;
+		return location.cacheKey();
 	});
+}
+
+std::optional<MediaKey> mtpFileLoader::fileLocationKey() const {
+	if (_locationType != UnknownFileLocation) {
+		return mediaKey(_locationType, dcId(), objId());
+	}
+	return std::nullopt;
 }
 
 mtpFileLoader::~mtpFileLoader() {
@@ -1196,14 +1205,16 @@ webFileLoader::webFileLoader(
 	fromCloud,
 	autoLoading,
 	cacheTag)
-, _url(url)
-, _requestSent(false)
-, _already(0) {
-	_queue = &_webQueue;
+, _url(url) {
+	_queue = _downloader->queueForWeb();
 }
 
 bool webFileLoader::loadPart() {
-	if (_finished || _requestSent || _webLoadManager == FinishedWebLoadManager) return false;
+	if (_finished
+		|| _requestSent
+		|| _webLoadManager == FinishedWebLoadManager) {
+		return false;
+	}
 	if (!_webLoadManager) {
 		_webLoadMainManager = new WebLoadMainManager();
 
@@ -1218,64 +1229,34 @@ bool webFileLoader::loadPart() {
 	return false;
 }
 
-int32 webFileLoader::currentOffset(bool includeSkipped) const {
+int webFileLoader::currentOffset() const {
 	return _already;
 }
 
-void webFileLoader::onProgress(qint64 already, qint64 size) {
+void webFileLoader::loadProgress(qint64 already, qint64 size) {
 	_size = size;
 	_already = already;
-
-	emit progress(this);
-}
-
-void webFileLoader::onFinished(const QByteArray &data) {
-	if (_fileIsOpen) {
-		if (_file.write(data.constData(), data.size()) != qint64(data.size())) {
-			return cancel(true);
-		}
-	} else {
-		_data = data;
-	}
-	if (!_filename.isEmpty() && (_toCache == LoadToCacheAsWell)) {
-		if (!_fileIsOpen) _fileIsOpen = _file.open(QIODevice::WriteOnly);
-		if (!_fileIsOpen) {
-			return cancel(true);
-		}
-		if (_file.write(_data) != qint64(_data.size())) {
-			return cancel(true);
-		}
-	}
-	_finished = true;
-	if (_fileIsOpen) {
-		_file.close();
-		_fileIsOpen = false;
-		Platform::File::PostprocessDownloaded(QFileInfo(_file).absoluteFilePath());
-	}
-	removeFromQueue();
-
-	if (_localStatus == LocalStatus::NotFound) {
-		if (const auto key = cacheKey()) {
-			if (_data.size() <= Storage::kMaxFileInMemory) {
-				Auth().data().cache().put(
-					*key,
-					Storage::Cache::Database::TaggedValue(
-						base::duplicate(_data),
-						_cacheTag));
-			}
-		}
-	}
-	_downloader->taskFinished().notify();
-
 	notifyAboutProgress();
 }
 
-void webFileLoader::onError() {
+void webFileLoader::loadFinished(const QByteArray &data) {
+	if (writeResultPart(0, bytes::make_span(data))) {
+		if (finalizeResult()) {
+			notifyAboutProgress();
+		}
+	}
+}
+
+void webFileLoader::loadError() {
 	cancel(true);
 }
 
-std::optional<Storage::Cache::Key> webFileLoader::cacheKey() const {
+Storage::Cache::Key webFileLoader::cacheKey() const {
 	return Data::UrlCacheKey(_url);
+}
+
+std::optional<MediaKey> webFileLoader::fileLocationKey() const {
+	return std::nullopt;
 }
 
 void webFileLoader::cancelRequests() {
@@ -1359,8 +1340,8 @@ void stopWebLoadManager() {
 		delete _webLoadManager;
 		delete _webLoadMainManager;
 		delete _webLoadThread;
-		_webLoadThread = 0;
-		_webLoadMainManager = 0;
+		_webLoadThread = nullptr;
+		_webLoadMainManager = nullptr;
 		_webLoadManager = FinishedWebLoadManager;
 	}
 }
@@ -1515,9 +1496,9 @@ void WebLoadManager::onMeta() {
 	const auto loader = j.value();
 
 	const auto pairs = reply->rawHeaderPairs();
-	for (auto i = pairs.begin(), e = pairs.end(); i != e; ++i) {
-		if (QString::fromUtf8(i->first).toLower() == "content-range") {
-			const auto m = QRegularExpression(qsl("/(\\d+)([^\\d]|$)")).match(QString::fromUtf8(i->second));
+	for (const auto &pair : pairs) {
+		if (QString::fromUtf8(pair.first).toLower() == "content-range") {
+			const auto m = QRegularExpression(qsl("/(\\d+)([^\\d]|$)")).match(QString::fromUtf8(pair.second));
 			if (m.hasMatch()) {
 				loader->setProgress(qMax(qint64(loader->data().size()), loader->already()), m.captured(1).toLongLong());
 				if (!handleReplyResult(loader, WebReplyProcessProgress)) {
@@ -1598,19 +1579,19 @@ void WebLoadManager::finish() {
 
 void WebLoadManager::clear() {
 	QMutexLocker lock(&_loaderPointersMutex);
-	for (LoaderPointers::iterator i = _loaderPointers.begin(), e = _loaderPointers.end(); i != e; ++i) {
+	for (auto i = _loaderPointers.begin(), e = _loaderPointers.end(); i != e; ++i) {
 		if (i.value()) {
-			i.key()->_private = 0;
+			i.key()->_private = nullptr;
 		}
 	}
 	_loaderPointers.clear();
 
-	for_const (webFileLoaderPrivate *loader, _loaders) {
+	for (const auto loader : _loaders) {
 		delete loader;
 	}
 	_loaders.clear();
 
-	for (Replies::iterator i = _replies.begin(), e = _replies.end(); i != e; ++i) {
+	for (auto i = _replies.begin(), e = _replies.end(); i != e; ++i) {
 		delete i.key();
 	}
 	_replies.clear();
@@ -1622,18 +1603,18 @@ WebLoadManager::~WebLoadManager() {
 
 void WebLoadMainManager::progress(webFileLoader *loader, qint64 already, qint64 size) {
 	if (webLoadManager() && webLoadManager()->carries(loader)) {
-		loader->onProgress(already, size);
+		loader->loadProgress(already, size);
 	}
 }
 
 void WebLoadMainManager::finished(webFileLoader *loader, QByteArray data) {
 	if (webLoadManager() && webLoadManager()->carries(loader)) {
-		loader->onFinished(data);
+		loader->loadFinished(data);
 	}
 }
 
 void WebLoadMainManager::error(webFileLoader *loader) {
 	if (webLoadManager() && webLoadManager()->carries(loader)) {
-		loader->onError();
+		loader->loadError();
 	}
 }

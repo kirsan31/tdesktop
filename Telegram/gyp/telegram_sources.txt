@@ -564,6 +564,8 @@
 <(src_loc)/platform/linux/linux_libs.h
 <(src_loc)/platform/linux/file_utilities_linux.cpp
 <(src_loc)/platform/linux/file_utilities_linux.h
+<(src_loc)/platform/linux/info_linux.cpp
+<(src_loc)/platform/linux/info_linux.h
 <(src_loc)/platform/linux/launcher_linux.cpp
 <(src_loc)/platform/linux/launcher_linux.h
 <(src_loc)/platform/linux/main_window_linux.cpp
@@ -574,6 +576,8 @@
 <(src_loc)/platform/linux/specific_linux.h
 <(src_loc)/platform/mac/file_utilities_mac.mm
 <(src_loc)/platform/mac/file_utilities_mac.h
+<(src_loc)/platform/mac/info_mac.mm
+<(src_loc)/platform/mac/info_mac.h
 <(src_loc)/platform/mac/launcher_mac.mm
 <(src_loc)/platform/mac/launcher_mac.h
 <(src_loc)/platform/mac/mac_iconv_helper.c
@@ -595,6 +599,8 @@
 <(src_loc)/platform/win/audio_win.h
 <(src_loc)/platform/win/file_utilities_win.cpp
 <(src_loc)/platform/win/file_utilities_win.h
+<(src_loc)/platform/win/info_win.cpp
+<(src_loc)/platform/win/info_win.h
 <(src_loc)/platform/win/launcher_win.cpp
 <(src_loc)/platform/win/launcher_win.h
 <(src_loc)/platform/win/main_window_win.cpp
@@ -615,6 +621,7 @@
 <(src_loc)/platform/win/wrapper_wrl_implements_h.h
 <(src_loc)/platform/platform_audio.h
 <(src_loc)/platform/platform_file_utilities.h
+<(src_loc)/platform/platform_info.h
 <(src_loc)/platform/platform_launcher.h
 <(src_loc)/platform/platform_main_window.h
 <(src_loc)/platform/platform_notifications_manager.h
@@ -676,6 +683,8 @@
 <(src_loc)/storage/storage_sparse_ids_list.h
 <(src_loc)/storage/storage_user_photos.cpp
 <(src_loc)/storage/storage_user_photos.h
+<(src_loc)/storage/streamed_file_downloader.cpp
+<(src_loc)/storage/streamed_file_downloader.h
 <(src_loc)/support/support_autocomplete.cpp
 <(src_loc)/support/support_autocomplete.h
 <(src_loc)/support/support_common.cpp
@@ -824,6 +833,8 @@
 <(src_loc)/window/window_lock_widgets.h
 <(src_loc)/window/window_main_menu.cpp
 <(src_loc)/window/window_main_menu.h
+<(src_loc)/window/window_outdated_bar.cpp
+<(src_loc)/window/window_outdated_bar.h
 <(src_loc)/window/window_peer_menu.cpp
 <(src_loc)/window/window_peer_menu.h
 <(src_loc)/window/window_slide_animation.cpp
