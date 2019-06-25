@@ -45,11 +45,12 @@ public:
 	Key key() override;
 	MTPInputPrivacyKey apiKey() override;
 
-	QString title() override;
-	LangKey optionsTitleKey() override;
+	rpl::producer<QString> title() override;
+	rpl::producer<QString> optionsTitleKey() override;
 	rpl::producer<QString> warning() override;
-	LangKey exceptionButtonTextKey(Exception exception) override;
-	QString exceptionBoxTitle(Exception exception) override;
+	rpl::producer<QString> exceptionButtonTextKey(
+		Exception exception) override;
+	rpl::producer<QString> exceptionBoxTitle(Exception exception) override;
 	rpl::producer<QString> exceptionsDescription() override;
 
 };
@@ -62,14 +63,17 @@ public:
 	Key key() override;
 	MTPInputPrivacyKey apiKey() override;
 
-	QString title() override;
-	LangKey optionsTitleKey() override;
+	rpl::producer<QString> title() override;
+	rpl::producer<QString> optionsTitleKey() override;
 	rpl::producer<QString> warning() override;
-	LangKey exceptionButtonTextKey(Exception exception) override;
-	QString exceptionBoxTitle(Exception exception) override;
+	rpl::producer<QString> exceptionButtonTextKey(
+		Exception exception) override;
+	rpl::producer<QString> exceptionBoxTitle(Exception exception) override;
 	rpl::producer<QString> exceptionsDescription() override;
 
-	void confirmSave(bool someAreDisallowed, FnMut<void()> saveCallback) override;
+	void confirmSave(
+		bool someAreDisallowed,
+		FnMut<void()> saveCallback) override;
 
 };
 
@@ -81,11 +85,12 @@ public:
 	Key key() override;
 	MTPInputPrivacyKey apiKey() override;
 
-	QString title() override;
+	rpl::producer<QString> title() override;
 	bool hasOption(Option option) override;
-	LangKey optionsTitleKey() override;
-	LangKey exceptionButtonTextKey(Exception exception) override;
-	QString exceptionBoxTitle(Exception exception) override;
+	rpl::producer<QString> optionsTitleKey() override;
+	rpl::producer<QString> exceptionButtonTextKey(
+		Exception exception) override;
+	rpl::producer<QString> exceptionBoxTitle(Exception exception) override;
 	rpl::producer<QString> exceptionsDescription() override;
 
 };
@@ -98,10 +103,11 @@ public:
 	Key key() override;
 	MTPInputPrivacyKey apiKey() override;
 
-	QString title() override;
-	LangKey optionsTitleKey() override;
-	LangKey exceptionButtonTextKey(Exception exception) override;
-	QString exceptionBoxTitle(Exception exception) override;
+	rpl::producer<QString> title() override;
+	rpl::producer<QString> optionsTitleKey() override;
+	rpl::producer<QString> exceptionButtonTextKey(
+		Exception exception) override;
+	rpl::producer<QString> exceptionBoxTitle(Exception exception) override;
 	rpl::producer<QString> exceptionsDescription() override;
 
 	object_ptr<Ui::RpWidget> setupBelowWidget(
@@ -117,12 +123,13 @@ public:
 	Key key() override;
 	MTPInputPrivacyKey apiKey() override;
 
-	QString title() override;
-	LangKey optionsTitleKey() override;
-	LangKey optionLabelKey(EditPrivacyBox::Option option) override;
+	rpl::producer<QString> title() override;
+	rpl::producer<QString> optionsTitleKey() override;
+	QString optionLabel(EditPrivacyBox::Option option) override;
 	rpl::producer<QString> warning() override;
-	LangKey exceptionButtonTextKey(Exception exception) override;
-	QString exceptionBoxTitle(Exception exception) override;
+	rpl::producer<QString> exceptionButtonTextKey(
+		Exception exception) override;
+	rpl::producer<QString> exceptionBoxTitle(Exception exception) override;
 	rpl::producer<QString> exceptionsDescription() override;
 
 };
@@ -137,11 +144,12 @@ public:
 	Key key() override;
 	MTPInputPrivacyKey apiKey() override;
 
-	QString title() override;
-	LangKey optionsTitleKey() override;
+	rpl::producer<QString> title() override;
+	rpl::producer<QString> optionsTitleKey() override;
 	rpl::producer<QString> warning() override;
-	LangKey exceptionButtonTextKey(Exception exception) override;
-	QString exceptionBoxTitle(Exception exception) override;
+	rpl::producer<QString> exceptionButtonTextKey(
+		Exception exception) override;
+	rpl::producer<QString> exceptionBoxTitle(Exception exception) override;
 	rpl::producer<QString> exceptionsDescription() override;
 
 	object_ptr<Ui::RpWidget> setupAboveWidget(
@@ -168,11 +176,12 @@ public:
 	Key key() override;
 	MTPInputPrivacyKey apiKey() override;
 
-	QString title() override;
+	rpl::producer<QString> title() override;
 	bool hasOption(Option option) override;
-	LangKey optionsTitleKey() override;
-	LangKey exceptionButtonTextKey(Exception exception) override;
-	QString exceptionBoxTitle(Exception exception) override;
+	rpl::producer<QString> optionsTitleKey() override;
+	rpl::producer<QString> exceptionButtonTextKey(
+		Exception exception) override;
+	rpl::producer<QString> exceptionBoxTitle(Exception exception) override;
 	rpl::producer<QString> exceptionsDescription() override;
 
 };

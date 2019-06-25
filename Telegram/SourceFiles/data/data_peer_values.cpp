@@ -44,13 +44,13 @@ int OnlinePhraseChangeInSeconds(TimeId online, TimeId now) {
 
 std::optional<QString> OnlineTextSpecial(not_null<UserData*> user) {
 	if (user->isNotificationsUser()) {
-		return lang(lng_status_service_notifications);
+		return tr::lng_status_service_notifications(tr::now);
 	} else if (user->isSupport()) {
-		return lang(lng_status_support);
+		return tr::lng_status_support(tr::now);
 	} else if (user->isBot()) {
-		return lang(lng_status_bot);
+		return tr::lng_status_bot(tr::now);
 	} else if (user->isServiceUser()) {
-		return lang(lng_status_support);
+		return tr::lng_status_support(tr::now);
 	}
 	return std::nullopt;
 }
@@ -59,16 +59,16 @@ std::optional<QString> OnlineTextCommon(TimeId online, TimeId now) {
 	if (online <= 0) {
 		switch (online) {
 		case 0:
-		case -1: return lang(lng_status_offline);
-		case -2: return lang(lng_status_recently);
-		case -3: return lang(lng_status_last_week);
-		case -4: return lang(lng_status_last_month);
+		case -1: return tr::lng_status_offline(tr::now);
+		case -2: return tr::lng_status_recently(tr::now);
+		case -3: return tr::lng_status_last_week(tr::now);
+		case -4: return tr::lng_status_last_month(tr::now);
 		}
 		return (-online > now)
-			? lang(lng_status_online)
-			: lang(lng_status_recently);
+			? tr::lng_status_online(tr::now)
+			: tr::lng_status_recently(tr::now);
 	} else if (online > now) {
-		return lang(lng_status_online);
+		return tr::lng_status_online(tr::now);
 	}
 	return std::nullopt;
 }
@@ -297,25 +297,25 @@ QString OnlineText(TimeId online, TimeId now) {
 	}
 	const auto minutes = (now - online) / 60;
 	if (!minutes) {
-		return lang(lng_status_lastseen_now);
+		return tr::lng_status_lastseen_now(tr::now);
 	} else if (minutes < 60) {
-		return lng_status_lastseen_minutes(lt_count, minutes);
+		return tr::lng_status_lastseen_minutes(tr::now, lt_count, minutes);
 	}
 	const auto hours = (now - online) / 3600;
 	if (hours < 12) {
-		return lng_status_lastseen_hours(lt_count, hours);
+		return tr::lng_status_lastseen_hours(tr::now, lt_count, hours);
 	}
 	const auto onlineFull = ParseDateTime(online);
 	const auto nowFull = ParseDateTime(now);
 	if (onlineFull.date() == nowFull.date()) {
 		const auto onlineTime = onlineFull.time().toString(cTimeFormat());
-		return lng_status_lastseen_today(lt_time, onlineTime);
+		return tr::lng_status_lastseen_today(tr::now, lt_time, onlineTime);
 	} else if (onlineFull.date().addDays(1) == nowFull.date()) {
 		const auto onlineTime = onlineFull.time().toString(cTimeFormat());
-		return lng_status_lastseen_yesterday(lt_time, onlineTime);
+		return tr::lng_status_lastseen_yesterday(tr::now, lt_time, onlineTime);
 	}
 	const auto date = onlineFull.date().toString(qsl("dd.MM.yy"));
-	return lng_status_lastseen_date(lt_date, date);
+	return tr::lng_status_lastseen_date(tr::now, lt_date, date);
 }
 
 QString OnlineText(not_null<UserData*> user, TimeId now) {
@@ -335,14 +335,14 @@ QString OnlineTextFull(not_null<UserData*> user, TimeId now) {
 	const auto nowFull = ParseDateTime(now);
 	if (onlineFull.date() == nowFull.date()) {
 		const auto onlineTime = onlineFull.time().toString(cTimeFormat());
-		return lng_status_lastseen_today(lt_time, onlineTime);
+		return tr::lng_status_lastseen_today(tr::now, lt_time, onlineTime);
 	} else if (onlineFull.date().addDays(1) == nowFull.date()) {
 		const auto onlineTime = onlineFull.time().toString(cTimeFormat());
-		return lng_status_lastseen_yesterday(lt_time, onlineTime);
+		return tr::lng_status_lastseen_yesterday(tr::now, lt_time, onlineTime);
 	}
 	const auto date = onlineFull.date().toString(qsl("dd.MM.yy"));
 	const auto time = onlineFull.time().toString(cTimeFormat());
-	return lng_status_lastseen_date_time(lt_date, date, lt_time, time);
+	return tr::lng_status_lastseen_date_time(tr::now, lt_date, date, lt_time, time);
 }
 
 bool OnlineTextActive(TimeId online, TimeId now) {
@@ -364,6 +364,13 @@ bool OnlineTextActive(not_null<UserData*> user, TimeId now) {
 		return false;
 	}
 	return OnlineTextActive(user->onlineTill, now);
+}
+
+bool IsPeerAnOnlineUser(not_null<PeerData*> peer) {
+	if (const auto user = peer->asUser()) {
+		return OnlineTextActive(user, unixtime());
+	}
+	return false;
 }
 
 } // namespace Data

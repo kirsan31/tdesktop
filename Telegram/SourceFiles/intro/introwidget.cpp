@@ -21,6 +21,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/application.h"
 #include "boxes/confirm_box.h"
 #include "ui/text/text.h"
+#include "ui/text/text_utilities.h"
 #include "ui/widgets/buttons.h"
 #include "ui/widgets/labels.h"
 #include "ui/wrap/fade_wrap.h"
@@ -64,9 +65,9 @@ Widget::Widget(QWidget *parent) : RpWidget(parent)
 	this,
 	object_ptr<Ui::RoundButton>(
 		this,
-		langFactory(lng_menu_settings),
+		tr::lng_menu_settings(),
 		st::defaultBoxButton))
-, _next(this, Fn<QString()>(), st::introNextButton) {
+, _next(this, nullptr, st::introNextButton) {
 	auto country = Platform::SystemCountry();
 	if (country.isEmpty()) {
 		country = str_const_toString(kDefaultCountry);
@@ -148,17 +149,19 @@ void Widget::createLanguageLink() {
 	const auto defaultId = Lang::DefaultLanguageId();
 	const auto suggested = Lang::CurrentCloudManager().suggestedLanguage();
 	if (currentId != defaultId) {
-		createLink(Lang::GetOriginalValue(lng_switch_to_this), defaultId);
+		createLink(
+			Lang::GetOriginalValue(tr::lng_switch_to_this.base),
+			defaultId);
 	} else if (!suggested.isEmpty() && suggested != currentId) {
 		request(MTPlangpack_GetStrings(
 			MTP_string(Lang::CloudLangPackName()),
 			MTP_string(suggested),
 			MTP_vector<MTPstring>(1, MTP_string("lng_switch_to_this"))
 		)).done([=](const MTPVector<MTPLangPackString> &result) {
-			auto strings = Lang::Instance::ParseStrings(result);
-			auto it = strings.find(lng_switch_to_this);
-			if (it != strings.end()) {
-				createLink(it->second, suggested);
+			const auto strings = Lang::Instance::ParseStrings(result);
+			const auto i = strings.find(tr::lng_switch_to_this.base);
+			if (i != strings.end()) {
+				createLink(i->second, suggested);
 			}
 		}).send();
 	}
@@ -173,7 +176,7 @@ void Widget::onCheckUpdateStatus() {
 			this,
 			object_ptr<Ui::RoundButton>(
 				this,
-				langFactory(lng_menu_update),
+				tr::lng_menu_update(),
 				st::defaultBoxButton));
 		if (!_a_show.animating()) {
 			_update->setVisible(true);
@@ -240,7 +243,7 @@ void Widget::historyMove(Direction direction) {
 	if (_update) {
 		_update->toggle(!stepHasCover, anim::type::normal);
 	}
-	_next->setText([this] { return getStep()->nextButtonText(); });
+	_next->setText(getStep()->nextButtonText());
 	if (_resetAccount) _resetAccount->show(anim::type::normal);
 	if (_terms) _terms->show(anim::type::normal);
 	if (_changeLanguage) {
@@ -306,7 +309,10 @@ void Widget::appendStep(Step *step) {
 
 void Widget::showResetButton() {
 	if (!_resetAccount) {
-		auto entity = object_ptr<Ui::RoundButton>(this, langFactory(lng_signin_reset_account), st::introResetButton);
+		auto entity = object_ptr<Ui::RoundButton>(
+			this,
+			tr::lng_signin_reset_account(),
+			st::introResetButton);
 		_resetAccount.create(this, std::move(entity));
 		_resetAccount->hide(anim::type::instant);
 		_resetAccount->entity()->setClickedCallback([this] { resetAccount(); });
@@ -324,17 +330,20 @@ void Widget::showTerms() {
 	} else if (!_terms) {
 		auto entity = object_ptr<Ui::FlatLabel>(
 			this,
-			lng_terms_signup(
+			tr::lng_terms_signup(
 				lt_link,
-				textcmdLink(1, lang(lng_terms_signup_link))),
-			Ui::FlatLabel::InitType::Rich,
+				tr::lng_terms_signup_link() | Ui::Text::ToLink(),
+				Ui::Text::WithEntities),
 			st::introTermsLabel);
 		_terms.create(this, std::move(entity));
-		_terms->entity()->setLink(
-			1,
-			std::make_shared<LambdaClickHandler>([=] {
+		_terms->entity()->setClickHandlerFilter([=](
+				const ClickHandlerPtr &handler,
+				Qt::MouseButton button) {
+			if (button == Qt::LeftButton) {
 				showTerms(nullptr);
-			}));
+			}
+			return false;
+		});
 		updateControlsGeometry();
 		_terms->hide(anim::type::instant);
 	}
@@ -352,7 +361,7 @@ void Widget::acceptTerms(Fn<void()> callback) {
 void Widget::resetAccount() {
 	if (_resetRequest) return;
 
-	Ui::show(Box<ConfirmBox>(lang(lng_signin_sure_reset), lang(lng_signin_reset), st::attentionBoxButton, crl::guard(this, [this] {
+	Ui::show(Box<ConfirmBox>(tr::lng_signin_sure_reset(tr::now), tr::lng_signin_reset(tr::now), st::attentionBoxButton, crl::guard(this, [this] {
 		if (_resetRequest) return;
 		_resetRequest = request(MTPaccount_DeleteAccount(MTP_string("Forgot password"))).done([this](const MTPBool &result) {
 			_resetRequest = 0;
@@ -364,25 +373,55 @@ void Widget::resetAccount() {
 
 			auto type = error.type();
 			if (type.startsWith(qstr("2FA_CONFIRM_WAIT_"))) {
-				auto seconds = type.mid(qstr("2FA_CONFIRM_WAIT_").size()).toInt();
-				auto days = (seconds + 59) / 86400;
-				auto hours = ((seconds + 59) % 86400) / 3600;
-				auto minutes = ((seconds + 59) % 3600) / 60;
-				auto when = lng_signin_reset_minutes(lt_count, minutes);
+				const auto seconds = type.mid(qstr("2FA_CONFIRM_WAIT_").size()).toInt();
+				const auto days = (seconds + 59) / 86400;
+				const auto hours = ((seconds + 59) % 86400) / 3600;
+				const auto minutes = ((seconds + 59) % 3600) / 60;
+				auto when = tr::lng_signin_reset_minutes(
+					tr::now,
+					lt_count,
+					minutes);
 				if (days > 0) {
-					auto daysCount = lng_signin_reset_days(lt_count, days);
-					auto hoursCount = lng_signin_reset_hours(lt_count, hours);
-					when = lng_signin_reset_in_days(lt_days_count, daysCount, lt_hours_count, hoursCount, lt_minutes_count, when);
+					const auto daysCount = tr::lng_signin_reset_days(
+						tr::now,
+						lt_count,
+						days);
+					const auto hoursCount = tr::lng_signin_reset_hours(
+						tr::now,
+						lt_count,
+						hours);
+					when = tr::lng_signin_reset_in_days(
+						tr::now,
+						lt_days_count,
+						daysCount,
+						lt_hours_count,
+						hoursCount,
+						lt_minutes_count,
+						when);
 				} else if (hours > 0) {
-					auto hoursCount = lng_signin_reset_hours(lt_count, hours);
-					when = lng_signin_reset_in_hours(lt_hours_count, hoursCount, lt_minutes_count, when);
+					const auto hoursCount = tr::lng_signin_reset_hours(
+						tr::now,
+						lt_count,
+						hours);
+					when = tr::lng_signin_reset_in_hours(
+						tr::now,
+						lt_hours_count,
+						hoursCount,
+						lt_minutes_count,
+						when);
 				}
-				Ui::show(Box<InformBox>(lng_signin_reset_wait(lt_phone_number, App::formatPhone(getData()->phone), lt_when, when)));
+				Ui::show(Box<InformBox>(tr::lng_signin_reset_wait(
+					tr::now,
+					lt_phone_number,
+					App::formatPhone(getData()->phone),
+					lt_when,
+					when)));
 			} else if (type == qstr("2FA_RECENT_CONFIRM")) {
-				Ui::show(Box<InformBox>(lang(lng_signin_reset_cancelled)));
+				Ui::show(Box<InformBox>(
+					tr::lng_signin_reset_cancelled(tr::now)));
 			} else {
 				Ui::hideLayer();
-				getStep()->showError(&Lang::Hard::ServerError);
+				getStep()->showError(rpl::single(Lang::Hard::ServerError()));
 			}
 		}).send();
 	})));
@@ -412,11 +451,11 @@ void Widget::showTerms(Fn<void()> callback) {
 	const auto box = Ui::show(callback
 		? Box<Window::TermsBox>(
 			getData()->termsLock,
-			langFactory(lng_terms_agree),
-			langFactory(lng_terms_decline))
+			tr::lng_terms_agree(),
+			tr::lng_terms_decline())
 		: Box<Window::TermsBox>(
 			getData()->termsLock.text,
-			langFactory(lng_box_ok),
+			tr::lng_box_ok(),
 			nullptr));
 
 	box->setCloseByEscape(false);
@@ -435,9 +474,9 @@ void Widget::showTerms(Fn<void()> callback) {
 	box->cancelClicks(
 	) | rpl::start_with_next([=] {
 		const auto box = Ui::show(Box<Window::TermsBox>(
-			TextWithEntities{ lang(lng_terms_signup_sorry) },
-			langFactory(lng_intro_finish),
-			langFactory(lng_terms_decline)));
+			TextWithEntities{ tr::lng_terms_signup_sorry(tr::now) },
+			tr::lng_intro_finish(),
+			tr::lng_terms_decline()));
 		box->agreeClicks(
 		) | rpl::start_with_next([=] {
 			if (weak) {
@@ -456,7 +495,7 @@ void Widget::showTerms(Fn<void()> callback) {
 void Widget::showControls() {
 	getStep()->show();
 	_next->show();
-	_next->setText([this] { return getStep()->nextButtonText(); });
+	_next->setText(getStep()->nextButtonText());
 	_connecting->setForceHidden(false);
 	auto hasCover = getStep()->hasCover();
 	_settings->toggle(!hasCover, anim::type::instant);
@@ -602,8 +641,8 @@ Widget::~Widget() {
 	if (App::wnd()) App::wnd()->noIntro(this);
 }
 
-QString Widget::Step::nextButtonText() const {
-	return lang(lng_intro_next);
+rpl::producer<QString> Widget::Step::nextButtonText() const {
+	return tr::lng_intro_next();
 }
 
 void Widget::Step::finish(const MTPUser &user, QImage &&photo) {
@@ -670,31 +709,19 @@ void Widget::Step::updateLabelsPosition() {
 	}
 }
 
-void Widget::Step::setTitleText(Fn<QString()> richTitleTextFactory) {
-	_titleTextFactory = std::move(richTitleTextFactory);
-	refreshTitle();
-	updateLabelsPosition();
+void Widget::Step::setTitleText(rpl::producer<QString> titleText) {
+	_titleText = std::move(titleText);
 }
 
-void Widget::Step::refreshTitle() {
-	_title->setRichText(_titleTextFactory());
+void Widget::Step::setDescriptionText(
+		rpl::producer<QString> descriptionText) {
+	setDescriptionText(
+		std::move(descriptionText) | Ui::Text::ToWithEntities());
 }
 
-void Widget::Step::setDescriptionText(Fn<QString()> richDescriptionTextFactory) {
-	_descriptionTextFactory = std::move(richDescriptionTextFactory);
-	refreshDescription();
-	updateLabelsPosition();
-}
-
-void Widget::Step::refreshDescription() {
-	_description->entity()->setRichText(_descriptionTextFactory());
-}
-
-void Widget::Step::refreshLang() {
-	refreshTitle();
-	refreshDescription();
-	refreshError();
-	updateLabelsPosition();
+void Widget::Step::setDescriptionText(
+		rpl::producer<TextWithEntities> richDescriptionText) {
+	_descriptionText = std::move(richDescriptionText);
 }
 
 void Widget::Step::showFinished() {
@@ -875,14 +902,12 @@ void Widget::Step::setErrorBelowLink(bool below) {
 	}
 }
 
-void Widget::Step::showError(Fn<QString()> textFactory) {
-	_errorTextFactory = std::move(textFactory);
-	refreshError();
-	updateLabelsPosition();
+void Widget::Step::showError(rpl::producer<QString> text) {
+	_errorText = std::move(text);
 }
 
-void Widget::Step::refreshError() {
-	if (!_errorTextFactory) {
+void Widget::Step::refreshError(const QString &text) {
+	if (text.isEmpty()) {
 		if (_error) _error->hide(anim::type::normal);
 	} else {
 		if (!_error) {
@@ -895,13 +920,14 @@ void Widget::Step::refreshError() {
 						: st::introError));
 			_error->hide(anim::type::instant);
 		}
-		_error->entity()->setText(_errorTextFactory());
+		_error->entity()->setText(text);
 		updateLabelsPosition();
 		_error->show(anim::type::normal);
 	}
 }
 
-Widget::Step::Step(QWidget *parent, Data *data, bool hasCover) : TWidget(parent)
+Widget::Step::Step(QWidget *parent, Data *data, bool hasCover)
+: RpWidget(parent)
 , _data(data)
 , _hasCover(hasCover)
 , _title(this, _hasCover ? st::introCoverTitle : st::introTitle)
@@ -922,7 +948,23 @@ Widget::Step::Step(QWidget *parent, Data *data, bool hasCover) : TWidget(parent)
 			}
 		}
 	});
-	subscribe(Lang::Current().updated(), [this] { refreshLang(); });
+
+	_errorText.value(
+	) | rpl::start_with_next([=](const QString &text) {
+		refreshError(text);
+	}, lifetime());
+
+	_titleText.value(
+	) | rpl::start_with_next([=](const QString &text) {
+		_title->setText(text);
+		updateLabelsPosition();
+	}, lifetime());
+
+	_descriptionText.value(
+	) | rpl::start_with_next([=](const TextWithEntities &text) {
+		_description->entity()->setMarkedText(text);
+		updateLabelsPosition();
+	}, lifetime());
 }
 
 void Widget::Step::prepareShowAnimated(Step *after) {
@@ -1019,7 +1061,7 @@ bool Widget::Step::hasBack() const {
 void Widget::Step::activate() {
 	_title->show();
 	_description->show(anim::type::instant);
-	if (_errorTextFactory) {
+	if (!_errorText.current().isEmpty()) {
 		_error->show(anim::type::instant);
 	}
 }

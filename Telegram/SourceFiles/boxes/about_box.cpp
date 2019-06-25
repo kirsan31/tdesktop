@@ -13,40 +13,66 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "boxes/confirm_box.h"
 #include "ui/widgets/buttons.h"
 #include "ui/widgets/labels.h"
-#include "styles/style_boxes.h"
+#include "ui/text/text_utilities.h"
 #include "platform/platform_file_utilities.h"
 #include "platform/platform_info.h"
 #include "core/click_handler_types.h"
 #include "core/update_checker.h"
+#include "styles/style_boxes.h"
+
+namespace {
+
+/*
+rpl::producer<TextWithEntities> Text1() {
+	return tr::lng_about_text1(
+		lt_api_link,
+		tr::lng_about_text1_api(
+		) | Ui::Text::ToLink("https://core.telegram.org/api"),
+		Ui::Text::WithEntities);
+}
+*/
+
+rpl::producer<TextWithEntities> Text2() {
+	return tr::lng_about_text2(
+		lt_gpl_link,
+		rpl::single(Ui::Text::Link(
+			"GNU GPL",
+			"https://github.com/kirsan31/tdesktop/blob/master/LICENSE")),
+		lt_github_link,
+		rpl::single(Ui::Text::Link(
+			"GitHub",
+			"https://github.com/kirsan31/tdesktop")),
+		Ui::Text::WithEntities);
+}
+
+rpl::producer<TextWithEntities> Text3() {
+	return tr::lng_about_text3(
+		lt_faq_link,
+		tr::lng_about_text3_faq() | Ui::Text::ToLink(telegramFaqLink()),
+		Ui::Text::WithEntities);
+}
+
+} // namespace
 
 AboutBox::AboutBox(QWidget *parent)
-: _version(this, lng_about_version(lt_version, currentVersionText()), st::aboutVersionLink)
-//, _text1(this, lang(lng_about_text_1), Ui::FlatLabel::InitType::Rich, st::aboutLabel)
-, _text2(this, lang(lng_about_text_2).replace(qsl("https://github.com/telegramdesktop/tdesktop"),qsl("https://github.com/kirsan31/tdesktop")), Ui::FlatLabel::InitType::Rich, st::aboutLabel)
-, _text3(this, st::aboutLabel) {
+: _version(this, tr::lng_about_version(tr::now, lt_version, currentVersionText()), st::aboutVersionLink)
+//, _text1(this, Text1(), st::aboutLabel)
+, _text2(this, Text2(), st::aboutLabel)
+, _text3(this, Text3(), st::aboutLabel) {
 }
 
 void AboutBox::prepare() {
-	setTitle([] { return qsl("Telegram Desktop mod"); });
+	setTitle(rpl::single(qsl("Telegram Desktop mod")));
 
-	addButton(langFactory(lng_close), [this] { closeBox(); });
+	addButton(tr::lng_close(), [this] { closeBox(); });
 
-	const auto linkFilter = [](const ClickHandlerPtr &link, auto button) {
-		if (const auto url = dynamic_cast<UrlClickHandler*>(link.get())) {
-			url->UrlClickHandler::onClick({ button });
-			return false;
-		}
-		return true;
-	};
-
-	_text3->setRichText(lng_about_text_3(lt_faq_open, qsl("[a href=\"%1\"]").arg(telegramFaqLink()), lt_faq_close, qsl("[/a]")));
-//	_text1->setClickHandlerFilter(linkFilter);
-	_text2->setClickHandlerFilter(linkFilter);
-	_text3->setClickHandlerFilter(linkFilter);
+//	_text1->setLinksTrusted();
+	_text2->setLinksTrusted();
+	_text3->setLinksTrusted();
 
 	_version->setClickedCallback([this] { showVersionHistory(); });
 
-	setDimensions(st::aboutWidth, st::aboutTextTop + /*_text1->height()*/ + st::aboutSkip + _text2->height() + st::aboutSkip + _text3->height());
+	setDimensions(st::aboutWidth, st::aboutTextTop /*+ _text1->height()*/ + st::aboutSkip + _text2->height() + st::aboutSkip + _text3->height());
 }
 
 void AboutBox::resizeEvent(QResizeEvent *e) {
@@ -54,7 +80,7 @@ void AboutBox::resizeEvent(QResizeEvent *e) {
 
 	_version->moveToLeft(st::boxPadding.left(), st::aboutVersionTop);
 //	_text1->moveToLeft(st::boxPadding.left(), st::aboutTextTop);
-	_text2->moveToLeft(st::boxPadding.left(), st::aboutTextTop);
+	_text2->moveToLeft(st::boxPadding.left(), /*_text1->y() + _text1->height() +*/ st::aboutTextTop);
 	_text3->moveToLeft(st::boxPadding.left(), _text2->y() + _text2->height() + st::aboutSkip);
 }
 

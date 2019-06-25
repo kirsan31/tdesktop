@@ -1,5 +1,7 @@
 <(src_loc)/boxes/peers/add_participants_box.cpp
 <(src_loc)/boxes/peers/add_participants_box.h
+<(src_loc)/boxes/peers/edit_contact_box.cpp
+<(src_loc)/boxes/peers/edit_contact_box.h
 <(src_loc)/boxes/peers/edit_linked_chat_box.cpp
 <(src_loc)/boxes/peers/edit_linked_chat_box.h
 <(src_loc)/boxes/peers/edit_participant_box.cpp
@@ -48,6 +50,8 @@
 <(src_loc)/boxes/edit_color_box.h
 <(src_loc)/boxes/edit_privacy_box.cpp
 <(src_loc)/boxes/edit_privacy_box.h
+<(src_loc)/boxes/generic_box.cpp
+<(src_loc)/boxes/generic_box.h
 <(src_loc)/boxes/language_box.cpp
 <(src_loc)/boxes/language_box.h
 <(src_loc)/boxes/local_storage_box.cpp
@@ -170,6 +174,8 @@
 <(src_loc)/data/data_channel.h
 <(src_loc)/data/data_channel_admins.cpp
 <(src_loc)/data/data_channel_admins.h
+<(src_loc)/data/data_countries.cpp
+<(src_loc)/data/data_countries.h
 <(src_loc)/data/data_document.cpp
 <(src_loc)/data/data_document.h
 <(src_loc)/data/data_document_good_thumbnail.cpp
@@ -186,6 +192,8 @@
 <(src_loc)/data/data_game.h
 <(src_loc)/data/data_groups.cpp
 <(src_loc)/data/data_groups.h
+<(src_loc)/data/data_location.cpp
+<(src_loc)/data/data_location.h
 <(src_loc)/data/data_media_types.cpp
 <(src_loc)/data/data_media_types.h
 <(src_loc)/data/data_messages.cpp
@@ -296,6 +304,8 @@
 <(src_loc)/history/media/history_media_wall_paper.cpp
 <(src_loc)/history/media/history_media_web_page.h
 <(src_loc)/history/media/history_media_web_page.cpp
+<(src_loc)/history/view/history_view_contact_status.cpp
+<(src_loc)/history/view/history_view_contact_status.h
 <(src_loc)/history/view/history_view_context_menu.cpp
 <(src_loc)/history/view/history_view_context_menu.h
 <(src_loc)/history/view/history_view_cursor_state.cpp
@@ -429,6 +439,8 @@
 <(src_loc)/lang/lang_tag.h
 <(src_loc)/lang/lang_translator.cpp
 <(src_loc)/lang/lang_translator.h
+<(src_loc)/lang/lang_values.cpp
+<(src_loc)/lang/lang_values.h
 <(src_loc)/main/main_account.cpp
 <(src_loc)/main/main_account.h
 <(src_loc)/media/audio/media_audio.cpp
@@ -739,6 +751,8 @@
 <(src_loc)/ui/text/text_block.h
 <(src_loc)/ui/text/text_entity.cpp
 <(src_loc)/ui/text/text_entity.h
+<(src_loc)/ui/text/text_utilities.cpp
+<(src_loc)/ui/text/text_utilities.h
 <(src_loc)/ui/toast/toast.cpp
 <(src_loc)/ui/toast/toast.h
 <(src_loc)/ui/toast/toast_manager.cpp
@@ -862,7 +876,6 @@
 <(src_loc)/auth_session.cpp
 <(src_loc)/auth_session.h
 <(src_loc)/config.h
-<(src_loc)/countries.h
 <(src_loc)/facades.cpp
 <(src_loc)/facades.h
 <(src_loc)/layout.cpp

@@ -102,13 +102,13 @@ TextSelection ShiftItemSelection(
 
 TextSelection UnshiftItemSelection(
 		TextSelection selection,
-		const Text &byText) {
+		const Ui::Text::String &byText) {
 	return UnshiftItemSelection(selection, byText.length());
 }
 
 TextSelection ShiftItemSelection(
 		TextSelection selection,
-		const Text &byText) {
+		const Ui::Text::String &byText) {
 	return ShiftItemSelection(selection, byText.length());
 }
 
@@ -118,8 +118,8 @@ void UnreadBar::init(int newCount) {
 	}
 	count = newCount;
 	text = /*(count == kCountUnknown) // #feed
-		? lang(lng_unread_bar_some)
-		: */lng_unread_bar(lt_count, count);
+		? tr::lng_unread_bar_some(tr::now)
+		: */tr::lng_unread_bar(tr::now, lt_count, count);
 	width = st::semiboldFont->width(text);
 }
 

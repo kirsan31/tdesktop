@@ -63,7 +63,7 @@ HistoryGif::HistoryGif(
 
 QSize HistoryGif::countOptimalSize() {
 	if (_parent->media() != this) {
-		_caption = Text();
+		_caption = Ui::Text::String();
 	} else if (_caption.hasSkipBlock()) {
 		_caption.updateSkipBlock(
 			_parent->skipBlockWidth(),
@@ -71,7 +71,7 @@ QSize HistoryGif::countOptimalSize() {
 	}
 	if (_gif && _gif->state() == Media::Clip::State::Error) {
 		if (!_gif->autoplay()) {
-			Ui::show(Box<InformBox>(lang(lng_gif_error)));
+			Ui::show(Box<InformBox>(tr::lng_gif_error(tr::now)));
 		}
 		setClipReader(Media::Clip::ReaderPointer::Bad());
 	}
@@ -596,7 +596,7 @@ TextState HistoryGif::textState(QPoint point, StateRequest request) const {
 				auto breakEverywhere = (forwardedHeightReal > forwardedHeight);
 				auto textRequest = request.forText();
 				if (breakEverywhere) {
-					textRequest.flags |= Text::StateRequest::Flag::BreakEverywhere;
+					textRequest.flags |= Ui::Text::StateRequest::Flag::BreakEverywhere;
 				}
 				result = TextState(_parent, forwarded->text.getState(
 					point - QPoint(rectx + st::msgReplyPadding.left(), recty + st::msgReplyPadding.top()),
@@ -713,7 +713,7 @@ int HistoryGif::additionalWidth() const {
 
 QString HistoryGif::mediaTypeString() const {
 	return _data->isVideoMessage()
-		? lang(lng_in_dlg_video_message)
+		? tr::lng_in_dlg_video_message(tr::now)
 		: qsl("GIF");
 }
 
@@ -785,7 +785,7 @@ bool HistoryGif::isReadyForOpen() const {
 void HistoryGif::parentTextUpdated() {
 	_caption = (_parent->media() == this)
 		? createCaption(_parent->data())
-		: Text();
+		: Ui::Text::String();
 	history()->owner().requestViewResize(_parent);
 }
 

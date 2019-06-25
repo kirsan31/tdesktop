@@ -12,8 +12,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_chat.h"
 #include "ui/widgets/labels.h"
 #include "ui/wrap/vertical_layout.h"
+#include "ui/text/text_utilities.h" // Ui::Text::ToUpper
 #include "info/profile/info_profile_button.h"
-#include "info/profile/info_profile_values.h"
 #include "boxes/peer_list_box.h"
 #include "boxes/confirm_box.h"
 #include "boxes/add_contact_box.h"
@@ -25,13 +25,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 namespace {
 
 constexpr auto kEnableSearchRowsCount = 10;
-
-TextWithEntities BoldText(const QString &text) {
-	auto result = TextWithEntities{ text };
-	result.entities.push_back(
-		EntityInText(EntityType::Bold, 0, text.size()));
-	return result;
-}
 
 class Controller : public PeerListController, public base::has_weak_ptr {
 public:
@@ -87,9 +80,11 @@ void Controller::prepare() {
 		}
 		auto row = std::make_unique<PeerListRow>(chat);
 		const auto username = chat->userName();
-		row->setCustomStatus(username.isEmpty()
-			? lang(lng_manage_discussion_group_private_status)
-			: ('@' + username));
+		row->setCustomStatus(!username.isEmpty()
+			? ('@' + username)
+			: (chat->isChannel() && !chat->isMegagroup())
+			? tr::lng_manage_linked_channel_private_status(tr::now)
+			: tr::lng_manage_discussion_group_private_status(tr::now));
 		delegate()->peerListAppendRow(std::move(row));
 	};
 	if (_chat) {
@@ -123,24 +118,25 @@ void Controller::rowClicked(not_null<PeerListRow*> row) {
 }
 
 void Controller::choose(not_null<ChannelData*> chat) {
-	auto text = lng_manage_discussion_group_sure__generic<
-		TextWithEntities
-	>(
+	auto text = tr::lng_manage_discussion_group_sure(
+		tr::now,
 		lt_group,
-		BoldText(chat->name),
+		Ui::Text::Bold(chat->name),
 		lt_channel,
-		BoldText(_channel->name));
+		Ui::Text::Bold(_channel->name),
+		Ui::Text::WithEntities);
 	if (!_channel->isPublic()) {
 		text.append(
-			"\n\n" + lang(lng_manage_linked_channel_private));
+			"\n\n" + tr::lng_manage_linked_channel_private(tr::now));
 	}
 	if (!chat->isPublic()) {
-		text.append("\n\n" + lang(lng_manage_discussion_group_private));
+		text.append(
+			"\n\n" + tr::lng_manage_discussion_group_private(tr::now));
 		if (chat->hiddenPreHistory()) {
 			text.append("\n\n");
-			text.append(lng_manage_discussion_group_warning__generic(
-				lt_visible,
-				BoldText(lang(lng_manage_discussion_group_visible))));
+			text.append(tr::lng_manage_discussion_group_warning(
+				tr::now,
+				Ui::Text::RichLangValue));
 		}
 	}
 	const auto box = std::make_shared<QPointer<BoxContent>>();
@@ -154,28 +150,27 @@ void Controller::choose(not_null<ChannelData*> chat) {
 	*box = Ui::show(
 		Box<ConfirmBox>(
 			text,
-			lang(lng_manage_discussion_group_link),
+			tr::lng_manage_discussion_group_link(tr::now),
 			sure),
 		LayerOption::KeepOther);
 }
 
 void Controller::choose(not_null<ChatData*> chat) {
-	auto text = lng_manage_discussion_group_sure__generic<
-		TextWithEntities
-	>(
+	auto text = tr::lng_manage_discussion_group_sure(
+		tr::now,
 		lt_group,
-		BoldText(chat->name),
+		Ui::Text::Bold(chat->name),
 		lt_channel,
-		BoldText(_channel->name));
+		Ui::Text::Bold(_channel->name),
+		Ui::Text::WithEntities);
 	if (!_channel->isPublic()) {
-		text.append(
-			"\n\n" + lang(lng_manage_linked_channel_private));
+		text.append("\n\n" + tr::lng_manage_linked_channel_private(tr::now));
 	}
-	text.append("\n\n" + lang(lng_manage_discussion_group_private));
+	text.append("\n\n" + tr::lng_manage_discussion_group_private(tr::now));
 	text.append("\n\n");
-	text.append(lng_manage_discussion_group_warning__generic(
-		lt_visible,
-		BoldText(lang(lng_manage_discussion_group_visible))));
+	text.append(tr::lng_manage_discussion_group_warning(
+		tr::now,
+		Ui::Text::RichLangValue));
 	const auto box = std::make_shared<QPointer<BoxContent>>();
 	const auto sure = [=] {
 		if (*box) {
@@ -190,7 +185,7 @@ void Controller::choose(not_null<ChatData*> chat) {
 	*box = Ui::show(
 		Box<ConfirmBox>(
 			text,
-			lang(lng_manage_discussion_group_link),
+			tr::lng_manage_discussion_group_link(tr::now),
 			sure),
 		LayerOption::KeepOther);
 }
@@ -202,20 +197,24 @@ object_ptr<Ui::RpWidget> SetupAbout(
 	auto about = object_ptr<Ui::FlatLabel>(
 		parent,
 		QString(),
-		Ui::FlatLabel::InitType::Simple,
 		st::linkedChatAbout);
-	about->setMarkedText([&]() -> TextWithEntities {
+	about->setMarkedText([&] {
 		if (!channel->isBroadcast()) {
-			return lng_manage_linked_channel_about__generic<
-				TextWithEntities
-			>(lt_channel, BoldText(chat->name));
+			return tr::lng_manage_linked_channel_about(
+				tr::now,
+				lt_channel,
+				Ui::Text::Bold(chat->name),
+				Ui::Text::WithEntities);
 		} else if (chat != nullptr) {
-			return lng_manage_discussion_group_about_chosen__generic<
-				TextWithEntities
-			>(lt_group, BoldText(chat->name));
-		} else {
-			return { lang(lng_manage_discussion_group_about) };
+			return tr::lng_manage_discussion_group_about_chosen(
+				tr::now,
+				lt_group,
+				Ui::Text::Bold(chat->name),
+				Ui::Text::WithEntities);
 		}
+		return tr::lng_manage_discussion_group_about(
+			tr::now,
+			Ui::Text::WithEntities);
 	}());
 	return std::move(about);
 }
@@ -225,10 +224,9 @@ object_ptr<Ui::RpWidget> SetupFooter(
 		not_null<ChannelData*> channel) {
 	return object_ptr<Ui::FlatLabel>(
 		parent,
-		lang(channel->isBroadcast()
-			? lng_manage_discussion_group_posted
-			: lng_manage_linked_channel_posted),
-		Ui::FlatLabel::InitType::Simple,
+		(channel->isBroadcast()
+			? tr::lng_manage_discussion_group_posted
+			: tr::lng_manage_linked_channel_posted)(),
 		st::linkedChatAbout);
 }
 
@@ -240,9 +238,8 @@ object_ptr<Ui::RpWidget> SetupCreateGroup(
 
 	auto result = object_ptr<Info::Profile::Button>(
 		parent,
-		Lang::Viewer(
-			lng_manage_discussion_group_create
-		) | Info::Profile::ToUpperValue(),
+		tr::lng_manage_discussion_group_create(
+		) | Ui::Text::ToUpper(),
 		st::infoCreateLinkedChatButton);
 	result->addClickHandler([=] {
 		const auto guarded = crl::guard(parent, callback);
@@ -262,10 +259,9 @@ object_ptr<Ui::RpWidget> SetupUnlink(
 		Fn<void(ChannelData*)> callback) {
 	auto result = object_ptr<Info::Profile::Button>(
 		parent,
-		Lang::Viewer(channel->isBroadcast()
-			? lng_manage_discussion_group_unlink
-			: lng_manage_linked_channel_unlink
-		) | Info::Profile::ToUpperValue(),
+		(channel->isBroadcast()
+			? tr::lng_manage_discussion_group_unlink
+			: tr::lng_manage_linked_channel_unlink)() | Ui::Text::ToUpper(),
 		st::infoUnlinkChatButton);
 	result->addClickHandler([=] {
 		callback(nullptr);
@@ -300,10 +296,10 @@ object_ptr<BoxContent> EditLinkedChatBox(
 			st::linkedChatAboutPadding);
 		box->peerListSetBelowWidget(std::move(below));
 
-		box->setTitle(langFactory(channel->isBroadcast()
-			? lng_manage_discussion_group
-			: lng_manage_linked_channel));
-		box->addButton(langFactory(lng_close), [=] { box->closeBox(); });
+		box->setTitle(channel->isBroadcast()
+			? tr::lng_manage_discussion_group()
+			: tr::lng_manage_linked_channel());
+		box->addButton(tr::lng_close(), [=] { box->closeBox(); });
 	};
 	auto controller = std::make_unique<Controller>(
 		channel,

@@ -34,6 +34,11 @@ dialogsPhotoSize: 46px;
 dialogsPhotoPadding: 12px;
 dialogsPadding: point(10px, 8px);
 
+dialogsOnlineBadgeStroke: 2px;
+dialogsOnlineBadgeSize: 10px;
+dialogsOnlineBadgeSkip: point(10px, 12px);
+dialogsOnlineBadgeDuration: 150;
+
 dialogsImportantBarHeight: 37px;
 
 dialogsSkip: 8px;
@@ -263,3 +268,9 @@ dialogsSearchFromStyle: TextStyle(defaultTextStyle) {
 dialogsSearchFromPalette: TextPalette(defaultTextPalette) {
 	linkFg: dialogsNameFg;
 }
+
+dialogsScamPadding: margins(2px, 0px, 2px, 0px);
+dialogsScamFont: font(9px semibold);
+dialogsScamSkip: 4px;
+dialogsScamRadius: 2px;
+

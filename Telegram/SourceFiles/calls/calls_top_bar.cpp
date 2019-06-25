@@ -48,9 +48,9 @@ DebugInfoBox::DebugInfoBox(QWidget*, base::weak_ptr<Call> call)
 }
 
 void DebugInfoBox::prepare() {
-	setTitle([] { return QString("Call Debug"); });
+	setTitle(rpl::single(qsl("Call Debug")));
 
-	addButton(langFactory(lng_close), [this] { closeBox(); });
+	addButton(tr::lng_close(), [this] { closeBox(); });
 	_text = setInnerWidget(
 		object_ptr<Ui::PaddingWrap<Ui::FlatLabel>>(
 			this,
@@ -80,7 +80,7 @@ TopBar::TopBar(
 , _signalBars(this, _call.get(), st::callBarSignalBars)
 , _fullInfoLabel(this, st::callBarInfoLabel)
 , _shortInfoLabel(this, st::callBarInfoLabel)
-, _hangupLabel(this, st::callBarLabel, lang(lng_call_bar_hangup).toUpper())
+, _hangupLabel(this, st::callBarLabel, tr::lng_call_bar_hangup(tr::now).toUpper())
 , _mute(this, st::callBarMuteToggle)
 , _info(this)
 , _hangup(this, st::callBarHangup) {

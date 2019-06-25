@@ -167,22 +167,23 @@ SetState ComputeState(int id) {
 
 QString StateDescription(const SetState &state) {
 	return state.match([](const Available &data) {
-		return lng_emoji_set_download(lt_size, formatSizeText(data.size));
+		return tr::lng_emoji_set_download(tr::now, lt_size, formatSizeText(data.size));
 	}, [](const Ready &data) -> QString {
-		return lang(lng_emoji_set_ready);
+		return tr::lng_emoji_set_ready(tr::now);
 	}, [](const Active &data) -> QString {
-		return lang(lng_emoji_set_active);
+		return tr::lng_emoji_set_active(tr::now);
 	}, [](const Loading &data) {
 		const auto percent = (data.size > 0)
 			? snap((data.already * 100) / float64(data.size), 0., 100.)
 			: 0.;
-		return lng_emoji_set_loading(
+		return tr::lng_emoji_set_loading(
+			tr::now,
 			lt_percent,
 			QString::number(int(std::round(percent))) + '%',
 			lt_progress,
 			formatDownloadText(data.already, data.size));
 	}, [](const Failed &data) {
-		return lang(lng_attach_failed);
+		return tr::lng_attach_failed(tr::now);
 	});
 }
 
@@ -541,7 +542,6 @@ void Row::setupLabels(const Set &set) {
 	const auto name = Ui::CreateChild<Ui::FlatLabel>(
 		this,
 		set.name,
-		Ui::FlatLabel::InitType::Simple,
 		st::localStorageRowTitle);
 	name->setAttribute(Qt::WA_TransparentForMouseEvents);
 	_status = Ui::CreateChild<Ui::FlatLabel>(
@@ -658,9 +658,9 @@ ManageSetsBox::ManageSetsBox(QWidget*) {
 void ManageSetsBox::prepare() {
 	const auto inner = setInnerWidget(object_ptr<Inner>(this));
 
-	setTitle(langFactory(lng_emoji_manage_sets));
+	setTitle(tr::lng_emoji_manage_sets());
 
-	addButton(langFactory(lng_close), [=] { closeBox(); });
+	addButton(tr::lng_close(), [=] { closeBox(); });
 
 	setDimensionsToContent(st::boxWidth, inner);
 }

@@ -12,6 +12,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/widgets/buttons.h"
 #include "ui/widgets/labels.h"
 #include "ui/widgets/menu.h"
+#include "ui/widgets/popup_menu.h"
+#include "ui/text/text_utilities.h"
 #include "ui/special_buttons.h"
 #include "ui/empty_userpic.h"
 #include "mainwindow.h"
@@ -26,6 +28,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/click_handler_types.h"
 #include "observer_peer.h"
 #include "auth_session.h"
+#include "data/data_folder.h"
+#include "data/data_session.h"
 #include "data/data_user.h"
 #include "mainwidget.h"
 #include "styles/style_window.h"
@@ -55,7 +59,7 @@ bool IsShadowShown(const QImage &img, const QRect r, float64 intensityText) {
 	return false;
 }
 
-}
+} // namespace
 
 namespace Window {
 
@@ -124,8 +128,20 @@ MainMenu::MainMenu(
 , _version(this, st::mainMenuVersionLabel) {
 	setAttribute(Qt::WA_OpaquePaintEvent);
 
-	auto showSelfChat = [] {
+	const auto showSelfChat = [] {
 		App::main()->choosePeer(Auth().userPeerId(), ShowAtUnreadMsgId);
+	};
+	const auto showArchive = [=] {
+		if (const auto folder = Auth().data().folderLoaded(Data::Folder::kId)) {
+			App::wnd()->sessionController()->openFolder(folder);
+			Ui::hideSettingsAndLayer();
+		}
+	};
+	const auto checkArchive = [=] {
+		const auto folder = Auth().data().folderLoaded(Data::Folder::kId);
+		return folder
+			&& !folder->chatsList()->empty()
+			&& _controller->session().settings().archiveInMainMenu();
 	};
 	_userpicButton.create(
 		this,
@@ -138,6 +154,27 @@ MainMenu::MainMenu(
 	_cloudButton.create(this, st::mainMenuCloudButton);
 	_cloudButton->setClickedCallback(showSelfChat);
 	_cloudButton->show();
+
+	_archiveButton.create(this, st::mainMenuCloudButton);
+	_archiveButton->setHidden(!checkArchive());
+	_archiveButton->setAcceptBoth(true);
+	_archiveButton->clicks(
+	) | rpl::start_with_next([=](Qt::MouseButton which) {
+		if (which == Qt::LeftButton) {
+			showArchive();
+			return;
+		} else if (which != Qt::RightButton) {
+			return;
+		}
+		_contextMenu = base::make_unique_q<Ui::PopupMenu>(this);
+		_contextMenu->addAction(
+			tr::lng_context_archive_to_list(tr::now), [=] {
+			_controller->session().settings().setArchiveInMainMenu(false);
+			_controller->session().saveSettingsDelayed();
+			Ui::hideSettingsAndLayer();
+		});
+		_contextMenu->popup(QCursor::pos());
+	}, _archiveButton->lifetime());
 
 	_nightThemeSwitch.setCallback([this] {
 		if (const auto action = *_nightThemeAction) {
@@ -156,9 +193,11 @@ MainMenu::MainMenu(
 	refreshMenu();
 	refreshBackground();
 
-	_telegram->setRichText(textcmdLink(1, qsl("Telegram Desktop mod")));
-	_telegram->setLink(1, std::make_shared<UrlClickHandler>(qsl("https://github.com/kirsan31/tdesktop")));
-	_version->setRichText(textcmdLink(1, lng_settings_current_version(lt_version, currentVersionText())) + QChar(' ') + QChar(8211) + QChar(' ') + textcmdLink(2, lang(lng_menu_about)));
+	_telegram->setMarkedText(Ui::Text::Link(
+		qsl("Telegram Desktop mod"),
+		qsl("https://github.com/kirsan31/tdesktop")));
+	_telegram->setLinksTrusted();
+	_version->setRichText(textcmdLink(1, tr::lng_settings_current_version(tr::now, lt_version, currentVersionText())) + QChar(' ') + QChar(8211) + QChar(' ') + textcmdLink(2, tr::lng_menu_about(tr::now)));
 	_version->setLink(1, std::make_shared<UrlClickHandler>(qsl("https://desktop.telegram.org/changelog")));
 	_version->setLink(2, std::make_shared<LambdaClickHandler>([] { Ui::show(Box<AboutBox>()); }));
 
@@ -178,6 +217,13 @@ MainMenu::MainMenu(
 			refreshBackground();
 		}
 	});
+	Auth().data().chatsListChanges(
+	) | rpl::filter([](Data::Folder *folder) {
+		return folder && (folder->id() == Data::Folder::kId);
+	}) | rpl::start_with_next([=](Data::Folder *folder) {
+		_archiveButton->setHidden(!checkArchive());
+		update();
+	}, lifetime());
 	updatePhone();
 	initResetScaleButton();
 }
@@ -185,22 +231,22 @@ MainMenu::MainMenu(
 void MainMenu::refreshMenu() {
 	_menu->clearActions();
 	if (!Auth().supportMode()) {
-		_menu->addAction(lang(lng_create_group_title), [] {
+		_menu->addAction(tr::lng_create_group_title(tr::now), [] {
 			App::wnd()->onShowNewGroup();
 		}, &st::mainMenuNewGroup, &st::mainMenuNewGroupOver);
-		_menu->addAction(lang(lng_create_channel_title), [] {
+		_menu->addAction(tr::lng_create_channel_title(tr::now), [] {
 			App::wnd()->onShowNewChannel();
 		}, &st::mainMenuNewChannel, &st::mainMenuNewChannelOver);
-		_menu->addAction(lang(lng_menu_contacts), [] {
+		_menu->addAction(tr::lng_menu_contacts(tr::now), [] {
 			Ui::show(Box<PeerListBox>(std::make_unique<ContactsBoxController>(), [](not_null<PeerListBox*> box) {
-				box->addButton(langFactory(lng_close), [box] { box->closeBox(); });
-				box->addLeftButton(langFactory(lng_profile_add_contact), [] { App::wnd()->onShowAddContact(); });
+				box->addButton(tr::lng_close(), [box] { box->closeBox(); });
+				box->addLeftButton(tr::lng_profile_add_contact(), [] { App::wnd()->onShowAddContact(); });
 			}));
 		}, &st::mainMenuContacts, &st::mainMenuContactsOver);
 		if (Global::PhoneCallsEnabled()) {
-			_menu->addAction(lang(lng_menu_calls), [] {
+			_menu->addAction(tr::lng_menu_calls(tr::now), [] {
 				Ui::show(Box<PeerListBox>(std::make_unique<Calls::BoxController>(), [](not_null<PeerListBox*> box) {
-					box->addButton(langFactory(lng_close), [=] {
+					box->addButton(tr::lng_close(), [=] {
 						box->closeBox();
 					});
 					box->addTopButton(st::callSettingsButton, [=] {
@@ -212,7 +258,7 @@ void MainMenu::refreshMenu() {
 			}, &st::mainMenuCalls, &st::mainMenuCallsOver);
 		}
 	} else {
-		_menu->addAction(lang(lng_profile_add_contact), [] {
+		_menu->addAction(tr::lng_profile_add_contact(tr::now), [] {
 			App::wnd()->onShowAddContact();
 		}, &st::mainMenuContacts, &st::mainMenuContactsOver);
 
@@ -229,12 +275,12 @@ void MainMenu::refreshMenu() {
 			Auth().supportTemplates().reload();
 		}, &st::mainMenuReload, &st::mainMenuReloadOver);
 	}
-	_menu->addAction(lang(lng_menu_settings), [] {
+	_menu->addAction(tr::lng_menu_settings(tr::now), [] {
 		App::wnd()->showSettings();
 	}, &st::mainMenuSettings, &st::mainMenuSettingsOver);
 
 	_nightThemeAction = std::make_shared<QPointer<QAction>>();
-	auto action = _menu->addAction(lang(lng_menu_night_mode), [=] {
+	auto action = _menu->addAction(tr::lng_menu_night_mode(tr::now), [=] {
 		if (auto action = *_nightThemeAction) {
 			action->setChecked(!action->isChecked());
 			_nightThemeSwitch.callOnce(st::mainMenu.itemToggle.duration);
@@ -289,7 +335,7 @@ void MainMenu::refreshBackground() {
 		st::mainMenuCoverTextLeft,
 		st::mainMenuCoverNameTop,
 		std::max(
-			st::semiboldFont->width(Auth().user()->nameText.toString()),
+			st::semiboldFont->width(Auth().user()->nameText().toString()),
 			st::normalFont->width(_phoneText)),
 		st::semiboldFont->height * 2);
 
@@ -310,7 +356,16 @@ void MainMenu::updateControlsGeometry() {
 		_userpicButton->moveToLeft(st::mainMenuUserpicLeft, st::mainMenuUserpicTop);
 	}
 	if (_cloudButton) {
-		_cloudButton->moveToRight(0, st::mainMenuCoverHeight - _cloudButton->height());
+		const auto offset = st::mainMenuCloudSize / 4;
+		const auto y = st::mainMenuCoverHeight
+			- _cloudButton->height()
+			- offset;
+		_cloudButton->moveToRight(offset, y);
+		if (_archiveButton) {
+			_archiveButton->moveToRight(
+				offset,
+				y - _cloudButton->height());
+		}
 	}
 	if (_resetScaleButton) {
 		_resetScaleButton->moveToRight(0, 0);
@@ -353,7 +408,7 @@ void MainMenu::paintEvent(QPaintEvent *e) {
 		}
 		p.setPen(st::mainMenuCoverFg);
 		p.setFont(st::semiboldFont);
-		Auth().user()->nameText.drawLeftElided(
+		Auth().user()->nameText().drawLeftElided(
 			p,
 			st::mainMenuCoverTextLeft,
 			st::mainMenuCoverNameTop,
@@ -370,6 +425,19 @@ void MainMenu::paintEvent(QPaintEvent *e) {
 				st::mainMenuCloudSize,
 				isFill ? st::mainMenuCloudBg : st::msgServiceBg,
 				isFill ? st::mainMenuCloudFg : st::msgServiceFg);
+		}
+
+		// Draw Archive button.
+		if (!_archiveButton->isHidden()) {
+			if (const auto folder = Auth().data().folderLoaded(Data::Folder::kId)) {
+				folder->paintUserpic(
+					p,
+					_archiveButton->x() + (_archiveButton->width() - st::mainMenuCloudSize) / 2,
+					_archiveButton->y() + (_archiveButton->height() - st::mainMenuCloudSize) / 2,
+					st::mainMenuCloudSize,
+					isFill ? st::mainMenuCloudBg : st::msgServiceBg,
+					isFill ? st::mainMenuCloudFg : st::msgServiceFg);
+			}
 		}
 	}
 	auto other = QRect(0, st::mainMenuCoverHeight, width(), height() - st::mainMenuCoverHeight).intersected(clip);

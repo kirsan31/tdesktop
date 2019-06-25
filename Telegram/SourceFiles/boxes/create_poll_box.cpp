@@ -150,7 +150,6 @@ not_null<Ui::FlatLabel*> CreateWarningLabel(
 	const auto result = Ui::CreateChild<Ui::FlatLabel>(
 		parent.get(),
 		QString(),
-		Ui::FlatLabel::InitType::Simple,
 		st::createPollWarning);
 	result->setAttribute(Qt::WA_TransparentForMouseEvents);
 	QObject::connect(field, &Ui::InputField::changed, [=] {
@@ -187,7 +186,7 @@ Options::Option Options::Option::Create(
 				container,
 				st::createPollOptionField,
 				Ui::InputField::Mode::NoNewlines,
-				langFactory(lng_polls_create_option_add))));
+				tr::lng_polls_create_option_add())));
 	InitField(outer, field->entity());
 	field->entity()->setMaxLength(kOptionLimit + kErrorLimit);
 	result._field.reset(field);
@@ -312,7 +311,7 @@ void Options::Option::clearValue() {
 }
 
 void Options::Option::setPlaceholder() const {
-	field()->setPlaceholder(langFactory(lng_polls_create_option_add));
+	field()->setPlaceholder(tr::lng_polls_create_option_add());
 }
 
 void Options::Option::toggleRemoveAlways(bool toggled) {
@@ -324,7 +323,7 @@ not_null<Ui::InputField*> Options::Option::field() const {
 }
 
 void Options::Option::removePlaceholder() const {
-	field()->setPlaceholder(nullptr);
+	field()->setPlaceholder(rpl::single(QString()));
 }
 
 PollAnswer Options::Option::toPollAnswer(int index) const {
@@ -598,13 +597,13 @@ not_null<Ui::InputField*> CreatePollBox::setupQuestion(
 		not_null<Ui::VerticalLayout*> container) {
 	using namespace Settings;
 
-	AddSubsectionTitle(container, lng_polls_create_question);
+	AddSubsectionTitle(container, tr::lng_polls_create_question());
 	const auto question = container->add(
 		object_ptr<Ui::InputField>(
 			container,
 			st::createPollField,
 			Ui::InputField::Mode::MultiLine,
-			langFactory(lng_polls_create_question_placeholder)),
+			tr::lng_polls_create_question_placeholder()),
 		st::createPollFieldPadding);
 	InitField(getDelegate()->outerContainer(), question);
 	question->setMaxLength(kQuestionLimit + kErrorLimit);
@@ -646,7 +645,7 @@ object_ptr<Ui::RpWidget> CreatePollBox::setupContent() {
 	const auto question = setupQuestion(container);
 	AddDivider(container);
 	AddSkip(container);
-	AddSubsectionTitle(container, lng_polls_create_options);
+	AddSubsectionTitle(container, tr::lng_polls_create_options());
 	const auto options = lifetime().make_state<Options>(
 		getDelegate()->outerContainer(),
 		container);
@@ -655,8 +654,8 @@ object_ptr<Ui::RpWidget> CreatePollBox::setupContent() {
 		setCloseByOutsideClick(!count);
 	}) | rpl::map([=](int count) {
 		return (count < kMaxOptionsCount)
-			? lng_polls_create_limit(lt_count, kMaxOptionsCount - count)
-			: lang(lng_polls_create_maximum);
+			? tr::lng_polls_create_limit(tr::now, lt_count, kMaxOptionsCount - count)
+			: tr::lng_polls_create_maximum(tr::now);
 	}) | rpl::after_next([=] {
 		container->resizeToWidth(container->widthNoMargins());
 	});
@@ -701,10 +700,10 @@ object_ptr<Ui::RpWidget> CreatePollBox::setupContent() {
 		clearButtons();
 		if (valid) {
 			addButton(
-				langFactory(lng_polls_create_button),
+				tr::lng_polls_create_button(),
 				[=] { _submitRequests.fire(collectResult()); });
 		}
-		addButton(langFactory(lng_cancel), [=] { closeBox(); });
+		addButton(tr::lng_cancel(), [=] { closeBox(); });
 	}, lifetime());
 
 	options->isValidChanged(
@@ -726,7 +725,7 @@ object_ptr<Ui::RpWidget> CreatePollBox::setupContent() {
 }
 
 void CreatePollBox::prepare() {
-	setTitle(langFactory(lng_polls_create_title));
+	setTitle(tr::lng_polls_create_title());
 
 	const auto inner = setInnerWidget(setupContent());
 

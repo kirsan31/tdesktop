@@ -13,6 +13,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/update_checker.h"
 #include "ui/widgets/buttons.h"
 #include "ui/widgets/labels.h"
+#include "ui/text/text_utilities.h"
 #include "boxes/confirm_box.h"
 #include "styles/style_intro.h"
 
@@ -21,8 +22,8 @@ namespace Intro {
 CodeInput::CodeInput(
 	QWidget *parent,
 	const style::InputField &st,
-	Fn<QString()> placeholderFactory)
-: Ui::MaskedInputField(parent, st, std::move(placeholderFactory)) {
+	rpl::producer<QString> placeholder)
+: Ui::MaskedInputField(parent, st, std::move(placeholder)) {
 }
 
 void CodeInput::setDigitsCountMax(int digitsCount) {
@@ -73,8 +74,8 @@ void CodeInput::correctValue(const QString &was, int wasCursor, QString &now, in
 }
 
 CodeWidget::CodeWidget(QWidget *parent, Widget::Data *data) : Step(parent, data)
-, _noTelegramCode(this, lang(lng_code_no_telegram), st::introLink)
-, _code(this, st::introCode, langFactory(lng_code_ph))
+, _noTelegramCode(this, tr::lng_code_no_telegram(tr::now), st::introLink)
+, _code(this, st::introCode, tr::lng_code_ph())
 , _callTimer(this)
 , _callStatus(getData()->callStatus)
 , _callTimeout(getData()->callTimeout)
@@ -90,18 +91,21 @@ CodeWidget::CodeWidget(QWidget *parent, Widget::Data *data) : Step(parent, data)
 	_code->setDigitsCountMax(getData()->codeLength);
 	setErrorBelowLink(true);
 
-	setTitleText([text = App::formatPhone(getData()->phone)] { return text; });
+	setTitleText(rpl::single(App::formatPhone(getData()->phone)));
 	updateDescText();
 }
 
 void CodeWidget::refreshLang() {
-	if (_noTelegramCode) _noTelegramCode->setText(lang(lng_code_no_telegram));
+	if (_noTelegramCode) _noTelegramCode->setText(tr::lng_code_no_telegram(tr::now));
 	updateDescText();
 	updateControlsGeometry();
 }
 
 void CodeWidget::updateDescText() {
-	setDescriptionText(langFactory(getData()->codeByTelegram ? lng_code_telegram : lng_code_desc));
+	const auto byTelegram = getData()->codeByTelegram;
+	setDescriptionText(
+		(byTelegram ? tr::lng_code_from_telegram : tr::lng_code_desc)(
+			Ui::Text::RichLangValue));
 	if (getData()->codeByTelegram) {
 		_noTelegramCode->show();
 		_callTimer->stop();
@@ -124,13 +128,27 @@ void CodeWidget::updateCallText() {
 		switch (_callStatus) {
 		case Widget::Data::CallStatus::Waiting: {
 			if (_callTimeout >= 3600) {
-				return lng_code_call(lt_minutes, qsl("%1:%2").arg(_callTimeout / 3600).arg((_callTimeout / 60) % 60, 2, 10, QChar('0')), lt_seconds, qsl("%1").arg(_callTimeout % 60, 2, 10, QChar('0')));
+				return tr::lng_code_call(
+					tr::now,
+					lt_minutes,
+					qsl("%1:%2"
+					).arg(_callTimeout / 3600
+					).arg((_callTimeout / 60) % 60, 2, 10, QChar('0')),
+					lt_seconds,
+					qsl("%1").arg(_callTimeout % 60, 2, 10, QChar('0')));
 			} else {
-				return lng_code_call(lt_minutes, QString::number(_callTimeout / 60), lt_seconds, qsl("%1").arg(_callTimeout % 60, 2, 10, QChar('0')));
+				return tr::lng_code_call(
+					tr::now,
+					lt_minutes,
+					QString::number(_callTimeout / 60),
+					lt_seconds,
+					qsl("%1").arg(_callTimeout % 60, 2, 10, QChar('0')));
 			}
 		} break;
-		case Widget::Data::CallStatus::Calling: return lang(lng_code_calling);
-		case Widget::Data::CallStatus::Called: return lang(lng_code_called);
+		case Widget::Data::CallStatus::Calling:
+			return tr::lng_code_calling(tr::now);
+		case Widget::Data::CallStatus::Called:
+			return tr::lng_code_called(tr::now);
 		}
 		return QString();
 	})();
@@ -150,9 +168,9 @@ void CodeWidget::updateControlsGeometry() {
 	_callLabel->moveToLeft(contentLeft() + st::buttonRadius, linkTop);
 }
 
-void CodeWidget::showCodeError(Fn<QString()> textFactory) {
-	if (textFactory) _code->showError();
-	showError(std::move(textFactory));
+void CodeWidget::showCodeError(rpl::producer<QString> text) {
+	_code->showError();
+	showError(std::move(text));
 }
 
 void CodeWidget::setInnerFocus() {
@@ -212,7 +230,7 @@ void CodeWidget::codeSubmitDone(const MTPauth_Authorization &result) {
 	_sentRequest = 0;
 	auto &d = result.c_auth_authorization();
 	if (d.vuser.type() != mtpc_user || !d.vuser.c_user().is_self()) { // wtf?
-		showCodeError(&Lang::Hard::ServerError);
+		showCodeError(rpl::single(Lang::Hard::ServerError()));
 		return;
 	}
 	cSetLoggedPhoneNumber(getData()->phone);
@@ -223,7 +241,7 @@ bool CodeWidget::codeSubmitFail(const RPCError &error) {
 	if (MTP::isFloodError(error)) {
 		stopCheck();
 		_sentRequest = 0;
-		showCodeError(langFactory(lng_flood_error));
+		showCodeError(tr::lng_flood_error());
 		return true;
 	}
 	if (MTP::isDefaultHandledError(error)) return false;
@@ -237,7 +255,7 @@ bool CodeWidget::codeSubmitFail(const RPCError &error) {
 		goBack();
 		return true;
 	} else if (err == qstr("PHONE_CODE_EMPTY") || err == qstr("PHONE_CODE_INVALID")) {
-		showCodeError(langFactory(lng_bad_code));
+		showCodeError(tr::lng_bad_code());
 		return true;
 	} else if (err == qstr("PHONE_NUMBER_UNOCCUPIED")) { // success, need to signUp
 		getData()->code = _sentCode;
@@ -250,10 +268,9 @@ bool CodeWidget::codeSubmitFail(const RPCError &error) {
 		return true;
 	}
 	if (Logs::DebugEnabled()) { // internal server error
-		auto text = err + ": " + error.description();
-		showCodeError([text] { return text; });
+		showCodeError(rpl::single(err + ": " + error.description()));
 	} else {
-		showCodeError(&Lang::Hard::ServerError);
+		showCodeError(rpl::single(Lang::Hard::ServerError()));
 	}
 	return false;
 }
@@ -308,8 +325,8 @@ void CodeWidget::gotPassword(const MTPaccount_Password &result) {
 			if (*box) (*box)->closeBox();
 		};
 		*box = Ui::show(Box<ConfirmBox>(
-			lang(lng_passport_app_out_of_date),
-			lang(lng_menu_update),
+			tr::lng_passport_app_out_of_date(tr::now),
+			tr::lng_menu_update(tr::now),
 			callback));
 		return;
 	}
@@ -353,7 +370,7 @@ void CodeWidget::noTelegramCodeDone(const MTPauth_SentCode &result) {
 	_noTelegramCodeRequestId = 0;
 
 	if (result.type() != mtpc_auth_sentCode) {
-		showCodeError(&Lang::Hard::ServerError);
+		showCodeError(rpl::single(Lang::Hard::ServerError()));
 		return;
 	}
 
@@ -374,7 +391,7 @@ void CodeWidget::noTelegramCodeDone(const MTPauth_SentCode &result) {
 bool CodeWidget::noTelegramCodeFail(const RPCError &error) {
 	if (MTP::isFloodError(error)) {
 		_noTelegramCodeRequestId = 0;
-		showCodeError(langFactory(lng_flood_error));
+		showCodeError(tr::lng_flood_error());
 		return true;
 	}
 	if (MTP::isDefaultHandledError(error)) {
@@ -383,10 +400,9 @@ bool CodeWidget::noTelegramCodeFail(const RPCError &error) {
 
 	_noTelegramCodeRequestId = 0;
 	if (Logs::DebugEnabled()) { // internal server error
-		auto text = error.type() + ": " + error.description();
-		showCodeError([text] { return text; });
+		showCodeError(rpl::single(error.type() + ": " + error.description()));
 	} else {
-		showCodeError(&Lang::Hard::ServerError);
+		showCodeError(rpl::single(Lang::Hard::ServerError()));
 	}
 	return false;
 }

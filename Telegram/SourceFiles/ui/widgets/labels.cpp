@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/widgets/labels.h"
 
 #include "ui/widgets/popup_menu.h"
+#include "core/click_handler_types.h" // UrlClickHandler
 #include "chat_helpers/message_field.h" // SetClipboardText/MimeDataFromText
 #include "mainwindow.h"
 #include "lang/lang_keys.h"
@@ -133,24 +134,19 @@ FlatLabel::FlatLabel(QWidget *parent, const style::FlatLabel &st)
 : RpWidget(parent)
 , _text(st.minWidth ? st.minWidth : QFIXED_MAX)
 , _st(st)
-, _contextCopyText(lang(lng_context_copy_text)) {
+, _contextCopyText(tr::lng_context_copy_text(tr::now)) {
 	init();
 }
 
 FlatLabel::FlatLabel(
 	QWidget *parent,
 	const QString &text,
-	InitType initType,
 	const style::FlatLabel &st)
 : RpWidget(parent)
 , _text(st.minWidth ? st.minWidth : QFIXED_MAX)
 , _st(st)
-, _contextCopyText(lang(lng_context_copy_text)) {
-	if (initType == InitType::Rich) {
-		setRichText(text);
-	} else {
-		setText(text);
-	}
+, _contextCopyText(tr::lng_context_copy_text(tr::now)) {
+	setText(text);
 	init();
 }
 
@@ -161,7 +157,7 @@ FlatLabel::FlatLabel(
 : RpWidget(parent)
 , _text(st.minWidth ? st.minWidth : QFIXED_MAX)
 , _st(st)
-, _contextCopyText(lang(lng_context_copy_text)) {
+, _contextCopyText(tr::lng_context_copy_text(tr::now)) {
 	textUpdated();
 	std::move(
 		text
@@ -177,7 +173,7 @@ FlatLabel::FlatLabel(
 : RpWidget(parent)
 , _text(st.minWidth ? st.minWidth : QFIXED_MAX)
 , _st(st)
-, _contextCopyText(lang(lng_context_copy_text)) {
+, _contextCopyText(tr::lng_context_copy_text(tr::now)) {
 	textUpdated();
 	std::move(
 		text
@@ -289,6 +285,20 @@ void FlatLabel::setLink(uint16 lnkIndex, const ClickHandlerPtr &lnk) {
 	_text.setLink(lnkIndex, lnk);
 }
 
+void FlatLabel::setLinksTrusted() {
+	static const auto TrustedLinksFilter = [](
+			const ClickHandlerPtr &link,
+			Qt::MouseButton button) {
+		if (const auto url = dynamic_cast<UrlClickHandler*>(link.get())) {
+			url->UrlClickHandler::onClick({ button });
+			return false;
+		}
+		return true;
+	};
+	setClickHandlerFilter(TrustedLinksFilter);
+
+}
+
 void FlatLabel::setClickHandlerFilter(ClickHandlerFilter &&filter) {
 	_clickHandlerFilter = std::move(filter);
 }
@@ -306,7 +316,7 @@ void FlatLabel::mousePressEvent(QMouseEvent *e) {
 	dragActionStart(e->globalPos(), e->button());
 }
 
-Text::StateResult FlatLabel::dragActionStart(const QPoint &p, Qt::MouseButton button) {
+Ui::Text::StateResult FlatLabel::dragActionStart(const QPoint &p, Qt::MouseButton button) {
 	_lastMousePos = p;
 	auto state = dragActionUpdate();
 
@@ -359,7 +369,7 @@ Text::StateResult FlatLabel::dragActionStart(const QPoint &p, Qt::MouseButton bu
 	return state;
 }
 
-Text::StateResult FlatLabel::dragActionFinish(const QPoint &p, Qt::MouseButton button) {
+Ui::Text::StateResult FlatLabel::dragActionFinish(const QPoint &p, Qt::MouseButton button) {
 	_lastMousePos = p;
 	auto state = dragActionUpdate();
 
@@ -561,7 +571,7 @@ void FlatLabel::showContextMenu(QContextMenuEvent *e, ContextMenuReason reason) 
 	if (fullSelection && !_contextCopyText.isEmpty()) {
 		_contextMenu->addAction(_contextCopyText, this, SLOT(onCopyContextText()));
 	} else if (uponSelection && !fullSelection) {
-		_contextMenu->addAction(lang(lng_context_copy_selected), this, SLOT(onCopySelectedText()));
+		_contextMenu->addAction(tr::lng_context_copy_selected(tr::now), this, SLOT(onCopySelectedText()));
 	} else if (!hasSelection && !_contextCopyText.isEmpty()) {
 		_contextMenu->addAction(_contextCopyText, this, SLOT(onCopyContextText()));
 	}
@@ -715,7 +725,7 @@ std::unique_ptr<CrossFadeAnimation> FlatLabel::CrossFade(
 	return result;
 }
 
-Text::StateResult FlatLabel::dragActionUpdate() {
+Ui::Text::StateResult FlatLabel::dragActionUpdate() {
 	auto m = mapFromGlobal(_lastMousePos);
 	auto state = getTextState(m);
 	updateHover(state);
@@ -728,7 +738,7 @@ Text::StateResult FlatLabel::dragActionUpdate() {
 	return state;
 }
 
-void FlatLabel::updateHover(const Text::StateResult &state) {
+void FlatLabel::updateHover(const Ui::Text::StateResult &state) {
 	bool lnkChanged = ClickHandler::setActive(state.link, this);
 
 	if (!_selectable) {
@@ -791,15 +801,15 @@ void FlatLabel::refreshCursor(bool uponSymbol) {
 	}
 }
 
-Text::StateResult FlatLabel::getTextState(const QPoint &m) const {
-	Text::StateRequestElided request;
+Ui::Text::StateResult FlatLabel::getTextState(const QPoint &m) const {
+	Ui::Text::StateRequestElided request;
 	request.align = _st.align;
 	if (_selectable) {
-		request.flags |= Text::StateRequest::Flag::LookupSymbol;
+		request.flags |= Ui::Text::StateRequest::Flag::LookupSymbol;
 	}
 	int textWidth = width() - _st.margin.left() - _st.margin.right();
 
-	Text::StateResult state;
+	Ui::Text::StateResult state;
 	bool heightExceeded = _st.maxHeight && (_st.maxHeight < _fullTextHeight || textWidth < _text.maxWidth());
 	bool renderElided = _breakEverywhere || heightExceeded;
 	if (renderElided) {
@@ -807,7 +817,7 @@ Text::StateResult FlatLabel::getTextState(const QPoint &m) const {
 		auto lines = _st.maxHeight ? qMax(_st.maxHeight / lineHeight, 1) : ((height() / lineHeight) + 2);
 		request.lines = lines;
 		if (_breakEverywhere) {
-			request.flags |= Text::StateRequest::Flag::BreakEverywhere;
+			request.flags |= Ui::Text::StateRequest::Flag::BreakEverywhere;
 		}
 		state = _text.getStateElided(m - QPoint(_st.margin.left(), _st.margin.top()), textWidth, request);
 	} else {

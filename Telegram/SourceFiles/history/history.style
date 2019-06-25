@@ -202,6 +202,19 @@ historyUnblock: FlatButton(historyComposeButton) {
 	color: attentionButtonFg;
 	overColor: attentionButtonFgOver;
 }
+historyContactStatusButton: FlatButton(historyComposeButton) {
+	height: 49px;
+	textTop: 16px;
+	overBgColor: historyComposeButtonBg;
+	ripple: RippleAnimation(defaultRippleAnimation) {
+		color: historyComposeButtonBgOver;
+	}
+}
+historyContactStatusBlock: FlatButton(historyContactStatusButton) {
+	color: attentionButtonFg;
+	overColor: attentionButtonFg;
+}
+historyContactStatusMinSkip: 16px;
 
 historySendIcon: icon {{ "send_control_send", historySendIconFg }};
 historySendIconOver: icon {{ "send_control_send", historySendIconFgOver }};
@@ -301,23 +314,6 @@ historyReplyCancel: IconButton {
 		color: windowBgOver;
 	}
 }
-
-reportSpamHide: FlatButton {
-	color: windowActiveTextFg;
-	overColor: windowActiveTextFg;
-
-	bgColor: transparent;
-	overBgColor: transparent;
-
-	width: -40px;
-	height: 46px;
-
-	textTop: 15px;
-
-	font: font(fsize);
-	overFont: font(fsize underline);
-}
-reportSpamSeparator: 30px;
 
 msgBotKbDuration: 200;
 msgBotKbFont: semiboldFont;

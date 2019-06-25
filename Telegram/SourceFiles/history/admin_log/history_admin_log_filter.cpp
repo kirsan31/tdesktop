@@ -117,7 +117,7 @@ void UserCheckbox::paintEvent(QPaintEvent *e) {
 	auto nameTop = userpicTop + st::contactsNameTop;
 	auto nameWidth = width() - nameLeft - st::contactsPadding.right();
 	p.setPen(st::contactsNameFg);
-	_user->nameText.drawLeftElided(p, nameLeft, nameTop, nameWidth, width());
+	_user->nameText().drawLeftElided(p, nameLeft, nameTop, nameWidth, width());
 
 	auto statusLeft = nameLeft;
 	auto statusTop = userpicTop + st::contactsStatusTop;
@@ -223,7 +223,7 @@ void FilterBox::Inner::createControls(const std::vector<not_null<UserData*>> &ad
 
 void FilterBox::Inner::createAllActionsCheckbox(const FilterValue &filter) {
 	auto checked = (filter.flags == 0);
-	_allFlags = addRow(object_ptr<Ui::Checkbox>(this, lang(lng_admin_log_filter_all_actions), checked, st::adminLogFilterCheckbox), st::adminLogFilterCheckbox.margin.top());
+	_allFlags = addRow(object_ptr<Ui::Checkbox>(this, tr::lng_admin_log_filter_all_actions(tr::now), checked, st::adminLogFilterCheckbox), st::adminLogFilterCheckbox.margin.top());
 	_allFlags->checkedChanges(
 	) | rpl::start_with_next([=](bool checked) {
 		if (!std::exchange(_restoringInvariant, true)) {
@@ -266,21 +266,21 @@ void FilterBox::Inner::createActionsCheckboxes(const FilterValue &filter) {
 	};
 	auto isGroup = _channel->isMegagroup();
 	if (isGroup) {
-		addFlag(Flag::f_ban | Flag::f_unban | Flag::f_kick | Flag::f_unkick, lang(lng_admin_log_filter_restrictions));
+		addFlag(Flag::f_ban | Flag::f_unban | Flag::f_kick | Flag::f_unkick, tr::lng_admin_log_filter_restrictions(tr::now));
 	}
-	addFlag(Flag::f_promote | Flag::f_demote, lang(lng_admin_log_filter_admins_new));
-	addFlag(Flag::f_join | Flag::f_invite, lang(lng_admin_log_filter_members_new));
-	addFlag(Flag::f_info | Flag::f_settings, lang(_channel->isMegagroup() ? lng_admin_log_filter_info_group : lng_admin_log_filter_info_channel));
-	addFlag(Flag::f_delete, lang(lng_admin_log_filter_messages_deleted));
-	addFlag(Flag::f_edit, lang(lng_admin_log_filter_messages_edited));
+	addFlag(Flag::f_promote | Flag::f_demote, tr::lng_admin_log_filter_admins_new(tr::now));
+	addFlag(Flag::f_join | Flag::f_invite, tr::lng_admin_log_filter_members_new(tr::now));
+	addFlag(Flag::f_info | Flag::f_settings, _channel->isMegagroup() ? tr::lng_admin_log_filter_info_group(tr::now) : tr::lng_admin_log_filter_info_channel(tr::now));
+	addFlag(Flag::f_delete, tr::lng_admin_log_filter_messages_deleted(tr::now));
+	addFlag(Flag::f_edit, tr::lng_admin_log_filter_messages_edited(tr::now));
 	if (isGroup) {
-		addFlag(Flag::f_pinned, lang(lng_admin_log_filter_messages_pinned));
+		addFlag(Flag::f_pinned, tr::lng_admin_log_filter_messages_pinned(tr::now));
 	}
-	addFlag(Flag::f_leave, lang(lng_admin_log_filter_members_removed));
+	addFlag(Flag::f_leave, tr::lng_admin_log_filter_members_removed(tr::now));
 }
 
 void FilterBox::Inner::createAllUsersCheckbox(const FilterValue &filter) {
-	_allUsers = addRow(object_ptr<Ui::Checkbox>(this, lang(lng_admin_log_filter_all_admins), filter.allUsers, st::adminLogFilterCheckbox), st::adminLogFilterSkip);
+	_allUsers = addRow(object_ptr<Ui::Checkbox>(this, tr::lng_admin_log_filter_all_admins(tr::now), filter.allUsers, st::adminLogFilterCheckbox), st::adminLogFilterSkip);
 	_allUsers->checkedChanges(
 	) | rpl::start_with_next([=](bool checked) {
 		if (checked && !std::exchange(_restoringInvariant, true)) {
@@ -384,7 +384,7 @@ FilterBox::FilterBox(QWidget*, not_null<ChannelData*> channel, const std::vector
 }
 
 void FilterBox::prepare() {
-	setTitle(langFactory(lng_admin_log_filter_title));
+	setTitle(tr::lng_admin_log_filter_title());
 
 	_inner = setInnerWidget(object_ptr<Inner>(this, _channel, _admins, _initialFilter, [this] { refreshButtons(); }));
 	_inner->resizeToWidth(st::boxWideWidth);
@@ -396,13 +396,13 @@ void FilterBox::prepare() {
 void FilterBox::refreshButtons() {
 	clearButtons();
 	if (_inner->canSave()) {
-		addButton(langFactory(lng_settings_save), [this] {
+		addButton(tr::lng_settings_save(), [this] {
 			if (_saveCallback) {
 				_saveCallback(_inner->filter());
 			}
 		});
 	}
-	addButton(langFactory(lng_cancel), [this] { closeBox(); });
+	addButton(tr::lng_cancel(), [this] { closeBox(); });
 }
 
 void FilterBox::resizeToContent() {

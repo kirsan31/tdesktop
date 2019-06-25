@@ -31,7 +31,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "boxes/abstract_box.h"
 #include "passport/passport_form_controller.h"
 #include "window/themes/window_theme.h"
-#include "lang/lang_keys.h" // lang(lng_deleted) in user name
+#include "lang/lang_keys.h" // tr::lng_deleted(tr::now) in user name
 #include "data/data_media_types.h"
 #include "data/data_folder.h"
 #include "data/data_channel.h"
@@ -101,12 +101,15 @@ QString ExtractUnavailableReason(const QString &restriction) {
 	// {full} is in "{type}-{tag}-{tag}-{tag}" format
 	// if we find "all" tag we return the restriction string
 	const auto typeTags = restriction.mid(0, fullEnd).split('-').mid(1);
-#ifndef OS_MAC_STORE
-	const auto restrictionApplies = typeTags.contains(qsl("all"));
-#else // OS_MAC_STORE
+#ifdef OS_MAC_STORE
 	const auto restrictionApplies = typeTags.contains(qsl("all"))
 		|| typeTags.contains(qsl("ios"));
-#endif // OS_MAC_STORE
+#elif defined OS_WIN_STORE // OS_MAC_STORE
+	const auto restrictionApplies = typeTags.contains(qsl("all"))
+		|| typeTags.contains(qsl("ms"));
+#else
+	const auto restrictionApplies = typeTags.contains(qsl("all"));
+#endif // OS_MAC_STORE || OS_WIN_STORE
 	if (restrictionApplies) {
 		return restriction.midRef(fullEnd + 1).trimmed().toString();
 	}
@@ -213,7 +216,6 @@ void Session::clear() {
 	_sentMessagesData.clear();
 	cSetRecentInlineBots(RecentInlineBots());
 	cSetRecentStickers(RecentStickerPack());
-	cSetReportSpamStatuses(ReportSpamStatuses());
 	App::clearMousedItems();
 	_histories.clear();
 }
@@ -296,7 +298,7 @@ not_null<UserData*> Session::processUser(const MTPUser &data) {
 
 		result->input = MTP_inputPeerUser(data.vid, MTP_long(0));
 		result->inputUser = MTP_inputUser(data.vid, MTP_long(0));
-		result->setName(lang(lng_deleted), QString(), QString(), QString());
+		result->setName(tr::lng_deleted(tr::now), QString(), QString(), QString());
 		result->setPhoto(MTP_userProfilePhotoEmpty());
 		//result->setFlags(MTPDuser_ClientFlag::f_inaccessible | 0);
 		result->setFlags(MTPDuser::Flag::f_deleted);
@@ -306,7 +308,7 @@ not_null<UserData*> Session::processUser(const MTPUser &data) {
 		}
 		result->setBotInfoVersion(-1);
 		status = &emptyStatus;
-		result->setContactStatus(UserData::ContactStatus::PhoneUnknown);
+		result->setIsContact(false);
 		if (canShareThisContact != result->canShareThisContactFast()) {
 			update.flags |= UpdateFlag::UserCanShareContact;
 		}
@@ -340,7 +342,7 @@ not_null<UserData*> Session::processUser(const MTPUser &data) {
 				result->setPhone(QString());
 				update.flags |= UpdateFlag::UserPhoneChanged;
 			}
-			result->setName(lang(lng_deleted), QString(), QString(), QString());
+			result->setName(tr::lng_deleted(tr::now), QString(), QString(), QString());
 			result->setPhoto(MTP_userProfilePhotoEmpty());
 			status = &emptyStatus;
 		} else {
@@ -368,15 +370,16 @@ not_null<UserData*> Session::processUser(const MTPUser &data) {
 				&& !data.is_mutual_contact();
 			auto showPhoneChanged = !result->isServiceUser()
 				&& !data.is_self()
-				&& ((showPhone
-					&& result->contactStatus() == UserData::ContactStatus::Contact)
+				&& ((showPhone && result->isContact())
 					|| (!showPhone
-						&& result->contactStatus() == UserData::ContactStatus::CanAdd));
+						&& !result->isContact()
+						&& !result->phone().isEmpty()));
 			if (minimal) {
 				showPhoneChanged = false;
 				showPhone = !result->isServiceUser()
-					&& (result->id != _session->userPeerId())
-					&& (result->contactStatus() == UserData::ContactStatus::CanAdd);
+					&& !result->isContact()
+					&& !result->phone().isEmpty()
+					&& (result->id != _session->userPeerId());
 			}
 
 			// see also Local::readPeer
@@ -413,11 +416,8 @@ not_null<UserData*> Session::processUser(const MTPUser &data) {
 			} else {
 				result->setBotInfoVersion(-1);
 			}
-			result->setContactStatus((data.is_contact() || data.is_mutual_contact())
-				? UserData::ContactStatus::Contact
-				: result->phone().isEmpty()
-				? UserData::ContactStatus::PhoneUnknown
-				: UserData::ContactStatus::CanAdd);
+			result->setIsContact(data.is_contact()
+				|| data.is_mutual_contact());
 		}
 
 		if (canShareThisContact != result->canShareThisContactFast()) {
@@ -445,11 +445,6 @@ not_null<UserData*> Session::processUser(const MTPUser &data) {
 		}
 	}
 
-	if (result->contactStatus() == UserData::ContactStatus::PhoneUnknown
-		&& !result->phone().isEmpty()
-		&& !result->isSelf()) {
-		result->setContactStatus(UserData::ContactStatus::CanAdd);
-	}
 	if (App::main()) {
 		if (update.flags) {
 			update.peer = result;
@@ -1010,7 +1005,7 @@ void Session::setupUserIsContactViewer() {
 				"userIsContactChanged() called for a not loaded user!"));
 			return;
 		}
-		if (user->contactStatus() == UserData::ContactStatus::Contact) {
+		if (user->isContact()) {
 			const auto history = user->owner().history(user->id);
 			_contactsList.addByName(history);
 			if (!history->inChatList()) {
@@ -1400,6 +1395,14 @@ void Session::notifyStickersUpdated() {
 
 rpl::producer<> Session::stickersUpdated() const {
 	return _stickersUpdated.events();
+}
+
+void Session::notifyRecentStickersUpdated() {
+	_recentStickersUpdated.fire({});
+}
+
+rpl::producer<> Session::recentStickersUpdated() const {
+	return _recentStickersUpdated.events();
 }
 
 void Session::notifySavedGifsUpdated() {
@@ -2890,14 +2893,13 @@ void Session::applyUpdate(const MTPDupdateChatDefaultBannedRights &update) {
 	}
 }
 
-not_null<LocationData*> Session::location(const LocationCoords &coords) {
-	auto i = _locations.find(coords);
-	if (i == _locations.cend()) {
-		i = _locations.emplace(
-			coords,
-			std::make_unique<LocationData>(coords)).first;
-	}
-	return i->second.get();
+not_null<LocationThumbnail*> Session::location(const LocationPoint &point) {
+	const auto i = _locations.find(point);
+	return (i != _locations.cend())
+		? i->second.get()
+		: _locations.emplace(
+			point,
+			std::make_unique<LocationThumbnail>(point)).first->second.get();
 }
 
 void Session::registerPhotoItem(

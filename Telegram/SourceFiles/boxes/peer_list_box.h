@@ -100,7 +100,7 @@ public:
 	}
 
 	void refreshName(const style::PeerListItem &st);
-	const Text &name() const {
+	const Ui::Text::String &name() const {
 		return _name;
 	}
 
@@ -203,8 +203,8 @@ private:
 	not_null<PeerData*> _peer;
 	std::unique_ptr<Ui::RippleAnimation> _ripple;
 	std::unique_ptr<Ui::RoundImageCheckbox> _checkbox;
-	Text _name;
-	Text _status;
+	Ui::Text::String _name;
+	Ui::Text::String _status;
 	StatusType _statusType = StatusType::Online;
 	crl::time _statusValidTill = 0;
 	base::flat_set<QChar> _nameFirstLetters;
@@ -225,8 +225,8 @@ struct PeerListState;
 
 class PeerListDelegate {
 public:
-	virtual void peerListSetTitle(Fn<QString()> title) = 0;
-	virtual void peerListSetAdditionalTitle(Fn<QString()> title) = 0;
+	virtual void peerListSetTitle(rpl::producer<QString> title) = 0;
+	virtual void peerListSetAdditionalTitle(rpl::producer<QString> title) = 0;
 	virtual void peerListSetDescription(object_ptr<Ui::FlatLabel> description) = 0;
 	virtual void peerListSetSearchLoading(object_ptr<Ui::FlatLabel> loading) = 0;
 	virtual void peerListSetSearchNoResults(object_ptr<Ui::FlatLabel> noResults) = 0;
@@ -755,11 +755,10 @@ public:
 		std::unique_ptr<PeerListController> controller,
 		Fn<void(not_null<PeerListBox*>)> init);
 
-	void peerListSetTitle(Fn<QString()> title) override {
+	void peerListSetTitle(rpl::producer<QString> title) override {
 		setTitle(std::move(title));
 	}
-	void peerListSetAdditionalTitle(
-			Fn<QString()> title) override {
+	void peerListSetAdditionalTitle(rpl::producer<QString> title) override {
 		setAdditionalTitle(std::move(title));
 	}
 	void peerListSetSearchMode(PeerListSearchMode mode) override;

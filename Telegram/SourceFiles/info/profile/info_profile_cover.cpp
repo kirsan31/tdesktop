@@ -20,7 +20,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_info.h"
 #include "ui/widgets/labels.h"
 #include "ui/effects/ripple_animation.h"
+#include "ui/text/text_utilities.h" // Ui::Text::ToUpper
 #include "ui/special_buttons.h"
+#include "ui/unread_badge.h"
 #include "window/window_session_controller.h"
 #include "observer_peer.h"
 #include "core/application.h"
@@ -126,24 +128,30 @@ bool SectionToggle::checkRippleStartPosition(QPoint position) const {
 }
 
 auto MembersStatusText(int count) {
-	return lng_chat_status_members(lt_count_decimal, count);
+	return tr::lng_chat_status_members(tr::now, lt_count_decimal, count);
 };
 
 auto OnlineStatusText(int count) {
-	return lng_chat_status_online(lt_count_decimal, count);
+	return tr::lng_chat_status_online(tr::now, lt_count_decimal, count);
 };
 
 auto ChatStatusText(int fullCount, int onlineCount, bool isGroup) {
 	if (onlineCount > 1 && onlineCount <= fullCount) {
-		return lng_chat_status_members_online(
-			lt_members_count, MembersStatusText(fullCount),
-			lt_online_count, OnlineStatusText(onlineCount));
+		return tr::lng_chat_status_members_online(
+			tr::now,
+			lt_members_count,
+			MembersStatusText(fullCount),
+			lt_online_count,
+			OnlineStatusText(onlineCount));
 	} else if (fullCount > 0) {
-		return lng_chat_status_members(lt_count_decimal, fullCount);
+		return tr::lng_chat_status_members(
+			tr::now,
+			lt_count_decimal,
+			fullCount);
 	}
-	return lang(isGroup
-		? lng_group_status
-		: lng_channel_status);
+	return isGroup
+		? tr::lng_group_status(tr::now)
+		: tr::lng_channel_status(tr::now);
 };
 
 } // namespace
@@ -193,7 +201,7 @@ rpl::producer<bool> SectionWithToggle::toggledValue() const {
 	if (_toggle) {
 		return _toggle->checkedValue();
 	}
-	return rpl::never<bool>();
+	return nullptr;
 }
 
 rpl::producer<bool> SectionWithToggle::toggleShownValue() const {
@@ -212,6 +220,18 @@ Cover::Cover(
 	QWidget *parent,
 	not_null<PeerData*> peer,
 	not_null<Window::SessionController*> controller)
+: Cover(parent, peer, controller, NameValue(
+	peer
+) | rpl::map([=](const TextWithEntities &name) {
+	return name.text;
+})) {
+}
+
+Cover::Cover(
+	QWidget *parent,
+	not_null<PeerData*> peer,
+	not_null<Window::SessionController*> controller,
+	rpl::producer<QString> title)
 : SectionWithToggle(
 	parent,
 	st::infoProfilePhotoTop
@@ -234,13 +254,13 @@ Cover::Cover(
 	_peer->updateFull();
 
 	_name->setSelectable(true);
-	_name->setContextCopyText(lang(lng_profile_copy_fullname));
+	_name->setContextCopyText(tr::lng_profile_copy_fullname(tr::now));
 
 	if (!_peer->isMegagroup()) {
 		_status->setAttribute(Qt::WA_TransparentForMouseEvents);
 	}
 
-	initViewers();
+	initViewers(std::move(title));
 	setupChildGeometry();
 }
 
@@ -270,12 +290,12 @@ Cover *Cover::setOnlineCount(rpl::producer<int> &&count) {
 	return this;
 }
 
-void Cover::initViewers() {
+void Cover::initViewers(rpl::producer<QString> title) {
 	using Flag = Notify::PeerUpdate::Flag;
-	NameValue(
-		_peer
-	) | rpl::start_with_next([=](const TextWithEntities &name) {
-		_name->setText(name.text);
+	std::move(
+		title
+	) | rpl::start_with_next([=](const QString &title) {
+		_name->setText(title);
 		refreshNameGeometry(width());
 	}, lifetime());
 
@@ -297,9 +317,14 @@ void Cover::initViewers() {
 	}
 	VerifiedValue(
 		_peer
-	) | rpl::start_with_next(
-		[=](bool verified) { setVerified(verified); },
-		lifetime());
+	) | rpl::start_with_next([=](bool verified) {
+		setVerified(verified);
+	}, lifetime());
+	ScamValue(
+		_peer
+	) | rpl::start_with_next([=](bool scam) {
+		setScam(scam);
+	}, lifetime());
 }
 
 void Cover::refreshUploadPhotoOverlay() {
@@ -318,6 +343,7 @@ void Cover::setVerified(bool verified) {
 		return;
 	}
 	if (verified) {
+		_scamBadge.destroy();
 		_verifiedCheck.create(this);
 		_verifiedCheck->show();
 		_verifiedCheck->resize(st::infoVerifiedCheck.size());
@@ -328,6 +354,34 @@ void Cover::setVerified(bool verified) {
 		}, _verifiedCheck->lifetime());
 	} else {
 		_verifiedCheck.destroy();
+	}
+	refreshNameGeometry(width());
+}
+
+void Cover::setScam(bool scam) {
+	if ((_scamBadge != nullptr) == scam) {
+		return;
+	}
+	if (scam) {
+		_verifiedCheck.destroy();
+		const auto size = Ui::ScamBadgeSize();
+		const auto skip = st::infoVerifiedCheckPosition.x();
+		_scamBadge.create(this);
+		_scamBadge->show();
+		_scamBadge->resize(
+			size.width() + 2 * skip,
+			size.height() + 2 * skip);
+		_scamBadge->paintRequest(
+		) | rpl::start_with_next([=, badge = _scamBadge.data()] {
+			Painter p(badge);
+			Ui::DrawScamBadge(
+				p,
+				badge->rect().marginsRemoved({ skip, skip, skip, skip }),
+				badge->width(),
+				st::attentionButtonFg);
+		}, _scamBadge->lifetime());
+	} else {
+		_scamBadge.destroy();
 	}
 	refreshNameGeometry(width());
 }
@@ -353,7 +407,7 @@ void Cover::refreshStatusText() {
 				: result;
 		} else if (auto chat = _peer->asChat()) {
 			if (!chat->amIn()) {
-				return lang(lng_chat_status_unaccessible);
+				return tr::lng_chat_status_unaccessible(tr::now);
 			}
 			auto fullCount = std::max(
 				chat->count,
@@ -367,7 +421,7 @@ void Cover::refreshStatusText() {
 				channel->isMegagroup());
 			return hasMembersLink ? textcmdLink(1, result) : result;
 		}
-		return lang(lng_chat_status_unaccessible);
+		return tr::lng_chat_status_unaccessible(tr::now);
 	}();
 	_status->setRichText(statusText);
 	if (hasMembersLink) {
@@ -390,17 +444,29 @@ void Cover::refreshNameGeometry(int newWidth) {
 		- toggleSkip();
 	if (_verifiedCheck) {
 		nameWidth -= st::infoVerifiedCheckPosition.x()
-			+ st::infoVerifiedCheck.width();
+			+ _verifiedCheck->width();
+	} else if (_scamBadge) {
+		nameWidth -= st::infoVerifiedCheckPosition.x()
+			+ _scamBadge->width();
 	}
 	_name->resizeToNaturalWidth(nameWidth);
 	_name->moveToLeft(nameLeft, nameTop, newWidth);
 	if (_verifiedCheck) {
-		auto checkLeft = nameLeft
+		const auto checkLeft = nameLeft
 			+ _name->width()
 			+ st::infoVerifiedCheckPosition.x();
-		auto checkTop = nameTop
+		const auto checkTop = nameTop
 			+ st::infoVerifiedCheckPosition.y();
 		_verifiedCheck->moveToLeft(checkLeft, checkTop, newWidth);
+	} else if (_scamBadge) {
+		const auto skip = st::infoVerifiedCheckPosition.x();
+		const auto badgeLeft = nameLeft
+			+ _name->width()
+			+ st::infoVerifiedCheckPosition.x()
+			- skip;
+		const auto badgeTop = nameTop
+			+ (_name->height() - _scamBadge->height()) / 2;
+		_scamBadge->moveToLeft(badgeLeft, badgeTop, newWidth);
 	}
 }
 
@@ -434,7 +500,7 @@ void SharedMediaCover::createLabel() {
 	using namespace rpl::mappers;
 	auto label = object_ptr<Ui::FlatLabel>(
 		this,
-		Lang::Viewer(lng_profile_shared_media) | ToUpperValue(),
+		tr::lng_profile_shared_media() | Ui::Text::ToUpper(),
 		st::infoBlockHeaderLabel);
 	label->setAttribute(Qt::WA_TransparentForMouseEvents);
 

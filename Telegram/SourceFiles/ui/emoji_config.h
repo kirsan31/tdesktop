@@ -9,6 +9,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "base/binary_guard.h"
 #include "emoji.h"
+#include "lang/lang_keys.h"
 
 namespace Ui {
 namespace Emoji {
@@ -37,6 +38,8 @@ struct Set {
 // Thread safe, callback is called on main thread.
 void SwitchToSet(int id, Fn<void(bool)> callback);
 
+tr::phrase<> CategoryTitle(int index);
+
 std::vector<Set> Sets();
 int CurrentSetId();
 bool SetIsReady(int id);
@@ -44,6 +47,9 @@ rpl::producer<> Updated();
 
 int GetSizeNormal();
 int GetSizeLarge();
+#if defined Q_OS_MAC && !defined OS_MAC_OLD
+int GetSizeTouchbar();
+#endif
 
 class One {
 	struct CreationTag {
@@ -156,6 +162,7 @@ inline int ColorIndexFromOldKey(uint64 oldKey) {
 void ReplaceInText(TextWithEntities &result);
 RecentEmojiPack &GetRecent();
 void AddRecent(EmojiPtr emoji);
+rpl::producer<> UpdatedRecent();
 
 const QPixmap &SinglePixmap(EmojiPtr emoji, int fontHeight);
 void Draw(QPainter &p, EmojiPtr emoji, int size, int x, int y);

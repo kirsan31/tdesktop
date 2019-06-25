@@ -399,17 +399,17 @@ auto ConnectionState::computeLayout(const State &state) const -> Layout {
 		|| state.type == State::Type::Waiting;
 	switch (state.type) {
 	case State::Type::Connecting:
-		result.text = state.underCursor ? lang(lng_connecting) : QString();
+		result.text = state.underCursor ? tr::lng_connecting(tr::now) : QString();
 		break;
 
 	case State::Type::Waiting:
 		Assert(state.waitTillRetry > 0);
-		result.text = lng_reconnecting(lt_count, state.waitTillRetry);
+		result.text = tr::lng_reconnecting(tr::now, lt_count, state.waitTillRetry);
 		break;
 	}
 	result.textWidth = st::normalFont->width(result.text);
 	const auto maxTextWidth = (state.type == State::Type::Waiting)
-		? st::normalFont->width(lng_reconnecting(lt_count, 88))
+		? st::normalFont->width(tr::lng_reconnecting(tr::now, lt_count, 88))
 		: result.textWidth;
 	result.contentWidth = (result.textWidth > 0)
 		? (st::connectingTextPadding.left()
@@ -419,7 +419,7 @@ auto ConnectionState::computeLayout(const State &state) const -> Layout {
 	if (state.type == State::Type::Waiting) {
 		result.contentWidth += st::connectingRetryLink.padding.left()
 			+ st::connectingRetryLink.font->width(
-				lang(lng_reconnecting_try_now))
+				tr::lng_reconnecting_try_now(tr::now))
 			+ st::connectingRetryLink.padding.right();
 	}
 	result.hasRetry = (state.type == State::Type::Waiting);
@@ -576,7 +576,7 @@ void ConnectionState::Widget::refreshRetryLink(bool hasRetry) {
 	if (hasRetry && !_retry) {
 		_retry = base::make_unique_q<Ui::LinkButton>(
 			this,
-			lang(lng_reconnecting_try_now),
+			tr::lng_reconnecting_try_now(tr::now),
 			st::connectingRetryLink);
 		_retry->addClickHandler([=] {
 			MTP::restart();

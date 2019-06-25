@@ -94,7 +94,7 @@ private:
 		Received
 	};
 	struct Row {
-		Text name;
+		Ui::Text::String name;
 		QString letters;
 		enum class Type {
 			User,
@@ -107,7 +107,7 @@ private:
 		bool muted = false;
 		bool pinned = false;
 		QString date;
-		Text text;
+		Ui::Text::String text;
 		Status status = Status::None;
 		bool selected = false;
 		bool active = false;
@@ -120,15 +120,15 @@ private:
 		QString date;
 		bool attached = false;
 		bool tail = true;
-		Text text = { st::msgMinWidth };
+		Ui::Text::String text = { st::msgMinWidth };
 		QVector<int> waveform;
 		int waveactive = 0;
 		QString wavestatus;
 		QImage photo;
 		int photoWidth = 0;
 		int photoHeight = 0;
-		Text replyName = { st::msgMinWidth };
-		Text replyText = { st::msgMinWidth };
+		Ui::Text::String replyName = { st::msgMinWidth };
+		Ui::Text::String replyText = { st::msgMinWidth };
 	};
 
 	void prepare();
@@ -177,7 +177,7 @@ private:
 	int _rowsTop = 0;
 	std::vector<Row> _rows;
 
-	Text _topBarName;
+	Ui::Text::String _topBarName;
 	QString _topBarStatus;
 	bool _topBarStatusActive = false;
 
@@ -518,7 +518,7 @@ void Generator::paintComposeArea() {
 		field.y() + st::historyComposeField.textMargins.top() + st::historyComposeField.placeholderMargins.top(),
 		field.width() - st::historyComposeField.textMargins.left() - st::historyComposeField.textMargins.right(),
 		field.height() - st::historyComposeField.textMargins.top() - st::historyComposeField.textMargins.bottom());
-	_p->drawText(placeholderRect, lang(lng_message_ph), QTextOption(st::historyComposeField.placeholderAlign));
+	_p->drawText(placeholderRect, tr::lng_message_ph(tr::now), QTextOption(st::historyComposeField.placeholderAlign));
 
 	_p->restore();
 	_p->setClipping(false);
@@ -554,7 +554,7 @@ void Generator::paintDialogs() {
 	auto phRect = QRect(filter.x() + st::dialogsFilter.textMrg.left() + st::dialogsFilter.phPos.x(), filter.y() + st::dialogsFilter.textMrg.top() + st::dialogsFilter.phPos.y(), filter.width() - st::dialogsFilter.textMrg.left() - st::dialogsFilter.textMrg.right(), filter.height() - st::dialogsFilter.textMrg.top() - st::dialogsFilter.textMrg.bottom());;
 	_p->setFont(st::dialogsFilter.font);
 	_p->setPen(st::dialogsFilter.phColor[_palette]);
-	_p->drawText(phRect, lang(lng_dlg_filter), QTextOption(st::dialogsFilter.phAlign));
+	_p->drawText(phRect, tr::lng_dlg_filter(tr::now), QTextOption(st::dialogsFilter.phAlign));
 	_p->restore();
 	_p->setClipping(false);
 

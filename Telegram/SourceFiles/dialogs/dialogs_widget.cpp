@@ -156,7 +156,7 @@ Widget::Widget(
 : Window::AbstractSectionWidget(parent, controller)
 , _searchControls(this)
 , _mainMenuToggle(_searchControls, st::dialogsMenuToggle)
-, _filter(_searchControls, st::dialogsFilter, langFactory(lng_dlg_filter))
+, _filter(_searchControls, st::dialogsFilter, tr::lng_dlg_filter())
 , _chooseFromUser(
 	_searchControls,
 	object_ptr<Ui::IconButton>(this, st::dialogsSearchFrom))
@@ -175,6 +175,9 @@ Widget::Widget(
 	) | rpl::start_with_next([=](bool mayBlock, bool isBlocked) {
 		refreshLoadMoreButton(mayBlock, isBlocked);
 	}, lifetime());
+
+	fullSearchRefreshOn(session().settings().skipArchiveInSearchChanges(
+	) | rpl::map([] { return rpl::empty_value(); }));
 
 	connect(_inner, SIGNAL(draggingScrollDelta(int)), this, SLOT(onDraggingScrollDelta(int)));
 	connect(_inner, SIGNAL(mustScrollTo(int,int)), _scroll, SLOT(scrollToY(int,int)));
@@ -365,7 +368,13 @@ void Widget::setupSupportMode() {
 		return;
 	}
 
-	session().settings().supportAllSearchResultsValue(
+	fullSearchRefreshOn(session().settings().supportAllSearchResultsValue(
+	) | rpl::map([] { return rpl::empty_value(); }));
+}
+
+void Widget::fullSearchRefreshOn(rpl::producer<> events) {
+	std::move(
+		events
 	) | rpl::filter([=] {
 		return !_searchQuery.isEmpty();
 	}) | rpl::start_with_next([=] {
@@ -467,7 +476,7 @@ void Widget::checkUpdateStatus() {
 		if (_updateTelegram) return;
 		_updateTelegram.create(
 			this,
-			lang(lng_update_telegram),
+			tr::lng_update_telegram(tr::now),
 			st::dialogsUpdateButton,
 			st::dialogsInstallUpdate,
 			st::dialogsInstallUpdateOver);
@@ -777,8 +786,14 @@ bool Widget::onSearchMessages(bool searchCache) {
 		//		rpcDone(&Widget::searchReceived, SearchRequestType::FromStart),
 		//		rpcFail(&Widget::searchFailed, SearchRequestType::FromStart));
 		} else {
+			const auto flags = session().settings().skipArchiveInSearch()
+				? MTPmessages_SearchGlobal::Flag::f_folder_id
+				: MTPmessages_SearchGlobal::Flag(0);
+			const auto folderId = 0;
 			_searchRequest = MTP::send(
 				MTPmessages_SearchGlobal(
+					MTP_flags(flags),
+					MTP_int(folderId),
 					MTP_string(_searchQuery),
 					MTP_int(0),
 					MTP_inputPeerEmpty(),
@@ -914,8 +929,14 @@ void Widget::onSearchMore() {
 			//		rpcDone(&Widget::searchReceived, offsetId ? SearchRequestType::FromOffset : SearchRequestType::FromStart),
 			//		rpcFail(&Widget::searchFailed, offsetId ? SearchRequestType::FromOffset : SearchRequestType::FromStart));
 			} else {
+				const auto flags = session().settings().skipArchiveInSearch()
+					? MTPmessages_SearchGlobal::Flag::f_folder_id
+					: MTPmessages_SearchGlobal::Flag(0);
+				const auto folderId = 0;
 				_searchRequest = MTP::send(
 					MTPmessages_SearchGlobal(
+						MTP_flags(flags),
+						MTP_int(folderId),
 						MTP_string(_searchQuery),
 						MTP_int(_searchNextRate),
 						offsetPeer
@@ -1542,7 +1563,7 @@ void Widget::paintEvent(QPaintEvent *e) {
 		p.fillRect(0, aboveTop, width(), st::dialogsForwardHeight, st::dialogsForwardBg);
 		p.setPen(st::dialogsForwardFg);
 		p.setFont(st::dialogsForwardFont);
-		p.drawTextLeft(st::dialogsForwardTextLeft, st::dialogsForwardTextTop, width(), lang(lng_forward_choose));
+		p.drawTextLeft(st::dialogsForwardTextLeft, st::dialogsForwardTextTop, width(), tr::lng_forward_choose(tr::now));
 		aboveTop += st::dialogsForwardHeight;
 	}
 	auto above = QRect(0, aboveTop, width(), _scroll->y() - aboveTop);

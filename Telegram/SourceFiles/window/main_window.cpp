@@ -170,8 +170,8 @@ void MainWindow::checkLockByTerms() {
 	Ui::hideSettingsAndLayer(anim::type::instant);
 	const auto box = Ui::show(Box<TermsBox>(
 		*data,
-		langFactory(lng_terms_agree),
-		langFactory(lng_terms_decline)));
+		tr::lng_terms_agree(),
+		tr::lng_terms_decline()));
 
 	box->setCloseByEscape(false);
 	box->setCloseByOutsideClick(false);
@@ -204,9 +204,9 @@ void MainWindow::checkLockByTerms() {
 void MainWindow::showTermsDecline() {
 	const auto box = Ui::show(
 		Box<Window::TermsBox>(
-			TextWithEntities{ lang(lng_terms_update_sorry) },
-			langFactory(lng_terms_decline_and_delete),
-			langFactory(lng_terms_back),
+			TextWithEntities{ tr::lng_terms_update_sorry(tr::now) },
+			tr::lng_terms_decline_and_delete(),
+			tr::lng_terms_back(),
 			true),
 		LayerOption::KeepOther);
 
@@ -237,8 +237,8 @@ void MainWindow::showTermsDelete() {
 	};
 	*box = Ui::show(
 		Box<ConfirmBox>(
-			lang(lng_terms_delete_warning),
-			lang(lng_terms_delete_now),
+			tr::lng_terms_delete_warning(tr::now),
+			tr::lng_terms_delete_now(tr::now),
 			st::attentionBoxButton,
 			deleteByTerms,
 			[=] { if (*box) (*box)->closeBox(); }),

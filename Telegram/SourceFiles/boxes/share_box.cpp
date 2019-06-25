@@ -85,7 +85,7 @@ private:
 
 		PeerData *peer;
 		Ui::RoundImageCheckbox checkbox;
-		Text name;
+		Ui::Text::String name;
 		Ui::Animations::Simple nameActive;
 	};
 
@@ -160,14 +160,14 @@ ShareBox::ShareBox(
 , _select(
 	this,
 	st::contactsMultiSelect,
-	langFactory(lng_participant_filter))
+	tr::lng_participant_filter())
 , _comment(
 	this,
 	object_ptr<Ui::InputField>(
 		this,
 		st::shareComment,
 		Ui::InputField::Mode::MultiLine,
-		langFactory(lng_photos_comment)),
+		tr::lng_photos_comment()),
 	st::shareCommentPadding)
 , _searchTimer([=] { searchByUsername(); }) {
 }
@@ -205,7 +205,7 @@ void ShareBox::prepare() {
 	_select->resizeToWidth(st::boxWideWidth);
 	Ui::SendPendingMoveResizeEvents(_select);
 
-	setTitle(langFactory(lng_share_title));
+	setTitle(tr::lng_share_title());
 
 	_inner = setInnerWidget(
 		object_ptr<Inner>(
@@ -400,11 +400,11 @@ void ShareBox::keyPressEvent(QKeyEvent *e) {
 void ShareBox::createButtons() {
 	clearButtons();
 	if (_hasSelected) {
-		addButton(langFactory(lng_share_confirm), [=] { submit(); });
+		addButton(tr::lng_share_confirm(), [=] { submit(); });
 	} else if (_copyCallback) {
-		addButton(langFactory(lng_share_copy_link), [=] { copyLink(); });
+		addButton(tr::lng_share_copy_link(), [=] { copyLink(); });
 	}
-	addButton(langFactory(lng_cancel), [=] { closeBox(); });
+	addButton(tr::lng_cancel(), [=] { closeBox(); });
 }
 
 void ShareBox::applyFilterUpdate(const QString &query) {
@@ -417,7 +417,7 @@ void ShareBox::addPeerToMultiSelect(PeerData *peer, bool skipAnimation) {
 	auto addItemWay = skipAnimation ? AddItemWay::SkipAnimation : AddItemWay::Default;
 	_select->addItem(
 		peer->id,
-		peer->isSelf() ? lang(lng_saved_short) : peer->shortName(),
+		peer->isSelf() ? tr::lng_saved_short(tr::now) : peer->shortName(),
 		st::activeButtonBg,
 		PaintUserpicCallback(peer, true),
 		addItemWay);
@@ -590,7 +590,7 @@ void ShareBox::Inner::updateChat(not_null<PeerData*> peer) {
 void ShareBox::Inner::updateChatName(
 		not_null<Chat*> chat,
 		not_null<PeerData*> peer) {
-	const auto text = peer->isSelf() ? lang(lng_saved_messages) : peer->name;
+	const auto text = peer->isSelf() ? tr::lng_saved_messages(tr::now) : peer->name;
 	chat->name.setText(st::shareNameStyle, text, Ui::NameTextOptions());
 }
 
@@ -791,7 +791,7 @@ void ShareBox::Inner::paintEvent(QPaintEvent *e) {
 			p.setPen(st::noContactsColor);
 			p.drawText(
 				rect().marginsRemoved(st::boxPadding),
-				lang(lng_bot_no_chats),
+				tr::lng_bot_no_chats(tr::now),
 				style::al_center);
 		}
 	} else {
@@ -802,7 +802,7 @@ void ShareBox::Inner::paintEvent(QPaintEvent *e) {
 			p.setPen(st::noContactsColor);
 			p.drawText(
 				rect().marginsRemoved(st::boxPadding),
-				lang(lng_bot_chats_not_found),
+				tr::lng_bot_chats_not_found(tr::now),
 				style::al_center);
 		} else {
 			auto filteredSize = _filtered.size();
@@ -1081,7 +1081,7 @@ void ShareGameScoreByHash(const QString &hash) {
 
 	auto hashEncrypted = QByteArray::fromBase64(hash.toLatin1(), QByteArray::Base64UrlEncoding | QByteArray::OmitTrailingEquals);
 	if (hashEncrypted.size() <= key128Size || (hashEncrypted.size() % 0x10) != 0) {
-		Ui::show(Box<InformBox>(lang(lng_confirm_phone_link_invalid)));
+		Ui::show(Box<InformBox>(tr::lng_confirm_phone_link_invalid(tr::now)));
 		return;
 	}
 
@@ -1101,20 +1101,20 @@ void ShareGameScoreByHash(const QString &hash) {
 	// Check next 64 bits of SHA1() of data.
 	auto skipSha1Part = sizeof(channelAccessHash);
 	if (memcmp(dataSha1 + skipSha1Part, hashEncrypted.constData() + skipSha1Part, key128Size - skipSha1Part) != 0) {
-		Ui::show(Box<InformBox>(lang(lng_share_wrong_user)));
+		Ui::show(Box<InformBox>(tr::lng_share_wrong_user(tr::now)));
 		return;
 	}
 
 	auto hashDataInts = reinterpret_cast<int32*>(hashData.data());
 	if (!AuthSession::Exists() || hashDataInts[0] != Auth().userId()) {
-		Ui::show(Box<InformBox>(lang(lng_share_wrong_user)));
+		Ui::show(Box<InformBox>(tr::lng_share_wrong_user(tr::now)));
 		return;
 	}
 
 	// Check first 32 bits of channel access hash.
 	auto channelAccessHashInts = reinterpret_cast<int32*>(&channelAccessHash);
 	if (channelAccessHashInts[0] != hashDataInts[3]) {
-		Ui::show(Box<InformBox>(lang(lng_share_wrong_user)));
+		Ui::show(Box<InformBox>(tr::lng_share_wrong_user(tr::now)));
 		return;
 	}
 
@@ -1122,7 +1122,7 @@ void ShareGameScoreByHash(const QString &hash) {
 	auto msgId = hashDataInts[2];
 	if (!channelId && channelAccessHash) {
 		// If there is no channel id, there should be no channel access_hash.
-		Ui::show(Box<InformBox>(lang(lng_share_wrong_user)));
+		Ui::show(Box<InformBox>(tr::lng_share_wrong_user(tr::now)));
 		return;
 	}
 
@@ -1136,7 +1136,7 @@ void ShareGameScoreByHash(const QString &hash) {
 				if (const auto item = Auth().data().message(channel, msgId)) {
 					FastShareMessage(item);
 				} else {
-					Ui::show(Box<InformBox>(lang(lng_edit_deleted)));
+					Ui::show(Box<InformBox>(tr::lng_edit_deleted(tr::now)));
 				}
 			});
 		};

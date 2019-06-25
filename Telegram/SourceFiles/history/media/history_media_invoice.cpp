@@ -45,13 +45,13 @@ void HistoryInvoice::fillFromData(not_null<Data::Invoice*> invoice) {
 	auto labelText = [&] {
 		if (invoice->receiptMsgId) {
 			if (invoice->isTest) {
-				return lang(lng_payments_receipt_label_test);
+				return tr::lng_payments_receipt_label_test(tr::now);
 			}
-			return lang(lng_payments_receipt_label);
+			return tr::lng_payments_receipt_label(tr::now);
 		} else if (invoice->isTest) {
-			return lang(lng_payments_invoice_label_test);
+			return tr::lng_payments_invoice_label_test(tr::now);
 		}
-		return lang(lng_payments_invoice_label);
+		return tr::lng_payments_invoice_label(tr::now);
 	};
 	auto statusText = TextWithEntities {
 		FillAmountAndCurrency(invoice->amount, invoice->currency),
@@ -296,7 +296,7 @@ TextState HistoryInvoice::textState(QPoint point, StateRequest request) const {
 	auto symbolAdd = 0;
 	if (_titleHeight) {
 		if (point.y() >= tshift && point.y() < tshift + _titleHeight) {
-			Text::StateRequestElided titleRequest = request.forText();
+			Ui::Text::StateRequestElided titleRequest = request.forText();
 			titleRequest.lines = _titleHeight / lineHeight;
 			result = TextState(_parent, _title.getStateElidedLeft(
 				point - QPoint(padding.left(), tshift),

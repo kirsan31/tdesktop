@@ -58,7 +58,7 @@ struct SavedCredentials;
 namespace Data {
 
 class Folder;
-
+class LocationPoint;
 class WallPaper;
 
 class Session final {
@@ -229,6 +229,8 @@ public:
 
 	void notifyStickersUpdated();
 	[[nodiscard]] rpl::producer<> stickersUpdated() const;
+	void notifyRecentStickersUpdated();
+	[[nodiscard]] rpl::producer<> recentStickersUpdated() const;
 	void notifySavedGifsUpdated();
 	[[nodiscard]] rpl::producer<> savedGifsUpdated() const;
 	void notifyPinnedDialogsOrderUpdated();
@@ -244,6 +246,9 @@ public:
 		return stickersUpdateNeeded(_lastRecentStickersUpdate, now);
 	}
 	void setLastRecentStickersUpdate(crl::time update) {
+		if (update) {
+			notifyRecentStickersUpdated();
+		}
 		_lastRecentStickersUpdate = update;
 	}
 	bool favedStickersUpdateNeeded(crl::time now) const {
@@ -521,8 +526,8 @@ public:
 	not_null<PollData*> processPoll(const MTPPoll &data);
 	not_null<PollData*> processPoll(const MTPDmessageMediaPoll &data);
 
-	[[nodiscard]] not_null<LocationData*> location(
-		const LocationCoords &coords);
+	[[nodiscard]] not_null<LocationThumbnail*> location(
+		const LocationPoint &point);
 
 	void registerPhotoItem(
 		not_null<const PhotoData*> photo,
@@ -839,6 +844,7 @@ private:
 	rpl::event_stream<DialogsRowReplacement> _dialogsRowReplacements;
 
 	rpl::event_stream<> _stickersUpdated;
+	rpl::event_stream<> _recentStickersUpdated;
 	rpl::event_stream<> _savedGifsUpdated;
 	rpl::event_stream<> _pinnedDialogsOrderUpdated;
 	crl::time _lastStickersUpdate = 0;
@@ -895,8 +901,8 @@ private:
 		not_null<const WebPageData*>,
 		base::flat_set<not_null<ViewElement*>>> _webpageViews;
 	std::unordered_map<
-		LocationCoords,
-		std::unique_ptr<LocationData>> _locations;
+		LocationPoint,
+		std::unique_ptr<LocationThumbnail>> _locations;
 	std::unordered_map<
 		PollId,
 		std::unique_ptr<PollData>> _polls;

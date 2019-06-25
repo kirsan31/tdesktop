@@ -11,8 +11,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/widgets/labels.h"
 #include "ui/widgets/input_fields.h"
 #include "ui/wrap/fade_wrap.h"
-#include "boxes/confirm_phone_box.h"
 #include "ui/toast/toast.h"
+#include "ui/text/text_utilities.h"
+#include "boxes/confirm_phone_box.h"
 #include "boxes/confirm_box.h"
 #include "auth_session.h"
 #include "data/data_session.h"
@@ -48,7 +49,6 @@ void createErrorLabel(
 			object_ptr<Ui::FlatLabel>(
 				parent,
 				text,
-				Ui::FlatLabel::InitType::Simple,
 				st::changePhoneError));
 		label->hide(anim::type::instant);
 		label->moveToLeft(x, y);
@@ -120,23 +120,23 @@ private:
 };
 
 void ChangePhoneBox::EnterPhone::prepare() {
-	setTitle(langFactory(lng_change_phone_title));
+	setTitle(tr::lng_change_phone_title());
 
 	auto phoneValue = QString();
-	_phone.create(this, st::defaultInputField, langFactory(lng_change_phone_new_title), phoneValue);
+	_phone.create(this, st::defaultInputField, tr::lng_change_phone_new_title(), phoneValue);
 
 	_phone->resize(st::boxWidth - 2 * st::boxPadding.left(), _phone->height());
 	_phone->moveToLeft(st::boxPadding.left(), st::boxLittleSkip);
 	connect(_phone, &Ui::PhoneInput::submitted, [=] { submit(); });
 
-	auto description = object_ptr<Ui::FlatLabel>(this, lang(lng_change_phone_new_description), Ui::FlatLabel::InitType::Simple, st::changePhoneLabel);
+	auto description = object_ptr<Ui::FlatLabel>(this, tr::lng_change_phone_new_description(tr::now), st::changePhoneLabel);
 	auto errorSkip = st::boxLittleSkip + st::changePhoneError.style.font->height;
 	description->moveToLeft(st::boxPadding.left(), _phone->y() + _phone->height() + errorSkip + st::boxLittleSkip);
 
 	setDimensions(st::boxWidth, description->bottomNoMargins() + st::boxLittleSkip);
 
-	addButton(langFactory(lng_change_phone_new_submit), [this] { submit(); });
-	addButton(langFactory(lng_cancel), [this] { closeBox(); });
+	addButton(tr::lng_change_phone_new_submit(), [this] { submit(); });
+	addButton(tr::lng_cancel(), [this] { closeBox(); });
 }
 
 void ChangePhoneBox::EnterPhone::submit() {
@@ -196,21 +196,22 @@ void ChangePhoneBox::EnterPhone::sendPhoneDone(const QString &phoneNumber, const
 bool ChangePhoneBox::EnterPhone::sendPhoneFail(const QString &phoneNumber, const RPCError &error) {
 	auto errorText = Lang::Hard::ServerError();
 	if (MTP::isFloodError(error)) {
-		errorText = lang(lng_flood_error);
+		errorText = tr::lng_flood_error(tr::now);
 	} else if (MTP::isDefaultHandledError(error)) {
 		return false;
 	} else if (error.type() == qstr("PHONE_NUMBER_INVALID")) {
-		errorText = lang(lng_bad_phone);
+		errorText = tr::lng_bad_phone(tr::now);
 	} else if (error.type() == qstr("PHONE_NUMBER_BANNED")) {
 		ShowPhoneBannedError(phoneNumber);
 		_requestId = 0;
 		return true;
 	} else if (error.type() == qstr("PHONE_NUMBER_OCCUPIED")) {
 		Ui::show(Box<InformBox>(
-			lng_change_phone_occupied(
+			tr::lng_change_phone_occupied(
+				tr::now,
 				lt_phone,
 				App::formatPhone(phoneNumber)),
-			lang(lng_box_ok)));
+			tr::lng_box_ok(tr::now)));
 		_requestId = 0;
 		return true;
 	}
@@ -235,14 +236,18 @@ ChangePhoneBox::EnterCode::EnterCode(QWidget*, const QString &phone, const QStri
 }
 
 void ChangePhoneBox::EnterCode::prepare() {
-	setTitle(langFactory(lng_change_phone_title));
+	setTitle(tr::lng_change_phone_title());
 
-	auto descriptionText = lng_change_phone_code_description(lt_phone, textcmdStartSemibold() + App::formatPhone(_phone) + textcmdStopSemibold());
-	auto description = object_ptr<Ui::FlatLabel>(this, descriptionText, Ui::FlatLabel::InitType::Rich, st::changePhoneLabel);
+	auto descriptionText = tr::lng_change_phone_code_description(
+		tr::now,
+		lt_phone,
+		Ui::Text::Bold(App::formatPhone(_phone)),
+		Ui::Text::WithEntities);
+	auto description = object_ptr<Ui::FlatLabel>(this, rpl::single(descriptionText), st::changePhoneLabel);
 	description->moveToLeft(st::boxPadding.left(), 0);
 
 	auto phoneValue = QString();
-	_code.create(this, st::defaultInputField, langFactory(lng_change_phone_code_title), phoneValue);
+	_code.create(this, st::defaultInputField, tr::lng_change_phone_code_title(), phoneValue);
 	_code->setAutoSubmit(_codeLength, [=] { submit(); });
 	_code->setChangedCallback([=] { hideError(); });
 
@@ -257,8 +262,8 @@ void ChangePhoneBox::EnterCode::prepare() {
 		updateCall();
 	}
 
-	addButton(langFactory(lng_change_phone_new_submit), [=] { submit(); });
-	addButton(langFactory(lng_cancel), [=] { closeBox(); });
+	addButton(tr::lng_change_phone_new_submit(), [=] { submit(); });
+	addButton(tr::lng_cancel(), [=] { closeBox(); });
 }
 
 int ChangePhoneBox::EnterCode::countHeight() {
@@ -282,7 +287,7 @@ void ChangePhoneBox::EnterCode::submit() {
 		if (weak) {
 			Ui::hideLayer();
 		}
-		Ui::Toast::Show(lang(lng_change_phone_success));
+		Ui::Toast::Show(tr::lng_change_phone_success(tr::now));
 	}), rpcFail(crl::guard(this, [this](const RPCError &error) {
 		return sendCodeFail(error);
 	})));
@@ -299,7 +304,7 @@ void ChangePhoneBox::EnterCode::updateCall() {
 	if (text.isEmpty()) {
 		_callLabel.destroy();
 	} else if (!_callLabel) {
-		_callLabel.create(this, text, Ui::FlatLabel::InitType::Simple, st::changePhoneLabel);
+		_callLabel.create(this, text, st::changePhoneLabel);
 		_callLabel->moveToLeft(st::boxPadding.left(), countHeight() - _callLabel->height());
 		_callLabel->show();
 	} else {
@@ -317,18 +322,18 @@ void ChangePhoneBox::EnterCode::showError(const QString &text) {
 bool ChangePhoneBox::EnterCode::sendCodeFail(const RPCError &error) {
 	auto errorText = Lang::Hard::ServerError();
 	if (MTP::isFloodError(error)) {
-		errorText = lang(lng_flood_error);
+		errorText = tr::lng_flood_error(tr::now);
 	} else if (MTP::isDefaultHandledError(error)) {
 		return false;
 	} else if (error.type() == qstr("PHONE_CODE_EMPTY") || error.type() == qstr("PHONE_CODE_INVALID")) {
-		errorText = lang(lng_bad_code);
+		errorText = tr::lng_bad_code(tr::now);
 	} else if (error.type() == qstr("PHONE_CODE_EXPIRED")
 		|| error.type() == qstr("PHONE_NUMBER_BANNED")) {
 		closeBox(); // Go back to phone input.
 		_requestId = 0;
 		return true;
 	} else if (error.type() == qstr("PHONE_NUMBER_INVALID")) {
-		errorText = lang(lng_bad_phone);
+		errorText = tr::lng_bad_phone(tr::now);
 	}
 	_requestId = 0;
 	showError(errorText);
@@ -336,17 +341,20 @@ bool ChangePhoneBox::EnterCode::sendCodeFail(const RPCError &error) {
 }
 
 void ChangePhoneBox::prepare() {
-	setTitle(langFactory(lng_change_phone_title));
-	addButton(langFactory(lng_change_phone_button), [] {
-		Ui::show(Box<ConfirmBox>(lang(lng_change_phone_warning), [] {
+	setTitle(tr::lng_change_phone_title());
+	addButton(tr::lng_change_phone_button(), [] {
+		Ui::show(Box<ConfirmBox>(tr::lng_change_phone_warning(tr::now), [] {
 			Ui::show(Box<EnterPhone>());
 		}));
 	});
-	addButton(langFactory(lng_cancel), [this] {
+	addButton(tr::lng_cancel(), [this] {
 		closeBox();
 	});
 
-	auto label = object_ptr<Ui::FlatLabel>(this, lang(lng_change_phone_description), Ui::FlatLabel::InitType::Rich, st::changePhoneDescription);
+	const auto label = Ui::CreateChild<Ui::FlatLabel>(
+		this,
+		tr::lng_change_phone_about(Ui::Text::RichLangValue),
+		st::changePhoneDescription);
 	label->moveToLeft((st::boxWideWidth - label->width()) / 2, st::changePhoneDescriptionTop);
 
 	setDimensions(st::boxWideWidth, label->bottomNoMargins() + st::boxLittleSkip);

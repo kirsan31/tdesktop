@@ -12,6 +12,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/widgets/buttons.h"
 #include "ui/widgets/input_fields.h"
 #include "ui/widgets/labels.h"
+#include "ui/text/text_utilities.h"
 #include "core/click_handler_types.h" // UrlClickHandler
 #include "base/qthelp_url.h" // qthelp::url_encode
 #include "platform/platform_info.h" // Platform::SystemVersionPretty
@@ -58,9 +59,9 @@ void ShowPhoneBannedError(const QString &phone) {
 		}
 	};
 	*box = Ui::show(Box<ConfirmBox>(
-		lang(lng_signin_banned_text),
-		lang(lng_box_ok),
-		lang(lng_signin_banned_help),
+		tr::lng_signin_banned_text(tr::now),
+		tr::lng_box_ok(tr::now),
+		tr::lng_signin_banned_help(tr::now),
 		close,
 		[=] { SendToBannedHelp(phone); close(); }));
 
@@ -69,9 +70,9 @@ void ShowPhoneBannedError(const QString &phone) {
 SentCodeField::SentCodeField(
 	QWidget *parent,
 	const style::InputField &st,
-	Fn<QString()> placeholderFactory,
+	rpl::producer<QString> placeholder,
 	const QString &val)
-: Ui::InputField(parent, st, std::move(placeholderFactory), val) {
+: Ui::InputField(parent, st, std::move(placeholder), val) {
 	connect(this, &Ui::InputField::changed, [this] { fix(); });
 }
 
@@ -181,12 +182,12 @@ QString SentCodeCall::getText() const {
 	switch (_status.state) {
 	case State::Waiting: {
 		if (_status.timeout >= 3600) {
-			return lng_code_call(lt_minutes, qsl("%1:%2").arg(_status.timeout / 3600).arg((_status.timeout / 60) % 60, 2, 10, QChar('0')), lt_seconds, qsl("%1").arg(_status.timeout % 60, 2, 10, QChar('0')));
+			return tr::lng_code_call(tr::now, lt_minutes, qsl("%1:%2").arg(_status.timeout / 3600).arg((_status.timeout / 60) % 60, 2, 10, QChar('0')), lt_seconds, qsl("%1").arg(_status.timeout % 60, 2, 10, QChar('0')));
 		}
-		return lng_code_call(lt_minutes, QString::number(_status.timeout / 60), lt_seconds, qsl("%1").arg(_status.timeout % 60, 2, 10, QChar('0')));
+		return tr::lng_code_call(tr::now, lt_minutes, QString::number(_status.timeout / 60), lt_seconds, qsl("%1").arg(_status.timeout % 60, 2, 10, QChar('0')));
 	} break;
-	case State::Calling: return lang(lng_code_calling);
-	case State::Called: return lang(lng_code_called);
+	case State::Calling: return tr::lng_code_calling(tr::now);
+	case State::Called: return tr::lng_code_called(tr::now);
 	}
 	return QString();
 }
@@ -246,11 +247,11 @@ void ConfirmPhoneBox::sendCodeDone(const MTPauth_SentCode &result) {
 bool ConfirmPhoneBox::sendCodeFail(const RPCError &error) {
 	auto errorText = Lang::Hard::ServerError();
 	if (MTP::isFloodError(error)) {
-		errorText = lang(lng_flood_error);
+		errorText = tr::lng_flood_error(tr::now);
 	} else if (MTP::isDefaultHandledError(error)) {
 		return false;
 	} else if (error.code() == 400) {
-		errorText = lang(lng_confirm_phone_link_invalid);
+		errorText = tr::lng_confirm_phone_link_invalid(tr::now);
 	}
 	_sendCodeRequestId = 0;
 	Ui::show(Box<InformBox>(errorText));
@@ -268,24 +269,22 @@ void ConfirmPhoneBox::launch() {
 }
 
 void ConfirmPhoneBox::prepare() {
-	_about.create(this, st::confirmPhoneAboutLabel);
-	TextWithEntities aboutText;
-	auto formattedPhone = App::formatPhone(_phone);
-	aboutText.text = lng_confirm_phone_about(lt_phone, formattedPhone);
-	auto phonePosition = aboutText.text.indexOf(formattedPhone);
-	if (phonePosition >= 0) {
-		aboutText.entities.push_back({ EntityType::Bold, phonePosition, formattedPhone.size() });
-	}
-	_about->setMarkedText(aboutText);
+	_about.create(
+		this,
+		tr::lng_confirm_phone_about(
+			lt_phone,
+			rpl::single(Ui::Text::Bold(App::formatPhone(_phone))),
+			Ui::Text::WithEntities),
+		st::confirmPhoneAboutLabel);
 
-	_code.create(this, st::confirmPhoneCodeField, langFactory(lng_code_ph));
+	_code.create(this, st::confirmPhoneCodeField, tr::lng_code_ph());
 	_code->setAutoSubmit(_sentCodeLength, [=] { sendCode(); });
 	_code->setChangedCallback([=] { showError(QString()); });
 
-	setTitle(langFactory(lng_confirm_phone_title));
+	setTitle(tr::lng_confirm_phone_title());
 
-	addButton(langFactory(lng_confirm_phone_send), [=] { sendCode(); });
-	addButton(langFactory(lng_cancel), [=] { closeBox(); });
+	addButton(tr::lng_confirm_phone_send(), [=] { sendCode(); });
+	addButton(tr::lng_cancel(), [=] { closeBox(); });
 
 	setDimensions(st::boxWidth, st::usernamePadding.top() + _code->height() + st::usernameSkip + _about->height() + st::usernameSkip);
 
@@ -321,19 +320,19 @@ void ConfirmPhoneBox::sendCode() {
 
 void ConfirmPhoneBox::confirmDone(const MTPBool &result) {
 	_sendCodeRequestId = 0;
-	Ui::show(Box<InformBox>(lng_confirm_phone_success(lt_phone, App::formatPhone(_phone))));
+	Ui::show(Box<InformBox>(tr::lng_confirm_phone_success(tr::now, lt_phone, App::formatPhone(_phone))));
 }
 
 bool ConfirmPhoneBox::confirmFail(const RPCError &error) {
 	auto errorText = Lang::Hard::ServerError();
 	if (MTP::isFloodError(error)) {
-		errorText = lang(lng_flood_error);
+		errorText = tr::lng_flood_error(tr::now);
 	} else if (MTP::isDefaultHandledError(error)) {
 		return false;
 	} else {
 		auto &errorType = error.type();
 		if (errorType == qstr("PHONE_CODE_EMPTY") || errorType == qstr("PHONE_CODE_INVALID")) {
-			errorText = lang(lng_bad_code);
+			errorText = tr::lng_bad_code(tr::now);
 		}
 	}
 	_sendCodeRequestId = 0;
@@ -369,7 +368,7 @@ void ConfirmPhoneBox::paintEvent(QPaintEvent *e) {
 	auto errorText = _error;
 	if (errorText.isEmpty()) {
 		p.setPen(st::usernameDefaultFg);
-		errorText = lang(lng_confirm_phone_enter_code);
+		errorText = tr::lng_confirm_phone_enter_code(tr::now);
 	} else {
 		p.setPen(st::boxTextFgError);
 	}

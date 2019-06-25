@@ -67,7 +67,7 @@ private:
 	const style::RoundButton &_confirmStyle;
 	bool _informative = false;
 
-	Text _text;
+	Ui::Text::String _text;
 	int _textWidth = 0;
 	int _textHeight = 0;
 	int _maxLineCount = 16;
@@ -109,7 +109,7 @@ private:
 
 	not_null<ChannelData*> _channel;
 
-	Text _text;
+	Ui::Text::String _text;
 	int32 _textWidth, _textHeight;
 
 	QRect _invitationLink;
@@ -224,9 +224,9 @@ class ConfirmDontWarnBox : public BoxContent {
 public:
 	ConfirmDontWarnBox(
 		QWidget*,
-		const QString &text,
+		rpl::producer<TextWithEntities> text,
 		const QString &checkbox,
-		const QString &confirm,
+		rpl::producer<QString> confirm,
 		FnMut<void(bool)> callback);
 
 protected:
@@ -234,11 +234,11 @@ protected:
 
 private:
 	not_null<Ui::RpWidget*> setupContent(
-		const QString &text,
+		rpl::producer<TextWithEntities> text,
 		const QString &checkbox,
 		FnMut<void(bool)> callback);
 
-	QString _confirm;
+	rpl::producer<QString> _confirm;
 	FnMut<void()> _callback;
 	not_null<Ui::RpWidget*> _content;
 

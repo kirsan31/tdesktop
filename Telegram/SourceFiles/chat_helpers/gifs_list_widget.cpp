@@ -63,7 +63,7 @@ private:
 
 GifsListWidget::Footer::Footer(not_null<GifsListWidget*> parent) : InnerFooter(parent)
 , _pan(parent)
-, _field(this, st::gifsSearchField, langFactory(lng_gifs_search))
+, _field(this, st::gifsSearchField, tr::lng_gifs_search())
 , _cancel(this, st::gifsSearchCancel) {
 	connect(_field, &Ui::InputField::submitted, [=] {
 		_pan->sendInlineRequest();
@@ -274,7 +274,9 @@ void GifsListWidget::paintInlineItems(Painter &p, QRect clip) {
 	if (_rows.isEmpty()) {
 		p.setFont(st::normalFont);
 		p.setPen(st::noContactsColor);
-		auto text = lang(_inlineQuery.isEmpty() ? lng_gifs_no_saved : lng_inline_bot_no_results);
+		auto text = _inlineQuery.isEmpty()
+			? tr::lng_gifs_no_saved(tr::now)
+			: tr::lng_inline_bot_no_results(tr::now);
 		p.drawText(QRect(0, 0, width(), (height() / 3) * 2 + st::normalFont->height), text, style::al_center);
 		return;
 	}

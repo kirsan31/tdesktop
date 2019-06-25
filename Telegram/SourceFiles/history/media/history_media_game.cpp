@@ -123,7 +123,7 @@ QSize HistoryGame::countOptimalSize() {
 	minHeight += padding.top() + padding.bottom();
 
 	if (!_gameTagWidth) {
-		_gameTagWidth = st::msgDateFont->width(lang(lng_game_tag).toUpper());
+		_gameTagWidth = st::msgDateFont->width(tr::lng_game_tag(tr::now).toUpper());
 	}
 	return { maxWidth, minHeight };
 }
@@ -262,7 +262,7 @@ void HistoryGame::draw(Painter &p, const QRect &r, TextSelection selection, crl:
 
 		p.setFont(st::msgDateFont);
 		p.setPen(st::msgDateImgFg);
-		p.drawTextLeft(gameX + st::msgDateImgPadding.x(), gameY + st::msgDateImgPadding.y(), pixwidth, lang(lng_game_tag).toUpper());
+		p.drawTextLeft(gameX + st::msgDateImgPadding.x(), gameY + st::msgDateImgPadding.y(), pixwidth, tr::lng_game_tag(tr::now).toUpper());
 
 		p.translate(-attachLeft, -attachTop);
 	}
@@ -290,7 +290,7 @@ TextState HistoryGame::textState(QPoint point, StateRequest request) const {
 	auto lineHeight = unitedLineHeight();
 	if (_titleLines) {
 		if (point.y() >= tshift && point.y() < tshift + _titleLines * lineHeight) {
-			Text::StateRequestElided titleRequest = request.forText();
+			Ui::Text::StateRequestElided titleRequest = request.forText();
 			titleRequest.lines = _titleLines;
 			result = TextState(_parent, _title.getStateElidedLeft(
 				point - QPoint(padding.left(), tshift),
@@ -304,7 +304,7 @@ TextState HistoryGame::textState(QPoint point, StateRequest request) const {
 	}
 	if (_descriptionLines) {
 		if (point.y() >= tshift && point.y() < tshift + _descriptionLines * lineHeight) {
-			Text::StateRequestElided descriptionRequest = request.forText();
+			Ui::Text::StateRequestElided descriptionRequest = request.forText();
 			descriptionRequest.lines = _descriptionLines;
 			result = TextState(_parent, _description.getStateElidedLeft(
 				point - QPoint(padding.left(), tshift),
@@ -420,7 +420,7 @@ void HistoryGame::parentTextUpdated() {
 				consumed,
 				Ui::ItemTextOptions(_parent->data()));
 		} else {
-			_description = Text(st::msgMinWidth - st::webPageLeft);
+			_description = Ui::Text::String(st::msgMinWidth - st::webPageLeft);
 		}
 		history()->owner().requestViewResize(_parent);
 	}

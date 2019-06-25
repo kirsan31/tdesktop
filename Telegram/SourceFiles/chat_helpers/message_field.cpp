@@ -112,7 +112,7 @@ void EditLinkBox::prepare() {
 		object_ptr<Ui::InputField>(
 			content,
 			st::defaultInputField,
-			langFactory(lng_formatting_link_text),
+			tr::lng_formatting_link_text(),
 			_startText),
 		st::markdownLinkFieldPadding);
 	text->setInstantReplaces(Ui::InstantReplaces::Default());
@@ -125,7 +125,7 @@ void EditLinkBox::prepare() {
 		object_ptr<Ui::InputField>(
 			content,
 			st::defaultInputField,
-			langFactory(lng_formatting_link_url),
+			tr::lng_formatting_link_url(),
 			_startLink.trimmed()),
 		st::markdownLinkFieldPadding);
 
@@ -157,13 +157,12 @@ void EditLinkBox::prepare() {
 		}
 	});
 
-	const auto title = url->getLastText().isEmpty()
-			? lng_formatting_link_create_title
-			: lng_formatting_link_edit_title;
-	setTitle(langFactory(title));
+	setTitle(url->getLastText().isEmpty()
+		? tr::lng_formatting_link_create_title()
+		: tr::lng_formatting_link_edit_title());
 
-	addButton(langFactory(lng_formatting_link_create), submit);
-	addButton(langFactory(lng_cancel), [=] { closeBox(); });
+	addButton(tr::lng_formatting_link_create(), submit);
+	addButton(tr::lng_cancel(), [=] { closeBox(); });
 
 	content->resizeToWidth(st::boxWidth);
 	content->moveToLeft(0, 0);
@@ -238,6 +237,10 @@ EntitiesInText ConvertTextTagsToEntities(const TextWithTags::Tags &tags) {
 			push(EntityType::Bold);
 		} else if (tag.id == Ui::InputField::kTagItalic) {
 			push(EntityType::Italic);
+		} else if (tag.id == Ui::InputField::kTagUnderline) {
+			push(EntityType::Underline);
+		} else if (tag.id == Ui::InputField::kTagStrikeOut) {
+			push(EntityType::StrikeOut);
 		} else if (tag.id == Ui::InputField::kTagCode) {
 			push(EntityType::Code);
 		} else if (tag.id == Ui::InputField::kTagPre) { // #TODO entities
@@ -275,8 +278,14 @@ TextWithTags::Tags ConvertEntitiesToTextTags(const EntitiesInText &entities) {
 			}
 		} break;
 		case EntityType::Bold: push(Ui::InputField::kTagBold); break;
-		case EntityType::Italic: push(Ui::InputField::kTagItalic); break; // #TODO entities
-		case EntityType::Code: push(Ui::InputField::kTagCode); break;
+		case EntityType::Italic: push(Ui::InputField::kTagItalic); break;
+		case EntityType::Underline:
+			push(Ui::InputField::kTagUnderline);
+			break;
+		case EntityType::StrikeOut:
+			push(Ui::InputField::kTagStrikeOut);
+			break;
+		case EntityType::Code: push(Ui::InputField::kTagCode); break; // #TODO entities
 		case EntityType::Pre: push(Ui::InputField::kTagPre); break;
 		}
 	}

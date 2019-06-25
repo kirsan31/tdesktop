@@ -401,28 +401,20 @@ rpl::producer<not_null<DocumentData*>> TabbedSelector::fileChosen() const {
 }
 
 rpl::producer<not_null<PhotoData*>> TabbedSelector::photoChosen() const {
-	return full()
-		? gifs()->photoChosen()
-		: rpl::never<not_null<PhotoData*>>();
+	return full() ? gifs()->photoChosen() : nullptr;
 }
 
 auto TabbedSelector::inlineResultChosen() const
 -> rpl::producer<InlineChosen> {
-	return full()
-		? gifs()->inlineResultChosen()
-		: rpl::never<InlineChosen>();
+	return full() ? gifs()->inlineResultChosen() : nullptr;
 }
 
 rpl::producer<> TabbedSelector::cancelled() const {
-	return full()
-		? gifs()->cancelRequests()
-		: rpl::never<>();
+	return full() ? gifs()->cancelRequests() : nullptr;
 }
 
 rpl::producer<> TabbedSelector::checkForHide() const {
-	return full()
-		? stickers()->checkForHide()
-		: rpl::never<>();
+	return full() ? stickers()->checkForHide() : nullptr;
 }
 
 rpl::producer<> TabbedSelector::slideFinished() const {
@@ -671,21 +663,20 @@ void TabbedSelector::setCurrentPeer(PeerData *peer) {
 
 void TabbedSelector::checkRestrictedPeer() {
 	if (_currentPeer) {
-		const auto errorKey = (_currentTabType == SelectorTab::Stickers)
-			? Data::RestrictionErrorKey(
+		const auto error = (_currentTabType == SelectorTab::Stickers)
+			? Data::RestrictionError(
 				_currentPeer,
 				ChatRestriction::f_send_stickers)
 			: (_currentTabType == SelectorTab::Gifs)
-			? Data::RestrictionErrorKey(
+			? Data::RestrictionError(
 				_currentPeer,
 				ChatRestriction::f_send_gifs)
 			: std::nullopt;
-		if (errorKey) {
+		if (error) {
 			if (!_restrictedLabel) {
 				_restrictedLabel.create(
 					this,
-					lang(*errorKey),
-					Ui::FlatLabel::InitType::Simple,
+					*error,
 					st::stickersRestrictedLabel);
 				_restrictedLabel->show();
 				updateRestrictedLabelGeometry();
@@ -757,9 +748,9 @@ void TabbedSelector::createTabsSlider() {
 	_tabsSlider.create(this, st::emojiTabs);
 
 	auto sections = QStringList();
-	sections.push_back(lang(lng_switch_emoji).toUpper());
-	sections.push_back(lang(lng_switch_stickers).toUpper());
-	sections.push_back(lang(lng_switch_gifs).toUpper());
+	sections.push_back(tr::lng_switch_emoji(tr::now).toUpper());
+	sections.push_back(tr::lng_switch_stickers(tr::now).toUpper());
+	sections.push_back(tr::lng_switch_gifs(tr::now).toUpper());
 	_tabsSlider->setSections(sections);
 
 	_tabsSlider->setActiveSectionFast(static_cast<int>(_currentTabType));

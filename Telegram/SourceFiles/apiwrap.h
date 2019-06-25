@@ -99,7 +99,9 @@ public:
 		bool operator!=(const BlockedUsersSlice &other) const;
 	};
 
-	ApiWrap(not_null<AuthSession*> session);
+	explicit ApiWrap(not_null<AuthSession*> session);
+
+	AuthSession &session() const;
 
 	void applyUpdates(const MTPUpdates &updates, uint64 sentMessageRandomId = 0);
 	void applyNotifySettings(
@@ -148,6 +150,7 @@ public:
 	void requestFullPeer(not_null<PeerData*> peer);
 	void requestPeer(not_null<PeerData*> peer);
 	void requestPeers(const QList<PeerData*> &peers);
+	void requestPeerSettings(not_null<PeerData*> peer);
 	void requestLastParticipants(not_null<ChannelData*> channel);
 	void requestBots(not_null<ChannelData*> channel);
 	void requestAdmins(not_null<ChannelData*> channel);
@@ -328,7 +331,7 @@ public:
 		const MTPchannels_ChannelParticipants &result,
 		Fn<void(
 			int availableCount,
-			const QVector<MTPChannelParticipant> &list)> callbackList,
+			const QVector<MTPChannelParticipant> &list)> callbackList = nullptr,
 		Fn<void()> callbackNotModified = nullptr);
 	void addChatParticipants(
 		not_null<PeerData*> peer,
@@ -692,6 +695,7 @@ private:
 	using PeerRequests = QMap<PeerData*, mtpRequestId>;
 	PeerRequests _fullPeerRequests;
 	PeerRequests _peerRequests;
+	base::flat_set<not_null<PeerData*>> _requestedPeerSettings;
 
 	PeerRequests _participantsRequests;
 	PeerRequests _botsRequests;

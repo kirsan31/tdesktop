@@ -18,6 +18,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/widgets/popup_menu.h"
 #include "ui/widgets/buttons.h"
 #include "ui/image/image.h"
+#include "ui/text/text_utilities.h"
 #include "ui/text_options.h"
 #include "boxes/confirm_box.h"
 #include "media/audio/media_audio.h"
@@ -222,9 +223,9 @@ OverlayWidget::LottieFile::LottieFile(
 OverlayWidget::OverlayWidget()
 : OverlayParent(nullptr)
 , _transparentBrush(style::transparentPlaceholderBrush())
-, _docDownload(this, lang(lng_media_download), st::mediaviewFileLink)
-, _docSaveAs(this, lang(lng_mediaview_save_as), st::mediaviewFileLink)
-, _docCancel(this, lang(lng_cancel), st::mediaviewFileLink)
+, _docDownload(this, tr::lng_media_download(tr::now), st::mediaviewFileLink)
+, _docSaveAs(this, tr::lng_mediaview_save_as(tr::now), st::mediaviewFileLink)
+, _docCancel(this, tr::lng_cancel(tr::now), st::mediaviewFileLink)
 , _radial([=](crl::time now) { return radialAnimationCallback(now); })
 , _lastAction(-st::mediaviewDeltaFromLastAction, -st::mediaviewDeltaFromLastAction)
 , _stateAnimation([=](crl::time now) { return stateAnimationCallback(now); })
@@ -235,11 +236,15 @@ OverlayWidget::OverlayWidget()
 	setWindowIcon(Window::CreateIcon(&Core::App().activeAccount()));
 	setWindowTitle(qsl("Media viewer"));
 
-	TextCustomTagsMap custom;
-	custom.insert(QChar('c'), qMakePair(textcmdStartLink(1), textcmdStopLink()));
-	_saveMsgText.setRichText(st::mediaviewSaveMsgStyle, lang(lng_mediaview_saved), Ui::DialogTextOptions(), custom);
+	const auto text = tr::lng_mediaview_saved_to(
+		tr::now,
+		lt_downloads,
+		Ui::Text::Link(
+			tr::lng_mediaview_downloads(tr::now),
+			"internal:show_saved_message"),
+		Ui::Text::WithEntities);
+	_saveMsgText.setMarkedText(st::mediaviewSaveMsgStyle, text, Ui::DialogTextOptions());
 	_saveMsg = QRect(0, 0, _saveMsgText.maxWidth() + st::mediaviewSaveMsgPadding.left() + st::mediaviewSaveMsgPadding.right(), st::mediaviewSaveMsgStyle.font->height + st::mediaviewSaveMsgPadding.top() + st::mediaviewSaveMsgPadding.bottom());
-	_saveMsgText.setLink(1, std::make_shared<LambdaClickHandler>([this] { showSaveMsgFile(); }));
 
 	connect(QApplication::desktop(), SIGNAL(resized(int)), this, SLOT(onScreenResized(int)));
 
@@ -494,7 +499,7 @@ void OverlayWidget::updateDocSize() {
 			totalStr = QString::number(total);
 			mb = qsl("B");
 		}
-		_docSize = lng_media_save_progress(lt_ready, readyStr, lt_total, totalStr, lt_mb, mb);
+		_docSize = tr::lng_media_save_progress(tr::now, lt_ready, readyStr, lt_total, totalStr, lt_mb, mb);
 	} else {
 		_docSize = formatSizeText(_doc->size);
 	}
@@ -574,11 +579,11 @@ void OverlayWidget::updateControls() {
 		return dNow;
 	}();
 	if (d.date() == dNow.date()) {
-		_dateText = lng_mediaview_today(lt_time, d.time().toString(cTimeFormat()));
+		_dateText = tr::lng_mediaview_today(tr::now, lt_time, d.time().toString(cTimeFormat()));
 	} else if (d.date().addDays(1) == dNow.date()) {
-		_dateText = lng_mediaview_yesterday(lt_time, d.time().toString(cTimeFormat()));
+		_dateText = tr::lng_mediaview_yesterday(tr::now, lt_time, d.time().toString(cTimeFormat()));
 	} else {
-		_dateText = lng_mediaview_date_time(lt_date, d.date().toString(qsl("dd.MM.yy")), lt_time, d.time().toString(cTimeFormat()));
+		_dateText = tr::lng_mediaview_date_time(tr::now, lt_date, d.date().toString(qsl("dd.MM.yy")), lt_time, d.time().toString(cTimeFormat()));
 	}
 	if (!_fromName.isEmpty()) {
 		_fromNameLabel.setText(st::mediaviewTextStyle, _fromName, Ui::NameTextOptions());
@@ -653,22 +658,22 @@ void OverlayWidget::updateActions() {
 	_actions.clear();
 
 	if (_doc && _doc->loading()) {
-		_actions.push_back({ lang(lng_cancel), SLOT(onSaveCancel()) });
+		_actions.push_back({ tr::lng_cancel(tr::now), SLOT(onSaveCancel()) });
 	}
 	if (IsServerMsgId(_msgid.msg)) {
-		_actions.push_back({ lang(lng_context_to_msg), SLOT(onToMessage()) });
+		_actions.push_back({ tr::lng_context_to_msg(tr::now), SLOT(onToMessage()) });
 	}
 	if (_doc && !_doc->filepath(DocumentData::FilePathResolve::Checked).isEmpty()) {
-		_actions.push_back({ lang(Platform::IsMac() ? lng_context_show_in_finder : lng_context_show_in_folder), SLOT(onShowInFolder()) });
+		_actions.push_back({ Platform::IsMac() ? tr::lng_context_show_in_finder(tr::now) : tr::lng_context_show_in_folder(tr::now), SLOT(onShowInFolder()) });
 	}
 	if ((_doc && documentContentShown()) || (_photo && _photo->loaded())) {
-		_actions.push_back({ lang(lng_mediaview_copy), SLOT(onCopy()) });
+		_actions.push_back({ tr::lng_mediaview_copy(tr::now), SLOT(onCopy()) });
 	}
 	if (_photo && _photo->hasSticker) {
-		_actions.push_back({ lang(lng_context_attached_stickers), SLOT(onAttachedStickers()) });
+		_actions.push_back({ tr::lng_context_attached_stickers(tr::now), SLOT(onAttachedStickers()) });
 	}
 	if (_canForwardItem) {
-		_actions.push_back({ lang(lng_mediaview_forward), SLOT(onForward()) });
+		_actions.push_back({ tr::lng_mediaview_forward(tr::now), SLOT(onForward()) });
 	}
 	auto canDelete = [&] {
 		if (_canDeleteItem) {
@@ -685,12 +690,12 @@ void OverlayWidget::updateActions() {
 		return false;
 	}();
 	if (canDelete) {
-		_actions.push_back({ lang(lng_mediaview_delete), SLOT(onDelete()) });
+		_actions.push_back({ tr::lng_mediaview_delete(tr::now), SLOT(onDelete()) });
 	}
-	_actions.push_back({ lang(lng_mediaview_save_as), SLOT(onSaveAs()) });
+	_actions.push_back({ tr::lng_mediaview_save_as(tr::now), SLOT(onSaveAs()) });
 
 	if (const auto overviewType = computeOverviewType()) {
-		_actions.push_back({ lang(_doc ? lng_mediaview_files_all : lng_mediaview_photos_all), SLOT(onOverview()) });
+		_actions.push_back({ _doc ? tr::lng_mediaview_files_all(tr::now) : tr::lng_mediaview_photos_all(tr::now), SLOT(onOverview()) });
 	}
 }
 
@@ -1116,7 +1121,7 @@ void OverlayWidget::onSaveAs() {
 			}
 
 			psBringToBack(this);
-			file = FileNameForSave(lang(lng_save_file), filter, qsl("doc"), name, true, alreadyDir);
+			file = FileNameForSave(tr::lng_save_file(tr::now), filter, qsl("doc"), name, true, alreadyDir);
 			psShowOverAll(this);
 			if (!file.isEmpty() && file != location.name()) {
 				if (_doc->data().isEmpty()) {
@@ -1145,7 +1150,7 @@ void OverlayWidget::onSaveAs() {
 		auto filter = qsl("JPEG Image (*.jpg);;") + FileDialog::AllFilesFilter();
 		FileDialog::GetWritePath(
 			this,
-			lang(lng_save_photo),
+			tr::lng_save_photo(tr::now),
 			filter,
 			filedialogDefaultName(
 				qsl("photo"),
@@ -1607,7 +1612,7 @@ void OverlayWidget::refreshFromLabel(HistoryItem *item) {
 }
 
 void OverlayWidget::refreshCaption(HistoryItem *item) {
-	_caption = Text();
+	_caption = Ui::Text::String();
 	if (!item) {
 		return;
 	} else if (const auto media = item->media()) {
@@ -1625,7 +1630,7 @@ void OverlayWidget::refreshCaption(HistoryItem *item) {
 		}
 		return false;
 	}();
-	_caption = Text(st::msgMinWidth);
+	_caption = Ui::Text::String(st::msgMinWidth);
 	_caption.setMarkedText(
 		st::mediaviewCaptionStyle,
 		caption,
@@ -1904,14 +1909,14 @@ void OverlayWidget::displayDocument(DocumentData *doc, HistoryItem *item) {
 
 		if (_doc) {
 			_docName = (_doc->type == StickerDocument)
-				? lang(lng_in_dlg_sticker)
+				? tr::lng_in_dlg_sticker(tr::now)
 				: (_doc->type == AnimatedDocument
 					? qsl("GIF")
 					: (_doc->filename().isEmpty()
-						? lang(lng_mediaview_doc_image)
+						? tr::lng_mediaview_doc_image(tr::now)
 						: _doc->filename()));
 		} else {
-			_docName = lang(lng_message_empty);
+			_docName = tr::lng_message_empty(tr::now);
 		}
 		_docNameWidth = st::mediaviewFileNameFont->width(_docName);
 		if (_docNameWidth > maxw) {
@@ -2238,7 +2243,7 @@ void OverlayWidget::initThemePreview() {
 			if (_themePreview) {
 				_themeApply.create(
 					this,
-					langFactory(lng_theme_preview_apply),
+					tr::lng_theme_preview_apply(),
 					st::themePreviewApplyButton);
 				_themeApply->show();
 				_themeApply->setClickedCallback([this] {
@@ -2248,7 +2253,7 @@ void OverlayWidget::initThemePreview() {
 				});
 				_themeCancel.create(
 					this,
-					langFactory(lng_cancel),
+					tr::lng_cancel(),
 					st::themePreviewCancelButton);
 				_themeCancel->show();
 				_themeCancel->setClickedCallback([this] { close(); });
@@ -2887,9 +2892,9 @@ void OverlayWidget::paintThemePreview(Painter &p, QRect clip) {
 			p.setPen(st::themePreviewLoadingFg);
 			p.drawText(
 				_themePreviewRect,
-				lang(_themePreviewId
-					? lng_theme_preview_generating
-					: lng_theme_preview_invalid),
+				(_themePreviewId
+					? tr::lng_theme_preview_generating(tr::now)
+					: tr::lng_theme_preview_invalid(tr::now)),
 				QTextOption(style::al_center));
 		}
 	}
@@ -2914,7 +2919,7 @@ void OverlayWidget::paintThemePreview(Painter &p, QRect clip) {
 	if (titleRect.intersects(clip)) {
 		p.setFont(st::themePreviewTitleFont);
 		p.setPen(st::themePreviewTitleFg);
-		p.drawTextLeft(titleRect.x(), titleRect.y(), width(), lang(lng_theme_preview_title));
+		p.drawTextLeft(titleRect.x(), titleRect.y(), width(), tr::lng_theme_preview_title(tr::now));
 	}
 
 	auto buttonsRect = QRect(_themePreviewRect.x(), _themePreviewRect.y() + _themePreviewRect.height() - st::themePreviewMargin.bottom(), _themePreviewRect.width(), st::themePreviewMargin.bottom());
@@ -3441,7 +3446,11 @@ void OverlayWidget::updateOver(QPoint pos) {
 void OverlayWidget::mouseReleaseEvent(QMouseEvent *e) {
 	updateOver(e->pos());
 
-	if (ClickHandlerPtr activated = ClickHandler::unpressed()) {
+	if (const auto activated = ClickHandler::unpressed()) {
+		if (activated->dragText() == qstr("internal:show_saved_message")) {
+			showSaveMsgFile();
+			return;
+		}
 		App::activateClickHandler(activated, e->button());
 		return;
 	}
@@ -3754,24 +3763,38 @@ void OverlayWidget::updateHeader() {
 	auto count = _fullCount ? *_fullCount : -1;
 	if (index >= 0 && index < count && count > 1) {
 		if (_doc) {
-			_headerText = lng_mediaview_file_n_of_count(lt_file, _doc->filename().isEmpty() ? lang(lng_mediaview_doc_image) : _doc->filename(), lt_n, QString::number(index + 1), lt_count, QString::number(count));
+			_headerText = tr::lng_mediaview_file_n_of_amount(
+				tr::now,
+				lt_file,
+				(_doc->filename().isEmpty()
+					? tr::lng_mediaview_doc_image(tr::now)
+					: _doc->filename()),
+				lt_n,
+				QString::number(index + 1),
+				lt_amount,
+				QString::number(count));
 		} else {
-			_headerText = lng_mediaview_n_of_count(lt_n, QString::number(index + 1), lt_count, QString::number(count));
+			_headerText = tr::lng_mediaview_n_of_amount(
+				tr::now,
+				lt_n,
+				QString::number(index + 1),
+				lt_amount,
+				QString::number(count));
 		}
 	} else {
 		if (_doc) {
-			_headerText = _doc->filename().isEmpty() ? lang(lng_mediaview_doc_image) : _doc->filename();
+			_headerText = _doc->filename().isEmpty() ? tr::lng_mediaview_doc_image(tr::now) : _doc->filename();
 		} else if (_msgid) {
-			_headerText = lang(lng_mediaview_single_photo);
+			_headerText = tr::lng_mediaview_single_photo(tr::now);
 		} else if (_user) {
-			_headerText = lang(lng_mediaview_profile_photo);
+			_headerText = tr::lng_mediaview_profile_photo(tr::now);
 		} else if ((_history && _history->channelId() && !_history->isMegagroup())
 			|| (_peer && _peer->isChannel() && !_peer->isMegagroup())) {
-			_headerText = lang(lng_mediaview_channel_photo);
+			_headerText = tr::lng_mediaview_channel_photo(tr::now);
 		} else if (_peer) {
-			_headerText = lang(lng_mediaview_group_photo);
+			_headerText = tr::lng_mediaview_group_photo(tr::now);
 		} else {
-			_headerText = lang(lng_mediaview_single_photo);
+			_headerText = tr::lng_mediaview_single_photo(tr::now);
 		}
 	}
 	_headerHasLink = computeOverviewType() != std::nullopt;

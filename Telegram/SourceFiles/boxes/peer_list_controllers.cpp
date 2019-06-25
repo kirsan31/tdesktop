@@ -221,7 +221,7 @@ ChatsListBoxController::ChatsListBoxController(
 }
 
 void ChatsListBoxController::prepare() {
-	setSearchNoResultsText(lang(lng_blocked_list_not_found));
+	setSearchNoResultsText(tr::lng_blocked_list_not_found(tr::now));
 	delegate()->peerListSetSearchMode(PeerListSearchMode::Enabled);
 
 	prepareViewHook();
@@ -293,12 +293,12 @@ void ChatsListBoxController::checkForEmptyRows() {
 	} else {
 		const auto loaded = Auth().data().contactsLoaded().current()
 			&& Auth().data().chatsListLoaded();
-		setDescriptionText(loaded ? emptyBoxText() : lang(lng_contacts_loading));
+		setDescriptionText(loaded ? emptyBoxText() : tr::lng_contacts_loading(tr::now));
 	}
 }
 
 QString ChatsListBoxController::emptyBoxText() const {
-	return lang(lng_contacts_not_found);
+	return tr::lng_contacts_not_found(tr::now);
 }
 
 std::unique_ptr<PeerListRow> ChatsListBoxController::createSearchRow(not_null<PeerData*> peer) {
@@ -323,9 +323,9 @@ ContactsBoxController::ContactsBoxController(
 }
 
 void ContactsBoxController::prepare() {
-	setSearchNoResultsText(lang(lng_blocked_list_not_found));
+	setSearchNoResultsText(tr::lng_blocked_list_not_found(tr::now));
 	delegate()->peerListSetSearchMode(PeerListSearchMode::Enabled);
-	delegate()->peerListSetTitle(langFactory(lng_contacts_header));
+	delegate()->peerListSetTitle(tr::lng_contacts_header());
 
 	prepareViewHook();
 
@@ -355,12 +355,11 @@ void ContactsBoxController::rebuildRows() {
 }
 
 void ContactsBoxController::checkForEmptyRows() {
-	if (delegate()->peerListFullRowsCount()) {
-		setDescriptionText(QString());
-	} else {
-		const auto loaded = Auth().data().contactsLoaded().current();
-		setDescriptionText(lang(loaded ? lng_contacts_not_found : lng_contacts_loading));
-	}
+	setDescriptionText(delegate()->peerListFullRowsCount()
+		? QString()
+		: Auth().data().contactsLoaded().current()
+		? tr::lng_contacts_not_found(tr::now)
+		: tr::lng_contacts_loading(tr::now));
 }
 
 std::unique_ptr<PeerListRow> ContactsBoxController::createSearchRow(
@@ -393,7 +392,7 @@ std::unique_ptr<PeerListRow> ContactsBoxController::createRow(not_null<UserData*
 
 void AddBotToGroupBoxController::Start(not_null<UserData*> bot) {
 	auto initBox = [=](not_null<PeerListBox*> box) {
-		box->addButton(langFactory(lng_cancel), [box] { box->closeBox(); });
+		box->addButton(tr::lng_cancel(), [box] { box->closeBox(); });
 	};
 	Ui::show(Box<PeerListBox>(std::make_unique<AddBotToGroupBoxController>(bot), std::move(initBox)));
 }
@@ -419,9 +418,9 @@ void AddBotToGroupBoxController::shareBotGame(not_null<PeerData*> chat) {
 	});
 	auto confirmText = [chat] {
 		if (chat->isUser()) {
-			return lng_bot_sure_share_game(lt_user, App::peerName(chat));
+			return tr::lng_bot_sure_share_game(tr::now, lt_user, App::peerName(chat));
 		}
-		return lng_bot_sure_share_game_group(lt_group, chat->name);
+		return tr::lng_bot_sure_share_game_group(tr::now, lt_group, chat->name);
 	}();
 	Ui::show(
 		Box<ConfirmBox>(confirmText, std::move(send)),
@@ -432,7 +431,7 @@ void AddBotToGroupBoxController::addBotToGroup(not_null<PeerData*> chat) {
 	if (const auto megagroup = chat->asMegagroup()) {
 		if (!megagroup->canAddMembers()) {
 			Ui::show(
-				Box<InformBox>(lang(lng_error_cant_add_member)),
+				Box<InformBox>(tr::lng_error_cant_add_member(tr::now)),
 				LayerOption::KeepOther);
 			return;
 		}
@@ -440,7 +439,7 @@ void AddBotToGroupBoxController::addBotToGroup(not_null<PeerData*> chat) {
 	auto send = crl::guard(this, [bot = _bot, chat] {
 		AddBotToGroup(bot, chat);
 	});
-	auto confirmText = lng_bot_sure_invite(lt_group, chat->name);
+	auto confirmText = tr::lng_bot_sure_invite(tr::now, lt_group, chat->name);
 	Ui::show(
 		Box<ConfirmBox>(confirmText, send),
 		LayerOption::KeepOther);
@@ -481,15 +480,19 @@ bool AddBotToGroupBoxController::sharingBotGame() const {
 }
 
 QString AddBotToGroupBoxController::emptyBoxText() const {
-	return lang(Auth().data().chatsListLoaded()
-		? (sharingBotGame() ? lng_bot_no_chats : lng_bot_no_groups)
-		: lng_contacts_loading);
+	return !Auth().data().chatsListLoaded()
+		? tr::lng_contacts_loading(tr::now)
+		: sharingBotGame()
+		? tr::lng_bot_no_chats(tr::now)
+		: tr::lng_bot_no_groups(tr::now);
 }
 
 QString AddBotToGroupBoxController::noResultsText() const {
-	return lang(Auth().data().chatsListLoaded()
-		? (sharingBotGame() ? lng_bot_chats_not_found : lng_bot_groups_not_found)
-		: lng_contacts_loading);
+	return !Auth().data().chatsListLoaded()
+		? tr::lng_contacts_loading(tr::now)
+		: sharingBotGame()
+		? tr::lng_bot_chats_not_found(tr::now)
+		: tr::lng_bot_groups_not_found(tr::now);
 }
 
 void AddBotToGroupBoxController::updateLabels() {
@@ -497,9 +500,9 @@ void AddBotToGroupBoxController::updateLabels() {
 }
 
 void AddBotToGroupBoxController::prepareViewHook() {
-	delegate()->peerListSetTitle(langFactory(sharingBotGame()
-		? lng_bot_choose_chat
-		: lng_bot_choose_group));
+	delegate()->peerListSetTitle(sharingBotGame()
+		? tr::lng_bot_choose_chat()
+		: tr::lng_bot_choose_group());
 	updateLabels();
 	Auth().data().chatsListLoadedEvents(
 	) | rpl::filter([=](Data::Folder *folder) {
@@ -515,7 +518,7 @@ ChooseRecipientBoxController::ChooseRecipientBoxController(
 }
 
 void ChooseRecipientBoxController::prepareViewHook() {
-	delegate()->peerListSetTitle(langFactory(lng_forward_choose));
+	delegate()->peerListSetTitle(tr::lng_forward_choose());
 }
 
 void ChooseRecipientBoxController::rowClicked(not_null<PeerListRow*> row) {

@@ -26,6 +26,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "platform/win/wrapper_wrl_implements_h.h"
 #include <windows.ui.notifications.h>
 
+#include <openssl/conf.h>
+#include <openssl/engine.h>
+#include <openssl/err.h>
+
 #include <dbghelp.h>
 #include <shlobj.h>
 #include <Shlwapi.h>
@@ -275,6 +279,24 @@ int psFixPrevious() {
 }
 
 namespace Platform {
+namespace ThirdParty {
+namespace {
+
+void StartOpenSSL() {
+	// Don't use dynamic OpenSSL config, it can load unwanted DLLs.
+	OPENSSL_load_builtin_modules();
+	ENGINE_load_builtin_engines();
+	ERR_clear_error();
+	OPENSSL_no_config();
+}
+
+} // namespace
+
+void start() {
+	StartOpenSSL();
+}
+
+} // namespace ThirdParty
 
 void start() {
 	Dlls::init();
@@ -583,6 +605,6 @@ void psWriteDump() {
 #endif // TDESKTOP_DISABLE_CRASH_REPORTS
 }
 
-bool psLaunchMaps(const LocationCoords &coords) {
-	return QDesktopServices::openUrl(qsl("bingmaps:?lvl=16&collection=point.%1_%2_Point").arg(coords.latAsString()).arg(coords.lonAsString()));
+bool psLaunchMaps(const Data::LocationPoint &point) {
+	return QDesktopServices::openUrl(qsl("bingmaps:?lvl=16&collection=point.%1_%2_Point").arg(point.latAsString()).arg(point.lonAsString()));
 }

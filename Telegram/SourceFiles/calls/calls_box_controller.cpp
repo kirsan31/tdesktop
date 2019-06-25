@@ -165,13 +165,20 @@ void BoxController::Row::refreshStatus() {
 		auto time = ItemDateTime(_items.front()).time().toString(cTimeFormat());
 		auto today = QDateTime::currentDateTime().date();
 		if (_date == today) {
-			return lng_call_box_status_today(lt_time, time);
+			return tr::lng_call_box_status_today(tr::now, lt_time, time);
 		} else if (_date.addDays(1) == today) {
-			return lng_call_box_status_yesterday(lt_time, time);
+			return tr::lng_call_box_status_yesterday(tr::now, lt_time, time);
 		}
-		return lng_call_box_status_date(lt_date, langDayOfMonthFull(_date), lt_time, time);
+		return tr::lng_call_box_status_date(tr::now, lt_date, langDayOfMonthFull(_date), lt_time, time);
 	};
-	setCustomStatus((_items.size() > 1) ? lng_call_box_status_group(lt_count, QString::number(_items.size()), lt_status, text()) : text());
+	setCustomStatus((_items.size() > 1)
+		? tr::lng_call_box_status_group(
+			tr::now,
+			lt_amount,
+			QString::number(_items.size()),
+			lt_status,
+			text())
+		: text());
 }
 
 BoxController::Row::Type BoxController::Row::ComputeType(
@@ -224,8 +231,8 @@ void BoxController::prepare() {
 		}
 	});
 
-	delegate()->peerListSetTitle(langFactory(lng_call_box_title));
-	setDescriptionText(lang(lng_contacts_loading));
+	delegate()->peerListSetTitle(tr::lng_call_box_title());
+	setDescriptionText(tr::lng_contacts_loading(tr::now));
 	delegate()->peerListRefreshRows();
 
 	loadMoreRows();
@@ -277,7 +284,7 @@ void BoxController::loadMoreRows() {
 }
 
 void BoxController::refreshAbout() {
-	setDescriptionText(delegate()->peerListFullRowsCount() ? QString() : lang(lng_call_box_about));
+	setDescriptionText(delegate()->peerListFullRowsCount() ? QString() : tr::lng_call_box_about(tr::now));
 }
 
 void BoxController::rowClicked(not_null<PeerListRow*> row) {

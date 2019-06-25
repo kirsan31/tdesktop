@@ -9,21 +9,33 @@
 #import "mac_touchbar.h"
 #import <QuartzCore/QuartzCore.h>
 
+#include "apiwrap.h"
 #include "auth_session.h"
+#include "boxes/confirm_box.h"
+#include "chat_helpers/emoji_list_widget.h"
 #include "core/application.h"
 #include "core/sandbox.h"
+#include "data/data_document.h"
+#include "data/data_file_origin.h"
 #include "data/data_folder.h"
+#include "data/data_peer_values.h"
 #include "data/data_session.h"
 #include "dialogs/dialogs_layout.h"
+#include "emoji_config.h"
 #include "history/history.h"
+#include "lang/lang_keys.h"
 #include "mainwidget.h"
 #include "mainwindow.h"
 #include "observer_peer.h"
+#include "platform/mac/mac_utilities.h"
+#include "stickers.h"
+#include "styles/style_dialogs.h"
 #include "styles/style_media_player.h"
+#include "styles/style_settings.h"
 #include "window/themes/window_theme.h"
 #include "window/window_session_controller.h"
 #include "ui/empty_userpic.h"
-#include "styles/style_dialogs.h"
+#include "ui/widgets/input_fields.h"
 
 NSImage *qt_mac_create_nsimage(const QPixmap &pm);
 
@@ -31,11 +43,21 @@ namespace {
 //https://developer.apple.com/design/human-interface-guidelines/macos/touch-bar/touch-bar-icons-and-images/
 constexpr auto kIdealIconSize = 36;
 constexpr auto kMaximumIconSize = 44;
+constexpr auto kScrubberHeight = 30;
 
 constexpr auto kCommandPlayPause = 0x002;
 constexpr auto kCommandPlaylistPrevious = 0x003;
 constexpr auto kCommandPlaylistNext = 0x004;
 constexpr auto kCommandClosePlayer = 0x005;
+
+constexpr auto kCommandBold = 0x010;
+constexpr auto kCommandItalic = 0x011;
+constexpr auto kCommandMonospace = 0x012;
+constexpr auto kCommandClear = 0x013;
+constexpr auto kCommandLink = 0x014;
+
+constexpr auto kCommandScrubberStickers = 0x020;
+constexpr auto kCommandScrubberEmoji = 0x021;
 
 constexpr auto kMs = 1000;
 
@@ -43,6 +65,18 @@ constexpr auto kSongType = AudioMsgId::Type::Song;
 
 constexpr auto kSavedMessagesId = 0;
 constexpr auto kArchiveId = -1;
+
+constexpr auto kMaxStickerSets = 5;
+
+NSString *const kTypePinned = @"pinned";
+NSString *const kTypeSlider = @"slider";
+NSString *const kTypeButton = @"button";
+NSString *const kTypeText = @"text";
+NSString *const kTypeTextButton = @"textButton";
+NSString *const kTypeScrubber = @"scrubber";
+NSString *const kTypePicker = @"picker";
+NSString *const kTypeFormatter = @"formatter";
+NSString *const kTypeFormatterSegment = @"formatterSegment";
 
 const NSString *kCustomizationIdPlayer = @"telegram.touchbar";
 const NSString *kCustomizationIdMain = @"telegram.touchbarMain";
@@ -57,6 +91,35 @@ const NSTouchBarItemIdentifier kPreviousItemIdentifier = [NSString stringWithFor
 const NSTouchBarItemIdentifier kCommandClosePlayerItemIdentifier = [NSString stringWithFormat:@"%@.closePlayer", kCustomizationIdPlayer];
 const NSTouchBarItemIdentifier kCurrentPositionItemIdentifier = [NSString stringWithFormat:@"%@.currentPosition", kCustomizationIdPlayer];
 
+const NSTouchBarItemIdentifier kPopoverInputItemIdentifier = [NSString stringWithFormat:@"%@.popoverInput", kCustomizationIdMain];
+const NSTouchBarItemIdentifier kPopoverInputFormatterItemIdentifier = [NSString stringWithFormat:@"%@.popoverInputFormatter", kCustomizationIdMain];
+
+const NSTouchBarItemIdentifier kPickerPopoverItemIdentifier = [NSString stringWithFormat:@"%@.pickerButtons", kCustomizationIdMain];
+const NSTouchBarItemIdentifier kScrubberStickersItemIdentifier = [NSString stringWithFormat:@"%@.scrubberStickers", kCustomizationIdMain];
+const NSTouchBarItemIdentifier kStickerItemIdentifier = [NSString stringWithFormat:@"%@.stickerItem", kCustomizationIdMain];
+const NSTouchBarItemIdentifier kScrubberEmojiItemIdentifier = [NSString stringWithFormat:@"%@.scrubberEmoji", kCustomizationIdMain];
+const NSTouchBarItemIdentifier kEmojiItemIdentifier = [NSString stringWithFormat:@"%@.emojiItem", kCustomizationIdMain];
+const NSTouchBarItemIdentifier kPickerTitleItemIdentifier = [NSString stringWithFormat:@"%@.pickerTitleItem", kCustomizationIdMain];
+
+struct PickerScrubberItem {
+	PickerScrubberItem(QString title) : title(title) {
+	}
+	PickerScrubberItem(DocumentData* document) : document(document) {
+	}
+	PickerScrubberItem(EmojiPtr emoji) : emoji(emoji) {
+	}
+	QString title = QString();
+	DocumentData* document = nullptr;
+	EmojiPtr emoji = nullptr;
+};
+
+enum ScrubberItemType {
+	Emoji,
+	Sticker,
+};
+
+using Platform::Q2NSString;
+
 NSImage *CreateNSImageFromStyleIcon(const style::icon &icon, int size = kIdealIconSize) {
 	const auto instance = icon.instance(QColor(255, 255, 255, 255), 100);
 	auto pixmap = QPixmap::fromImage(instance);
@@ -64,6 +127,33 @@ NSImage *CreateNSImageFromStyleIcon(const style::icon &icon, int size = kIdealIc
 	NSImage *image = [qt_mac_create_nsimage(pixmap) autorelease];
 	[image setSize:NSMakeSize(size, size)];
 	return image;
+}
+
+NSImage *CreateNSImageFromEmoji(EmojiPtr emoji) {
+	const auto s = kIdealIconSize * cIntRetinaFactor();
+	auto pixmap = QPixmap(s, s);
+	pixmap.setDevicePixelRatio(cRetinaFactor());
+	pixmap.fill(Qt::black);
+	Painter paint(&pixmap);
+	PainterHighQualityEnabler hq(paint);
+#ifndef OS_MAC_OLD
+	Ui::Emoji::Draw(
+		paint,
+		std::move(emoji),
+		Ui::Emoji::GetSizeTouchbar(),
+		0,
+		0);
+#endif // OS_MAC_OLD
+	return [qt_mac_create_nsimage(pixmap) autorelease];
+}
+
+int WidthFromString(NSString *s) {
+	return (int)ceil(
+		[[NSTextField labelWithString:s] frame].size.width) * 1.2;
+}
+
+inline bool IsSticker(ScrubberItemType type) {
+	return type == ScrubberItemType::Sticker;
 }
 
 inline bool CurrentSongExists() {
@@ -75,13 +165,48 @@ inline bool UseEmptyUserpic(PeerData *peer) {
 }
 
 inline bool IsSelfPeer(PeerData *peer) {
-	return (peer && peer->id == Auth().userPeerId());
+	return (peer && peer->isSelf());
 }
 
-inline int UnreadCount(PeerData *peer) {
-	return (peer
-		&& AuthSession::Exists()
-		&& Auth().data().history(peer->id)->unreadCountForBadge());
+inline int UnreadCount(not_null<PeerData*> peer) {
+	if (const auto history = peer->owner().historyLoaded(peer)) {
+		return history->unreadCountForBadge();
+	}
+	return 0;
+}
+
+inline auto GetActiveChat() {
+	if (const auto window = App::wnd()) {
+		if (const auto controller = window->sessionController()) {
+			return controller->activeChatCurrent();
+		}
+	}
+	return Dialogs::Key();
+}
+
+inline bool CanWriteToActiveChat() {
+	if (const auto history = GetActiveChat().history()) {
+		return history->peer->canWrite();
+	}
+	return false;
+}
+
+inline std::optional<QString> RestrictionToSendStickers() {
+	if (const auto peer = GetActiveChat().peer()) {
+		return Data::RestrictionError(
+			peer,
+			ChatRestriction::f_send_stickers);
+	}
+	return std::nullopt;
+}
+
+QString TitleRecentlyUsed() {
+	const auto &sets = Auth().data().stickerSets();
+	const auto it = sets.constFind(Stickers::CloudRecentSetId);
+	if (it != sets.cend()) {
+		return it->title;
+	}
+	return tr::lng_recent_stickers(tr::now);
 }
 
 NSString *FormatTime(int time) {
@@ -102,11 +227,11 @@ NSString *FormatTime(int time) {
 	return stringTime;
 }
 
-void PaintUnreadBadge(Painter &p, PeerData *peer) {
-	const auto history = Auth().data().history(peer->id);
+bool PaintUnreadBadge(Painter &p, PeerData *peer) {
+	const auto history = peer->owner().history(peer->id);
 	const auto count = history->unreadCountForBadge();
 	if (!count) {
-		return;
+		return false;
 	}
 	const auto unread = history->unreadMark()
 		? QString()
@@ -122,6 +247,132 @@ void PaintUnreadBadge(Painter &p, PeerData *peer) {
 		unreadSt.font->flags(),
 		unreadSt.font->family());
 	Dialogs::Layout::paintUnreadCount(p, unread, kIdealIconSize, kIdealIconSize - unreadSt.size, unreadSt, nullptr, 2);
+	return true;
+}
+
+void PaintOnlineCircle(Painter &p) {
+	PainterHighQualityEnabler hq(p);
+	// Use constant values to draw online badge regardless of cConfigScale().
+	const auto size = 8;
+	const auto paddingSize = 4;
+	const auto circleSize = size + paddingSize;
+	const auto offset = size + paddingSize / 2;
+	p.setPen(Qt::NoPen);
+	p.setBrush(Qt::black);
+	p.drawEllipse(
+		kIdealIconSize - circleSize,
+		kIdealIconSize - circleSize,
+		circleSize,
+		circleSize);
+	p.setBrush(st::dialogsOnlineBadgeFg);
+	p.drawEllipse(
+		kIdealIconSize - offset,
+		kIdealIconSize - offset,
+		size,
+		size);
+}
+
+void SendKeyEvent(int command) {
+	QWidget *focused = QApplication::focusWidget();
+	if (!qobject_cast<QTextEdit*>(focused)) {
+		return;
+	}
+	auto key = 0;
+	auto modifier = Qt::KeyboardModifiers(0) | Qt::ControlModifier;
+	switch (command) {
+	case kCommandBold:
+		key = Qt::Key_B;
+		break;
+	case kCommandItalic:
+		key = Qt::Key_I;
+		break;
+	case kCommandMonospace:
+		key = Qt::Key_M;
+		modifier |= Qt::ShiftModifier;
+		break;
+	case kCommandClear:
+		key = Qt::Key_N;
+		modifier |= Qt::ShiftModifier;
+		break;
+	case kCommandLink:
+		key = Qt::Key_K;
+		break;
+	}
+	QApplication::postEvent(focused, new QKeyEvent(QEvent::KeyPress, key, modifier));
+	QApplication::postEvent(focused, new QKeyEvent(QEvent::KeyRelease, key, modifier));
+}
+
+void AppendStickerSet(std::vector<PickerScrubberItem> &to, uint64 setId) {
+	auto &sets = Auth().data().stickerSets();
+	auto it = sets.constFind(setId);
+	if (it == sets.cend() || it->stickers.isEmpty()) {
+		return;
+	}
+	if (it->flags & MTPDstickerSet::Flag::f_archived) {
+		return;
+	}
+	if (!(it->flags & MTPDstickerSet::Flag::f_installed_date)) {
+		return;
+	}
+
+	to.emplace_back(PickerScrubberItem(it->title.isEmpty()
+		? it->shortName
+		: it->title));
+	for (const auto sticker : it->stickers) {
+		to.emplace_back(PickerScrubberItem(sticker));
+	}
+}
+
+void AppendRecentStickers(std::vector<PickerScrubberItem> &to) {
+	const auto &sets = Auth().data().stickerSets();
+	const auto cloudIt = sets.constFind(Stickers::CloudRecentSetId);
+	const auto favedIt = sets.constFind(Stickers::FavedSetId);
+	const auto cloudCount = (cloudIt != sets.cend())
+		? cloudIt->stickers.size()
+		: 0;
+	if (cloudCount > 0) {
+		to.emplace_back(PickerScrubberItem(cloudIt->title));
+		auto count = 0;
+		for (const auto document : cloudIt->stickers) {
+			if (Stickers::IsFaved(document)) {
+				continue;
+			}
+			to.emplace_back(PickerScrubberItem(document));
+		}
+	}
+	for (const auto recent : Stickers::GetRecentPack()) {
+		to.emplace_back(PickerScrubberItem(recent.first));
+	}
+}
+
+void AppendFavedStickers(std::vector<PickerScrubberItem> &to) {
+	const auto &sets = Auth().data().stickerSets();
+	const auto it = sets.constFind(Stickers::FavedSetId);
+	const auto count = (it != sets.cend())
+		? it->stickers.size()
+		: 0;
+	if (!count) {
+		return;
+	}
+	to.emplace_back(PickerScrubberItem(
+		tr::lng_mac_touchbar_favorite_stickers(tr::now)));
+	for (const auto document : it->stickers) {
+		to.emplace_back(PickerScrubberItem(document));
+	}
+}
+
+void AppendEmojiPacks(std::vector<PickerScrubberItem> &to) {
+	for (auto i = 0; i != ChatHelpers::kEmojiSectionCount; ++i) {
+		const auto section = Ui::Emoji::GetSection(
+			static_cast<Ui::Emoji::Section>(i));
+		const auto title = i
+			? Ui::Emoji::CategoryTitle(i)(tr::now)
+			: TitleRecentlyUsed();
+		to.emplace_back(title);
+		for (const auto &emoji : section) {
+			to.emplace_back(PickerScrubberItem(emoji));
+		}
+	}
 }
 
 } // namespace
@@ -187,8 +438,9 @@ void PaintUnreadBadge(Painter &p, PeerData *peer) {
 	std::move(
 		themeChanged
 	) | rpl::filter([=](const Update &update) {
-		return update.type == Update::Type::ApplyingTheme
-			&& UnreadCount(_peer);
+		return (update.type == Update::Type::ApplyingTheme)
+			&& (_peer != nullptr)
+			&& (UnreadCount(_peer) || Data::IsPeerAnOnlineUser(_peer));
 	}) | rpl::start_with_next([=] {
 		[self updateBadge];
 	}, _lifetime);
@@ -214,9 +466,9 @@ void PaintUnreadBadge(Painter &p, PeerData *peer) {
 	if (_peer == newPeer) {
 		return;
 	}
-	_peer = newPeer;
 	_peerChangedLifetime.destroy();
-	if (!_peer) {
+	_peer = newPeer;
+	if (!_peer || IsSelfPeer(_peer)) {
 		return;
 	}
 	Notify::PeerUpdateViewer(
@@ -231,6 +483,15 @@ void PaintUnreadBadge(Painter &p, PeerData *peer) {
 		_peer,
 		Notify::PeerUpdate::Flag::UnreadViewChanged
 	) | rpl::start_with_next([=] {
+		[self updateBadge];
+	}, _peerChangedLifetime);
+
+	Notify::PeerUpdateViewer(
+		_peer,
+		Notify::PeerUpdate::Flag::UserOnlineChanged
+	) | rpl::filter([=] {
+		return UnreadCount(_peer) == 0;
+	}) | rpl::start_with_next([=] {
 		[self updateBadge];
 	}, _peerChangedLifetime);
 }
@@ -257,8 +518,8 @@ void PaintUnreadBadge(Painter &p, PeerData *peer) {
 	// Don't draw self userpic if we pin Saved Messages.
 	if (self.number <= kSavedMessagesId || IsSelfPeer(_peer)) {
 		const auto s = kIdealIconSize * cIntRetinaFactor();
-		auto *pixmap = new QPixmap(s, s);
-		Painter paint(pixmap);
+		_userpic = QPixmap(s, s);
+		Painter paint(&_userpic);
 		paint.fillRect(QRectF(0, 0, s, s), QColor(0, 0, 0, 255));
 
 		if (self.number == kArchiveId) {
@@ -268,8 +529,7 @@ void PaintUnreadBadge(Painter &p, PeerData *peer) {
 		} else {
 			Ui::EmptyUserpic::PaintSavedMessages(paint, 0, 0, s, s);
 		}
-		pixmap->setDevicePixelRatio(cRetinaFactor());
-		_userpic = *pixmap;
+		_userpic.setDevicePixelRatio(cRetinaFactor());
 		[self updateImage:_userpic];
 		return;
 	}
@@ -284,15 +544,232 @@ void PaintUnreadBadge(Painter &p, PeerData *peer) {
 }
 
 - (void) updateBadge {
+	if (IsSelfPeer(_peer)) {
+		return;
+	}
+	// Draw unread or online badge.
 	auto pixmap = App::pixmapFromImageInPlace(_userpic.toImage());
 	Painter p(&pixmap);
-	PaintUnreadBadge(p, _peer);
+	if (!PaintUnreadBadge(p, _peer) && Data::IsPeerAnOnlineUser(_peer)) {
+		PaintOnlineCircle(p);
+	}
 	[self updateImage:pixmap];
 }
 
 - (void) updateImage:(QPixmap)pixmap {
 	NSButton *button = self.view;
 	button.image = [qt_mac_create_nsimage(pixmap) autorelease];
+}
+
+@end
+
+
+
+@interface PickerScrubberItemView : NSScrubberItemView
+@property (strong) NSImageView *imageView;
+@end
+@implementation PickerScrubberItemView {
+	rpl::lifetime _lifetime;
+	Data::FileOrigin _origin;
+	QSize _dimensions;
+	Image *_image;
+}
+
+- (instancetype)initWithFrame:(NSRect)frameRect {
+	self = [super initWithFrame:frameRect];
+	if (!self) {
+		return self;
+	}
+	_imageView = [NSImageView imageViewWithImage:
+		[[NSImage alloc] initWithSize:frameRect.size]];
+	[self.imageView setAutoresizingMask:
+		(NSAutoresizingMaskOptions)(NSViewWidthSizable | NSViewHeightSizable)];
+	[self addSubview:self.imageView];
+	return self;
+}
+
+- (void)addDocument:(DocumentData *)document {
+	if (!document->sticker()) {
+		return;
+	}
+	_image = document->getStickerSmall();
+	if (!_image) {
+		return;
+	}
+	_dimensions = document->dimensions;
+	_origin = document->stickerSetOrigin();
+	_image->load(_origin);
+	if (_image->loaded()) {
+		[self updateImage];
+		return;
+	}
+
+	base::ObservableViewer(
+		Auth().downloaderTaskFinished()
+	) | rpl::start_with_next([=] {
+		if (_image->loaded()) {
+			[self updateImage];
+			_lifetime.destroy();
+		}
+	}, _lifetime);
+}
+- (void)updateImage {
+	const auto size = _dimensions
+			.scaled(kScrubberHeight, kScrubberHeight, Qt::KeepAspectRatio);
+	_imageView.image = [qt_mac_create_nsimage(
+			_image->pixSingle(
+				_origin,
+				size.width(),
+				size.height(),
+				kScrubberHeight,
+				kScrubberHeight,
+				ImageRoundRadius::None))
+		autorelease];
+}
+@end
+
+
+@interface PickerCustomTouchBarItem: NSCustomTouchBarItem
+	<NSScrubberDelegate,
+	NSScrubberDataSource,
+	NSScrubberFlowLayoutDelegate>
+@end
+
+#pragma mark -
+
+@implementation PickerCustomTouchBarItem {
+	std::vector<PickerScrubberItem> _stickers;
+	NSPopoverTouchBarItem *_parentPopover;
+}
+
+- (id) init:(ScrubberItemType)type popover:(NSPopoverTouchBarItem *)popover {
+	self = [super initWithIdentifier:IsSticker(type)
+		? kScrubberStickersItemIdentifier
+		: kScrubberEmojiItemIdentifier];
+	if (!self) {
+		return self;
+	}
+	_parentPopover = popover;
+	IsSticker(type) ? [self updateStickers] : [self updateEmoji];
+	NSScrubber *scrubber = [[[NSScrubber alloc] initWithFrame:NSZeroRect] autorelease];
+	NSScrubberFlowLayout *layout = [[[NSScrubberFlowLayout alloc] init] autorelease];
+	layout.itemSpacing = 10;
+	scrubber.scrubberLayout = layout;
+	scrubber.mode = NSScrubberModeFree;
+	scrubber.delegate = self;
+	scrubber.dataSource = self;
+	scrubber.floatsSelectionViews = true;
+	scrubber.showsAdditionalContentIndicators = true;
+	scrubber.itemAlignment = NSScrubberAlignmentCenter;
+	[scrubber registerClass:[PickerScrubberItemView class] forItemIdentifier:kStickerItemIdentifier];
+	[scrubber registerClass:[NSScrubberTextItemView class] forItemIdentifier:kPickerTitleItemIdentifier];
+	[scrubber registerClass:[NSScrubberImageItemView class] forItemIdentifier:kEmojiItemIdentifier];
+
+	self.view = scrubber;
+	return self;
+}
+
+- (void)encodeWithCoder:(nonnull NSCoder *)aCoder {
+	// Has not been implemented.
+}
+
+#pragma mark - NSScrubberDelegate
+
+- (NSInteger)numberOfItemsForScrubber:(NSScrubber *)scrubber {
+	return _stickers.size();
+}
+
+- (NSScrubberItemView *)scrubber:(NSScrubber *)scrubber viewForItemAtIndex:(NSInteger)index {
+	const auto item = _stickers[index];
+	if (const auto document = item.document) {
+		PickerScrubberItemView *itemView = [scrubber makeItemWithIdentifier:kStickerItemIdentifier owner:nil];
+		[itemView addDocument:document];
+		return itemView;
+	} else if (const auto emoji = item.emoji) {
+		NSScrubberImageItemView *itemView = [scrubber makeItemWithIdentifier:kEmojiItemIdentifier owner:nil];
+		itemView.imageView.image = CreateNSImageFromEmoji(emoji);
+		return itemView;
+	} else {
+		NSScrubberTextItemView *itemView = [scrubber makeItemWithIdentifier:kPickerTitleItemIdentifier owner:nil];
+		itemView.textField.stringValue = Q2NSString(item.title);
+		return itemView;
+	}
+}
+
+- (NSSize)scrubber:(NSScrubber *)scrubber layout:(NSScrubberFlowLayout *)layout sizeForItemAtIndex:(NSInteger)index {
+	if (const auto t = _stickers[index].title; !t.isEmpty()) {
+		return NSMakeSize(
+			WidthFromString(Q2NSString(t)) + 30, kScrubberHeight);
+	}
+	return NSMakeSize(kScrubberHeight, kScrubberHeight);
+}
+
+- (void)scrubber:(NSScrubber *)scrubber didSelectItemAtIndex:(NSInteger)index {
+	if (!CanWriteToActiveChat()) {
+		return;
+	}
+	const auto chat = GetActiveChat();
+
+	const auto callback = [&]() -> bool {
+		if (const auto document = _stickers[index].document) {
+			if (const auto error = RestrictionToSendStickers()) {
+				Ui::show(Box<InformBox>(*error));
+			}
+			Auth().api().sendExistingDocument(
+				document,
+				document->stickerSetOrigin(),
+				{},
+				ApiWrap::SendOptions(chat.history()));
+			return true;
+		} else if (const auto emoji = _stickers[index].emoji) {
+			if (const auto inputField = qobject_cast<QTextEdit*>(
+					QApplication::focusWidget())) {
+				Ui::InsertEmojiAtCursor(inputField->textCursor(), emoji);
+				Ui::Emoji::AddRecent(emoji);
+				return true;
+			}
+		}
+		return false;
+	};
+
+	if (!Core::Sandbox::Instance().customEnterFromEventLoop(callback)) {
+		return;
+	}
+
+	if (_parentPopover) {
+		[_parentPopover dismissPopover:nil];
+	}
+	scrubber.selectedIndex = -1;
+}
+
+- (void)updateStickers {
+	std::vector<PickerScrubberItem> temp;
+	if (const auto error = RestrictionToSendStickers()) {
+		temp.emplace_back(PickerScrubberItem(
+			tr::lng_restricted_send_stickers_all(tr::now)));
+		_stickers = std::move(temp);
+		return;
+	}
+	AppendFavedStickers(temp);
+	AppendRecentStickers(temp);
+	auto count = 0;
+	for (const auto setId : Auth().data().stickerSetsOrder()) {
+		AppendStickerSet(temp, setId);
+		if (++count == kMaxStickerSets) {
+			break;
+		}
+	}
+	if (!temp.size()) {
+		temp.emplace_back(PickerScrubberItem(
+			tr::lng_stickers_nothing_found(tr::now)));
+	}
+	_stickers = std::move(temp);
+}
+
+- (void)updateEmoji {
+	std::vector<PickerScrubberItem> temp;
+	AppendEmojiPacks(temp);
+	_stickers = std::move(temp);
 }
 
 @end
@@ -308,6 +785,8 @@ void PaintUnreadBadge(Painter &p, PeerData *peer) {
 	NSTouchBar *_touchBarMain;
 	NSTouchBar *_touchBarAudioPlayer;
 
+	NSPopoverTouchBarItem *_popoverPicker;
+
 	Platform::TouchBarType _touchBarType;
 	Platform::TouchBarType _touchBarTypeBeforeLock;
 
@@ -315,6 +794,7 @@ void PaintUnreadBadge(Painter &p, PeerData *peer) {
 	double _position;
 
 	rpl::lifetime _lifetime;
+	rpl::lifetime _lifetimeSessionControllerChecker;
 }
 
 - (id) init:(NSView *)view {
@@ -329,40 +809,59 @@ void PaintUnreadBadge(Painter &p, PeerData *peer) {
 	_parentView = view;
 	self.touchBarItems = @{
 		kPinnedPanelItemIdentifier: [NSMutableDictionary dictionaryWithDictionary:@{
-			@"type":  @"pinned",
+			@"type":  kTypePinned,
 		}],
 		kSeekBarItemIdentifier: [NSMutableDictionary dictionaryWithDictionary:@{
-			@"type": @"slider",
+			@"type": kTypeSlider,
 			@"name": @"Seek Bar"
 		}],
 		kPlayItemIdentifier: [NSMutableDictionary dictionaryWithDictionary:@{
-			@"type":     @"button",
+			@"type":     kTypeButton,
 			@"name":     @"Play Button",
 			@"cmd":      [NSNumber numberWithInt:kCommandPlayPause],
 			@"image":    CreateNSImageFromStyleIcon(st::touchBarIconPlayerPause, iconSize),
 			@"imageAlt": CreateNSImageFromStyleIcon(st::touchBarIconPlayerPlay, iconSize),
 		}],
 		kPreviousItemIdentifier: [NSMutableDictionary dictionaryWithDictionary:@{
-			@"type":  @"button",
+			@"type":  kTypeButton,
 			@"name":  @"Previous Playlist Item",
 			@"cmd":   [NSNumber numberWithInt:kCommandPlaylistPrevious],
 			@"image": CreateNSImageFromStyleIcon(st::touchBarIconPlayerPrevious, iconSize),
 		}],
 		kNextItemIdentifier: [NSMutableDictionary dictionaryWithDictionary:@{
-			@"type":  @"button",
+			@"type":  kTypeButton,
 			@"name":  @"Next Playlist Item",
 			@"cmd":   [NSNumber numberWithInt:kCommandPlaylistNext],
 			@"image": CreateNSImageFromStyleIcon(st::touchBarIconPlayerNext, iconSize),
 		}],
 		kCommandClosePlayerItemIdentifier: [NSMutableDictionary dictionaryWithDictionary:@{
-			@"type":  @"button",
+			@"type":  kTypeButton,
 			@"name":  @"Close Player",
 			@"cmd":   [NSNumber numberWithInt:kCommandClosePlayer],
 			@"image": CreateNSImageFromStyleIcon(st::touchBarIconPlayerClose, iconSize),
 		}],
 		kCurrentPositionItemIdentifier: [NSMutableDictionary dictionaryWithDictionary:@{
-			@"type": @"text",
+			@"type": kTypeText,
 			@"name": @"Current Position"
+		}],
+		kPopoverInputItemIdentifier: [NSMutableDictionary dictionaryWithDictionary:@{
+			@"type":  kTypeFormatter,
+			@"image": [NSImage imageNamed:NSImageNameTouchBarTextItalicTemplate],
+		}],
+		kPopoverInputFormatterItemIdentifier: [NSMutableDictionary dictionaryWithDictionary:@{
+			@"type":  kTypeFormatterSegment,
+		}],
+		kScrubberStickersItemIdentifier: [NSMutableDictionary dictionaryWithDictionary:@{
+			@"type":  kTypeScrubber,
+			@"cmd":   [NSNumber numberWithInt:kCommandScrubberStickers],
+		}],
+		kScrubberEmojiItemIdentifier: [NSMutableDictionary dictionaryWithDictionary:@{
+			@"type":  kTypeScrubber,
+			@"cmd":   [NSNumber numberWithInt:kCommandScrubberEmoji],
+		}],
+		kPickerPopoverItemIdentifier: [NSMutableDictionary dictionaryWithDictionary:@{
+			@"type":  kTypePicker,
+			@"name":  @"Picker",
 		}]
 	};
 
@@ -407,6 +906,44 @@ void PaintUnreadBadge(Painter &p, PeerData *peer) {
 		[self toggleArchiveButton:folder->chatsList()->empty()];
 	}, _lifetime);
 
+
+	// At the time of this touchbar creation the sessionController does
+	// not yet exist. But at the time of chatsListChanges event
+	// the sessionController is valid and we can work with it.
+	// So _lifetimeSessionControllerChecker is needed only once.
+	Auth().data().chatsListChanges(
+	) | rpl::start_with_next([=] {
+		if (const auto window = App::wnd()) {
+			if (!Auth().data().stickerSets().size()) {
+				Auth().api().updateStickers();
+			}
+			if (const auto controller = window->sessionController()) {
+				_lifetimeSessionControllerChecker.destroy();
+				controller->activeChatChanges(
+				) | rpl::start_with_next([=](Dialogs::Key key) {
+					const auto show = key.peer()
+						&& key.history()
+						&& key.peer()->canWrite();
+					[self showPickerItem:show];
+				}, _lifetime);
+			}
+		}
+	}, _lifetimeSessionControllerChecker);
+
+	rpl::merge(
+		Auth().data().stickersUpdated(),
+		Auth().data().recentStickersUpdated()
+	) | rpl::start_with_next([=] {
+		[self updatePickerPopover:ScrubberItemType::Sticker];
+	}, _lifetime);
+
+	rpl::merge(
+		Ui::Emoji::UpdatedRecent(),
+		Ui::Emoji::Updated()
+	) | rpl::start_with_next([=] {
+		[self updatePickerPopover:ScrubberItemType::Emoji];
+	}, _lifetime);
+
 	[self updatePinnedButtons];
 
 	return self;
@@ -416,7 +953,10 @@ void PaintUnreadBadge(Painter &p, PeerData *peer) {
 				 makeItemForIdentifier:(NSTouchBarItemIdentifier)identifier {
 	const id dictionaryItem = self.touchBarItems[identifier];
 	const id type = dictionaryItem[@"type"];
-	if ([type isEqualToString:@"slider"]) {
+	const auto isType = [type](NSString *string) {
+		return [type isEqualToString:string];
+	};
+	if (isType(kTypeSlider)) {
 		NSSliderTouchBarItem *item = [[NSSliderTouchBarItem alloc] initWithIdentifier:identifier];
 		item.slider.minValue = 0.0f;
 		item.slider.maxValue = 1.0f;
@@ -425,16 +965,19 @@ void PaintUnreadBadge(Painter &p, PeerData *peer) {
 		item.customizationLabel = dictionaryItem[@"name"];
 		[dictionaryItem setObject:item.slider forKey:@"view"];
 		return item;
-	} else if ([type isEqualToString:@"button"]) {
+	} else if (isType(kTypeButton) || isType(kTypeTextButton)) {
 		NSCustomTouchBarItem *item = [[NSCustomTouchBarItem alloc] initWithIdentifier:identifier];
-		NSImage *image = dictionaryItem[@"image"];
-		NSButton *button = [NSButton buttonWithImage:image target:self action:@selector(buttonAction:)];
+		NSButton *button = isType(kTypeButton)
+			? [NSButton buttonWithImage:dictionaryItem[@"image"]
+				target:self action:@selector(buttonAction:)]
+			: [NSButton buttonWithTitle:dictionaryItem[@"name"]
+				target:self action:@selector(buttonAction:)];
 		button.tag = [dictionaryItem[@"cmd"] intValue];
 		item.view = button;
 		item.customizationLabel = dictionaryItem[@"name"];
 		[dictionaryItem setObject:button forKey:@"view"];
 		return item;
-	} else if ([type isEqualToString:@"text"]) {
+	} else if (isType(kTypeText)) {
 		NSCustomTouchBarItem *item = [[NSCustomTouchBarItem alloc] initWithIdentifier:identifier];
 		NSTextField *text = [NSTextField labelWithString:@"00:00 / 00:00"];
 		text.alignment = NSTextAlignmentCenter;
@@ -442,7 +985,67 @@ void PaintUnreadBadge(Painter &p, PeerData *peer) {
 		item.customizationLabel = dictionaryItem[@"name"];
 		[dictionaryItem setObject:text forKey:@"view"];
 		return item;
-	} else if ([type isEqualToString:@"pinned"]) {
+	} else if (isType(kTypeFormatter)) {
+		NSPopoverTouchBarItem *item = [[NSPopoverTouchBarItem alloc] initWithIdentifier:identifier];
+		item.collapsedRepresentationImage = dictionaryItem[@"image"];
+		NSTouchBar *secondaryTouchBar = [[NSTouchBar alloc] init];
+		secondaryTouchBar.delegate = self;
+		secondaryTouchBar.defaultItemIdentifiers = @[kPopoverInputFormatterItemIdentifier];
+		item.pressAndHoldTouchBar = secondaryTouchBar;
+		item.popoverTouchBar = secondaryTouchBar;
+		return item;
+	} else if (isType(kTypeFormatterSegment)) {
+		NSCustomTouchBarItem *item = [[NSCustomTouchBarItem alloc] initWithIdentifier:identifier];
+		NSSegmentedControl *segment = [[NSSegmentedControl alloc] init];
+		segment.segmentStyle = NSSegmentStyleRounded;
+		static const auto strings = {
+			tr::lng_menu_formatting_bold,
+			tr::lng_menu_formatting_italic,
+			tr::lng_menu_formatting_monospace,
+			tr::lng_menu_formatting_clear,
+			tr::lng_info_link_label,
+		};
+		segment.segmentCount = strings.size();
+		auto count = 0;
+		for (const auto s : strings) {
+			[segment setLabel:Q2NSString(s(tr::now)) forSegment:count++];
+		}
+		segment.target = self;
+		segment.action = @selector(formatterClicked:);
+		item.view = segment;
+		return item;
+	} else if (isType(kTypeScrubber)) {
+		const auto isSticker = ([dictionaryItem[@"cmd"] intValue]
+		 	== kCommandScrubberStickers);
+		const auto type = isSticker
+			? ScrubberItemType::Sticker
+			: ScrubberItemType::Emoji;
+		const auto popover = isSticker
+			? _popoverPicker
+			: nil;
+		PickerCustomTouchBarItem *item = [[PickerCustomTouchBarItem alloc]
+			init:type popover:popover];
+		return item;
+	} else if (isType(kTypePicker)) {
+		NSPopoverTouchBarItem *item = [[NSPopoverTouchBarItem alloc] initWithIdentifier:identifier];
+		_popoverPicker = item;
+		NSSegmentedControl *segment = [[NSSegmentedControl alloc] init];
+		[self updatePickerPopover:ScrubberItemType::Sticker];
+		[self updatePickerPopover:ScrubberItemType::Emoji];
+		const auto imageSize = kIdealIconSize / 3 * 2;
+		segment.segmentStyle = NSSegmentStyleSeparated;
+		segment.segmentCount = 2;
+		[segment setImage:CreateNSImageFromStyleIcon(st::settingsIconStickers, imageSize) forSegment:0];
+		[segment setImage:CreateNSImageFromStyleIcon(st::settingsIconEmoji, imageSize) forSegment:1];
+		[segment setWidth:92 forSegment:0];
+		[segment setWidth:92 forSegment:1];
+		segment.target = self;
+		segment.action = @selector(segmentClicked:);
+		segment.trackingMode = NSSegmentSwitchTrackingMomentary;
+		item.visibilityPriority = NSTouchBarItemPriorityHigh;
+		item.collapsedRepresentation = segment;
+		return item;
+	} else if (isType(kTypePinned)) {
 		NSCustomTouchBarItem *item = [[NSCustomTouchBarItem alloc] initWithIdentifier:identifier];
 		_mainPinnedButtons = [[NSMutableArray alloc] init];
 		NSStackView *stackView = [[NSStackView alloc] init];
@@ -510,6 +1113,42 @@ void PaintUnreadBadge(Painter &p, PeerData *peer) {
 		[_parentView setTouchBar:nil];
 	}
 	_touchBarType = type;
+}
+
+- (void) showInputFieldItem:(bool)show {
+	[self showItemInMain: show
+		? kPopoverInputItemIdentifier
+		: CanWriteToActiveChat()
+			? kPickerPopoverItemIdentifier
+			: nil];
+}
+
+- (void) showPickerItem:(bool)show {
+	[self showItemInMain: show
+		? kPickerPopoverItemIdentifier
+		: nil];
+}
+
+- (void) showItemInMain:(NSTouchBarItemIdentifier)item {
+	NSMutableArray *items = [NSMutableArray arrayWithArray:@[kPinnedPanelItemIdentifier]];
+	if (item) {
+		[items addObject:item];
+	}
+	_touchBarMain.defaultItemIdentifiers = items;
+}
+
+- (void) updatePickerPopover:(ScrubberItemType)type {
+	NSTouchBar *secondaryTouchBar = [[NSTouchBar alloc] init];
+	secondaryTouchBar.delegate = self;
+	const auto popover = IsSticker(type)
+		? _popoverPicker
+		: nil;
+	[[PickerCustomTouchBarItem alloc] init:type popover:popover];
+	const auto identifier = IsSticker(type)
+		? kScrubberStickersItemIdentifier
+		: kScrubberEmojiItemIdentifier;
+	secondaryTouchBar.defaultItemIdentifiers = @[identifier];
+	_popoverPicker.popoverTouchBar = secondaryTouchBar;
 }
 
 // Main Touchbar.
@@ -639,7 +1278,6 @@ void PaintUnreadBadge(Painter &p, PeerData *peer) {
 
 	NSString *fString = [[textField.stringValue componentsSeparatedByCharactersInSet:
 		[NSCharacterSet decimalDigitCharacterSet]] componentsJoinedByString:@"0"];
-	NSSize size = [[NSTextField labelWithString:fString] frame].size;
 
 	NSLayoutConstraint *con =
 		[NSLayoutConstraint constraintWithItem:field
@@ -648,7 +1286,7 @@ void PaintUnreadBadge(Painter &p, PeerData *peer) {
 										toItem:nil
 									 attribute:NSLayoutAttributeNotAnAttribute
 									multiplier:1.0
-									  constant:(int)ceil(size.width) * 1.2];
+									  constant:WidthFromString(fString)];
 	[field addConstraint:con];
 	[item setObject:con forKey:@"constrain"];
 }
@@ -685,6 +1323,22 @@ void PaintUnreadBadge(Painter &p, PeerData *peer) {
 			Media::Player::instance()->startSeeking(kSongType);
 		}
 	});
+}
+
+- (void) segmentClicked:(NSSegmentedControl *)sender {
+	const auto identifier = sender.selectedSegment
+		? kScrubberEmojiItemIdentifier
+		: kScrubberStickersItemIdentifier;
+	_popoverPicker.popoverTouchBar.defaultItemIdentifiers = @[identifier];
+	[_popoverPicker showPopover:nil];
+}
+
+- (void) formatterClicked:(NSSegmentedControl *)sender {
+	[[_touchBarMain itemForIdentifier:kPopoverInputItemIdentifier]
+		dismissPopover:nil];
+	const auto command = int(sender.selectedSegment) + kCommandBold;
+	sender.selectedSegment = -1;
+	SendKeyEvent(command);
 }
 
 -(void)dealloc {

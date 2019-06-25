@@ -96,9 +96,9 @@ void LockWidget::paintContent(Painter &p) {
 
 PasscodeLockWidget::PasscodeLockWidget(QWidget *parent)
 : LockWidget(parent)
-, _passcode(this, st::passcodeInput, langFactory(lng_passcode_ph))
-, _submit(this, langFactory(lng_passcode_submit), st::passcodeSubmit)
-, _logout(this, lang(lng_passcode_logout)) {
+, _passcode(this, st::passcodeInput, tr::lng_passcode_ph())
+, _submit(this, tr::lng_passcode_submit(), st::passcodeSubmit)
+, _logout(this, tr::lng_passcode_logout(tr::now)) {
 	connect(_passcode, &Ui::MaskedInputField::changed, [=] { changed(); });
 	connect(_passcode, &Ui::MaskedInputField::submitted, [=] { submit(); });
 
@@ -111,7 +111,7 @@ void PasscodeLockWidget::paintContent(Painter &p) {
 
 	p.setFont(st::passcodeHeaderFont);
 	p.setPen(st::windowFg);
-	p.drawText(QRect(0, _passcode->y() - st::passcodeHeaderHeight, width(), st::passcodeHeaderHeight), lang(lng_passcode_enter), style::al_center);
+	p.drawText(QRect(0, _passcode->y() - st::passcodeHeaderHeight, width(), st::passcodeHeaderHeight), tr::lng_passcode_enter(tr::now), style::al_center);
 
 	if (!_error.isEmpty()) {
 		p.setFont(st::boxTextFont);
@@ -126,7 +126,7 @@ void PasscodeLockWidget::submit() {
 		return;
 	}
 	if (!passcodeCanTry()) {
-		_error = lang(lng_flood_error);
+		_error = tr::lng_flood_error(tr::now);
 		_passcode->showError();
 		update();
 		return;
@@ -147,7 +147,7 @@ void PasscodeLockWidget::submit() {
 }
 
 void PasscodeLockWidget::error() {
-	_error = lang(lng_passcode_wrong);
+	_error = tr::lng_passcode_wrong(tr::now);
 	_passcode->selectAll();
 	_passcode->showError();
 	update();
@@ -187,22 +187,22 @@ TermsLock TermsLock::FromMTP(const MTPDhelp_termsOfService &data) {
 TermsBox::TermsBox(
 	QWidget*,
 	const TermsLock &data,
-	Fn<QString()> agree,
-	Fn<QString()> cancel)
+	rpl::producer<QString> agree,
+	rpl::producer<QString> cancel)
 : _data(data)
-, _agree(agree)
-, _cancel(cancel) {
+, _agree(std::move(agree))
+, _cancel(std::move(cancel)) {
 }
 
 TermsBox::TermsBox(
 	QWidget*,
 	const TextWithEntities &text,
-	Fn<QString()> agree,
-	Fn<QString()> cancel,
+	rpl::producer<QString> agree,
+	rpl::producer<QString> cancel,
 	bool attentionAgree)
 : _data{ {}, text, std::nullopt, false }
-, _agree(agree)
-, _cancel(cancel)
+, _agree(std::move(agree))
+, _cancel(std::move(cancel))
 , _attentionAgree(attentionAgree) {
 }
 
@@ -215,7 +215,7 @@ rpl::producer<> TermsBox::cancelClicks() const {
 }
 
 void TermsBox::prepare() {
-	setTitle(langFactory(lng_terms_header));
+	setTitle(tr::lng_terms_header());
 
 	auto check = std::make_unique<Ui::CheckView>(st::defaultCheck, false);
 	const auto ageCheck = check.get();
@@ -224,7 +224,7 @@ void TermsBox::prepare() {
 			this,
 			object_ptr<Ui::Checkbox>(
 				this,
-				lng_terms_age(lt_count, *_data.minAge),
+				tr::lng_terms_age(tr::now, lt_count, *_data.minAge),
 				st::defaultCheckbox,
 				std::move(check)),
 			st::termsAgePadding)
@@ -251,7 +251,7 @@ void TermsBox::prepare() {
 			: QString();
 		if (TextUtilities::RegExpMention().match(link).hasMatch()) {
 			_lastClickedMention = link;
-			Ui::Toast::Show(lng_terms_agree_to_proceed(lt_bot, link));
+			Ui::Toast::Show(tr::lng_terms_agree_to_proceed(tr::now, lt_bot, link));
 			return false;
 		}
 		return true;
@@ -285,7 +285,7 @@ void TermsBox::prepare() {
 	const auto &agreeStyle = _attentionAgree
 		? st::attentionBoxButton
 		: st::defaultBoxButton;
-	addButton(_agree, [=] {}, agreeStyle)->clicks(
+	addButton(std::move(_agree), [=] {}, agreeStyle)->clicks(
 	) | rpl::filter([=] {
 		if (age && !age->entity()->checked()) {
 			toggleAgeError(true);
@@ -297,7 +297,7 @@ void TermsBox::prepare() {
 	}) | rpl::start_to_stream(_agreeClicks, lifetime());
 
 	if (_cancel) {
-		addButton(_cancel, [=] {})->clicks(
+		addButton(std::move(_cancel), [=] {})->clicks(
 		) | rpl::map([] {
 			return rpl::empty_value();
 		}) | rpl::start_to_stream(_cancelClicks, lifetime());

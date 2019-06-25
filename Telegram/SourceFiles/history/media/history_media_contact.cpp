@@ -73,7 +73,7 @@ HistoryContact::HistoryContact(
 
 	_name.setText(
 		st::semiboldTextStyle,
-		lng_full_name(lt_first_name, first, lt_last_name, last).trimmed(),
+		tr::lng_full_name(tr::now, lt_first_name, first, lt_last_name, last).trimmed(),
 		Ui::NameTextOptions());
 	_phonew = st::normalFont->width(_phone);
 }
@@ -107,13 +107,12 @@ QSize HistoryContact::countOptimalSize() {
 				: Data::FakePeerIdForJustName(full)),
 			full);
 	}
-	if (_contact
-		&& _contact->contactStatus() == UserData::ContactStatus::Contact) {
+	if (_contact && _contact->isContact()) {
 		_linkl = sendMessageClickHandler(_contact);
-		_link = lang(lng_profile_send_message).toUpper();
+		_link = tr::lng_profile_send_message(tr::now).toUpper();
 	} else if (_userId) {
 		_linkl = addContactClickHandler(_parent->data());
-		_link = lang(lng_profile_add_contact).toUpper();
+		_link = tr::lng_profile_add_contact(tr::now).toUpper();
 	}
 	_linkw = _link.isEmpty() ? 0 : st::semiboldFont->width(_link);
 

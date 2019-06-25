@@ -124,13 +124,13 @@ int KeyboardStyle::minButtonWidth(
 }
 
 QString MessageBadgeText(not_null<const HistoryMessage*> message) {
-	return lang(message->hasAdminBadge()
-		? lng_admin_badge
-		: lng_channel_badge);
+	return message->hasAdminBadge()
+		? tr::lng_admin_badge(tr::now)
+		: tr::lng_channel_badge(tr::now);
 }
 
 QString FastReplyText() {
-	return lang(lng_fast_reply);
+	return tr::lng_fast_reply(tr::now);
 }
 
 void PaintBubble(Painter &p, QRect rect, int outerWidth, bool selected, bool outbg, RectPart tailSide) {
@@ -295,7 +295,7 @@ QSize Message::performCountOptimalSize() {
 			if (displayFromName()) {
 				const auto from = item->displayFrom();
 				const auto &name = from
-					? from->nameText
+					? from->nameText()
 					: item->hiddenForwardedInfo()->nameText;
 				auto namew = st::msgPadding.left()
 					+ name.maxWidth()
@@ -544,14 +544,14 @@ void Message::paintFromName(
 		}
 
 		p.setFont(st::msgNameFont);
-		const auto nameText = [&]() -> const Text* {
+		const auto nameText = [&]() -> const Ui::Text::String * {
 			const auto from = item->displayFrom();
 			if (item->isPost()) {
 				p.setPen(selected ? st::msgInServiceFgSelected : st::msgInServiceFg);
-				return &from->nameText;
+				return &from->nameText();
 			} else if (from) {
 				p.setPen(FromNameFg(from->id, selected));
-				return &from->nameText;
+				return &from->nameText();
 			} else if (const auto info = item->hiddenForwardedInfo()) {
 				p.setPen(FromNameFg(info->colorPeerId, selected));
 				return &info->nameText;
@@ -886,9 +886,9 @@ bool Message::getStateFromName(
 				availableWidth -= st::msgPadding.right() + replyWidth;
 			}
 			const auto from = item->displayFrom();
-			const auto nameText = [&]() -> const Text* {
+			const auto nameText = [&]() -> const Ui::Text::String * {
 				if (from) {
-					return &from->nameText;
+					return &from->nameText();
 				} else if (const auto info = item->hiddenForwardedInfo()) {
 					return &info->nameText;
 				} else {
@@ -899,7 +899,7 @@ bool Message::getStateFromName(
 				&& point.x() < availableLeft + availableWidth
 				&& point.x() < availableLeft + nameText->maxWidth()) {
 				static const auto hidden = std::make_shared<LambdaClickHandler>([] {
-					Ui::Toast::Show(lang(lng_forwarded_hidden));
+					Ui::Toast::Show(tr::lng_forwarded_hidden(tr::now));
 				});
 				outResult->link = from ? from->openLink() : hidden;
 				return true;
@@ -932,7 +932,7 @@ bool Message::getStateForwardedInfo(
 			auto breakEverywhere = (forwarded->text.countHeight(trect.width()) > 2 * st::semiboldFont->height);
 			auto textRequest = request.forText();
 			if (breakEverywhere) {
-				textRequest.flags |= Text::StateRequest::Flag::BreakEverywhere;
+				textRequest.flags |= Ui::Text::StateRequest::Flag::BreakEverywhere;
 			}
 			*outResult = TextState(item, forwarded->text.getState(
 				point - trect.topLeft(),
@@ -1561,9 +1561,9 @@ void Message::fromNameUpdated(int width) const {
 	item->_fromNameVersion = from ? from->nameVersion : 1;
 	if (const auto via = item->Get<HistoryMessageVia>()) {
 		if (!displayForwardedFrom()) {
-			const auto nameText = [&]() -> const Text* {
+			const auto nameText = [&]() -> const Ui::Text::String * {
 				if (from) {
-					return &from->nameText;
+					return &from->nameText();
 				} else if (const auto info = item->hiddenForwardedInfo()) {
 					return &info->nameText;
 				} else {
@@ -1808,7 +1808,7 @@ void Message::initTime() {
 	if (const auto views = item->Get<HistoryMessageViews>()) {
 		views->_viewsText = (views->_views > 0)
 			? Lang::FormatCountToShort(views->_views).string
-			: QString();
+			: QString("1");
 		views->_viewsWidth = views->_viewsText.isEmpty()
 			? 0
 			: st::msgDateFont->width(views->_viewsText);

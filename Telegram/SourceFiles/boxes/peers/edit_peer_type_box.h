@@ -10,8 +10,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "boxes/abstract_box.h"
 #include "base/timer.h"
 
-enum LangKey : int;
-
 namespace style {
 struct InfoProfileCountButton;
 } // namespace style
@@ -27,8 +25,8 @@ class Button;
 } // namespace Info
 
 enum class Privacy {
-	Public,
-	Private,
+	HasUsername,
+	NoUsername,
 };
 
 enum class UsernameState {
@@ -39,13 +37,17 @@ enum class UsernameState {
 
 class EditPeerTypeBox : public BoxContent {
 public:
+	// Edit just the invite link.
+	EditPeerTypeBox(QWidget*, not_null<PeerData*> peer);
+
 	EditPeerTypeBox(
 		QWidget*,
-		not_null<PeerData*> p,
-		std::optional<FnMut<void(Privacy, QString)>> savedCallback = {},
-		std::optional<Privacy> privacySaved = {},
-		std::optional<QString> usernameSaved = {},
-		std::optional<LangKey> usernameError = {});
+		not_null<PeerData*> peer,
+		bool useLocationPhrases,
+		std::optional<FnMut<void(Privacy, QString)>> savedCallback,
+		std::optional<Privacy> privacySaved,
+		std::optional<QString> usernameSaved,
+		std::optional<rpl::producer<QString>> usernameError = {});
 
 protected:
 	void prepare() override;
@@ -53,11 +55,12 @@ protected:
 
 private:
 	not_null<PeerData*> _peer;
+	bool _useLocationPhrases = false;
 	std::optional<FnMut<void(Privacy, QString)>> _savedCallback;
 
 	std::optional<Privacy> _privacySavedValue;
 	std::optional<QString> _usernameSavedValue;
-	std::optional<LangKey> _usernameError;
+	std::optional<rpl::producer<QString>> _usernameError;
 
 	rpl::event_stream<> _focusRequests;
 

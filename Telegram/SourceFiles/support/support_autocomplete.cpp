@@ -54,9 +54,9 @@ protected:
 private:
 	struct Row {
 		Question data;
-		Text question = { st::windowMinWidth / 2 };
-		Text keys = { st::windowMinWidth / 2 };
-		Text answer = { st::windowMinWidth / 2 };
+		Ui::Text::String question = { st::windowMinWidth / 2 };
+		Ui::Text::String keys = { st::windowMinWidth / 2 };
+		Ui::Text::String answer = { st::windowMinWidth / 2 };
 		int top = 0;
 		int height = 0;
 	};
@@ -73,7 +73,7 @@ private:
 
 };
 
-int TextHeight(const Text &text, int available, int lines) {
+int TextHeight(const Ui::Text::String &text, int available, int lines) {
 	Expects(text.style() != nullptr);
 
 	const auto st = text.style();
@@ -179,7 +179,7 @@ void Inner::paintEvent(QPaintEvent *e) {
 	const auto padding = st::autocompleteRowPadding;
 	const auto available = width() - padding.left() - padding.right();
 	auto top = padding.top();
-	const auto drawText = [&](const Text &text, int lines) {
+	const auto drawText = [&](const Ui::Text::String &text, int lines) {
 		text.drawLeftElided(
 			p,
 			padding.left(),
@@ -396,7 +396,7 @@ void Autocomplete::setupContent() {
 		object_ptr<Ui::InputField>(
 			this,
 			st::gifsSearchField,
-			[] { return "Search for templates"; }),
+			rpl::single(qsl("Search for templates"))), // #TODO hard_lang
 		st::autocompleteSearchPadding);
 	const auto input = inputWrap->entity();
 	const auto scroll = Ui::CreateChild<Ui::ScrollArea>(
@@ -507,7 +507,7 @@ ConfirmContactBox::ConfirmContactBox(
 }
 
 void ConfirmContactBox::prepare() {
-	setTitle([] { return "Confirmation"; });
+	setTitle(rpl::single(qsl("Confirmation"))); // #TODO hard_lang
 
 	auto maxWidth = 0;
 	if (_comment) {
@@ -539,7 +539,7 @@ void ConfirmContactBox::prepare() {
 		}
 	};
 
-	const auto button = addButton(langFactory(lng_send_button), [] {});
+	const auto button = addButton(tr::lng_send_button(), [] {});
 	button->clicks(
 	) | rpl::start_with_next([=](Qt::MouseButton which) {
 		_submit((which == Qt::RightButton)
@@ -548,7 +548,7 @@ void ConfirmContactBox::prepare() {
 	}, button->lifetime());
 	button->setAcceptBoth(true);
 
-	addButton(langFactory(lng_cancel), [=] { closeBox(); });
+	addButton(tr::lng_cancel(), [=] { closeBox(); });
 }
 
 void ConfirmContactBox::keyPressEvent(QKeyEvent *e) {

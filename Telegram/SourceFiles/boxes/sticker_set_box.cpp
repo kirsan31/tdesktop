@@ -18,6 +18,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/widgets/buttons.h"
 #include "ui/widgets/scroll_area.h"
 #include "ui/image/image.h"
+#include "ui/text/text_utilities.h"
 #include "ui/emoji_config.h"
 #include "auth_session.h"
 #include "apiwrap.h"
@@ -39,7 +40,7 @@ public:
 	bool loaded() const;
 	bool notInstalled() const;
 	bool official() const;
-	Fn<TextWithEntities()> title() const;
+	rpl::producer<TextWithEntities> title() const;
 	QString shortName() const;
 
 	void install();
@@ -113,7 +114,7 @@ void StickerSetBox::Show(DocumentData *document) {
 }
 
 void StickerSetBox::prepare() {
-	setTitle(langFactory(lng_contacts_loading));
+	setTitle(tr::lng_contacts_loading());
 
 	_inner = setInnerWidget(object_ptr<Inner>(this, _set), st::stickersScroll);
 	Auth().data().stickersUpdated(
@@ -144,7 +145,7 @@ void StickerSetBox::addStickers() {
 void StickerSetBox::shareStickers() {
 	auto url = Core::App().createInternalLinkFull(qsl("addstickers/") + _inner->shortName());
 	QApplication::clipboard()->setText(url);
-	Ui::show(Box<InformBox>(lang(lng_stickers_copied)));
+	Ui::show(Box<InformBox>(tr::lng_stickers_copied(tr::now)));
 }
 
 void StickerSetBox::updateTitleAndButtons() {
@@ -156,16 +157,16 @@ void StickerSetBox::updateButtons() {
 	clearButtons();
 	if (_inner->loaded()) {
 		if (_inner->notInstalled()) {
-			addButton(langFactory(lng_stickers_add_pack), [=] { addStickers(); });
-			addButton(langFactory(lng_cancel), [=] { closeBox(); });
+			addButton(tr::lng_stickers_add_pack(), [=] { addStickers(); });
+			addButton(tr::lng_cancel(), [=] { closeBox(); });
 		} else if (_inner->official()) {
-			addButton(langFactory(lng_about_done), [=] { closeBox(); });
+			addButton(tr::lng_about_done(), [=] { closeBox(); });
 		} else {
-			addButton(langFactory(lng_stickers_share_pack), [=] { shareStickers(); });
-			addButton(langFactory(lng_cancel), [=] { closeBox(); });
+			addButton(tr::lng_stickers_share_pack(), [=] { shareStickers(); });
+			addButton(tr::lng_cancel(), [=] { closeBox(); });
 		}
 	} else {
-		addButton(langFactory(lng_cancel), [=] { closeBox(); });
+		addButton(tr::lng_cancel(), [=] { closeBox(); });
 	}
 	update();
 }
@@ -259,7 +260,7 @@ void StickerSetBox::Inner::gotSet(const MTPmessages_StickerSet &set) {
 	});
 
 	if (_pack.isEmpty()) {
-		Ui::show(Box<InformBox>(lang(lng_stickers_not_found)));
+		Ui::show(Box<InformBox>(tr::lng_stickers_not_found(tr::now)));
 		return;
 	} else {
 		int32 rows = _pack.size() / kStickersPanelPerRow + ((_pack.size() % kStickersPanelPerRow) ? 1 : 0);
@@ -284,7 +285,7 @@ bool StickerSetBox::Inner::failedSet(const RPCError &error) {
 
 	_loaded = true;
 
-	Ui::show(Box<InformBox>(lang(lng_stickers_not_found)));
+	Ui::show(Box<InformBox>(tr::lng_stickers_not_found(tr::now)));
 
 	return true;
 }
@@ -358,7 +359,7 @@ void StickerSetBox::Inner::installDone(const MTPmessages_StickerSetInstallResult
 bool StickerSetBox::Inner::installFail(const RPCError &error) {
 	if (MTP::isDefaultHandledError(error)) return false;
 
-	Ui::show(Box<InformBox>(lang(lng_stickers_not_found)));
+	Ui::show(Box<InformBox>(tr::lng_stickers_not_found(tr::now)));
 
 	return true;
 }
@@ -519,18 +520,15 @@ bool StickerSetBox::Inner::official() const {
 	return _loaded && _setShortName.isEmpty();
 }
 
-Fn<TextWithEntities()> StickerSetBox::Inner::title() const {
-	auto text = TextWithEntities { _setTitle };
-	if (_loaded) {
-		if (_pack.isEmpty()) {
-			return [] { return TextWithEntities { lang(lng_attach_failed), EntitiesInText() }; };
-		} else {
-			TextUtilities::ParseEntities(text, TextParseMentions);
-		}
-	} else {
-		return [] { return TextWithEntities { lang(lng_contacts_loading), EntitiesInText() }; };
+rpl::producer<TextWithEntities> StickerSetBox::Inner::title() const {
+	if (!_loaded) {
+		return tr::lng_contacts_loading() | Ui::Text::ToWithEntities();
+	} else if (_pack.isEmpty()) {
+		return tr::lng_attach_failed() | Ui::Text::ToWithEntities();
 	}
-	return [text] { return text; };
+	auto text = TextWithEntities{ _setTitle };
+	TextUtilities::ParseEntities(text, TextParseMentions);
+	return rpl::single(text);
 }
 
 QString StickerSetBox::Inner::shortName() const {
@@ -540,7 +538,7 @@ QString StickerSetBox::Inner::shortName() const {
 void StickerSetBox::Inner::install() {
 	if (isMasksSet()) {
 		Ui::show(
-			Box<InformBox>(lang(lng_stickers_masks_pack)),
+			Box<InformBox>(tr::lng_stickers_masks_pack(tr::now)),
 			LayerOption::KeepOther);
 		return;
 	}

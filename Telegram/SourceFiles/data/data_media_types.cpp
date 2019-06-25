@@ -90,15 +90,15 @@ QString WithCaptionDialogsText(
 		return textcmdLink(1, TextUtilities::Clean(attachType));
 	}
 
-	auto captionText = TextUtilities::Clean(caption);
-	auto attachTypeWrapped = textcmdLink(1, lng_dialogs_text_media_wrapped(
-		lt_media,
-		TextUtilities::Clean(attachType)));
-	return lng_dialogs_text_media(
+	return tr::lng_dialogs_text_media(
+		tr::now,
 		lt_media_part,
-		attachTypeWrapped,
+		textcmdLink(1, tr::lng_dialogs_text_media_wrapped(
+			tr::now,
+			lt_media,
+			TextUtilities::Clean(attachType))),
 		lt_caption,
-		captionText);
+		TextUtilities::Clean(caption));
 }
 
 QString WithCaptionNotificationText(
@@ -108,12 +108,13 @@ QString WithCaptionNotificationText(
 		return attachType;
 	}
 
-	auto attachTypeWrapped = lng_dialogs_text_media_wrapped(
-		lt_media,
-		attachType);
-	return lng_dialogs_text_media(
+	return tr::lng_dialogs_text_media(
+		tr::now,
 		lt_media_part,
-		attachTypeWrapped,
+		tr::lng_dialogs_text_media_wrapped(
+			tr::now,
+			lt_media,
+			attachType),
 		lt_caption,
 		caption);
 }
@@ -167,7 +168,7 @@ const Invoice *Media::invoice() const {
 	return nullptr;
 }
 
-LocationData *Media::location() const {
+LocationThumbnail *Media::location() const {
 	return nullptr;
 }
 
@@ -306,23 +307,23 @@ Image *MediaPhoto::replyPreview() const {
 
 QString MediaPhoto::notificationText() const {
 	return WithCaptionNotificationText(
-		lang(lng_in_dlg_photo),
+		tr::lng_in_dlg_photo(tr::now),
 		parent()->originalText().text);
 }
 
 QString MediaPhoto::chatListText() const {
 	return WithCaptionDialogsText(
-		lang(lng_in_dlg_photo),
+		tr::lng_in_dlg_photo(tr::now),
 		parent()->originalText().text);
 }
 
 QString MediaPhoto::pinnedTextSubstring() const {
-	return lang(lng_action_pinned_media_photo);
+	return tr::lng_action_pinned_media_photo(tr::now);
 }
 
 TextForMimeData MediaPhoto::clipboardText() const {
 	return WithCaptionClipboardText(
-		lang(lng_in_dlg_photo),
+		tr::lng_in_dlg_photo(tr::now),
 		parent()->clipboardText());
 }
 
@@ -335,10 +336,10 @@ bool MediaPhoto::allowsEditMedia() const {
 }
 
 QString MediaPhoto::errorTextForForward(not_null<PeerData*> peer) const {
-	const auto errorKey = Data::RestrictionErrorKey(
+	return Data::RestrictionError(
 		peer,
-		ChatRestriction::f_send_media);
-	return errorKey ? lang(*errorKey) : QString();
+		ChatRestriction::f_send_media
+	).value_or(QString());
 }
 
 bool MediaPhoto::updateInlineResultMedia(const MTPMessageMedia &media) {
@@ -564,20 +565,20 @@ QString MediaFile::chatListText() const {
 	}
 	const auto type = [&] {
 		if (_document->isVideoMessage()) {
-			return lang(lng_in_dlg_video_message);
+			return tr::lng_in_dlg_video_message(tr::now);
 		} else if (_document->isAnimation()) {
 			return qsl("GIF");
 		} else if (_document->isVideoFile()) {
-			return lang(lng_in_dlg_video);
+			return tr::lng_in_dlg_video(tr::now);
 		} else if (_document->isVoiceMessage()) {
-			return lang(lng_in_dlg_audio);
+			return tr::lng_in_dlg_audio(tr::now);
 		} else if (const auto name = _document->composeNameString();
 				!name.isEmpty()) {
 			return name;
 		} else if (_document->isAudioFile()) {
-			return lang(lng_in_dlg_audio_file);
+			return tr::lng_in_dlg_audio_file(tr::now);
 		}
-		return lang(lng_in_dlg_file);
+		return tr::lng_in_dlg_file(tr::now);
 	}();
 	return WithCaptionDialogsText(type, parent()->originalText().text);
 }
@@ -585,24 +586,24 @@ QString MediaFile::chatListText() const {
 QString MediaFile::notificationText() const {
 	if (const auto sticker = _document->sticker()) {
 		return _emoji.isEmpty()
-			? lang(lng_in_dlg_sticker)
-			: lng_in_dlg_sticker_emoji(lt_emoji, _emoji);
+			? tr::lng_in_dlg_sticker(tr::now)
+			: tr::lng_in_dlg_sticker_emoji(tr::now, lt_emoji, _emoji);
 	}
 	const auto type = [&] {
 		if (_document->isVideoMessage()) {
-			return lang(lng_in_dlg_video_message);
+			return tr::lng_in_dlg_video_message(tr::now);
 		} else if (_document->isAnimation()) {
 			return qsl("GIF");
 		} else if (_document->isVideoFile()) {
-			return lang(lng_in_dlg_video);
+			return tr::lng_in_dlg_video(tr::now);
 		} else if (_document->isVoiceMessage()) {
-			return lang(lng_in_dlg_audio);
+			return tr::lng_in_dlg_audio(tr::now);
 		} else if (!_document->filename().isEmpty()) {
 			return _document->filename();
 		} else if (_document->isAudioFile()) {
-			return lang(lng_in_dlg_audio_file);
+			return tr::lng_in_dlg_audio_file(tr::now);
 		}
-		return lang(lng_in_dlg_file);
+		return tr::lng_in_dlg_file(tr::now);
 	}();
 	return WithCaptionNotificationText(type, parent()->originalText().text);
 }
@@ -610,22 +611,22 @@ QString MediaFile::notificationText() const {
 QString MediaFile::pinnedTextSubstring() const {
 	if (const auto sticker = _document->sticker()) {
 		if (!_emoji.isEmpty()) {
-			return lng_action_pinned_media_emoji_sticker(lt_emoji, _emoji);
+			return tr::lng_action_pinned_media_emoji_sticker(tr::now, lt_emoji, _emoji);
 		}
-		return lang(lng_action_pinned_media_sticker);
+		return tr::lng_action_pinned_media_sticker(tr::now);
 	} else if (_document->isAnimation()) {
 		if (_document->isVideoMessage()) {
-			return lang(lng_action_pinned_media_video_message);
+			return tr::lng_action_pinned_media_video_message(tr::now);
 		}
-		return lang(lng_action_pinned_media_gif);
+		return tr::lng_action_pinned_media_gif(tr::now);
 	} else if (_document->isVideoFile()) {
-		return lang(lng_action_pinned_media_video);
+		return tr::lng_action_pinned_media_video(tr::now);
 	} else if (_document->isVoiceMessage()) {
-		return lang(lng_action_pinned_media_voice);
+		return tr::lng_action_pinned_media_voice(tr::now);
 	} else if (_document->isSong()) {
-		return lang(lng_action_pinned_media_audio);
+		return tr::lng_action_pinned_media_audio(tr::now);
 	}
-	return lang(lng_action_pinned_media_file);
+	return tr::lng_action_pinned_media_file(tr::now);
 }
 
 TextForMimeData MediaFile::clipboardText() const {
@@ -636,22 +637,22 @@ TextForMimeData MediaFile::clipboardText() const {
 			: QString();
 		if (const auto sticker = _document->sticker()) {
 			if (!_emoji.isEmpty()) {
-				return lng_in_dlg_sticker_emoji(lt_emoji, _emoji);
+				return tr::lng_in_dlg_sticker_emoji(tr::now, lt_emoji, _emoji);
 			}
-			return lang(lng_in_dlg_sticker);
+			return tr::lng_in_dlg_sticker(tr::now);
 		} else if (_document->isAnimation()) {
 			if (_document->isVideoMessage()) {
-				return lang(lng_in_dlg_video_message);
+				return tr::lng_in_dlg_video_message(tr::now);
 			}
 			return qsl("GIF");
 		} else if (_document->isVideoFile()) {
-			return lang(lng_in_dlg_video);
+			return tr::lng_in_dlg_video(tr::now);
 		} else if (_document->isVoiceMessage()) {
-			return lang(lng_in_dlg_audio) + addName;
+			return tr::lng_in_dlg_audio(tr::now) + addName;
 		} else if (_document->isSong()) {
-			return lang(lng_in_dlg_audio_file) + addName;
+			return tr::lng_in_dlg_audio_file(tr::now) + addName;
 		}
-		return lang(lng_in_dlg_file) + addName;
+		return tr::lng_in_dlg_file(tr::now) + addName;
 	}();
 	return WithCaptionClipboardText(
 		attachType,
@@ -676,29 +677,29 @@ bool MediaFile::forwardedBecomesUnread() const {
 
 QString MediaFile::errorTextForForward(not_null<PeerData*> peer) const {
 	if (const auto sticker = _document->sticker()) {
-		if (const auto key = Data::RestrictionErrorKey(
+		if (const auto error = Data::RestrictionError(
 				peer,
 				ChatRestriction::f_send_stickers)) {
-			return lang(*key);
+			return *error;
 		}
 	} else if (_document->isAnimation()) {
 		if (_document->isVideoMessage()) {
-			if (const auto key = Data::RestrictionErrorKey(
+			if (const auto error = Data::RestrictionError(
 					peer,
 					ChatRestriction::f_send_media)) {
-				return lang(*key);
+				return *error;
 			}
 		} else {
-			if (const auto key = Data::RestrictionErrorKey(
+			if (const auto error = Data::RestrictionError(
 					peer,
 					ChatRestriction::f_send_gifs)) {
-				return lang(*key);
+				return *error;
 			}
 		}
-	} else if (const auto key = Data::RestrictionErrorKey(
+	} else if (const auto error = Data::RestrictionError(
 			peer,
 			ChatRestriction::f_send_media)) {
-		return lang(*key);
+		return *error;
 	}
 	return QString();
 }
@@ -807,16 +808,17 @@ const SharedContact *MediaContact::sharedContact() const {
 }
 
 QString MediaContact::notificationText() const {
-	return lang(lng_in_dlg_contact);
+	return tr::lng_in_dlg_contact(tr::now);
 }
 
 QString MediaContact::pinnedTextSubstring() const {
-	return lang(lng_action_pinned_media_contact);
+	return tr::lng_action_pinned_media_contact(tr::now);
 }
 
 TextForMimeData MediaContact::clipboardText() const {
-	const auto text = qsl("[ ") + lang(lng_in_dlg_contact) + qsl(" ]\n")
-		+ lng_full_name(
+	const auto text = qsl("[ ") + tr::lng_in_dlg_contact(tr::now) + qsl(" ]\n")
+		+ tr::lng_full_name(
+			tr::now,
 			lt_first_name,
 			_contact.firstName,
 			lt_last_name,
@@ -859,17 +861,17 @@ std::unique_ptr<HistoryMedia> MediaContact::createView(
 
 MediaLocation::MediaLocation(
 	not_null<HistoryItem*> parent,
-	const LocationCoords &coords)
-: MediaLocation(parent, coords, QString(), QString()) {
+	const LocationPoint &point)
+: MediaLocation(parent, point, QString(), QString()) {
 }
 
 MediaLocation::MediaLocation(
 	not_null<HistoryItem*> parent,
-	const LocationCoords &coords,
+	const LocationPoint &point,
 	const QString &title,
 	const QString &description)
 : Media(parent)
-, _location(parent->history()->owner().location(coords))
+, _location(parent->history()->owner().location(point))
 , _title(title)
 , _description(description) {
 }
@@ -877,30 +879,30 @@ MediaLocation::MediaLocation(
 std::unique_ptr<Media> MediaLocation::clone(not_null<HistoryItem*> parent) {
 	return std::make_unique<MediaLocation>(
 		parent,
-		_location->coords,
+		_location->point,
 		_title,
 		_description);
 }
 
-LocationData *MediaLocation::location() const {
+LocationThumbnail *MediaLocation::location() const {
 	return _location;
 }
 
 QString MediaLocation::chatListText() const {
-	return WithCaptionDialogsText(lang(lng_maps_point), _title);
+	return WithCaptionDialogsText(tr::lng_maps_point(tr::now), _title);
 }
 
 QString MediaLocation::notificationText() const {
-	return WithCaptionNotificationText(lang(lng_maps_point), _title);
+	return WithCaptionNotificationText(tr::lng_maps_point(tr::now), _title);
 }
 
 QString MediaLocation::pinnedTextSubstring() const {
-	return lang(lng_action_pinned_media_location);
+	return tr::lng_action_pinned_media_location(tr::now);
 }
 
 TextForMimeData MediaLocation::clipboardText() const {
 	auto result = TextForMimeData::Simple(
-		qstr("[ ") + lang(lng_maps_point) + qstr(" ]\n"));
+		qstr("[ ") + tr::lng_maps_point(tr::now) + qstr(" ]\n"));
 	auto titleResult = TextUtilities::ParseEntities(
 		TextUtilities::Clean(_title),
 		Ui::WebpageTextTitleOptions().flags);
@@ -913,7 +915,7 @@ TextForMimeData MediaLocation::clipboardText() const {
 	if (!descriptionResult.text.isEmpty()) {
 		result.append(std::move(descriptionResult));
 	}
-	result.append(LocationClickHandler(_location->coords).dragText());
+	result.append(LocationClickHandler(_location->point).dragText());
 	return result;
 }
 
@@ -953,7 +955,8 @@ const Call *MediaCall::call() const {
 QString MediaCall::notificationText() const {
 	auto result = Text(parent(), _call.finishReason);
 	if (_call.duration > 0) {
-		result = lng_call_type_and_duration(
+		result = tr::lng_call_type_and_duration(
+			tr::now,
 			lt_type,
 			result,
 			lt_duration,
@@ -993,15 +996,15 @@ QString MediaCall::Text(
 		not_null<HistoryItem*> item,
 		CallFinishReason reason) {
 	if (item->out()) {
-		return lang(reason == CallFinishReason::Missed
-			? lng_call_cancelled
-			: lng_call_outgoing);
+		return (reason == CallFinishReason::Missed)
+			? tr::lng_call_cancelled(tr::now)
+			: tr::lng_call_outgoing(tr::now);
 	} else if (reason == CallFinishReason::Missed) {
-		return lang(lng_call_missed);
+		return tr::lng_call_missed(tr::now);
 	} else if (reason == CallFinishReason::Busy) {
-		return lang(lng_call_declined);
+		return tr::lng_call_declined(tr::now);
 	}
-	return lang(lng_call_incoming);
+	return tr::lng_call_incoming(tr::now);
 }
 
 MediaWebPage::MediaWebPage(
@@ -1133,7 +1136,7 @@ GameData *MediaGame::game() const {
 
 QString MediaGame::pinnedTextSubstring() const {
 	const auto title = _game->title;
-	return lng_action_pinned_media_game(lt_game, title);
+	return tr::lng_action_pinned_media_game(tr::now, lt_game, title);
 }
 
 TextForMimeData MediaGame::clipboardText() const {
@@ -1141,10 +1144,10 @@ TextForMimeData MediaGame::clipboardText() const {
 }
 
 QString MediaGame::errorTextForForward(not_null<PeerData*> peer) const {
-	const auto errorKey = Data::RestrictionErrorKey(
+	return Data::RestrictionError(
 		peer,
-		ChatRestriction::f_send_games);
-	return errorKey ? lang(*errorKey) : QString();
+		ChatRestriction::f_send_games
+	).value_or(QString());
 }
 
 bool MediaGame::consumeMessageText(const TextWithEntities &text) {
@@ -1265,7 +1268,7 @@ QString MediaPoll::pinnedTextSubstring() const {
 
 TextForMimeData MediaPoll::clipboardText() const {
 	const auto text = qstr("[ ")
-		+ lang(lng_in_dlg_poll)
+		+ tr::lng_in_dlg_poll(tr::now)
 		+ qstr(" : ")
 		+ _poll->question
 		+ qstr(" ]")
@@ -1280,10 +1283,10 @@ TextForMimeData MediaPoll::clipboardText() const {
 }
 
 QString MediaPoll::errorTextForForward(not_null<PeerData*> peer) const {
-	const auto errorKey = Data::RestrictionErrorKey(
+	return Data::RestrictionError(
 		peer,
-		ChatRestriction::f_send_polls);
-	return errorKey ? lang(*errorKey) : QString();
+		ChatRestriction::f_send_polls
+	).value_or(QString());
 }
 
 bool MediaPoll::updateInlineResultMedia(const MTPMessageMedia &media) {

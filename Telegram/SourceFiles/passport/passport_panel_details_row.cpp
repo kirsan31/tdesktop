@@ -18,6 +18,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/countryinput.h"
 #include "auth_session.h"
 #include "data/data_user.h"
+#include "data/data_countries.h"
 #include "styles/style_boxes.h"
 #include "styles/style_passport.h"
 
@@ -29,7 +30,7 @@ public:
 	PostcodeInput(
 		QWidget *parent,
 		const style::InputField &st,
-		Fn<QString()> placeholderFactory,
+		rpl::producer<QString> placeholder,
 		const QString &val);
 
 protected:
@@ -44,9 +45,9 @@ protected:
 PostcodeInput::PostcodeInput(
 	QWidget *parent,
 	const style::InputField &st,
-	Fn<QString()> placeholderFactory,
+	rpl::producer<QString> placeholder,
 	const QString &val)
-: MaskedInputField(parent, st, std::move(placeholderFactory), val) {
+: MaskedInputField(parent, st, std::move(placeholder), val) {
 	if (!QRegularExpression("^[a-zA-Z0-9\\-]+$").match(val).hasMatch()) {
 		setText(QString());
 	}
@@ -301,8 +302,8 @@ void AbstractTextRow<Input>::finishInnerAnimating() {
 }
 
 QString CountryString(const QString &code) {
-	const auto name = CountrySelectBox::NameByISO(code);
-	return name.isEmpty() ? lang(lng_passport_country_choose) : name;
+	const auto name = Data::CountryNameByISO2(code);
+	return name.isEmpty() ? tr::lng_passport_country_choose(tr::now) : name;
 }
 
 CountryRow::CountryRow(
@@ -378,8 +379,8 @@ void CountryRow::errorAnimationCallback() {
 
 void CountryRow::chooseCountry() {
 	const auto top = _value.current();
-	const auto name = CountrySelectBox::NameByISO(top);
-	const auto isoByPhone = CountrySelectBox::ISOByPhone(
+	const auto name = Data::CountryNameByISO2(top);
+	const auto isoByPhone = Data::CountryISO2ByPhone(
 		Auth().user()->phone());
 	const auto box = _controller->show(Box<CountrySelectBox>(!name.isEmpty()
 		? top
@@ -523,33 +524,31 @@ DateRow::DateRow(
 , _day(
 	this,
 	st::passportDetailsDateField,
-	langFactory(lng_date_input_day),
+	tr::lng_date_input_day(),
 	GetDay(value))
 , _separator1(
 	this,
 	object_ptr<Ui::FlatLabel>(
 		this,
 		QString(" / "),
-		Ui::FlatLabel::InitType::Simple,
 		st::passportDetailsSeparator),
 	st::passportDetailsSeparatorPadding)
 , _month(
 	this,
 	st::passportDetailsDateField,
-	langFactory(lng_date_input_month),
+	tr::lng_date_input_month(),
 	GetMonth(value))
 , _separator2(
 	this,
 	object_ptr<Ui::FlatLabel>(
 		this,
 		QString(" / "),
-		Ui::FlatLabel::InitType::Simple,
 		st::passportDetailsSeparator),
 	st::passportDetailsSeparatorPadding)
 , _year(
 	this,
 	st::passportDetailsDateField,
-	langFactory(lng_date_input_year),
+	tr::lng_date_input_year(),
 	GetYear(value))
 , _value(valueCurrent()) {
 	const auto focused = [=](const object_ptr<DateInput> &field) {
@@ -741,13 +740,13 @@ int DateRow::resizeInner(int left, int top, int width) {
 	const auto addToWidth = st::passportDetailsSeparatorPadding.left();
 	const auto dayWidth = _st.textMargins.left()
 		+ _st.placeholderMargins.left()
-		+ font->width(lang(lng_date_input_day))
+		+ font->width(tr::lng_date_input_day(tr::now))
 		+ _st.placeholderMargins.right()
 		+ _st.textMargins.right()
 		+ addToWidth;
 	const auto monthWidth = _st.textMargins.left()
 		+ _st.placeholderMargins.left()
-		+ font->width(lang(lng_date_input_month))
+		+ font->width(tr::lng_date_input_month(tr::now))
 		+ _st.placeholderMargins.right()
 		+ _st.textMargins.right()
 		+ addToWidth;
@@ -852,14 +851,14 @@ GenderRow::GenderRow(
 	this,
 	_group,
 	Gender::Male,
-	lang(lng_passport_gender_male),
+	tr::lng_passport_gender_male(tr::now),
 	st::defaultCheckbox,
 	createRadioView(_maleRadio))
 , _female(
 	this,
 	_group,
 	Gender::Female,
-	lang(lng_passport_gender_female),
+	tr::lng_passport_gender_female(tr::now),
 	st::defaultCheckbox,
 	createRadioView(_femaleRadio))
 , _value(StringToGender(value) ? value : QString()) {
@@ -1066,7 +1065,6 @@ void PanelDetailsRow::showError(std::optional<QString> error) {
 				object_ptr<Ui::FlatLabel>(
 					this,
 					*error,
-					Ui::FlatLabel::InitType::Simple,
 					st::passportVerifyErrorLabel));
 		} else {
 			_error->entity()->setText(*error);

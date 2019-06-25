@@ -77,14 +77,9 @@ class FlatLabel : public RpWidget, public ClickHandlerHost {
 public:
 	FlatLabel(QWidget *parent, const style::FlatLabel &st = st::defaultFlatLabel);
 
-	enum class InitType {
-		Simple,
-		Rich,
-	};
 	FlatLabel(
 		QWidget *parent,
 		const QString &text,
-		InitType initType,
 		const style::FlatLabel &st = st::defaultFlatLabel);
 
 	FlatLabel(
@@ -112,6 +107,7 @@ public:
 	QMargins getMargins() const override;
 
 	void setLink(uint16 lnkIndex, const ClickHandlerPtr &lnk);
+	void setLinksTrusted();
 
 	using ClickHandlerFilter = Fn<bool(const ClickHandlerPtr&, Qt::MouseButton)>;
 	void setClickHandlerFilter(ClickHandlerFilter &&filter);
@@ -157,11 +153,11 @@ private:
 	void init();
 	void textUpdated();
 
-	Text::StateResult dragActionUpdate();
-	Text::StateResult dragActionStart(const QPoint &p, Qt::MouseButton button);
-	Text::StateResult dragActionFinish(const QPoint &p, Qt::MouseButton button);
-	void updateHover(const Text::StateResult &state);
-	Text::StateResult getTextState(const QPoint &m) const;
+	Ui::Text::StateResult dragActionUpdate();
+	Ui::Text::StateResult dragActionStart(const QPoint &p, Qt::MouseButton button);
+	Ui::Text::StateResult dragActionFinish(const QPoint &p, Qt::MouseButton button);
+	void updateHover(const Ui::Text::StateResult &state);
+	Ui::Text::StateResult getTextState(const QPoint &m) const;
 	void refreshCursor(bool uponSymbol);
 
 	int countTextWidth() const;
@@ -174,7 +170,7 @@ private:
 	};
 	void showContextMenu(QContextMenuEvent *e, ContextMenuReason reason);
 
-	Text _text;
+	Text::String _text;
 	const style::FlatLabel &_st;
 	std::optional<QColor> _textColorOverride;
 	float64 _opacity = 1.;

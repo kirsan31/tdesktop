@@ -75,6 +75,14 @@ public:
 		int y,
 		int size) const override;
 
+	void paintUserpic(
+		Painter &p,
+		int x,
+		int y,
+		int size,
+		const style::color &overrideBg,
+		const style::color &overrideFg) const;
+
 	bool chatsListLoaded() const;
 	void setChatsListLoaded(bool loaded = true);
 	void setCloudChatsListSize(int size);
@@ -90,6 +98,14 @@ private:
 
 	void reorderLastHistories();
 	void finalizeCloudUnread();
+
+	void paintUserpic(
+		Painter &p,
+		int x,
+		int y,
+		int size,
+		const style::color *overrideBg,
+		const style::color *overrideFg) const;
 
 	FolderId _id = 0;
 	Dialogs::MainList _chatsList;

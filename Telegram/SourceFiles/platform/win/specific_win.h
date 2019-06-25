@@ -9,7 +9,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "platform/win/wrapper_windows_h.h"
 
-class LocationCoords;
+namespace Data {
+class LocationPoint;
+} // namespace Data
 
 namespace Platform {
 
@@ -38,8 +40,7 @@ QString CurrentExecutablePath(int argc, char *argv[]);
 
 namespace ThirdParty {
 
-inline void start() {
-}
+void start();
 
 inline void finish() {
 }
@@ -107,4 +108,4 @@ public:
 
 };
 
-bool psLaunchMaps(const LocationCoords &coords);
+bool psLaunchMaps(const Data::LocationPoint &point);

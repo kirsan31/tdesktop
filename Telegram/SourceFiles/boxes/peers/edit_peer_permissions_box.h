@@ -15,8 +15,6 @@ class RoundButton;
 class VerticalLayout;
 } // namespace Ui
 
-enum LangKey : int;
-
 class EditPeerPermissionsBox : public BoxContent {
 public:
 	EditPeerPermissionsBox(QWidget*, not_null<PeerData*> peer);
@@ -44,13 +42,13 @@ struct EditFlagsControl {
 
 EditFlagsControl<MTPDchatBannedRights::Flags> CreateEditRestrictions(
 	QWidget *parent,
-	LangKey header,
+	rpl::producer<QString> header,
 	MTPDchatBannedRights::Flags restrictions,
 	std::map<MTPDchatBannedRights::Flags, QString> disabledMessages);
 
 EditFlagsControl<MTPDchatAdminRights::Flags> CreateEditAdminRights(
 	QWidget *parent,
-	LangKey header,
+	rpl::producer<QString> header,
 	MTPDchatAdminRights::Flags rights,
 	std::map<MTPDchatAdminRights::Flags, QString> disabledMessages,
 	bool isGroup,
@@ -58,3 +56,4 @@ EditFlagsControl<MTPDchatAdminRights::Flags> CreateEditAdminRights(
 
 ChatAdminRights DisabledByDefaultRestrictions(not_null<PeerData*> peer);
 ChatRestrictions FixDependentRestrictions(ChatRestrictions restrictions);
+ChatAdminRights FullAdminRights(bool isGroup);

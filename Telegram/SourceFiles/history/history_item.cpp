@@ -62,7 +62,7 @@ not_null<HistoryItem*> CreateUnsupportedMessage(
 		UserId from) {
 	const auto siteLink = qsl("https://desktop.telegram.org");
 	auto text = TextWithEntities{
-		lng_message_unsupported(lt_link, siteLink)
+		tr::lng_message_unsupported(tr::now, lt_link, siteLink)
 	};
 	TextUtilities::ParseEntities(text, Ui::ItemTextNoMonoOptions().flags);
 	text.entities.push_front(
@@ -727,7 +727,7 @@ QString HistoryItem::inDialogsText(DrawInDialog way) const {
 	auto getText = [this]() {
 		if (_media) {
 			if (_groupId) {
-				return textcmdLink(1, TextUtilities::Clean(lang(lng_in_dlg_album)));
+				return textcmdLink(1, TextUtilities::Clean(tr::lng_in_dlg_album(tr::now)));
 			}
 			return _media->chatListText();
 		} else if (!emptyText()) {
@@ -747,9 +747,9 @@ QString HistoryItem::inDialogsText(DrawInDialog way) const {
 		return nullptr;
 	}();
 	if (sender) {
-		auto fromText = sender->isSelf() ? lang(lng_from_you) : sender->shortName();
-		auto fromWrapped = textcmdLink(1, lng_dialogs_text_from_wrapped(lt_from, TextUtilities::Clean(fromText)));
-		return lng_dialogs_text_with_from(lt_from_part, fromWrapped, lt_message, plainText);
+		auto fromText = sender->isSelf() ? tr::lng_from_you(tr::now) : sender->shortName();
+		auto fromWrapped = textcmdLink(1, tr::lng_dialogs_text_from_wrapped(tr::now, lt_from, TextUtilities::Clean(fromText)));
+		return tr::lng_dialogs_text_with_from(tr::now, lt_from_part, fromWrapped, lt_message, plainText);
 	}
 	return plainText;
 }
@@ -761,7 +761,7 @@ void HistoryItem::drawInDialog(
 		bool selected,
 		DrawInDialog way,
 		const HistoryItem *&cacheFor,
-		Text &cache) const {
+		Ui::Text::String &cache) const {
 	if (r.isEmpty()) {
 		return;
 	}
@@ -828,7 +828,7 @@ not_null<HistoryItem*> HistoryItem::Create(
 				data.vfrom_id.v);
 		} else if (checked == MediaCheckResult::Empty) {
 			const auto text = HistoryService::PreparedText {
-				lang(lng_message_empty)
+				tr::lng_message_empty(tr::now)
 			};
 			return history->owner().makeServiceMessage(
 				history,
@@ -848,7 +848,7 @@ not_null<HistoryItem*> HistoryItem::Create(
 		return history->owner().makeServiceMessage(history, data);
 	}, [&](const MTPDmessageEmpty &data) -> HistoryItem* {
 		const auto text = HistoryService::PreparedText{
-			lang(lng_message_empty)
+			tr::lng_message_empty(tr::now)
 		};
 		return history->owner().makeServiceMessage(history, data.vid.v, TimeId(0), text);
 	});

@@ -91,14 +91,12 @@ void ProgressWidget::Row::fillCurrentInstance() {
 		object_ptr<Ui::FlatLabel>(
 			this,
 			_data.label,
-			Ui::FlatLabel::InitType::Simple,
 			st::exportProgressLabel));
 	_current.info = base::make_unique_q<Ui::FadeWrap<Ui::FlatLabel>>(
 		this,
 		object_ptr<Ui::FlatLabel>(
 			this,
 			_data.info,
-			Ui::FlatLabel::InitType::Simple,
 			st::exportProgressInfoLabel));
 	_current.label->hide(anim::type::instant);
 	_current.info->hide(anim::type::instant);
@@ -247,8 +245,7 @@ ProgressWidget::ProgressWidget(
 	_about = _body->add(
 		object_ptr<Ui::FlatLabel>(
 			this,
-			lang(lng_export_progress),
-			Ui::FlatLabel::InitType::Simple,
+			tr::lng_export_progress(tr::now),
 			st::exportAboutLabel),
 		st::exportAboutPadding);
 
@@ -260,7 +257,7 @@ ProgressWidget::ProgressWidget(
 
 	_cancel = base::make_unique_q<Ui::RoundButton>(
 		this,
-		langFactory(lng_export_stop),
+		tr::lng_export_stop(),
 		st::exportCancelButton);
 	setupBottomButton(_cancel.get());
 }
@@ -310,13 +307,13 @@ void ProgressWidget::updateState(Content &&content) {
 
 void ProgressWidget::showDone() {
 	_cancel = nullptr;
-	_about->setText(lang(lng_export_about_done));
+	_about->setText(tr::lng_export_about_done(tr::now));
 	_done = base::make_unique_q<Ui::RoundButton>(
 		this,
-		langFactory(lng_export_done),
+		tr::lng_export_done(),
 		st::exportDoneButton);
 	const auto desired = std::min(
-		st::exportDoneButton.font->width(lang(lng_export_done).toUpper())
+		st::exportDoneButton.font->width(tr::lng_export_done(tr::now).toUpper())
 		+ st::exportDoneButton.height
 		- st::exportDoneButton.font->height,
 		st::exportPanelSize.width() - 2 * st::exportCancelBottom);

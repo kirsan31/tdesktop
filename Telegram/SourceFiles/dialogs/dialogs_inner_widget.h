@@ -25,6 +25,10 @@ namespace Window {
 class SessionController;
 } // namespace Window
 
+namespace Notify {
+struct PeerUpdate;
+} // namespace Notify
+
 namespace Dialogs {
 
 class Row;
@@ -204,6 +208,10 @@ private:
 	bool uniqueSearchResults() const;
 	bool hasHistoryInResults(not_null<History*> history) const;
 
+	int defaultRowTop(not_null<Row*> row) const;
+	void setupOnlineStatusCheck();
+	void userOnlineUpdated(const Notify::PeerUpdate &update);
+
 	void setupShortcuts();
 	RowDescriptor computeJump(
 		const RowDescriptor &to,
@@ -232,6 +240,7 @@ private:
 		QRect updateRect = QRect(),
 		UpdateRowSections sections = UpdateRowSection::All);
 	void fillSupportSearchMenu(not_null<Ui::PopupMenu*> menu);
+	void fillArchiveSearchMenu(not_null<Ui::PopupMenu*> menu);
 
 	int dialogsOffset() const;
 	int fixedOnTopCount() const;
@@ -259,23 +268,23 @@ private:
 		Painter &p,
 		not_null<PeerData*> peer,
 		int top,
-		const Text &text) const;
+		const Ui::Text::String &text) const;
 	void paintSearchInSaved(
 		Painter &p,
 		int top,
-		const Text &text) const;
+		const Ui::Text::String &text) const;
 	//void paintSearchInFeed( // #feed
 	//	Painter &p,
 	//	not_null<Data::Feed*> feed,
 	//	int top,
-	//	const Text &text) const;
+	//	const Ui::Text::String &text) const;
 	template <typename PaintUserpic>
 	void paintSearchInFilter(
 		Painter &p,
 		PaintUserpic paintUserpic,
 		int top,
 		const style::icon *icon,
-		const Text &text) const;
+		const Ui::Text::String &text) const;
 	void refreshSearchInChatLabel();
 
 	void clearSearchResults(bool clearPeerSearchResults = true);
@@ -305,7 +314,7 @@ private:
 	std::vector<std::unique_ptr<CollapsedRow>> _collapsedRows;
 	int _collapsedSelected = -1;
 	int _collapsedPressed = -1;
-	int _skipByCollapsedRows = 0;
+	int _skipTopDialogs = 0;
 	Row *_selected = nullptr;
 	Row *_pressed = nullptr;
 
@@ -368,8 +377,8 @@ private:
 	Key _searchInChat;
 	History *_searchInMigrated = nullptr;
 	UserData *_searchFromUser = nullptr;
-	Text _searchInChatText;
-	Text _searchFromUserText;
+	Ui::Text::String _searchInChatText;
+	Ui::Text::String _searchFromUserText;
 	RowDescriptor _menuRow;
 
 	Fn<void()> _loadMoreCallback;

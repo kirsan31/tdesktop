@@ -10,7 +10,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/widgets/labels.h" // Ui::FlatLabel
 #include "ui/widgets/buttons.h" // Ui::IconButton
 #include "ui/wrap/slide_wrap.h" // Ui::SlideWrap
-#include "info/profile/info_profile_values.h" // Info::Profile::ToUpperValue
+#include "ui/text/text_utilities.h" // Ui::Text::ToUpper
 #include "platform/platform_info.h"
 #include "lang/lang_keys.h"
 #include "styles/style_window.h"
@@ -46,19 +46,18 @@ Bar::Bar(not_null<QWidget*> parent, QDate date)
 : _date(date)
 , _title(
 	this,
-	Lang::Viewer(lng_outdated_title) | Info::Profile::ToUpperValue(),
+	tr::lng_outdated_title() | Ui::Text::ToUpper(),
 	st::windowOutdatedTitle)
 , _details(this,
 	QString(),
-	Ui::FlatLabel::InitType::Simple,
 	st::windowOutdatedDetails)
 , _close(this, st::windowOutdatedClose)
 , _soon(_date >= QDate::currentDate()) {
 	_title->setTryMakeSimilarLines(true);
 	_details->setTryMakeSimilarLines(true);
 	_details->setText(_soon
-		? lng_outdated_soon(lt_date, langDayOfMonthFull(date))
-		: lang(lng_outdated_now));
+		? tr::lng_outdated_soon(tr::now, lt_date, langDayOfMonthFull(date))
+		: tr::lng_outdated_now(tr::now));
 }
 
 rpl::producer<> Bar::hideClicks() const {

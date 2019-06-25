@@ -11,6 +11,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/application.h"
 #include "auth_session.h"
 #include "ui/wrap/slide_wrap.h"
+#include "ui/text/text_utilities.h"
 #include "data/data_peer_values.h"
 #include "data/data_shared_media.h"
 #include "data/data_folder.h"
@@ -30,7 +31,7 @@ rpl::producer<TextWithEntities> NameValue(not_null<PeerData*> peer) {
 		Notify::PeerUpdate::Flag::NameChanged
 	) | rpl::map([=] {
 		return App::peerName(peer);
-	}) | WithEmptyEntities();
+	}) | Ui::Text::ToWithEntities();
 }
 
 rpl::producer<TextWithEntities> PhoneValue(not_null<UserData*> user) {
@@ -39,7 +40,7 @@ rpl::producer<TextWithEntities> PhoneValue(not_null<UserData*> user) {
 			Notify::PeerUpdate::Flag::UserPhoneChanged
 	) | rpl::map([user] {
 		return App::formatPhone(user->phone());
-	}) | WithEmptyEntities();
+	}) | Ui::Text::ToWithEntities();
 }
 
 auto PlainBioValue(not_null<UserData*> user) {
@@ -52,13 +53,13 @@ auto PlainBioValue(not_null<UserData*> user) {
 rpl::producer<TextWithEntities> BioValue(not_null<UserData*> user) {
 	return PlainBioValue(user)
 		| ToSingleLine()
-		| WithEmptyEntities();
+		| Ui::Text::ToWithEntities();
 }
 
 auto PlainUsernameValue(not_null<PeerData*> peer) {
 	return Notify::PeerUpdateValue(
-			peer,
-			Notify::PeerUpdate::Flag::UsernameChanged
+		peer,
+		Notify::PeerUpdate::Flag::UsernameChanged
 	) | rpl::map([peer] {
 		return peer->userName();
 	});
@@ -71,7 +72,7 @@ rpl::producer<TextWithEntities> UsernameValue(not_null<UserData*> user) {
 		return username.isEmpty()
 			? QString()
 			: ('@' + username);
-	}) | WithEmptyEntities();
+	}) | Ui::Text::ToWithEntities();
 }
 
 rpl::producer<QString> PlainAboutValue(not_null<PeerData*> peer) {
@@ -95,7 +96,7 @@ rpl::producer<TextWithEntities> AboutValue(not_null<PeerData*> peer) {
 	}
 	return PlainAboutValue(
 		peer
-	) | WithEmptyEntities(
+	) | Ui::Text::ToWithEntities(
 	) | rpl::map([=](TextWithEntities &&text) {
 		TextUtilities::ParseEntities(text, flags);
 		return std::move(text);
@@ -109,6 +110,16 @@ rpl::producer<QString> LinkValue(not_null<PeerData*> peer) {
 		return username.isEmpty()
 			? QString()
 			: Core::App().createInternalLinkFull(username);
+	});
+}
+
+rpl::producer<const ChannelLocation*> LocationValue(
+		not_null<ChannelData*> channel) {
+	return Notify::PeerUpdateValue(
+		channel,
+		Notify::PeerUpdate::Flag::ChannelLocation
+	) | rpl::map([=] {
+		return channel->getLocation();
 	});
 }
 
@@ -154,10 +165,12 @@ rpl::producer<bool> CanShareContactValue(not_null<UserData*> user) {
 
 rpl::producer<bool> CanAddContactValue(not_null<UserData*> user) {
 	using namespace rpl::mappers;
-	return rpl::combine(
-		IsContactValue(user),
-		CanShareContactValue(user),
-		!_1 && _2);
+	if (user->isBot() || user->isSelf()) {
+		return rpl::single(false);
+	}
+	return IsContactValue(
+		user
+	) | rpl::map(!_1);
 }
 
 rpl::producer<bool> AmInChannelValue(not_null<ChannelData*> channel) {
@@ -297,14 +310,14 @@ rpl::producer<int> CommonGroupsCountValue(not_null<UserData*> user) {
 }
 
 rpl::producer<bool> CanAddMemberValue(not_null<PeerData*> peer) {
-	if (auto chat = peer->asChat()) {
+	if (const auto chat = peer->asChat()) {
 		return Notify::PeerUpdateValue(
 			chat,
 			Notify::PeerUpdate::Flag::RightsChanged
 		) | rpl::map([=] {
 			return chat->canAddMembers();
 		});
-	} else if (auto channel = peer->asChannel()) {
+	} else if (const auto channel = peer->asChannel()) {
 		return Notify::PeerUpdateValue(
 			channel,
 			Notify::PeerUpdate::Flag::RightsChanged
@@ -316,12 +329,23 @@ rpl::producer<bool> CanAddMemberValue(not_null<PeerData*> peer) {
 }
 
 rpl::producer<bool> VerifiedValue(not_null<PeerData*> peer) {
-	if (auto user = peer->asUser()) {
+	if (const auto user = peer->asUser()) {
 		return Data::PeerFlagValue(user, MTPDuser::Flag::f_verified);
-	} else if (auto channel = peer->asChannel()) {
+	} else if (const auto channel = peer->asChannel()) {
 		return Data::PeerFlagValue(
 			channel,
 			MTPDchannel::Flag::f_verified);
+	}
+	return rpl::single(false);
+}
+
+rpl::producer<bool> ScamValue(not_null<PeerData*> peer) {
+	if (const auto user = peer->asUser()) {
+		return Data::PeerFlagValue(user, MTPDuser::Flag::f_scam);
+	} else if (const auto channel = peer->asChannel()) {
+		return Data::PeerFlagValue(
+			channel,
+			MTPDchannel::Flag::f_scam);
 	}
 	return rpl::single(false);
 }

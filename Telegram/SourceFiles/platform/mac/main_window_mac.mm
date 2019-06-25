@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "platform/mac/main_window_mac.h"
 
+#include "data/data_session.h"
 #include "styles/style_window.h"
 #include "mainwindow.h"
 #include "mainwidget.h"
@@ -16,26 +17,25 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/history_widget.h"
 #include "history/history_inner_widget.h"
 #include "main/main_account.h" // Account::sessionChanges.
+#include "media/player/media_player_instance.h"
+#include "media/audio/media_audio.h"
 #include "storage/localstorage.h"
 #include "window/notifications_manager_default.h"
 #include "window/themes/window_theme.h"
+#include "platform/mac/mac_touchbar.h"
 #include "platform/platform_notifications_manager.h"
 #include "platform/platform_info.h"
 #include "boxes/peer_list_controllers.h"
 #include "boxes/about_box.h"
 #include "lang/lang_keys.h"
 #include "platform/mac/mac_utilities.h"
+#include "ui/widgets/input_fields.h"
 
 #include <Cocoa/Cocoa.h>
 #include <CoreFoundation/CFURL.h>
 #include <IOKit/IOKitLib.h>
 #include <IOKit/hidsystem/ev_keymap.h>
 #include <SPMediaKeyTap.h>
-
-#include "media/player/media_player_instance.h"
-#include "media/audio/media_audio.h"
-#include "platform/mac/mac_touchbar.h"
-#include "data/data_session.h"
 
 @interface MainWindowObserver : NSObject {
 }
@@ -639,7 +639,7 @@ void MainWindow::psFirstShow() {
 
 void MainWindow::createGlobalMenu() {
 	auto main = psMainMenu.addMenu(qsl("Telegram"));
-	auto about = main->addAction(lng_mac_menu_about_telegram(lt_telegram, qsl("Telegram")));
+	auto about = main->addAction(tr::lng_mac_menu_about_telegram(tr::now, lt_telegram, qsl("Telegram")));
 	connect(about, &QAction::triggered, about, [] {
 		if (App::wnd() && App::wnd()->isHidden()) App::wnd()->showFromTray();
 		Ui::show(Box<AboutBox>());
@@ -647,25 +647,25 @@ void MainWindow::createGlobalMenu() {
 	about->setMenuRole(QAction::AboutQtRole);
 
 	main->addSeparator();
-	QAction *prefs = main->addAction(lang(lng_mac_menu_preferences), App::wnd(), SLOT(showSettings()), QKeySequence(Qt::ControlModifier | Qt::Key_Comma));
+	QAction *prefs = main->addAction(tr::lng_mac_menu_preferences(tr::now), App::wnd(), SLOT(showSettings()), QKeySequence(Qt::ControlModifier | Qt::Key_Comma));
 	prefs->setMenuRole(QAction::PreferencesRole);
 
-	QMenu *file = psMainMenu.addMenu(lang(lng_mac_menu_file));
-	psLogout = file->addAction(lang(lng_mac_menu_logout), App::wnd(), SLOT(onLogout()));
+	QMenu *file = psMainMenu.addMenu(tr::lng_mac_menu_file(tr::now));
+	psLogout = file->addAction(tr::lng_mac_menu_logout(tr::now), App::wnd(), SLOT(onLogout()));
 
-	QMenu *edit = psMainMenu.addMenu(lang(lng_mac_menu_edit));
-	psUndo = edit->addAction(lang(lng_mac_menu_undo), this, SLOT(psMacUndo()), QKeySequence::Undo);
-	psRedo = edit->addAction(lang(lng_mac_menu_redo), this, SLOT(psMacRedo()), QKeySequence::Redo);
+	QMenu *edit = psMainMenu.addMenu(tr::lng_mac_menu_edit(tr::now));
+	psUndo = edit->addAction(tr::lng_mac_menu_undo(tr::now), this, SLOT(psMacUndo()), QKeySequence::Undo);
+	psRedo = edit->addAction(tr::lng_mac_menu_redo(tr::now), this, SLOT(psMacRedo()), QKeySequence::Redo);
 	edit->addSeparator();
-	psCut = edit->addAction(lang(lng_mac_menu_cut), this, SLOT(psMacCut()), QKeySequence::Cut);
-	psCopy = edit->addAction(lang(lng_mac_menu_copy), this, SLOT(psMacCopy()), QKeySequence::Copy);
-	psPaste = edit->addAction(lang(lng_mac_menu_paste), this, SLOT(psMacPaste()), QKeySequence::Paste);
-	psDelete = edit->addAction(lang(lng_mac_menu_delete), this, SLOT(psMacDelete()), QKeySequence(Qt::ControlModifier | Qt::Key_Backspace));
+	psCut = edit->addAction(tr::lng_mac_menu_cut(tr::now), this, SLOT(psMacCut()), QKeySequence::Cut);
+	psCopy = edit->addAction(tr::lng_mac_menu_copy(tr::now), this, SLOT(psMacCopy()), QKeySequence::Copy);
+	psPaste = edit->addAction(tr::lng_mac_menu_paste(tr::now), this, SLOT(psMacPaste()), QKeySequence::Paste);
+	psDelete = edit->addAction(tr::lng_mac_menu_delete(tr::now), this, SLOT(psMacDelete()), QKeySequence(Qt::ControlModifier | Qt::Key_Backspace));
 	edit->addSeparator();
-	psSelectAll = edit->addAction(lang(lng_mac_menu_select_all), this, SLOT(psMacSelectAll()), QKeySequence::SelectAll);
+	psSelectAll = edit->addAction(tr::lng_mac_menu_select_all(tr::now), this, SLOT(psMacSelectAll()), QKeySequence::SelectAll);
 
-	QMenu *window = psMainMenu.addMenu(lang(lng_mac_menu_window));
-	psContacts = window->addAction(lang(lng_mac_menu_contacts));
+	QMenu *window = psMainMenu.addMenu(tr::lng_mac_menu_window(tr::now));
+	psContacts = window->addAction(tr::lng_mac_menu_contacts(tr::now));
 	connect(psContacts, &QAction::triggered, psContacts, crl::guard(this, [=] {
 		if (isHidden()) {
 			App::wnd()->showFromTray();
@@ -674,16 +674,16 @@ void MainWindow::createGlobalMenu() {
 			return;
 		}
 		Ui::show(Box<PeerListBox>(std::make_unique<ContactsBoxController>(), [](not_null<PeerListBox*> box) {
-			box->addButton(langFactory(lng_close), [box] { box->closeBox(); });
-			box->addLeftButton(langFactory(lng_profile_add_contact), [] { App::wnd()->onShowAddContact(); });
+			box->addButton(tr::lng_close(), [box] { box->closeBox(); });
+			box->addLeftButton(tr::lng_profile_add_contact(), [] { App::wnd()->onShowAddContact(); });
 		}));
 	}));
-	psAddContact = window->addAction(lang(lng_mac_menu_add_contact), App::wnd(), SLOT(onShowAddContact()));
+	psAddContact = window->addAction(tr::lng_mac_menu_add_contact(tr::now), App::wnd(), SLOT(onShowAddContact()));
 	window->addSeparator();
-	psNewGroup = window->addAction(lang(lng_mac_menu_new_group), App::wnd(), SLOT(onShowNewGroup()));
-	psNewChannel = window->addAction(lang(lng_mac_menu_new_channel), App::wnd(), SLOT(onShowNewChannel()));
+	psNewGroup = window->addAction(tr::lng_mac_menu_new_group(tr::now), App::wnd(), SLOT(onShowNewGroup()));
+	psNewChannel = window->addAction(tr::lng_mac_menu_new_channel(tr::now), App::wnd(), SLOT(onShowNewChannel()));
 	window->addSeparator();
-	psShowTelegram = window->addAction(lang(lng_mac_menu_show), App::wnd(), SLOT(showFromTray()));
+	psShowTelegram = window->addAction(tr::lng_mac_menu_show(tr::now), App::wnd(), SLOT(showFromTray()));
 
 	updateGlobalMenu();
 }
@@ -745,6 +745,7 @@ void MainWindow::updateGlobalMenuHook() {
 	auto focused = QApplication::focusWidget();
 	bool canUndo = false, canRedo = false, canCut = false, canCopy = false, canPaste = false, canDelete = false, canSelectAll = false;
 	auto clipboardHasText = _private->clipboardHasText();
+	auto showTouchBarItem = false;
 	if (auto edit = qobject_cast<QLineEdit*>(focused)) {
 		canCut = canCopy = canDelete = edit->hasSelectedText();
 		canSelectAll = !edit->text().isEmpty();
@@ -757,9 +758,17 @@ void MainWindow::updateGlobalMenuHook() {
 		canUndo = edit->document()->isUndoAvailable();
 		canRedo = edit->document()->isRedoAvailable();
 		canPaste = clipboardHasText;
+		if (canCopy) {
+			if (const auto inputField = qobject_cast<Ui::InputField*>(focused->parentWidget())) {
+				showTouchBarItem = inputField->isMarkdownEnabled();
+			}
+		}
 	} else if (auto list = qobject_cast<HistoryInner*>(focused)) {
 		canCopy = list->canCopySelected();
 		canDelete = list->canDeleteSelected();
+	}
+	if (_private->_touchBar) {
+		[_private->_touchBar showInputFieldItem:showTouchBarItem];
 	}
 	App::wnd()->updateIsActive(0);
 	const auto logged = account().sessionExists();

@@ -518,7 +518,7 @@ Notification::Notification(
 , _item(msg)
 , _forwardedCount(forwardedCount)
 , _close(this, st::notifyClose)
-, _reply(this, langFactory(lng_notification_reply), st::defaultBoxButton) {
+, _reply(this, tr::lng_notification_reply(), st::defaultBoxButton) {
 	subscribe(Lang::Current().updated(), [this] { refreshLang(); });
 
 	auto position = computePosition(st::notifyMinHeight);
@@ -684,7 +684,7 @@ void Notification::updateNotifyDisplay() {
 
 		if (!options.hideMessageText) {
 			const HistoryItem *textCachedFor = nullptr;
-			Text itemTextCache(itemWidth);
+			Ui::Text::String itemTextCache(itemWidth);
 			QRect r(st::notifyPhotoPos.x() + st::notifyPhotoSize + st::notifyTextLeft, st::notifyItemTop + st::msgNameFont->height, itemWidth, 2 * st::dialogsTextFont->height);
 			if (_item) {
 				auto active = false, selected = false;
@@ -705,10 +705,10 @@ void Notification::updateNotifyDisplay() {
 					r.setTop(r.top() + st::dialogsTextFont->height);
 				}
 				p.setPen(st::dialogsTextFg);
-				p.drawText(r.left(), r.top() + st::dialogsTextFont->ascent, lng_forward_messages(lt_count, _forwardedCount));
+				p.drawText(r.left(), r.top() + st::dialogsTextFont->ascent, tr::lng_forward_messages(tr::now, lt_count, _forwardedCount));
 			}
 		} else {
-			static QString notifyText = st::dialogsTextFont->elided(lang(lng_notification_preview), itemWidth);
+			static QString notifyText = st::dialogsTextFont->elided(tr::lng_notification_preview(tr::now), itemWidth);
 			p.setFont(st::dialogsTextFont);
 			p.setPen(st::dialogsTextFgService);
 			p.drawText(st::notifyPhotoPos.x() + st::notifyPhotoSize + st::notifyTextLeft, st::notifyItemTop + st::msgNameFont->height + st::dialogsTextFont->ascent, notifyText);
@@ -716,7 +716,7 @@ void Notification::updateNotifyDisplay() {
 
 		p.setPen(st::dialogsNameFg);
 		if (!options.hideNameAndPhoto) {
-			_history->peer->dialogName().drawElided(p, rectForName.left(), rectForName.top(), rectForName.width());
+			_history->peer->nameText().drawElided(p, rectForName.left(), rectForName.top(), rectForName.width());
 		} else {
 			p.setFont(st::msgNameFont);
 			static QString notifyTitle = st::msgNameFont->elided(qsl("Telegram Desktop"), rectForName.width());
@@ -792,7 +792,7 @@ void Notification::showReplyField() {
 		this,
 		st::notifyReplyArea,
 		Ui::InputField::Mode::MultiLine,
-		langFactory(lng_message_ph));
+		tr::lng_message_ph());
 	_replyArea->resize(width() - st::notifySendReply.width - 2 * st::notifyBorderWidth, st::notifySendReply.height);
 	_replyArea->moveToLeft(st::notifyBorderWidth, st::notifyMinHeight);
 	_replyArea->show();
@@ -958,7 +958,7 @@ void HideAllButton::paintEvent(QPaintEvent *e) {
 
 	p.setFont(st::defaultLinkButton.font);
 	p.setPen(_mouseOver ? st::lightButtonFgOver : st::lightButtonFg);
-	p.drawText(rect(), lang(lng_notification_hide_all), style::al_center);
+	p.drawText(rect(), tr::lng_notification_hide_all(tr::now), style::al_center);
 }
 
 } // namespace internal

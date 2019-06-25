@@ -61,7 +61,7 @@ EditInfoBox::EditInfoBox(
 	this,
 	st::supportInfoField,
 	Ui::InputField::Mode::MultiLine,
-	[] { return QString("Support information"); },
+	rpl::single(qsl("Support information")), // #TODO hard_lang
 	text)
 , _submit(std::move(submit)) {
 	_field->setMaxLength(kMaxSupportInfoLength);
@@ -73,7 +73,7 @@ EditInfoBox::EditInfoBox(
 }
 
 void EditInfoBox::prepare() {
-	setTitle([] { return QString("Edit support information"); });
+	setTitle(rpl::single(qsl("Edit support information"))); // #TODO hard_lang
 
 	const auto save = [=] {
 		const auto done = crl::guard(this, [=](bool success) {
@@ -85,8 +85,8 @@ void EditInfoBox::prepare() {
 		});
 		_submit(_field->getTextWithAppliedMarkdown(), done);
 	};
-	addButton(langFactory(lng_settings_save), save);
-	addButton(langFactory(lng_cancel), [=] { closeBox(); });
+	addButton(tr::lng_settings_save(), save);
+	addButton(tr::lng_cancel(), [=] { closeBox(); });
 
 	connect(_field, &Ui::InputField::submitted, save);
 	connect(_field, &Ui::InputField::cancelled, [=] { closeBox(); });
@@ -121,15 +121,18 @@ QString FormatDateTime(TimeId value) {
 	const auto now = QDateTime::currentDateTime();
 	const auto date = ParseDateTime(value);
 	if (date.date() == now.date()) {
-		return lng_mediaview_today(
+		return tr::lng_mediaview_today(
+			tr::now,
 			lt_time,
 			date.time().toString(cTimeFormat()));
 	} else if (date.date().addDays(1) == now.date()) {
-		return lng_mediaview_yesterday(
+		return tr::lng_mediaview_yesterday(
+			tr::now,
 			lt_time,
 			date.time().toString(cTimeFormat()));
 	} else {
-		return lng_mediaview_date_time(
+		return tr::lng_mediaview_date_time(
+			tr::now,
 			lt_date,
 			date.date().toString(qsl("dd.MM.yy")),
 			lt_time,

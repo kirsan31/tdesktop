@@ -32,7 +32,9 @@ namespace {
 
 class PrivacyExceptionsBoxController : public ChatsListBoxController {
 public:
-	PrivacyExceptionsBoxController(Fn<QString()> titleFactory, const std::vector<not_null<PeerData*>> &selected);
+	PrivacyExceptionsBoxController(
+		rpl::producer<QString> title,
+		const std::vector<not_null<PeerData*>> &selected);
 	void rowClicked(not_null<PeerListRow*> row) override;
 
 	std::vector<not_null<PeerData*>> getResult() const;
@@ -42,20 +44,20 @@ protected:
 	std::unique_ptr<Row> createRow(not_null<History*> history) override;
 
 private:
-	Fn<QString()> _titleFactory;
+	rpl::producer<QString> _title;
 	std::vector<not_null<PeerData*>> _selected;
 
 };
 
 PrivacyExceptionsBoxController::PrivacyExceptionsBoxController(
-	Fn<QString()> titleFactory,
+	rpl::producer<QString> title,
 	const std::vector<not_null<PeerData*>> &selected)
-: _titleFactory(std::move(titleFactory))
+: _title(std::move(title))
 , _selected(selected) {
 }
 
 void PrivacyExceptionsBoxController::prepareViewHook() {
-	delegate()->peerListSetTitle(_titleFactory);
+	delegate()->peerListSetTitle(std::move(_title));
 	delegate()->peerListAddSelectedRows(_selected);
 }
 
@@ -93,18 +95,18 @@ std::unique_ptr<PrivacyExceptionsBoxController::Row> PrivacyExceptionsBoxControl
 	}();
 	if (count > 0) {
 		result->setCustomStatus(
-			lng_chat_status_members(lt_count_decimal, count));
+			tr::lng_chat_status_members(tr::now, lt_count_decimal, count));
 	}
 	return result;
 }
 
 } // namespace
 
-LangKey EditPrivacyController::optionLabelKey(Option option) {
+QString EditPrivacyController::optionLabel(Option option) {
 	switch (option) {
-	case Option::Everyone: return lng_edit_privacy_everyone;
-	case Option::Contacts: return lng_edit_privacy_contacts;
-	case Option::Nobody: return lng_edit_privacy_nobody;
+	case Option::Everyone: return tr::lng_edit_privacy_everyone(tr::now);
+	case Option::Contacts: return tr::lng_edit_privacy_contacts(tr::now);
+	case Option::Nobody: return tr::lng_edit_privacy_nobody(tr::now);
 	}
 	Unexpected("Option value in optionsLabelKey.");
 }
@@ -127,13 +129,11 @@ void EditPrivacyBox::editExceptions(
 		Exception exception,
 		Fn<void()> done) {
 	auto controller = std::make_unique<PrivacyExceptionsBoxController>(
-		crl::guard(this, [=] {
-			return _controller->exceptionBoxTitle(exception);
-		}),
+		_controller->exceptionBoxTitle(exception),
 		exceptions(exception));
 	auto initBox = [=, controller = controller.get()](
 			not_null<PeerListBox*> box) {
-		box->addButton(langFactory(lng_settings_save), crl::guard(this, [=] {
+		box->addButton(tr::lng_settings_save(), crl::guard(this, [=] {
 			exceptions(exception) = controller->getResult();
 			const auto type = [&] {
 				switch (exception) {
@@ -151,7 +151,7 @@ void EditPrivacyBox::editExceptions(
 			done();
 			box->closeBox();
 		}));
-		box->addButton(langFactory(lng_cancel), [=] { box->closeBox(); });
+		box->addButton(tr::lng_cancel(), [=] { box->closeBox(); });
 	};
 	Ui::show(
 		Box<PeerListBox>(std::move(controller), std::move(initBox)),
@@ -244,7 +244,7 @@ Ui::Radioenum<EditPrivacyBox::Option> *EditPrivacyBox::addOption(
 			container,
 			group,
 			option,
-			lang(_controller->optionLabelKey(option)),
+			_controller->optionLabel(option),
 			st::settingsSendType),
 		st::settingsSendTypePadding);
 }
@@ -272,7 +272,7 @@ Ui::FlatLabel *EditPrivacyBox::addLabel(
 void EditPrivacyBox::setupContent() {
 	using namespace Settings;
 
-	setTitle([=] { return _controller->title(); });
+	setTitle(_controller->title());
 
 	auto wrap = object_ptr<Ui::VerticalLayout>(this);
 	const auto content = wrap.data();
@@ -302,8 +302,8 @@ void EditPrivacyBox::setupContent() {
 			return Settings::ExceptionUsersCount(exceptions(exception));
 		}) | rpl::map([](int count) {
 			return count
-				? lng_edit_privacy_exceptions_count(lt_count, count)
-				: lang(lng_edit_privacy_exceptions_add);
+				? tr::lng_edit_privacy_exceptions_count(tr::now, lt_count, count)
+				: tr::lng_edit_privacy_exceptions_add(tr::now);
 		});
 		auto text = _controller->exceptionButtonTextKey(exception);
 		const auto button = content->add(
@@ -311,13 +311,13 @@ void EditPrivacyBox::setupContent() {
 				content,
 				object_ptr<Button>(
 					content,
-					Lang::Viewer(text),
+					rpl::duplicate(text),
 					st::settingsButton)));
 		CreateRightLabel(
 			button->entity(),
 			std::move(label),
 			st::settingsButton,
-			text);
+			std::move(text));
 		button->toggleOn(rpl::duplicate(
 			optionValue
 		) | rpl::map([=] {
@@ -344,7 +344,7 @@ void EditPrivacyBox::setupContent() {
 
 	AddDivider(content);
 	AddSkip(content);
-	AddSubsectionTitle(content, lng_edit_privacy_exceptions);
+	AddSubsectionTitle(content, tr::lng_edit_privacy_exceptions());
 	const auto always = addExceptionLink(Exception::Always);
 	const auto never = addExceptionLink(Exception::Never);
 	addLabel(content, _controller->exceptionsDescription());
@@ -354,7 +354,7 @@ void EditPrivacyBox::setupContent() {
 		content->add(std::move(below));
 	}
 
-	addButton(langFactory(lng_settings_save), [=] {
+	addButton(tr::lng_settings_save(), [=] {
 		const auto someAreDisallowed = (_value.option != Option::Everyone)
 			|| !_value.never.empty();
 		_controller->confirmSave(someAreDisallowed, crl::guard(this, [=] {
@@ -364,7 +364,7 @@ void EditPrivacyBox::setupContent() {
 			closeBox();
 		}));
 	});
-	addButton(langFactory(lng_cancel), [this] { closeBox(); });
+	addButton(tr::lng_cancel(), [this] { closeBox(); });
 
 	const auto linkHeight = st::settingsButton.padding.top()
 		+ st::settingsButton.height

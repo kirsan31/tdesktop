@@ -49,9 +49,9 @@ TopBarWidget::TopBarWidget(
 	not_null<Window::SessionController*> controller)
 : RpWidget(parent)
 , _controller(controller)
-, _clear(this, langFactory(lng_selected_clear), st::topBarClearButton)
-, _forward(this, langFactory(lng_selected_forward), st::defaultActiveButton)
-, _delete(this, langFactory(lng_selected_delete), st::defaultActiveButton)
+, _clear(this, tr::lng_selected_clear(), st::topBarClearButton)
+, _forward(this, tr::lng_selected_forward(), st::defaultActiveButton)
+, _delete(this, tr::lng_selected_delete(), st::defaultActiveButton)
 , _back(this, st::historyTopBarBack)
 , _call(this, st::topBarCall)
 , _search(this, st::topBarSearch)
@@ -304,17 +304,17 @@ void TopBarWidget::paintTopBar(Painter &p) {
 	auto nameleft = _leftTaken;
 	auto nametop = st::topBarArrowPadding.top();
 	auto statustop = st::topBarHeight - st::topBarArrowPadding.bottom() - st::dialogsTextFont->height;
-	auto namewidth = width() - _rightTaken - nameleft;
+	auto availableWidth = width() - _rightTaken - nameleft;
 
 	auto history = _activeChat.history();
 
-	p.setPen(st::dialogsNameFg);
 	if (const auto folder = _activeChat.folder()) {
 		auto text = folder->chatListName(); // TODO feed name emoji
-		auto textWidth = st::historySavedFont->width(text);
-		if (namewidth < textWidth) {
-			text = st::historySavedFont->elided(text, namewidth);
+		const auto textWidth = st::historySavedFont->width(text);
+		if (availableWidth < textWidth) {
+			text = st::historySavedFont->elided(text, availableWidth);
 		}
+		p.setPen(st::dialogsNameFg);
 		p.setFont(st::historySavedFont);
 		p.drawTextLeft(
 			nameleft,
@@ -322,11 +322,12 @@ void TopBarWidget::paintTopBar(Painter &p) {
 			width(),
 			text);
 	} else if (_activeChat.peer()->isSelf()) {
-		auto text = lang(lng_saved_messages);
-		auto textWidth = st::historySavedFont->width(text);
-		if (namewidth < textWidth) {
-			text = st::historySavedFont->elided(text, namewidth);
+		auto text = tr::lng_saved_messages(tr::now);
+		const auto textWidth = st::historySavedFont->width(text);
+		if (availableWidth < textWidth) {
+			text = st::historySavedFont->elided(text, availableWidth);
 		}
+		p.setPen(st::dialogsNameFg);
 		p.setFont(st::historySavedFont);
 		p.drawTextLeft(
 			nameleft,
@@ -334,7 +335,30 @@ void TopBarWidget::paintTopBar(Painter &p) {
 			width(),
 			text);
 	} else if (const auto history = _activeChat.history()) {
-		history->peer->dialogName().drawElided(p, nameleft, nametop, namewidth);
+		const auto peer = history->peer;
+		const auto &text = peer->topBarNameText();
+		const auto badgeStyle = Ui::PeerBadgeStyle{
+			nullptr,
+			&st::attentionButtonFg };
+		const auto badgeWidth = Ui::DrawPeerBadgeGetWidth(
+			peer,
+			p,
+			QRect(
+				nameleft,
+				nametop,
+				availableWidth,
+				st::msgNameStyle.font->height),
+			text.maxWidth(),
+			width(),
+			badgeStyle);
+		const auto namewidth = availableWidth - badgeWidth;
+
+		p.setPen(st::dialogsNameFg);
+		peer->topBarNameText().drawElided(
+			p,
+			nameleft,
+			nametop,
+			namewidth);
 
 		p.setFont(st::dialogsTextFont);
 		if (paintConnectingState(p, nameleft, statustop, width())) {
@@ -343,13 +367,13 @@ void TopBarWidget::paintTopBar(Painter &p) {
 				p,
 				nameleft,
 				statustop,
-				namewidth,
+			availableWidth,
 				width(),
 				st::historyStatusFgTyping,
 				crl::now())) {
 			return;
 		} else {
-			paintStatus(p, nameleft, statustop, namewidth, width());
+			paintStatus(p, nameleft, statustop, availableWidth, width());
 		}
 	}
 }
@@ -373,7 +397,7 @@ bool TopBarWidget::paintConnectingState(
 		+ st::topBarConnectingAnimation.size.width()
 		+ st::topBarConnectingSkip;
 	p.setPen(st::historyStatusFg);
-	p.drawTextLeft(left, top, outerWidth, lang(lng_status_connecting));
+	p.drawTextLeft(left, top, outerWidth, tr::lng_status_connecting(tr::now));
 	return true;
 }
 
@@ -764,14 +788,14 @@ void TopBarWidget::updateOnlineDisplay() {
 		}
 	} else if (const auto chat = _activeChat.peer()->asChat()) {
 		if (!chat->amIn()) {
-			text = lang(lng_chat_status_unaccessible);
+			text = tr::lng_chat_status_unaccessible(tr::now);
 		} else if (chat->participants.empty()) {
 			if (!_titlePeerText.isEmpty()) {
 				text = _titlePeerText.toString();
 			} else if (chat->count <= 0) {
-				text = lang(lng_group_status);
+				text = tr::lng_group_status(tr::now);
 			} else {
-				text = lng_chat_status_members(lt_count_decimal, chat->count);
+				text = tr::lng_chat_status_members(tr::now, lt_count_decimal, chat->count);
 			}
 		} else {
 			const auto self = Auth().user();
@@ -784,13 +808,13 @@ void TopBarWidget::updateOnlineDisplay() {
 				}
 			}
 			if (online > 0 && !onlyMe) {
-				auto membersCount = lng_chat_status_members(lt_count_decimal, chat->participants.size());
-				auto onlineCount = lng_chat_status_online(lt_count, online);
-				text = lng_chat_status_members_online(lt_members_count, membersCount, lt_online_count, onlineCount);
+				auto membersCount = tr::lng_chat_status_members(tr::now, lt_count_decimal, chat->participants.size());
+				auto onlineCount = tr::lng_chat_status_online(tr::now, lt_count, online);
+				text = tr::lng_chat_status_members_online(tr::now, lt_members_count, membersCount, lt_online_count, onlineCount);
 			} else if (chat->participants.size() > 0) {
-				text = lng_chat_status_members(lt_count_decimal, chat->participants.size());
+				text = tr::lng_chat_status_members(tr::now, lt_count_decimal, chat->participants.size());
 			} else {
-				text = lang(lng_group_status);
+				text = tr::lng_group_status(tr::now);
 			}
 		}
 	} else if (const auto channel = _activeChat.peer()->asChannel()) {
@@ -810,18 +834,19 @@ void TopBarWidget::updateOnlineDisplay() {
 				}
 			}
 			if (online && !onlyMe) {
-				auto membersCount = lng_chat_status_members(lt_count_decimal, channel->membersCount());
-				auto onlineCount = lng_chat_status_online(lt_count, online);
-				text = lng_chat_status_members_online(lt_members_count, membersCount, lt_online_count, onlineCount);
+				auto membersCount = tr::lng_chat_status_members(tr::now, lt_count_decimal, channel->membersCount());
+				auto onlineCount = tr::lng_chat_status_online(tr::now, lt_count, online);
+				text = tr::lng_chat_status_members_online(tr::now, lt_members_count, membersCount, lt_online_count, onlineCount);
 			} else if (channel->membersCount() > 0) {
-				text = lng_chat_status_members(lt_count_decimal, channel->membersCount());
+				text = tr::lng_chat_status_members(tr::now, lt_count_decimal, channel->membersCount());
 			} else {
-				text = lang(lng_group_status);
+				text = tr::lng_group_status(tr::now);
 			}
 		} else if (channel->membersCount() > 0) {
-			text = lng_chat_status_members(lt_count_decimal, channel->membersCount());
+			text = tr::lng_chat_status_members(tr::now, lt_count_decimal, channel->membersCount());
+
 		} else {
-			text = lang(channel->isMegagroup() ? lng_group_status : lng_channel_status);
+			text = channel->isMegagroup() ? tr::lng_group_status(tr::now) : tr::lng_channel_status(tr::now);
 		}
 	}
 	if (_titlePeerText.toString() != text) {

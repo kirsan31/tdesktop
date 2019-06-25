@@ -101,7 +101,7 @@ private:
 	void prepareThumb(const QImage &preview);
 
 	QPixmap _fileThumb;
-	Text _nameText;
+	Ui::Text::String _nameText;
 	bool _fileIsAudio = false;
 	bool _fileIsImage = false;
 	QString _statusText;
@@ -905,14 +905,14 @@ rpl::producer<int> SingleFilePreview::desiredHeightValue() const {
 	return rpl::single(st::boxPhotoPadding.top() + h + st::msgShadow);
 }
 
-Fn<QString()> FieldPlaceholder(
+rpl::producer<QString> FieldPlaceholder(
 		const Storage::PreparedList &list,
 		SendFilesWay way) {
 	const auto isAlbum = (way == SendFilesWay::Album);
 	const auto compressImages = (way != SendFilesWay::Files);
-	return langFactory(list.canAddCaption(isAlbum, compressImages)
-		? lng_photo_caption
-		: lng_photos_comment);
+	return list.canAddCaption(isAlbum, compressImages)
+		? tr::lng_photo_caption()
+		: tr::lng_photos_comment();
 }
 
 } // namespace
@@ -1441,8 +1441,8 @@ void SendFilesBox::setupShadows(
 }
 
 void SendFilesBox::prepare() {
-	_send = addButton(langFactory(lng_send_button), [=] { send(); });
-	addButton(langFactory(lng_cancel), [=] { closeBox(); });
+	_send = addButton(tr::lng_send_button(), [=] { send(); });
+	addButton(tr::lng_cancel(), [=] { closeBox(); });
 	initSendWay();
 	setupCaption();
 	preparePreview();
@@ -1541,20 +1541,20 @@ void SendFilesBox::setupSendWayControls() {
 		button->show();
 	};
 	if (_list.albumIsPossible) {
-		addRadio(_sendAlbum, SendFilesWay::Album, lang(lng_send_album));
+		addRadio(_sendAlbum, SendFilesWay::Album, tr::lng_send_album(tr::now));
 	}
 	if (!_list.albumIsPossible || _albumPhotosCount > 0) {
 		addRadio(_sendPhotos, SendFilesWay::Photos, (_list.files.size() == 1)
-			? lang(lng_send_photo)
+			? tr::lng_send_photo(tr::now)
 			: (_albumVideosCount > 0)
-			? lang(lng_send_separate_photos_videos)
+			? tr::lng_send_separate_photos_videos(tr::now)
 			: (_list.albumIsPossible
-				? lang(lng_send_separate_photos)
-				: lng_send_photos(lt_count, _list.files.size())));
+				? tr::lng_send_separate_photos(tr::now)
+				: tr::lng_send_photos(tr::now, lt_count, _list.files.size())));
 	}
 	addRadio(_sendFiles, SendFilesWay::Files, (_list.files.size() == 1)
-		? lang(lng_send_file)
-		: lng_send_files(lt_count, _list.files.size()));
+		? tr::lng_send_file(tr::now)
+		: tr::lng_send_files(tr::now, lt_count, _list.files.size()));
 }
 
 void SendFilesBox::applyAlbumOrder() {
@@ -1753,8 +1753,8 @@ void SendFilesBox::setupTitleText() {
 		const auto onlyImages = (_compressConfirm != CompressConfirm::None)
 			&& (_albumVideosCount == 0);
 		_titleText = onlyImages
-			? lng_send_images_selected(lt_count, _list.files.size())
-			: lng_send_files_selected(lt_count, _list.files.size());
+			? tr::lng_send_images_selected(tr::now, lt_count, _list.files.size())
+			: tr::lng_send_files_selected(tr::now, lt_count, _list.files.size());
 		_titleHeight = st::boxTitleHeight;
 	} else {
 		_titleText = QString();

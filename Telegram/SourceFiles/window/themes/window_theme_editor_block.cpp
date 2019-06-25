@@ -45,7 +45,7 @@ public:
 	QString description() const {
 		return _description.toString();
 	}
-	const Text &descriptionText() const {
+	const Ui::Text::String &descriptionText() const {
 		return _description;
 	}
 	void setDescription(const QString &description) {
@@ -102,7 +102,7 @@ private:
 	QString _copyOf;
 	QColor _value;
 	QString _valueString;
-	Text _description = { st::windowMinWidth / 2 };
+	Ui::Text::String _description = { st::windowMinWidth / 2 };
 
 	OrderedSet<QString> _searchWords;
 	OrderedSet<QChar> _searchStartChars;
@@ -620,7 +620,7 @@ void EditorBlock::paintEvent(QPaintEvent *e) {
 		p.fillRect(clip, st::dialogsBg);
 		p.setFont(st::noContactsFont);
 		p.setPen(st::noContactsColor);
-		p.drawText(QRect(0, 0, width(), st::noContactsHeight), lang(lng_theme_editor_no_keys));
+		p.drawText(QRect(0, 0, width(), st::noContactsHeight), tr::lng_theme_editor_no_keys(tr::now));
 	}
 
 	auto cliptop = clip.y();

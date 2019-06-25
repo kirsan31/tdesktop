@@ -141,7 +141,7 @@ void FastShareMessage(not_null<HistoryItem*> item) {
 
 						QApplication::clipboard()->setText(link);
 
-						Ui::Toast::Show(lang(lng_share_game_link_copied));
+						Ui::Toast::Show(tr::lng_share_game_link_copied(tr::now));
 					}
 				}
 			}
@@ -183,7 +183,7 @@ void FastShareMessage(not_null<HistoryItem*> item) {
 			history->session().api().applyUpdates(updates);
 			data->requests.remove(requestId);
 			if (data->requests.empty()) {
-				Ui::Toast::Show(lang(lng_share_done));
+				Ui::Toast::Show(tr::lng_share_done(tr::now));
 				Ui::hideLayer();
 			}
 		};
@@ -276,7 +276,7 @@ QString GetErrorTextForForward(
 		not_null<PeerData*> peer,
 		const HistoryItemsList &items) {
 	if (!peer->canWrite()) {
-		return lang(lng_forward_cant);
+		return tr::lng_forward_cant(tr::now);
 	}
 
 	for (const auto item : items) {
@@ -287,12 +287,10 @@ QString GetErrorTextForForward(
 			}
 		}
 	}
-	const auto errorKey = Data::RestrictionErrorKey(
+	const auto error = Data::RestrictionError(
 		peer,
 		ChatRestriction::f_send_inline);
-	return (errorKey && HasInlineItems(items))
-		? lang(*errorKey)
-		: QString();
+	return (error && HasInlineItems(items)) ? *error : QString();
 }
 
 struct HistoryMessage::CreateConfig {
@@ -457,7 +455,9 @@ HistoryMessage::HistoryMessage(
 	int fwdViewsCount = original->viewsCount();
 	if (fwdViewsCount > 0) {
 		config.viewsCount = fwdViewsCount;
-	} else if (isPost()) {
+	} else if (isPost()
+		|| (original->senderOriginal()
+			&& original->senderOriginal()->isChannel())) {
 		config.viewsCount = 1;
 	}
 
@@ -791,7 +791,7 @@ std::unique_ptr<Data::Media> HistoryMessage::CreateMedia(
 		return media.vgeo.match([&](const MTPDgeoPoint &point) -> Result {
 			return std::make_unique<Data::MediaLocation>(
 				item,
-				LocationCoords(point));
+				Data::LocationPoint(point));
 		}, [](const MTPDgeoPointEmpty &) -> Result {
 			return nullptr;
 		});
@@ -799,7 +799,7 @@ std::unique_ptr<Data::Media> HistoryMessage::CreateMedia(
 		return media.vgeo.match([&](const MTPDgeoPoint &point) -> Result {
 			return std::make_unique<Data::MediaLocation>(
 				item,
-				LocationCoords(point));
+				Data::LocationPoint(point));
 		}, [](const MTPDgeoPointEmpty &) -> Result {
 			return nullptr;
 		});
@@ -807,7 +807,7 @@ std::unique_ptr<Data::Media> HistoryMessage::CreateMedia(
 		return media.vgeo.match([&](const MTPDgeoPoint &point) -> Result {
 			return std::make_unique<Data::MediaLocation>(
 				item,
-				LocationCoords(point),
+				Data::LocationPoint(point),
 				qs(media.vtitle),
 				qs(media.vaddress));
 		}, [](const MTPDgeoPointEmpty &data) -> Result {
@@ -893,7 +893,7 @@ void HistoryMessage::replaceBuyWithReceiptInMarkup() {
 		for (auto &row : markup->rows) {
 			for (auto &button : row) {
 				if (button.type == HistoryMessageMarkupButton::Type::Buy) {
-					button.text = lang(lng_payments_receipt_button);
+					button.text = tr::lng_payments_receipt_button(tr::now);
 				}
 			}
 		}
@@ -1116,7 +1116,7 @@ void HistoryMessage::setViewsCount(int32 count) {
 	views->_views = count;
 	views->_viewsText = (views->_views > 0)
 		? Lang::FormatCountToShort(views->_views).string
-		: QString();
+		: QString("1");
 	views->_viewsWidth = views->_viewsText.isEmpty()
 		? 0
 		: st::msgDateFont->width(views->_viewsText);

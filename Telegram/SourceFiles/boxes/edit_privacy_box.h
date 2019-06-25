@@ -11,8 +11,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "mtproto/sender.h"
 #include "apiwrap.h"
 
-enum LangKey : int;
-
 namespace Ui {
 class VerticalLayout;
 class FlatLabel;
@@ -39,18 +37,18 @@ public:
 	[[nodiscard]] virtual Key key() = 0;
 	[[nodiscard]] virtual MTPInputPrivacyKey apiKey() = 0;
 
-	[[nodiscard]] virtual QString title() = 0;
+	[[nodiscard]] virtual rpl::producer<QString> title() = 0;
 	[[nodiscard]] virtual bool hasOption(Option option) {
 		return true;
 	}
-	[[nodiscard]] virtual LangKey optionsTitleKey() = 0;
-	[[nodiscard]] virtual LangKey optionLabelKey(Option option);
+	[[nodiscard]] virtual rpl::producer<QString> optionsTitleKey() = 0;
+	[[nodiscard]] virtual QString optionLabel(Option option);
 	[[nodiscard]] virtual rpl::producer<QString> warning() {
-		return rpl::never<QString>();
+		return nullptr;
 	}
-	[[nodiscard]] virtual LangKey exceptionButtonTextKey(
+	[[nodiscard]] virtual rpl::producer<QString> exceptionButtonTextKey(
 		Exception exception) = 0;
-	[[nodiscard]] virtual QString exceptionBoxTitle(
+	[[nodiscard]] virtual rpl::producer<QString> exceptionBoxTitle(
 		Exception exception) = 0;
 	[[nodiscard]] virtual auto exceptionsDescription()
 		-> rpl::producer<QString> = 0;

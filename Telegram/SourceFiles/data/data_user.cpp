@@ -33,13 +33,13 @@ BotCommand::BotCommand(
 bool BotCommand::setDescription(const QString &description) {
 	if (_description != description) {
 		_description = description;
-		_descriptionText = Text();
+		_descriptionText = Ui::Text::String();
 		return true;
 	}
 	return false;
 }
 
-const Text &BotCommand::descriptionText() const {
+const Ui::Text::String &BotCommand::descriptionText() const {
 	if (_descriptionText.isEmpty() && !_description.isEmpty()) {
 		_descriptionText.setText(
 			st::defaultTextStyle,
@@ -58,21 +58,15 @@ bool UserData::canShareThisContact() const {
 		|| !owner().findContactPhone(peerToUser(id)).isEmpty();
 }
 
-void UserData::setContactStatus(ContactStatus status) {
+void UserData::setIsContact(bool is) {
+	const auto status = is
+		? ContactStatus::Contact
+		: ContactStatus::NotContact;
 	if (_contactStatus != status) {
-		const auto changed = (_contactStatus == ContactStatus::Contact)
-			!= (status == ContactStatus::Contact);
 		_contactStatus = status;
-		if (changed) {
-			Notify::peerUpdatedDelayed(
-				this,
-				Notify::PeerUpdate::Flag::UserIsContact);
-		}
-	}
-	if (_contactStatus == ContactStatus::Contact
-		&& cReportSpamStatuses().value(id, dbiprsHidden) != dbiprsHidden) {
-		cRefReportSpamStatuses().insert(id, dbiprsHidden);
-		Local::writeReportSpamStatuses();
+		Notify::peerUpdatedDelayed(
+			this,
+			Notify::PeerUpdate::Flag::UserIsContact);
 	}
 }
 
@@ -119,7 +113,7 @@ void UserData::setName(const QString &newFirstName, const QString &newLastName, 
 			firstName = newFirstName;
 			lastName = newLastName;
 		}
-		newFullName = lastName.isEmpty() ? firstName : lng_full_name(lt_first_name, firstName, lt_last_name, lastName);
+		newFullName = lastName.isEmpty() ? firstName : tr::lng_full_name(tr::now, lt_first_name, firstName, lt_last_name, lastName);
 	}
 	updateNameDelayed(newFullName, newPhoneName, newUsername);
 }
@@ -164,30 +158,31 @@ void UserData::setBotInfo(const MTPBotInfo &info) {
 		QString desc = qs(d.vdescription);
 		if (botInfo->description != desc) {
 			botInfo->description = desc;
-			botInfo->text = Text(st::msgMinWidth);
+			botInfo->text = Ui::Text::String(st::msgMinWidth);
 		}
 
 		auto &v = d.vcommands.v;
 		botInfo->commands.reserve(v.size());
 		auto changedCommands = false;
 		int32 j = 0;
-		for (int32 i = 0, l = v.size(); i < l; ++i) {
-			if (v.at(i).type() != mtpc_botCommand) continue;
-
-			QString cmd = qs(v.at(i).c_botCommand().vcommand), desc = qs(v.at(i).c_botCommand().vdescription);
-			if (botInfo->commands.size() <= j) {
-				botInfo->commands.push_back(BotCommand(cmd, desc));
-				changedCommands = true;
-			} else {
-				if (botInfo->commands[j].command != cmd) {
-					botInfo->commands[j].command = cmd;
+		for (const auto &command : v) {
+			command.match([&](const MTPDbotCommand &data) {
+				const auto cmd = qs(data.vcommand);
+				const auto desc = qs(data.vdescription);
+				if (botInfo->commands.size() <= j) {
+					botInfo->commands.push_back(BotCommand(cmd, desc));
 					changedCommands = true;
+				} else {
+					if (botInfo->commands[j].command != cmd) {
+						botInfo->commands[j].command = cmd;
+						changedCommands = true;
+					}
+					if (botInfo->commands[j].setDescription(desc)) {
+						changedCommands = true;
+					}
 				}
-				if (botInfo->commands[j].setDescription(desc)) {
-					changedCommands = true;
-				}
-			}
-			++j;
+				++j;
+			});
 		}
 		while (j < botInfo->commands.size()) {
 			botInfo->commands.pop_back();
@@ -235,9 +230,17 @@ void UserData::setAccessHash(uint64 accessHash) {
 	}
 }
 
-void UserData::setBlockStatus(BlockStatus blockStatus) {
-	if (blockStatus != _blockStatus) {
-		_blockStatus = blockStatus;
+void UserData::setIsBlocked(bool is) {
+	const auto status = is
+		? BlockStatus::Blocked
+		: BlockStatus::NotBlocked;
+	if (_blockStatus != status) {
+		_blockStatus = status;
+		if (is) {
+			_fullFlags.add(MTPDuserFull::Flag::f_blocked);
+		} else {
+			_fullFlags.remove(MTPDuserFull::Flag::f_blocked);
+		}
 		Notify::peerUpdatedDelayed(this, UpdateFlag::UserIsBlocked);
 	}
 }
@@ -261,12 +264,11 @@ void ApplyUserUpdate(not_null<UserData*> user, const MTPDuserFull &update) {
 	if (update.has_profile_photo()) {
 		user->owner().processPhoto(update.vprofile_photo);
 	}
-	update.vlink.match([&](const MTPDcontacts_link & link) {
-		App::feedUserLink(
-			MTP_int(peerToUser(user->id)),
-			link.vmy_link,
-			link.vforeign_link);
+	const auto settings = update.vsettings.match([&](
+			const MTPDpeerSettings &data) {
+		return data.vflags.v;
 	});
+	user->setSettings(settings);
 	user->session().api().applyNotifySettings(
 		MTP_inputNotifyPeer(user->input),
 		update.vnotify_settings);
@@ -282,9 +284,7 @@ void ApplyUserUpdate(not_null<UserData*> user, const MTPDuserFull &update) {
 		user->clearPinnedMessage();
 	}
 	user->setFullFlags(update.vflags.v);
-	user->setBlockStatus(update.is_blocked()
-		? UserData::BlockStatus::Blocked
-		: UserData::BlockStatus::NotBlocked);
+	user->setIsBlocked(update.is_blocked());
 	user->setCallsStatus(update.is_phone_calls_private()
 		? UserData::CallsStatus::Private
 		: update.is_phone_calls_available()

@@ -104,6 +104,10 @@ Application::~Application() {
 	_window.reset();
 	_mediaView.reset();
 
+	// This can call writeMap() that serializes AuthSession.
+	// In case it gets called after authSessionDestroy() we get missing data.
+	Local::finish();
+
 	// Some MTP requests can be cancelled from data clearing.
 	authSessionDestroy();
 
@@ -127,7 +131,6 @@ Application::~Application() {
 	Media::Player::finish(_audio.get());
 	style::stopManager();
 
-	Local::finish();
 	Global::finish();
 	ThirdParty::finish();
 
@@ -723,7 +726,7 @@ void Application::startLocalStorage() {
 void Application::forceLogOut(const TextWithEntities &explanation) {
 	const auto box = Ui::show(Box<InformBox>(
 		explanation,
-		lang(lng_passcode_logout)));
+		tr::lng_passcode_logout(tr::now)));
 	box->setCloseByEscape(false);
 	box->setCloseByOutsideClick(false);
 	connect(box, &QObject::destroyed, [=] {

@@ -17,6 +17,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "window/themes/window_theme.h"
 #include "lang/lang_keys.h"
 #include "data/data_user.h"
+#include "data/data_countries.h" // Data::ValidPhoneCode
 #include "mainwindow.h"
 #include "numbers.h"
 #include "auth_session.h"
@@ -37,6 +38,8 @@ const auto kObjectReplacement = QString::fromRawData(
 	1);
 const auto &kTagBold = InputField::kTagBold;
 const auto &kTagItalic = InputField::kTagItalic;
+const auto &kTagUnderline = InputField::kTagUnderline;
+const auto &kTagStrikeOut = InputField::kTagStrikeOut;
 const auto &kTagCode = InputField::kTagCode;
 const auto &kTagPre = InputField::kTagPre;
 const auto kNewlineChars = QString("\r\n")
@@ -45,6 +48,7 @@ const auto kNewlineChars = QString("\r\n")
 	+ QChar(QChar::ParagraphSeparator)
 	+ QChar(QChar::LineSeparator);
 const auto kClearFormatSequence = QKeySequence("ctrl+shift+n");
+const auto kStrikeOutSequence = QKeySequence("ctrl+shift+x");
 const auto kMonospaceSequence = QKeySequence("ctrl+shift+m");
 const auto kEditLinkSequence = QKeySequence("ctrl+k");
 
@@ -174,10 +178,14 @@ struct TagStartExpression {
 	QString tag;
 	QString goodBefore;
 	QString badAfter;
+	QString badBefore;
+	QString goodAfter;
 };
 
 constexpr auto kTagBoldIndex = 0;
 constexpr auto kTagItalicIndex = 1;
+//constexpr auto kTagUnderlineIndex = 2;
+//constexpr auto kTagStrikeOutIndex = 2;
 constexpr auto kTagCodeIndex = 2;
 constexpr auto kTagPreIndex = 3;
 constexpr auto kInvalidPosition = std::numeric_limits<int>::max() / 2;
@@ -207,24 +215,34 @@ public:
 		const auto length = text.size();
 		const auto &tag = expression.tag;
 		const auto tagLength = tag.size();
-		const auto isGood = [&](QChar ch) {
-			return (expression.goodBefore.indexOf(ch) >= 0);
+		const auto isGoodBefore = [&](QChar ch) {
+			return expression.goodBefore.isEmpty()
+				|| (expression.goodBefore.indexOf(ch) >= 0);
 		};
-		const auto isBad = [&](QChar ch) {
-			return (expression.badAfter.indexOf(ch) >= 0);
+		const auto isBadAfter = [&](QChar ch) {
+			return !expression.badAfter.isEmpty()
+				&& (expression.badAfter.indexOf(ch) >= 0);
+		};
+		const auto isBadBefore = [&](QChar ch) {
+			return !expression.badBefore.isEmpty()
+				&& (expression.badBefore.indexOf(ch) >= 0);
+		};
+		const auto isGoodAfter = [&](QChar ch) {
+			return expression.goodAfter.isEmpty()
+				|| (expression.goodAfter.indexOf(ch) >= 0);
 		};
 		const auto check = [&](Edge edge) {
 			if (_position > 0) {
 				const auto before = text[_position - 1];
-				if ((edge == Edge::Open && !isGood(before))
-					|| (edge == Edge::Close && isBad(before))) {
+				if ((edge == Edge::Open && !isGoodBefore(before))
+					|| (edge == Edge::Close && isBadBefore(before))) {
 					return false;
 				}
 			}
 			if (_position + tagLength < length) {
 				const auto after = text[_position + tagLength];
-				if ((edge == Edge::Open && isBad(after))
-					|| (edge == Edge::Close && !isGood(after))) {
+				if ((edge == Edge::Open && isBadAfter(after))
+					|| (edge == Edge::Close && !isGoodAfter(after))) {
 					return false;
 				}
 			}
@@ -274,22 +292,44 @@ const std::vector<TagStartExpression> &TagStartExpressions() {
 		{
 			kTagBold,
 			TextUtilities::MarkdownBoldGoodBefore(),
-			TextUtilities::MarkdownBoldBadAfter()
+			TextUtilities::MarkdownBoldBadAfter(),
+			TextUtilities::MarkdownBoldBadAfter(),
+			TextUtilities::MarkdownBoldGoodBefore()
 		},
 		{
 			kTagItalic,
 			TextUtilities::MarkdownItalicGoodBefore(),
-			TextUtilities::MarkdownItalicBadAfter()
+			TextUtilities::MarkdownItalicBadAfter(),
+			TextUtilities::MarkdownItalicBadAfter(),
+			TextUtilities::MarkdownItalicGoodBefore()
 		},
+		//{
+		//	kTagUnderline,
+		//	TextUtilities::MarkdownUnderlineGoodBefore(),
+		//	TextUtilities::MarkdownUnderlineBadAfter(),
+		//	TextUtilities::MarkdownUnderlineBadAfter(),
+		//	TextUtilities::MarkdownUnderlineGoodBefore()
+		//},
+		//{
+		//	kTagStrikeOut,
+		//	TextUtilities::MarkdownStrikeOutGoodBefore(),
+		//	TextUtilities::MarkdownStrikeOutBadAfter(),
+		//	TextUtilities::MarkdownStrikeOutBadAfter(),
+		//	QString(),
+		//},
 		{
 			kTagCode,
 			TextUtilities::MarkdownCodeGoodBefore(),
-			TextUtilities::MarkdownCodeBadAfter()
+			TextUtilities::MarkdownCodeBadAfter(),
+			TextUtilities::MarkdownCodeBadAfter(),
+			TextUtilities::MarkdownCodeGoodBefore()
 		},
 		{
 			kTagPre,
 			TextUtilities::MarkdownPreGoodBefore(),
-			TextUtilities::MarkdownPreBadAfter()
+			TextUtilities::MarkdownPreBadAfter(),
+			TextUtilities::MarkdownPreBadAfter(),
+			TextUtilities::MarkdownPreGoodBefore()
 		},
 	};
 	return cached;
@@ -299,6 +339,8 @@ const std::map<QString, int> &TagIndices() {
 	static auto cached = std::map<QString, int> {
 		{ kTagBold, kTagBoldIndex },
 		{ kTagItalic, kTagItalicIndex },
+		//{ kTagUnderline, kTagUnderlineIndex },
+		//{ kTagStrikeOut, kTagStrikeOutIndex },
 		{ kTagCode, kTagCodeIndex },
 		{ kTagPre, kTagPreIndex },
 	};
@@ -645,6 +687,12 @@ QTextCharFormat PrepareTagFormat(
 	} else if (tag == kTagItalic) {
 		result.setForeground(st.textFg);
 		result.setFont(st.font->italic());
+	} else if (tag == kTagUnderline) {
+		result.setForeground(st.textFg);
+		result.setFont(st.font->underline());
+	} else if (tag == kTagStrikeOut) {
+		result.setForeground(st.textFg);
+		result.setFont(st.font->strikeout());
 	} else if (tag == kTagCode || tag == kTagPre) {
 		result.setForeground(st::defaultTextPalette.monoFg);
 		result.setFont(AdjustFont(App::monofont(), st.font));
@@ -793,6 +841,8 @@ QString ExpandCustomLinks(const TextWithTags &text) {
 
 const QString InputField::kTagBold = qsl("**");
 const QString InputField::kTagItalic = qsl("__");
+const QString InputField::kTagUnderline = qsl("^^"); // Not for Markdown.
+const QString InputField::kTagStrikeOut = qsl("~~");
 const QString InputField::kTagCode = qsl("`");
 const QString InputField::kTagPre = qsl("```");
 
@@ -886,9 +936,14 @@ const InstantReplaces &InstantReplaces::Default() {
 	return result;
 }
 
-FlatInput::FlatInput(QWidget *parent, const style::FlatInput &st, Fn<QString()> placeholderFactory, const QString &v) : TWidgetHelper<QLineEdit>(v, parent)
+FlatInput::FlatInput(
+	QWidget *parent,
+	const style::FlatInput &st,
+	rpl::producer<QString> placeholder,
+	const QString &v)
+: RpWidgetWrap<QLineEdit>(v, parent)
 , _oldtext(v)
-, _placeholderFactory(std::move(placeholderFactory))
+, _placeholderFull(std::move(placeholder))
 , _placeholderVisible(!v.length())
 , _st(st)
 , _textMrg(_st.textMrg) {
@@ -898,8 +953,10 @@ FlatInput::FlatInput(QWidget *parent, const style::FlatInput &st, Fn<QString()> 
 	setFont(_st.font->f);
 	setAlignment(_st.align);
 
-	subscribe(Lang::Current().updated(), [this] { refreshPlaceholder(); });
-	refreshPlaceholder();
+	_placeholderFull.value(
+	) | rpl::start_with_next([=](const QString &text) {
+		refreshPlaceholder(text);
+	}, lifetime());
 
 	subscribe(Window::Theme::Background(), [this](const Window::Theme::BackgroundUpdate &update) {
 		if (update.paletteChanged()) {
@@ -935,15 +992,17 @@ void FlatInput::onTouchTimer() {
 	_touchRightButton = true;
 }
 
-bool FlatInput::event(QEvent *e) {
-	if (e->type() == QEvent::TouchBegin || e->type() == QEvent::TouchUpdate || e->type() == QEvent::TouchEnd || e->type() == QEvent::TouchCancel) {
-		QTouchEvent *ev = static_cast<QTouchEvent*>(e);
+bool FlatInput::eventHook(QEvent *e) {
+	if (e->type() == QEvent::TouchBegin
+		|| e->type() == QEvent::TouchUpdate
+		|| e->type() == QEvent::TouchEnd
+		|| e->type() == QEvent::TouchCancel) {
+		const auto ev = static_cast<QTouchEvent*>(e);
 		if (ev->device()->type() == QTouchDevice::TouchScreen) {
 			touchEvent(ev);
-			return QLineEdit::event(e);
 		}
 	}
-	return QLineEdit::event(e);
+	return Parent::eventHook(e);
 }
 
 void FlatInput::touchEvent(QTouchEvent *e) {
@@ -990,7 +1049,7 @@ void FlatInput::touchEvent(QTouchEvent *e) {
 
 void FlatInput::setTextMrg(const QMargins &textMrg) {
 	_textMrg = textMrg;
-	refreshPlaceholder();
+	refreshPlaceholder(_placeholderFull.current());
 	update();
 }
 
@@ -1068,22 +1127,20 @@ void FlatInput::focusOutEvent(QFocusEvent *e) {
 }
 
 void FlatInput::resizeEvent(QResizeEvent *e) {
-	refreshPlaceholder();
+	refreshPlaceholder(_placeholderFull.current());
 	return QLineEdit::resizeEvent(e);
 }
 
-void FlatInput::setPlaceholder(Fn<QString()> placeholderFactory) {
-	_placeholderFactory = std::move(placeholderFactory);
-	refreshPlaceholder();
+void FlatInput::setPlaceholder(rpl::producer<QString> placeholder) {
+	_placeholderFull = std::move(placeholder);
 }
 
-void FlatInput::refreshPlaceholder() {
-	auto availw = width() - _textMrg.left() - _textMrg.right() - _st.phPos.x() - 1;
-	auto placeholderText = _placeholderFactory ? _placeholderFactory() : QString();
-	if (_st.font->width(placeholderText) > availw) {
-		_placeholder = _st.font->elided(placeholderText, availw);
+void FlatInput::refreshPlaceholder(const QString &text) {
+	const auto availw = width() - _textMrg.left() - _textMrg.right() - _st.phPos.x() - 1;
+	if (_st.font->width(text) > availw) {
+		_placeholder = _st.font->elided(text, availw);
 	} else {
-		_placeholder = placeholderText;
+		_placeholder = text;
 	}
 	update();
 }
@@ -1190,13 +1247,13 @@ void FlatInput::onTextChange(const QString &text) {
 InputField::InputField(
 	QWidget *parent,
 	const style::InputField &st,
-	Fn<QString()> placeholderFactory,
+	rpl::producer<QString> placeholder,
 	const QString &value)
 : InputField(
 	parent,
 	st,
 	Mode::SingleLine,
-	std::move(placeholderFactory),
+	std::move(placeholder),
 	{ value, {} }) {
 }
 
@@ -1204,13 +1261,13 @@ InputField::InputField(
 	QWidget *parent,
 	const style::InputField &st,
 	Mode mode,
-	Fn<QString()> placeholderFactory,
+	rpl::producer<QString> placeholder,
 	const QString &value)
 : InputField(
 	parent,
 	st,
 	mode,
-	std::move(placeholderFactory),
+	std::move(placeholder),
 	{ value, {} }) {
 }
 
@@ -1218,7 +1275,7 @@ InputField::InputField(
 	QWidget *parent,
 	const style::InputField &st,
 	Mode mode,
-	Fn<QString()> placeholderFactory,
+	rpl::producer<QString> placeholder,
 	const TextWithTags &value)
 : RpWidget(parent)
 , _st(st)
@@ -1227,7 +1284,7 @@ InputField::InputField(
 , _maxHeight(st.heightMax)
 , _inner(std::make_unique<Inner>(this))
 , _lastTextWithTags(value)
-, _placeholderFactory(std::move(placeholderFactory)) {
+, _placeholderFull(std::move(placeholder)) {
 	_inner->setDocument(Ui::CreateChild<InputDocument>(_inner.get(), _st));
 
 	_inner->setAcceptRichText(false);
@@ -1243,8 +1300,10 @@ InputField::InputField(
 		_inner->setWordWrapMode(QTextOption::NoWrap);
 	}
 
-	subscribe(Lang::Current().updated(), [=] { refreshPlaceholder(); });
-	refreshPlaceholder();
+	_placeholderFull.value(
+	) | rpl::start_with_next([=](const QString &text) {
+		refreshPlaceholder(text);
+	}, lifetime());
 
 	subscribe(Window::Theme::Background(), [=](
 			const Window::Theme::BackgroundUpdate &update) {
@@ -1670,7 +1729,7 @@ void InputField::paintEvent(QPaintEvent *e) {
 			p.restore();
 		}
 	}
-	TWidget::paintEvent(e);
+	RpWidget::paintEvent(e);
 }
 
 int InputField::placeholderSkipWidth() const {
@@ -2688,6 +2747,10 @@ bool InputField::handleMarkdownKey(QKeyEvent *e) {
 		toggleSelectionMarkdown(kTagBold);
 	} else if (e == QKeySequence::Italic) {
 		toggleSelectionMarkdown(kTagItalic);
+	//} else if (e == QKeySequence::Underline) {
+	//	toggleSelectionMarkdown(kTagUnderline);
+	//} else if (matches(kStrikeOutSequence)) {
+	//	toggleSelectionMarkdown(kTagStrikeOut);
 	} else if (matches(kMonospaceSequence)) {
 		toggleSelectionMarkdown(kTagCode);
 	} else if (matches(kClearFormatSequence)) {
@@ -3301,7 +3364,7 @@ void InputField::addMarkdownActions(
 	if (!_markdownEnabled) {
 		return;
 	}
-	const auto formatting = new QAction(lang(lng_menu_formatting), menu);
+	const auto formatting = new QAction(tr::lng_menu_formatting(tr::now), menu);
 	addMarkdownMenuAction(menu, formatting);
 
 	const auto submenu = new QMenu(menu);
@@ -3319,48 +3382,50 @@ void InputField::addMarkdownActions(
 	}
 	const auto fullTag = GetFullSimpleTextTag(textWithTags);
 	const auto add = [&](
-			LangKey key,
+			const QString &base,
 			QKeySequence sequence,
 			bool disabled,
 			auto callback) {
 		const auto add = sequence.isEmpty()
 			? QString()
 			: QChar('\t') + sequence.toString(QKeySequence::NativeText);
-		const auto action = new QAction(lang(key) + add, submenu);
+		const auto action = new QAction(base + add, submenu);
 		connect(action, &QAction::triggered, this, callback);
 		action->setDisabled(disabled);
 		submenu->addAction(action);
 	};
 	const auto addtag = [&](
-			LangKey key,
+			const QString &base,
 			QKeySequence sequence,
 			const QString &tag) {
 		const auto disabled = (fullTag == tag)
 			|| (fullTag == kTagPre && tag == kTagCode);
-		add(key, sequence, (!hasText || fullTag == tag), [=] {
+		add(base, sequence, (!hasText || fullTag == tag), [=] {
 			toggleSelectionMarkdown(tag);
 		});
 	};
 	const auto addlink = [&] {
 		const auto selection = editLinkSelection(e);
 		const auto data = selectionEditLinkData(selection);
-		const auto key = data.link.isEmpty()
-			? lng_menu_formatting_link_create
-			: lng_menu_formatting_link_edit;
-		add(key, kEditLinkSequence, false, [=] {
+		const auto base = data.link.isEmpty()
+			? tr::lng_menu_formatting_link_create(tr::now)
+			: tr::lng_menu_formatting_link_edit(tr::now);
+		add(base, kEditLinkSequence, false, [=] {
 			editMarkdownLink(selection);
 		});
 	};
 	const auto addclear = [&] {
 		const auto disabled = !hasText || !hasTags;
-		add(lng_menu_formatting_clear, kClearFormatSequence, disabled, [=] {
+		add(tr::lng_menu_formatting_clear(tr::now), kClearFormatSequence, disabled, [=] {
 			clearSelectionMarkdown();
 		});
 	};
 
-	addtag(lng_menu_formatting_bold, QKeySequence::Bold, kTagBold);
-	addtag(lng_menu_formatting_italic, QKeySequence::Italic, kTagItalic);
-	addtag(lng_menu_formatting_monospace, kMonospaceSequence, kTagCode);
+	addtag(tr::lng_menu_formatting_bold(tr::now), QKeySequence::Bold, kTagBold);
+	addtag(tr::lng_menu_formatting_italic(tr::now), QKeySequence::Italic, kTagItalic);
+	//addtag(tr::lng_menu_formatting_underline(tr::now), QKeySequence::Underline, kTagUnderline);
+	//addtag(tr::lng_menu_formatting_strike_out(tr::now), kStrikeOutSequence, kTagStrikeOut);
+	addtag(tr::lng_menu_formatting_monospace(tr::now), kMonospaceSequence, kTagCode);
 
 	if (_editLinkCallback) {
 		submenu->addSeparator();
@@ -3442,40 +3507,38 @@ void InputField::insertFromMimeDataInner(const QMimeData *source) {
 }
 
 void InputField::resizeEvent(QResizeEvent *e) {
-	refreshPlaceholder();
+	refreshPlaceholder(_placeholderFull.current());
 	_inner->setGeometry(rect().marginsRemoved(_st.textMargins));
 	_borderAnimationStart = width() / 2;
-	TWidget::resizeEvent(e);
+	RpWidget::resizeEvent(e);
 	checkContentHeight();
 }
 
-void InputField::refreshPlaceholder() {
-	auto placeholderText = _placeholderFactory ? _placeholderFactory() : QString();
-	auto availableWidth = width() - _st.textMargins.left() - _st.textMargins.right() - _st.placeholderMargins.left() - _st.placeholderMargins.right() - 1;
+void InputField::refreshPlaceholder(const QString &text) {
+	const auto availableWidth = width() - _st.textMargins.left() - _st.textMargins.right() - _st.placeholderMargins.left() - _st.placeholderMargins.right() - 1;
 	if (_st.placeholderScale > 0.) {
 		auto placeholderFont = _st.placeholderFont->f;
 		placeholderFont.setStyleStrategy(QFont::PreferMatch);
-		auto metrics = QFontMetrics(placeholderFont);
-		_placeholder = metrics.elidedText(placeholderText, Qt::ElideRight, availableWidth);
+		const auto metrics = QFontMetrics(placeholderFont);
+		_placeholder = metrics.elidedText(text, Qt::ElideRight, availableWidth);
 		_placeholderPath = QPainterPath();
 		if (!_placeholder.isEmpty()) {
 			_placeholderPath.addText(0, QFontMetrics(placeholderFont).ascent(), placeholderFont, _placeholder);
 		}
 	} else {
-		_placeholder = _st.placeholderFont->elided(placeholderText, availableWidth);
+		_placeholder = _st.placeholderFont->elided(text, availableWidth);
 	}
 	update();
 }
 
 void InputField::setPlaceholder(
-		Fn<QString()> placeholderFactory,
+		rpl::producer<QString> placeholder,
 		int afterSymbols) {
-	_placeholderFactory = std::move(placeholderFactory);
+	_placeholderFull = std::move(placeholder);
 	if (_placeholderAfterSymbols != afterSymbols) {
 		_placeholderAfterSymbols = afterSymbols;
 		startPlaceholderAnimation();
 	}
-	refreshPlaceholder();
 }
 
 void InputField::setEditLinkCallback(
@@ -3507,19 +3570,21 @@ InputField::~InputField() = default;
 MaskedInputField::MaskedInputField(
 	QWidget *parent,
 	const style::InputField &st,
-	Fn<QString()> placeholderFactory,
+	rpl::producer<QString> placeholder,
 	const QString &val)
 : Parent(val, parent)
 , _st(st)
 , _oldtext(val)
-, _placeholderFactory(std::move(placeholderFactory)) {
+, _placeholderFull(std::move(placeholder)) {
 	resize(_st.width, _st.heightMin);
 
 	setFont(_st.font);
 	setAlignment(_st.textAlign);
 
-	subscribe(Lang::Current().updated(), [this] { refreshPlaceholder(); });
-	refreshPlaceholder();
+	_placeholderFull.value(
+	) | rpl::start_with_next([=](const QString &text) {
+		refreshPlaceholder(text);
+	}, lifetime());
 
 	subscribe(Window::Theme::Background(), [this](const Window::Theme::BackgroundUpdate &update) {
 		if (update.paletteChanged()) {
@@ -3584,7 +3649,7 @@ int MaskedInputField::borderAnimationStart() const {
 
 void MaskedInputField::setTextMargins(const QMargins &mrg) {
 	_textMargins = mrg;
-	refreshPlaceholder();
+	refreshPlaceholder(_placeholderFull.current());
 }
 
 void MaskedInputField::onTouchTimer() {
@@ -3767,36 +3832,34 @@ void MaskedInputField::setFocused(bool focused) {
 }
 
 void MaskedInputField::resizeEvent(QResizeEvent *e) {
-	refreshPlaceholder();
+	refreshPlaceholder(_placeholderFull.current());
 	_borderAnimationStart = width() / 2;
 	QLineEdit::resizeEvent(e);
 }
 
-void MaskedInputField::refreshPlaceholder() {
-	auto placeholderText = _placeholderFactory ? _placeholderFactory() : QString();
-	auto availableWidth = width() - _textMargins.left() - _textMargins.right() - _st.placeholderMargins.left() - _st.placeholderMargins.right() - 1;
+void MaskedInputField::refreshPlaceholder(const QString &text) {
+	const auto availableWidth = width() - _textMargins.left() - _textMargins.right() - _st.placeholderMargins.left() - _st.placeholderMargins.right() - 1;
 	if (_st.placeholderScale > 0.) {
 		auto placeholderFont = _st.placeholderFont->f;
 		placeholderFont.setStyleStrategy(QFont::PreferMatch);
-		auto metrics = QFontMetrics(placeholderFont);
-		_placeholder = metrics.elidedText(placeholderText, Qt::ElideRight, availableWidth);
+		const auto metrics = QFontMetrics(placeholderFont);
+		_placeholder = metrics.elidedText(text, Qt::ElideRight, availableWidth);
 		_placeholderPath = QPainterPath();
 		if (!_placeholder.isEmpty()) {
 			_placeholderPath.addText(0, QFontMetrics(placeholderFont).ascent(), placeholderFont, _placeholder);
 		}
 	} else {
-		_placeholder = _st.placeholderFont->elided(placeholderText, availableWidth);
+		_placeholder = _st.placeholderFont->elided(text, availableWidth);
 	}
 	update();
 }
 
-void MaskedInputField::setPlaceholder(Fn<QString()> placeholderFactory) {
-	_placeholderFactory = std::move(placeholderFactory);
-	refreshPlaceholder();
+void MaskedInputField::setPlaceholder(rpl::producer<QString> placeholder) {
+	_placeholderFull = std::move(placeholder);
 }
 
 void MaskedInputField::contextMenuEvent(QContextMenuEvent *e) {
-	if (auto menu = createStandardContextMenu()) {
+	if (const auto menu = createStandardContextMenu()) {
 		(new Ui::PopupMenu(this, menu))->popup(e->globalPos());
 	}
 }
@@ -3973,7 +4036,7 @@ void CountryCodeInput::correctValue(
 		}
 	}
 	if (!addToNumber.isEmpty()) {
-		auto validCode = findValidCode(newText.mid(1));
+		auto validCode = Data::ValidPhoneCode(newText.mid(1));
 		addToNumber = newText.mid(1 + validCode.length()) + addToNumber;
 		newText = '+' + validCode;
 	}
@@ -3987,7 +4050,7 @@ void CountryCodeInput::correctValue(
 	}
 }
 
-PhonePartInput::PhonePartInput(QWidget *parent, const style::InputField &st) : MaskedInputField(parent, st/*, lang(lng_phone_ph)*/) {
+PhonePartInput::PhonePartInput(QWidget *parent, const style::InputField &st) : MaskedInputField(parent, st/*, tr::lng_phone_ph(tr::now)*/) {
 }
 
 void PhonePartInput::paintAdditionalPlaceholder(Painter &p) {
@@ -4117,11 +4180,21 @@ void PhonePartInput::onChooseCode(const QString &code) {
 	startPlaceholderAnimation();
 }
 
-PasswordInput::PasswordInput(QWidget *parent, const style::InputField &st, Fn<QString()> placeholderFactory, const QString &val) : MaskedInputField(parent, st, std::move(placeholderFactory), val) {
+PasswordInput::PasswordInput(
+	QWidget *parent,
+	const style::InputField &st,
+	rpl::producer<QString> placeholder,
+	const QString &val)
+: MaskedInputField(parent, st, std::move(placeholder), val) {
 	setEchoMode(QLineEdit::Password);
 }
 
-PortInput::PortInput(QWidget *parent, const style::InputField &st, Fn<QString()> placeholderFactory, const QString &val) : MaskedInputField(parent, st, std::move(placeholderFactory), val) {
+PortInput::PortInput(
+	QWidget *parent,
+	const style::InputField &st,
+	rpl::producer<QString> placeholder,
+	const QString &val)
+: MaskedInputField(parent, st, std::move(placeholder), val) {
 	if (!val.toInt() || val.toInt() > 65535) {
 		setText(QString());
 	}
@@ -4152,7 +4225,12 @@ void PortInput::correctValue(
 	setCorrectedText(now, nowCursor, newText, newPos);
 }
 
-HexInput::HexInput(QWidget *parent, const style::InputField &st, Fn<QString()> placeholderFactory, const QString &val) : MaskedInputField(parent, st, std::move(placeholderFactory), val) {
+HexInput::HexInput(
+	QWidget *parent,
+	const style::InputField &st,
+	rpl::producer<QString> placeholder,
+	const QString &val)
+: MaskedInputField(parent, st, std::move(placeholder), val) {
 	if (!QRegularExpression("^[a-fA-F0-9]+$").match(val).hasMatch()) {
 		setText(QString());
 	}
@@ -4179,8 +4257,15 @@ void HexInput::correctValue(
 	setCorrectedText(now, nowCursor, newText, newPos);
 }
 
-UsernameInput::UsernameInput(QWidget *parent, const style::InputField &st, Fn<QString()> placeholderFactory, const QString &val, bool isLink) : MaskedInputField(parent, st, std::move(placeholderFactory), val) {
-	setLinkPlaceholder(isLink ? Core::App().createInternalLink(QString()) : QString());
+UsernameInput::UsernameInput(
+	QWidget *parent,
+	const style::InputField &st,
+	rpl::producer<QString> placeholder,
+	const QString &val,
+	bool isLink)
+: MaskedInputField(parent, st, std::move(placeholder), val) {
+	setLinkPlaceholder(
+		isLink ? Core::App().createInternalLink(QString()) : QString());
 }
 
 void UsernameInput::setLinkPlaceholder(const QString &placeholder) {
@@ -4226,7 +4311,12 @@ void UsernameInput::correctValue(
 	setCorrectedText(now, nowCursor, now.mid(from, len), newPos);
 }
 
-PhoneInput::PhoneInput(QWidget *parent, const style::InputField &st, Fn<QString()> placeholderFactory, const QString &val) : MaskedInputField(parent, st, std::move(placeholderFactory), val) {
+PhoneInput::PhoneInput(
+	QWidget *parent,
+	const style::InputField &st,
+	rpl::producer<QString> placeholder,
+	const QString &val)
+: MaskedInputField(parent, st, std::move(placeholder), val) {
 	QString phone(val);
 	if (phone.isEmpty()) {
 		clearText();
@@ -4285,7 +4375,7 @@ void PhoneInput::correctValue(
 	if (_pattern.isEmpty()) {
 		newPlaceholder = QString();
 	} else if (_pattern.size() == 1 && _pattern.at(0) == digits.size()) {
-		newPlaceholder = QString(_pattern.at(0) + 2, ' ') + lang(lng_contact_phone);
+		newPlaceholder = QString(_pattern.at(0) + 2, ' ') + tr::lng_contact_phone(tr::now);
 	} else {
 		newPlaceholder.reserve(20);
 		for (int i = 0, l = _pattern.size(); i < l; ++i) {

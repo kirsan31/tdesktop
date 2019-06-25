@@ -39,7 +39,7 @@ void ShowSearchFromBox(
 	if (auto controller = createController()) {
 		auto subscription = std::make_shared<rpl::lifetime>();
 		auto box = Ui::show(Box<PeerListBox>(std::move(controller), [subscription](not_null<PeerListBox*> box) {
-			box->addButton(langFactory(lng_cancel), [box, subscription] {
+			box->addButton(tr::lng_cancel(), [box, subscription] {
 				box->closeBox();
 			});
 		}), LayerOption::KeepOther);
@@ -62,7 +62,7 @@ SearchFromController::SearchFromController(
 
 void SearchFromController::prepare() {
 	ParticipantsBoxController::prepare();
-	delegate()->peerListSetTitle(langFactory(lng_search_messages_from));
+	delegate()->peerListSetTitle(tr::lng_search_messages_from());
 }
 
 void SearchFromController::rowClicked(not_null<PeerListRow*> row) {

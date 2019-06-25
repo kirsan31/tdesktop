@@ -248,6 +248,10 @@ ApiWrap::ApiWrap(not_null<AuthSession*> session)
 	});
 }
 
+AuthSession &ApiWrap::session() const {
+	return *_session;
+}
+
 void ApiWrap::setupSupportMode() {
 	if (!_session->supportMode()) {
 		return;
@@ -458,11 +462,11 @@ void ApiWrap::importChatInvite(const QString &hash) {
 	}).fail([=](const RPCError &error) {
 		const auto &type = error.type();
 		if (type == qstr("CHANNELS_TOO_MUCH")) {
-			Ui::show(Box<InformBox>(lang(lng_join_channel_error)));
+			Ui::show(Box<InformBox>(tr::lng_join_channel_error(tr::now)));
 		} else if (error.code() == 400) {
-			Ui::show(Box<InformBox>(lang(type == qstr("USERS_TOO_MUCH")
-				? lng_group_invite_no_room
-				: lng_group_invite_bad_link)));
+			Ui::show(Box<InformBox>((type == qstr("USERS_TOO_MUCH"))
+				? tr::lng_group_invite_no_room(tr::now)
+				: tr::lng_group_invite_bad_link(tr::now)));
 		}
 	}).send();
 }
@@ -546,8 +550,9 @@ void ApiWrap::sendMessageFail(const RPCError &error) {
 	} else if (error.type() == qstr("USER_BANNED_IN_CHANNEL")) {
 		const auto link = textcmdLink(
 			Core::App().createInternalLinkFull(qsl("spambot")),
-			lang(lng_cant_more_info));
-		Ui::show(Box<InformBox>(lng_error_public_groups_denied(
+			tr::lng_cant_more_info(tr::now));
+		Ui::show(Box<InformBox>(tr::lng_error_public_groups_denied(
+			tr::now,
 			lt_more_info,
 			link)));
 	}
@@ -686,11 +691,11 @@ QString ApiWrap::exportDirectMessageLink(not_null<HistoryItem*> item) {
 	const auto itemId = item->fullId();
 	const auto channel = item->history()->peer->asChannel();
 	const auto fallback = [&] {
-		const auto base = channel->isPublic()
+		const auto base = channel->hasUsername()
 			? channel->username
 			: "c/" + QString::number(channel->bareId());
 		const auto query = base + '/' + QString::number(item->id);
-		if (channel->isPublic() && !channel->isMegagroup()) {
+		if (channel->hasUsername() && !channel->isMegagroup()) {
 			if (const auto media = item->media()) {
 				if (const auto document = media->document()) {
 					if (document->isVideoMessage()) {
@@ -739,8 +744,7 @@ void ApiWrap::requestContacts() {
 
 			const auto userId = contact.c_contact().vuser_id.v;
 			if (userId == _session->userId()) {
-				_session->user()->setContactStatus(
-					UserData::ContactStatus::Contact);
+				_session->user()->setIsContact(true);
 			}
 		}
 		_session->data().contactsLoaded() = true;
@@ -1313,6 +1317,22 @@ void ApiWrap::requestPeer(not_null<PeerData*> peer) {
 	_peerRequests.insert(peer, requestId);
 }
 
+void ApiWrap::requestPeerSettings(not_null<PeerData*> peer) {
+	if (!_requestedPeerSettings.emplace(peer).second) {
+		return;
+	}
+	request(MTPmessages_GetPeerSettings(
+		peer->input
+	)).done([=](const MTPPeerSettings &result) {
+		peer->setSettings(result.match([&](const MTPDpeerSettings &data) {
+			return data.vflags.v;
+		}));
+		_requestedPeerSettings.erase(peer);
+	}).fail([=](const RPCError &error) {
+		_requestedPeerSettings.erase(peer);
+	}).send();
+}
+
 void ApiWrap::migrateChat(
 		not_null<ChatData*> chat,
 		FnMut<void(not_null<ChannelData*>)> done,
@@ -1390,7 +1410,7 @@ void ApiWrap::migrateDone(
 void ApiWrap::migrateFail(not_null<PeerData*> peer, const RPCError &error) {
 	const auto &type = error.type();
 	if (type == qstr("CHANNELS_TOO_MUCH")) {
-		Ui::show(Box<InformBox>(lang(lng_migrate_error)));
+		Ui::show(Box<InformBox>(tr::lng_migrate_error(tr::now)));
 	}
 	if (auto handlers = _migrateCallbacks.take(peer)) {
 		for (auto &handler : *handlers) {
@@ -2148,13 +2168,13 @@ void ApiWrap::joinChannel(not_null<ChannelData*> channel) {
 			if (error.type() == qstr("CHANNEL_PRIVATE")
 				|| error.type() == qstr("CHANNEL_PUBLIC_GROUP_NA")
 				|| error.type() == qstr("USER_BANNED_IN_CHANNEL")) {
-				Ui::show(Box<InformBox>(lang(channel->isMegagroup()
-					? lng_group_not_accessible
-					: lng_channel_not_accessible)));
+				Ui::show(Box<InformBox>(channel->isMegagroup()
+					? tr::lng_group_not_accessible(tr::now)
+					: tr::lng_channel_not_accessible(tr::now)));
 			} else if (error.type() == qstr("CHANNELS_TOO_MUCH")) {
-				Ui::show(Box<InformBox>(lang(lng_join_channel_error)));
+				Ui::show(Box<InformBox>(tr::lng_join_channel_error(tr::now)));
 			} else if (error.type() == qstr("USERS_TOO_MUCH")) {
-				Ui::show(Box<InformBox>(lang(lng_group_full)));
+				Ui::show(Box<InformBox>(tr::lng_group_full(tr::now)));
 			}
 			_channelAmInRequests.remove(channel);
 		}).send();
@@ -2188,7 +2208,7 @@ void ApiWrap::blockUser(not_null<UserData*> user) {
 	} else if (_blockRequests.find(user) == end(_blockRequests)) {
 		const auto requestId = request(MTPcontacts_Block(user->inputUser)).done([this, user](const MTPBool &result) {
 			_blockRequests.erase(user);
-			user->setBlockStatus(UserData::BlockStatus::Blocked);
+			user->setIsBlocked(true);
 			if (_blockedUsersSlice) {
 				_blockedUsersSlice->list.insert(
 					_blockedUsersSlice->list.begin(),
@@ -2214,7 +2234,7 @@ void ApiWrap::unblockUser(not_null<UserData*> user) {
 			user->inputUser
 		)).done([=](const MTPBool &result) {
 			_blockRequests.erase(user);
-			user->setBlockStatus(UserData::BlockStatus::NotBlocked);
+			user->setIsBlocked(false);
 			if (_blockedUsersSlice) {
 				auto &list = _blockedUsersSlice->list;
 				for (auto i = list.begin(); i != list.end(); ++i) {
@@ -2510,9 +2530,6 @@ void ApiWrap::deleteHistory(not_null<PeerData*> peer, bool justClear, bool revok
 		const auto offset = applyAffectedHistory(peer, result);
 		if (offset > 0) {
 			deleteHistory(peer, justClear, revoke);
-		} else if (!justClear && cReportSpamStatuses().contains(peer->id)) {
-			cRefReportSpamStatuses().remove(peer->id);
-			Local::writeReportSpamStatuses();
 		}
 	}).send();
 }
@@ -2810,7 +2827,7 @@ void ApiWrap::requestAttachedStickerSets(not_null<PhotoData*> photo) {
 		MTP_inputStickeredMediaPhoto(photo->mtpInput())
 	)).done([=](const MTPVector<MTPStickerSetCovered> &result) {
 		if (result.v.isEmpty()) {
-			Ui::show(Box<InformBox>(lang(lng_stickers_not_found)));
+			Ui::show(Box<InformBox>(tr::lng_stickers_not_found(tr::now)));
 			return;
 		} else if (result.v.size() > 1) {
 			Ui::show(Box<StickersBox>(result));
@@ -2831,7 +2848,7 @@ void ApiWrap::requestAttachedStickerSets(not_null<PhotoData*> photo) {
 			LayerOption::KeepOther);
 
 	}).fail([=](const RPCError &error) {
-		Ui::show(Box<InformBox>(lang(lng_stickers_not_found)));
+		Ui::show(Box<InformBox>(tr::lng_stickers_not_found(tr::now)));
 	}).send();
 }
 
@@ -3361,7 +3378,7 @@ void ApiWrap::requestRecentStickersWithHash(int32 hash) {
 			auto &d = result.c_messages_recentStickers();
 			Stickers::SpecialSetReceived(
 				Stickers::CloudRecentSetId,
-				lang(lng_recent_stickers),
+				tr::lng_recent_stickers(tr::now),
 				d.vstickers.v,
 				d.vhash.v,
 				d.vpacks.v,
@@ -3556,7 +3573,9 @@ void ApiWrap::parseRecentChannelParticipants(
 				availableCount,
 				list);
 		}
-		callbackList(availableCount, list);
+		if (callbackList) {
+			callbackList(availableCount, list);
+		}
 	}, std::move(callbackNotModified));
 }
 
@@ -4861,7 +4880,7 @@ void ApiWrap::editUploadedFile(
 			item->returnSavedMedia();
 			_session->data().sendHistoryChangeNotifications();
 			Ui::show(
-				Box<InformBox>(lang(lng_edit_media_invalid_file)),
+				Box<InformBox>(tr::lng_edit_media_invalid_file(tr::now)),
 				LayerOption::KeepOther);
 		} else {
 			sendMessageFail(error);
@@ -5225,6 +5244,7 @@ void ApiWrap::sendExistingDocument(
 		main->finishForwarding(history);
 		if (document->sticker()) {
 			main->incrementSticker(document);
+			_session->data().notifyRecentStickersUpdated();
 		}
 	}
 }
@@ -5805,7 +5825,7 @@ void ApiWrap::reloadBlockedUsers() {
 					const auto user = _session->data().userLoaded(
 						data.vuser_id.v);
 					if (user) {
-						user->setBlockStatus(UserData::BlockStatus::Blocked);
+						user->setIsBlocked(true);
 						slice.list.push_back({ user, data.vdate.v });
 					}
 				});

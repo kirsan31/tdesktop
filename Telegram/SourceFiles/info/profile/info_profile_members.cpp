@@ -23,6 +23,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/widgets/input_fields.h"
 #include "ui/widgets/scroll_area.h"
 #include "ui/wrap/padding_wrap.h"
+#include "ui/text/text_utilities.h" // Ui::Text::ToUpper
 #include "ui/search_field_controller.h"
 #include "lang/lang_keys.h"
 #include "boxes/confirm_box.h"
@@ -163,11 +164,11 @@ void Members::setupHeader() {
 object_ptr<Ui::FlatLabel> Members::setupTitle() {
 	auto result = object_ptr<Ui::FlatLabel>(
 		_titleWrap,
-		MembersCountValue(
-			_peer
-		) | rpl::map([](int count) {
-			return lng_chat_status_members(lt_count_decimal, count);
-		}) | ToUpperValue(),
+		tr::lng_chat_status_members(
+			lt_count_decimal,
+			MembersCountValue(_peer) | tr::to_count(),
+			Ui::Text::Upper
+		),
 		st::infoBlockHeaderLabel);
 	result->setAttribute(Qt::WA_TransparentForMouseEvents);
 	return result;
@@ -408,11 +409,10 @@ void Members::visibleTopBottomUpdated(
 	setChildVisibleTopBottom(_list, visibleTop, visibleBottom);
 }
 
-void Members::peerListSetTitle(Fn<QString()> title) {
+void Members::peerListSetTitle(rpl::producer<QString> title) {
 }
 
-void Members::peerListSetAdditionalTitle(
-		Fn<QString()> title) {
+void Members::peerListSetAdditionalTitle(rpl::producer<QString> title) {
 }
 
 bool Members::peerListIsRowSelected(not_null<PeerData*> peer) {

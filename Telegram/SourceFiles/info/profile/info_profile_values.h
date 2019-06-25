@@ -11,6 +11,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <rpl/map.h>
 #include "observer_peer.h"
 
+struct ChannelLocation;
+
 namespace Ui {
 class RpWidget;
 template <typename Widget>
@@ -30,24 +32,14 @@ inline auto ToSingleLine() {
 	});
 }
 
-inline auto WithEmptyEntities() {
-	return rpl::map([](QString &&text) {
-		return TextWithEntities{ std::move(text), {} };
-	});
-}
-
-inline auto ToUpperValue() {
-	return rpl::map([](QString &&text) {
-		return std::move(text).toUpper();
-	});
-}
-
 rpl::producer<TextWithEntities> NameValue(not_null<PeerData*> peer);
 rpl::producer<TextWithEntities> PhoneValue(not_null<UserData*> user);
 rpl::producer<TextWithEntities> BioValue(not_null<UserData*> user);
 rpl::producer<TextWithEntities> UsernameValue(not_null<UserData*> user);
 rpl::producer<TextWithEntities> AboutValue(not_null<PeerData*> peer);
 rpl::producer<QString> LinkValue(not_null<PeerData*> peer);
+rpl::producer<const ChannelLocation*> LocationValue(
+	not_null<ChannelData*> channel);
 rpl::producer<bool> NotificationsEnabledValue(not_null<PeerData*> peer);
 rpl::producer<bool> IsContactValue(not_null<UserData*> user);
 rpl::producer<bool> CanInviteBotToGroupValue(not_null<UserData*> user);
@@ -66,6 +58,7 @@ rpl::producer<int> SharedMediaCountValue(
 rpl::producer<int> CommonGroupsCountValue(not_null<UserData*> user);
 rpl::producer<bool> CanAddMemberValue(not_null<PeerData*> peer);
 rpl::producer<bool> VerifiedValue(not_null<PeerData*> peer);
+rpl::producer<bool> ScamValue(not_null<PeerData*> peer);
 
 //rpl::producer<int> FeedChannelsCountValue(not_null<Data::Feed*> feed); // #feed
 

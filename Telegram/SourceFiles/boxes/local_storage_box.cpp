@@ -103,10 +103,10 @@ QString TimeLimitText(size_type limit) {
 	const auto weeks = (days / 7);
 	const auto months = (days / 29);
 	return (months > 0)
-		? lng_local_storage_limit_months(lt_count, months)
+		? tr::lng_local_storage_limit_months(tr::now, lt_count, months)
 		: (limit > 0)
-		? lng_local_storage_limit_weeks(lt_count, weeks)
-		: lang(lng_local_storage_limit_never);
+		? tr::lng_local_storage_limit_weeks(tr::now, lt_count, weeks)
+		: tr::lng_local_storage_limit_never(tr::now);
 }
 
 size_type LimitToValue(size_type timeLimit) {
@@ -124,7 +124,7 @@ public:
 	Row(
 		QWidget *parent,
 		Fn<QString(size_type)> title,
-		Fn<QString()> clear,
+		rpl::producer<QString> clear,
 		const Database::TaggedSummary &data);
 
 	void update(const Database::TaggedSummary &data);
@@ -153,19 +153,17 @@ private:
 LocalStorageBox::Row::Row(
 	QWidget *parent,
 	Fn<QString(size_type)> title,
-	Fn<QString()> clear,
+	rpl::producer<QString> clear,
 	const Database::TaggedSummary &data)
 : RpWidget(parent)
 , _titleFactory(std::move(title))
 , _title(
 	this,
 	titleText(data),
-	Ui::FlatLabel::InitType::Simple,
 	st::localStorageRowTitle)
 , _description(
 	this,
 	sizeText(data),
-	Ui::FlatLabel::InitType::Simple,
 	st::localStorageRowSize)
 , _clear(this, std::move(clear), st::localStorageClear) {
 	_clear->setVisible(data.count != 0);
@@ -191,8 +189,7 @@ void LocalStorageBox::Row::toggleProgress(bool shown) {
 		_progress->start();
 		_clearing = object_ptr<Ui::FlatLabel>(
 			this,
-			lang(lng_local_storage_clearing),
-			Ui::FlatLabel::InitType::Simple,
+			tr::lng_local_storage_clearing(tr::now),
 			st::localStorageRowSize);
 		_clearing->show();
 		_description->hide();
@@ -263,7 +260,7 @@ QString LocalStorageBox::Row::titleText(const Database::TaggedSummary &data) con
 QString LocalStorageBox::Row::sizeText(const Database::TaggedSummary &data) const {
 	return data.totalSize
 		? formatSizeText(data.totalSize)
-		: lang(lng_local_storage_empty);
+		: tr::lng_local_storage_empty(tr::now);
 }
 
 LocalStorageBox::LocalStorageBox(
@@ -300,9 +297,9 @@ void LocalStorageBox::Show(
 }
 
 void LocalStorageBox::prepare() {
-	setTitle(langFactory(lng_local_storage_title));
+	setTitle(tr::lng_local_storage_title());
 
-	addButton(langFactory(lng_box_ok), [this] { closeBox(); });
+	addButton(tr::lng_box_ok(), [this] { closeBox(); });
 
 	setupControls();
 }
@@ -368,7 +365,7 @@ void LocalStorageBox::setupControls() {
 	const auto createRow = [&](
 			uint16 tag,
 			Fn<QString(size_type)> title,
-			Fn<QString()> clear,
+			rpl::producer<QString> clear,
 			const Database::TaggedSummary &data) {
 		auto result = container->add(object_ptr<Ui::SlideWrap<Row>>(
 			container,
@@ -393,39 +390,39 @@ void LocalStorageBox::setupControls() {
 		const auto &data = (i != end(_stats.tagged)) ? i->second : empty;
 		auto factory = std::forward<decltype(titleFactory)>(titleFactory);
 		auto title = [factory = std::move(factory)](size_type count) {
-			return factory(lt_count, count);
+			return factory(tr::now, lt_count, count);
 		};
 		tracker.track(createRow(
 			tag,
 			std::move(title),
-			langFactory(lng_local_storage_clear_some),
+			tr::lng_local_storage_clear_some(),
 			data));
 	};
 	auto summaryTitle = [](size_type) {
-		return lang(lng_local_storage_summary);
+		return tr::lng_local_storage_summary(tr::now);
 	};
 	auto mediaCacheTitle = [](size_type) {
-		return lang(lng_local_storage_media);
+		return tr::lng_local_storage_media(tr::now);
 	};
 	createRow(
 		0,
 		std::move(summaryTitle),
-		langFactory(lng_local_storage_clear),
+		tr::lng_local_storage_clear(),
 		summary());
 	setupLimits(container);
 	const auto shadow = container->add(object_ptr<Ui::SlideWrap<>>(
 		container,
 		object_ptr<Ui::PlainShadow>(container),
 		st::localStorageRowPadding));
-	createTagRow(Data::kImageCacheTag, lng_local_storage_image);
-	createTagRow(Data::kStickerCacheTag, lng_local_storage_sticker);
-	createTagRow(Data::kVoiceMessageCacheTag, lng_local_storage_voice);
-	createTagRow(Data::kVideoMessageCacheTag, lng_local_storage_round);
-	createTagRow(Data::kAnimationCacheTag, lng_local_storage_animation);
+	createTagRow(Data::kImageCacheTag, tr::lng_local_storage_image);
+	createTagRow(Data::kStickerCacheTag, tr::lng_local_storage_sticker);
+	createTagRow(Data::kVoiceMessageCacheTag, tr::lng_local_storage_voice);
+	createTagRow(Data::kVideoMessageCacheTag, tr::lng_local_storage_round);
+	createTagRow(Data::kAnimationCacheTag, tr::lng_local_storage_animation);
 	tracker.track(createRow(
 		kFakeMediaCacheTag,
 		std::move(mediaCacheTitle),
-		langFactory(lng_local_storage_clear_some),
+		tr::lng_local_storage_clear_some(),
 		_statsBig.full));
 	shadow->toggleOn(
 		std::move(tracker).atLeastOneShownValue()
@@ -509,14 +506,14 @@ void LocalStorageBox::updateTotalLabel() {
 	Expects(_totalLabel != nullptr);
 
 	const auto text = SizeLimitText(_totalSizeLimit);
-	_totalLabel->setText(lng_local_storage_size_limit(lt_size, text));
+	_totalLabel->setText(tr::lng_local_storage_size_limit(tr::now, lt_size, text));
 }
 
 void LocalStorageBox::updateMediaLabel() {
 	Expects(_mediaLabel != nullptr);
 
 	const auto text = SizeLimitText(_mediaSizeLimit);
-	_mediaLabel->setText(lng_local_storage_media_limit(lt_size, text));
+	_mediaLabel->setText(tr::lng_local_storage_media_limit(tr::now, lt_size, text));
 }
 
 void LocalStorageBox::setupLimits(not_null<Ui::VerticalLayout*> container) {
@@ -558,7 +555,7 @@ void LocalStorageBox::setupLimits(not_null<Ui::VerticalLayout*> container) {
 		[=](not_null<Ui::LabelSimple*> label, size_type limit) {
 			_timeLimit = ValueToLimit(limit);
 			const auto text = TimeLimitText(_timeLimit);
-			label->setText(lng_local_storage_time_limit(lt_limit, text));
+			label->setText(tr::lng_local_storage_time_limit(tr::now, lt_limit, text));
 			limitsChanged();
 		});
 }
@@ -575,10 +572,10 @@ void LocalStorageBox::limitsChanged() {
 		_limitsChanged = changed;
 		clearButtons();
 		if (_limitsChanged) {
-			addButton(langFactory(lng_settings_save), [=] { save(); });
-			addButton(langFactory(lng_cancel), [=] { closeBox(); });
+			addButton(tr::lng_settings_save(), [=] { save(); });
+			addButton(tr::lng_cancel(), [=] { closeBox(); });
 		} else {
-			addButton(langFactory(lng_box_ok), [=] { closeBox(); });
+			addButton(tr::lng_box_ok(), [=] { closeBox(); });
 		}
 	}
 }

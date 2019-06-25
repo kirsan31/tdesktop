@@ -19,29 +19,6 @@ namespace {
 std::map<int, const char*> BetaLogs() {
 	return {
 	{
-		1005005,
-		"- Support for auto-download of files and music.\n"
-
-		"- Improved auto-download settings.\n"
-
-		"- Bug fixes and other minor improvements."
-	},
-	{
-		1005007,
-		"- Choose the emoji set you would like to use "
-		"in Settings > Chat Settings.\n"
-
-		"- Choose input and output devices for Telegram Calls "
-		"in Settings > Adavanced > Call Settings."
-	},
-	{
-		1005016,
-		"- Play video files and listen to received music "
-		"without waiting for them to download.\n"
-
-		"- Press CTRL+0 (CMD+0 on macOS) to jump to your Saved Messages."
-	},
-	{
 		1006004,
 		"- Replace media when editing messages with media content.\n"
 
@@ -59,6 +36,15 @@ std::map<int, const char*> BetaLogs() {
 	{
 		1007004,
 		"- Download video files while watching them using streaming."
+	},
+	{
+		1007008,
+		"\xE2\x80\xA2 Hide archived chats in the main menu.\n"
+
+		"\xE2\x80\xA2 See who is online straight from the chat list.\n"
+
+		"\xE2\x80\xA2 Apply formatting to selected text parts "
+		"from the MacBook Pro TouchBar."
 	}
 	};
 }
@@ -136,11 +122,12 @@ void Changelogs::addLocalLogs() {
 		addBetaLogs();
 	}
 	if (!_addedSomeLocal) {
-		const auto text = lng_new_version_wrap(
+		const auto text = tr::lng_new_version_wrap(
+			tr::now,
 			lt_version,
 			QString::fromLatin1(AppVersionStr),
 			lt_changes,
-			lang(lng_new_version_minor),
+			tr::lng_new_version_minor(tr::now),
 			lt_link,
 			qsl("https://desktop.telegram.org/changelog"));
 		addLocalLog(text.trimmed());

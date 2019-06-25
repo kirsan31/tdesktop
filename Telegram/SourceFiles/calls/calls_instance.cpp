@@ -39,7 +39,7 @@ void Instance::startOutgoingCall(not_null<UserData*> user) {
 	if (user->callsStatus() == UserData::CallsStatus::Private) {
 		// Request full user once more to refresh the setting in case it was changed.
 		Auth().api().requestFullPeer(user);
-		Ui::show(Box<InformBox>(lng_call_error_not_available(lt_user, App::peerName(user))));
+		Ui::show(Box<InformBox>(tr::lng_call_error_not_available(tr::now, lt_user, App::peerName(user))));
 		return;
 	}
 	requestMicrophonePermissionOrFail(crl::guard(this, [=] {
@@ -228,7 +228,7 @@ bool Instance::isQuitPrevent() {
 	if (!_currentCall) {
 		return false;
 	}
-	LOG(("Calls::Instance prevents quit, saving drafts..."));
+	LOG(("Calls::Instance prevents quit, hanging up a call..."));
 	return true;
 }
 
@@ -286,7 +286,7 @@ void Instance::requestMicrophonePermissionOrFail(Fn<void()> onSuccess) {
 		if (alreadyInCall()) {
 			_currentCall->hangup();
 		}
-		Ui::show(Box<ConfirmBox>(lang(lng_no_mic_permission), lang(lng_menu_settings), crl::guard(this, [] {
+		Ui::show(Box<ConfirmBox>(tr::lng_no_mic_permission(tr::now), tr::lng_menu_settings(tr::now), crl::guard(this, [] {
 			Platform::OpenSystemSettingsForPermission(Platform::PermissionType::Microphone);
 			Ui::hideLayer();
 		})));

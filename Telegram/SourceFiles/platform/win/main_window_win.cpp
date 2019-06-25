@@ -691,7 +691,7 @@ void MainWindow::psSetupTrayIcon() {
 
 void MainWindow::showTrayTooltip() {
 	if (trayIcon && !cSeenTrayTooltip()) {
-		trayIcon->showMessage(str_const_toString(AppName), lang(lng_tray_icon_text), QSystemTrayIcon::Information, 10000);
+		trayIcon->showMessage(str_const_toString(AppName), tr::lng_tray_icon_text(tr::now), QSystemTrayIcon::Information, 10000);
 		cSetSeenTrayTooltip(true);
 		Local::writeSettings();
 	}
@@ -772,7 +772,7 @@ void MainWindow::updateIconCounters() {
 			iconOverlay.addPixmap(App::pixmapFromImageInPlace(iconWithCounter(-32, counter, bg, fg, false)));
 			ps_iconOverlay = createHIconFromQIcon(iconOverlay, GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON));
 		}
-		auto description = (counter > 0) ? lng_unread_bar(lt_count, counter) : QString();
+		auto description = (counter > 0) ? tr::lng_unread_bar(tr::now, lt_count, counter) : QString();
 		taskbarList->SetOverlayIcon(ps_hWnd, ps_iconOverlay, description.toStdWString().c_str());
 	}
 	SetWindowPos(ps_hWnd, 0, 0, 0, 0, 0, SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
