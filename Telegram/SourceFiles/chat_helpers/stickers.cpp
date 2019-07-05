@@ -19,9 +19,16 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "mainwindow.h"
 #include "ui/toast/toast.h"
 #include "ui/emoji_config.h"
+#include "lottie/lottie_single_player.h"
+#include "lottie/lottie_multi_player.h"
 #include "styles/style_chat_helpers.h"
 
 namespace Stickers {
+namespace {
+
+constexpr auto kDontCacheLottieAfterArea = 512 * 512;
+
+} // namespace
 
 void ApplyArchivedResult(const MTPDmessages_stickerSetInstallResultArchive &d) {
 	auto &v = d.vsets.v;
@@ -724,20 +731,34 @@ std::vector<not_null<DocumentData*>> GetListByEmoji(
 	const auto CreateSortKey = [&](
 			not_null<DocumentData*> document,
 			int base) {
+		if (document->sticker() && document->sticker()->animated) {
+			base += kSlice;
+		}
 		return TimeId(base + int((document->id ^ seed) % kSlice));
 	};
 	const auto CreateRecentSortKey = [&](not_null<DocumentData*> document) {
-		return CreateSortKey(document, kSlice * 4);
+		return CreateSortKey(document, kSlice * 6);
 	};
 	auto myCounter = 0;
-	const auto CreateMySortKey = [&] {
-		return (kSlice * 4 - (++myCounter));
+	const auto CreateMySortKey = [&](not_null<DocumentData*> document) {
+		auto base = kSlice * 6;
+		if (!document->sticker() || !document->sticker()->animated) {
+			base -= kSlice;
+		}
+		return (base - (++myCounter));
 	};
 	const auto CreateFeaturedSortKey = [&](not_null<DocumentData*> document) {
 		return CreateSortKey(document, kSlice * 2);
 	};
 	const auto CreateOtherSortKey = [&](not_null<DocumentData*> document) {
-		return CreateSortKey(document, kSlice);
+		return CreateSortKey(document, 0);
+	};
+	const auto InstallDateAdjusted = [&](
+			TimeId date,
+			not_null<DocumentData*> document) {
+		return (document->sticker() && document->sticker()->animated)
+			? date
+			: date / 2;
 	};
 	const auto InstallDate = [&](not_null<DocumentData*> document) {
 		Expects(document->sticker() != nullptr);
@@ -747,7 +768,7 @@ std::vector<not_null<DocumentData*>> GetListByEmoji(
 			const auto setId = sticker->set.c_inputStickerSetID().vid.v;
 			const auto setIt = sets.find(setId);
 			if (setIt != sets.end()) {
-				return setIt->installDate;
+				return InstallDateAdjusted(setIt->installDate, document);
 			}
 		}
 		return TimeId(0);
@@ -799,9 +820,9 @@ std::vector<not_null<DocumentData*>> GetListByEmoji(
 			for (const auto document : *i) {
 				const auto installDate = my ? it->installDate : TimeId(0);
 				const auto date = (installDate > 1)
-					? installDate
+					? InstallDateAdjusted(installDate, document)
 					: my
-					? CreateMySortKey()
+					? CreateMySortKey(document)
 					: CreateFeaturedSortKey(document);
 				add(document, date);
 			}
@@ -816,7 +837,7 @@ std::vector<not_null<DocumentData*>> GetListByEmoji(
 	//	MTPDstickerSet::Flag::f_installed_date);
 
 	if (!setsToRequest.empty()) {
-		for (const auto [setId, accessHash] : setsToRequest) {
+		for (const auto &[setId, accessHash] : setsToRequest) {
 			Auth().api().scheduleStickerSetRequest(setId, accessHash);
 		}
 		Auth().api().requestStickerSets();
@@ -836,7 +857,7 @@ std::vector<not_null<DocumentData*>> GetListByEmoji(
 	ranges::action::sort(
 		result,
 		std::greater<>(),
-		[](const StickerWithDate &data) { return data.date; });
+		&StickerWithDate::date);
 
 	return ranges::view::all(
 		result
@@ -1084,6 +1105,181 @@ RecentStickerPack &GetRecentPack() {
 		}
 	}
 	return cRefRecentStickers();
+}
+
+template <typename Method>
+auto LottieCachedFromContent(
+		Method &&method,
+		Storage::Cache::Key baseKey,
+		LottieSize sizeTag,
+		not_null<AuthSession*> session,
+		const QByteArray &content,
+		QSize box) {
+	const auto key = Storage::Cache::Key{
+		baseKey.high,
+		baseKey.low + int(sizeTag)
+	};
+	const auto get = [=](FnMut<void(QByteArray &&cached)> handler) {
+		session->data().cacheBigFile().get(
+			key,
+			std::move(handler));
+	};
+	const auto weak = base::make_weak(session.get());
+	const auto put = [=](QByteArray &&cached) {
+		crl::on_main(weak, [=, data = std::move(cached)]() mutable {
+			weak->data().cacheBigFile().put(key, std::move(data));
+		});
+	};
+	return method(
+		get,
+		put,
+		content,
+		Lottie::FrameRequest{ box });
+}
+
+template <typename Method>
+auto LottieFromDocument(
+		Method &&method,
+		not_null<DocumentData*> document,
+		LottieSize sizeTag,
+		QSize box) {
+	const auto data = document->data();
+	const auto filepath = document->filepath();
+	if (box.width() * box.height() > kDontCacheLottieAfterArea) {
+		// Don't use frame caching for large stickers.
+		return method(
+			Lottie::ReadContent(data, filepath),
+			Lottie::FrameRequest{ box });
+	}
+	if (const auto baseKey = document->bigFileBaseCacheKey()) {
+		return LottieCachedFromContent(
+			std::forward<Method>(method),
+			*baseKey,
+			sizeTag,
+			&document->session(),
+			Lottie::ReadContent(data, filepath),
+			box);
+	}
+	return method(
+		Lottie::ReadContent(data, filepath),
+		Lottie::FrameRequest{ box });
+}
+
+std::unique_ptr<Lottie::SinglePlayer> LottiePlayerFromDocument(
+		not_null<DocumentData*> document,
+		LottieSize sizeTag,
+		QSize box,
+		std::shared_ptr<Lottie::FrameRenderer> renderer) {
+	const auto method = [&](auto &&...args) {
+		return std::make_unique<Lottie::SinglePlayer>(
+			std::forward<decltype(args)>(args)..., std::move(renderer));
+	};
+	return LottieFromDocument(method, document, sizeTag, box);
+}
+
+not_null<Lottie::Animation*> LottieAnimationFromDocument(
+		not_null<Lottie::MultiPlayer*> player,
+		not_null<DocumentData*> document,
+		LottieSize sizeTag,
+		QSize box) {
+	const auto method = [&](auto &&...args) {
+		return player->append(std::forward<decltype(args)>(args)...);
+	};
+	return LottieFromDocument(method, document, sizeTag, box);
+}
+
+bool HasLottieThumbnail(
+		ImagePtr thumbnail,
+		not_null<DocumentData*> sticker) {
+	if (thumbnail) {
+		if (!thumbnail->loaded()) {
+			return false;
+		}
+		const auto &location = thumbnail->location();
+		const auto &bytes = thumbnail->bytesForCache();
+		return location.valid()
+			&& location.type() == StorageFileLocation::Type::StickerSetThumb
+			&& !bytes.isEmpty();
+	} else if (const auto info = sticker->sticker()) {
+		if (!info->animated) {
+			return false;
+		}
+		sticker->automaticLoad(sticker->stickerSetOrigin(), nullptr);
+		if (!sticker->loaded()) {
+			return false;
+		}
+		return sticker->bigFileBaseCacheKey().has_value();
+	}
+	return false;
+}
+
+std::unique_ptr<Lottie::SinglePlayer> LottieThumbnail(
+		ImagePtr thumbnail,
+		not_null<DocumentData*> sticker,
+		LottieSize sizeTag,
+		QSize box,
+		std::shared_ptr<Lottie::FrameRenderer> renderer) {
+	const auto baseKey = thumbnail
+		? thumbnail->location().file().bigFileBaseCacheKey()
+		: sticker->bigFileBaseCacheKey();
+	if (!baseKey) {
+		return nullptr;
+	}
+	const auto content = (thumbnail
+		? thumbnail->bytesForCache()
+		: Lottie::ReadContent(sticker->data(), sticker->filepath()));
+	if (content.isEmpty()) {
+		return nullptr;
+	}
+	const auto method = [](auto &&...args) {
+		return std::make_unique<Lottie::SinglePlayer>(
+			std::forward<decltype(args)>(args)...);
+	};
+	return LottieCachedFromContent(
+		method,
+		*baseKey,
+		sizeTag,
+		&sticker->session(),
+		content,
+		box);
+}
+
+ThumbnailSource::ThumbnailSource(
+	const StorageImageLocation &location,
+	int size)
+: StorageSource(location, size) {
+}
+
+QImage ThumbnailSource::takeLoaded() {
+	if (_bytesForAnimated.isEmpty()
+		&& _loader
+		&& _loader->finished()
+		&& !_loader->cancelled()) {
+		_bytesForAnimated = _loader->bytes();
+	}
+	auto result = StorageSource::takeLoaded();
+	if (!_bytesForAnimated.isEmpty()
+		&& !result.isNull()
+		&& result.size() != Image::Empty()->original().size()) {
+		_bytesForAnimated = QByteArray();
+	}
+	return result;
+}
+
+QByteArray ThumbnailSource::bytesForCache() {
+	return _bytesForAnimated;
+}
+
+std::unique_ptr<FileLoader> ThumbnailSource::createLoader(
+		Data::FileOrigin origin,
+		LoadFromCloudSetting fromCloud,
+		bool autoLoading) {
+	auto result = StorageSource::createLoader(
+		origin,
+		fromCloud,
+		autoLoading);
+	_loader = result.get();
+	return result;
 }
 
 } // namespace Stickers

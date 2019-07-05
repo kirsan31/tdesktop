@@ -465,17 +465,20 @@ void DocumentData::setattributes(
 		const QVector<MTPDocumentAttribute> &attributes) {
 	_flags &= ~(Flag::ImageType | kStreamingSupportedMask);
 	_flags |= kStreamingSupportedUnknown;
+
+	validateLottieSticker();
+
 	for (const auto &attribute : attributes) {
-		attribute.match([&](const MTPDdocumentAttributeImageSize & data) {
+		attribute.match([&](const MTPDdocumentAttributeImageSize &data) {
 			dimensions = QSize(data.vw.v, data.vh.v);
-		}, [&](const MTPDdocumentAttributeAnimated & data) {
+		}, [&](const MTPDdocumentAttributeAnimated &data) {
 			if (type == FileDocument
 				|| type == StickerDocument
 				|| type == VideoDocument) {
 				type = AnimatedDocument;
 				_additional = nullptr;
 			}
-		}, [&](const MTPDdocumentAttributeSticker & data) {
+		}, [&](const MTPDdocumentAttributeSticker &data) {
 			if (type == FileDocument) {
 				type = StickerDocument;
 				_additional = std::make_unique<StickerData>();
@@ -487,7 +490,7 @@ void DocumentData::setattributes(
 					sticker()->set = data.vstickerset;
 				}
 			}
-		}, [&](const MTPDdocumentAttributeVideo & data) {
+		}, [&](const MTPDdocumentAttributeVideo &data) {
 			if (type == FileDocument) {
 				type = data.is_round_message()
 					? RoundVideoDocument
@@ -496,7 +499,7 @@ void DocumentData::setattributes(
 			_duration = data.vduration.v;
 			setMaybeSupportsStreaming(data.is_supports_streaming());
 			dimensions = QSize(data.vw.v, data.vh.v);
-		}, [&](const MTPDdocumentAttributeAudio & data) {
+		}, [&](const MTPDdocumentAttributeAudio &data) {
 			if (type == FileDocument) {
 				if (data.is_voice()) {
 					type = VoiceDocument;
@@ -518,7 +521,7 @@ void DocumentData::setattributes(
 				songData->title = qs(data.vtitle);
 				songData->performer = qs(data.vperformer);
 			}
-		}, [&](const MTPDdocumentAttributeFilename & data) {
+		}, [&](const MTPDdocumentAttributeFilename &data) {
 			_filename = qs(data.vfile_name);
 
 			// We don't want LTR/RTL mark/embedding/override/isolate chars
@@ -545,7 +548,6 @@ void DocumentData::setattributes(
 		}, [&](const MTPDdocumentAttributeHasStickers &data) {
 		});
 	}
-	validateLottieSticker();
 	if (type == StickerDocument) {
 		if (dimensions.width() <= 0
 			|| dimensions.height() <= 0
@@ -566,7 +568,6 @@ void DocumentData::setattributes(
 
 void DocumentData::validateLottieSticker() {
 	if (type == FileDocument
-		&& _filename.endsWith(qstr(".tgs"))
 		&& _mimeString == qstr("application/x-tgsticker")
 		&& _thumbnail) {
 		type = StickerDocument;
@@ -644,7 +645,10 @@ Image *DocumentData::goodThumbnail() const {
 }
 
 void DocumentData::validateGoodThumbnail() {
-	if (!isVideoFile() && !isAnimation() && !isWallPaper()) {
+	if (!isVideoFile()
+		&& !isAnimation()
+		&& !isWallPaper()
+		&& (!sticker() || !sticker()->animated)) {
 		_goodThumbnail = nullptr;
 	} else if (!_goodThumbnail && hasRemoteLocation()) {
 		_goodThumbnail = std::make_unique<Image>(
@@ -673,7 +677,25 @@ void DocumentData::setGoodThumbnailOnUpload(
 	}
 	_goodThumbnail = std::make_unique<Image>(
 		std::make_unique<Images::LocalFileSource>(
-			QString(), std::move(bytes), "JPG", std::move(image)));
+			QString(),
+			std::move(bytes),
+			sticker() ? "WEBP" : "JPG",
+			std::move(image)));
+}
+
+auto DocumentData::bigFileBaseCacheKey() const
+-> std::optional<Storage::Cache::Key> {
+	if (hasRemoteLocation()) {
+		return StorageFileLocation(
+			_dc,
+			session().userId(),
+			MTP_inputDocumentFileLocation(
+				MTP_long(id),
+				MTP_long(_access),
+				MTP_bytes(_fileReference),
+				MTP_string(QString()))).bigFileBaseCacheKey();
+	}
+	return std::nullopt;
 }
 
 bool DocumentData::saveToCache() const {
@@ -899,9 +921,9 @@ void DocumentData::save(
 	if (_loader) {
 		if (!_loader->setFileName(toFile)) {
 			cancel();
-			_flags &= ~Flag::DownloadCancelled;
 		}
 	}
+	_flags &= ~Flag::DownloadCancelled;
 
 	if (_loader) {
 		if (fromCloud == LoadFromCloudOrLocal) {
@@ -1188,8 +1210,12 @@ void DocumentData::checkStickerLarge() {
 }
 
 void DocumentData::checkStickerSmall() {
-	if (thumbnailEnoughForSticker()) {
+	const auto data = sticker();
+	if ((data && data->animated) || thumbnailEnoughForSticker()) {
 		_thumbnail->load(stickerSetOrigin());
+		if (data && data->animated) {
+			automaticLoad(stickerSetOrigin(), nullptr);
+		}
 	} else {
 		checkStickerLarge();
 	}
@@ -1204,9 +1230,10 @@ Image *DocumentData::getStickerLarge() {
 }
 
 Image *DocumentData::getStickerSmall() {
-	if (thumbnailEnoughForSticker()) {
+	const auto data = sticker();
+	if ((data && data->animated) || thumbnailEnoughForSticker()) {
 		return _thumbnail->isNull() ? nullptr : _thumbnail.get();
-	} else if (const auto data = sticker()) {
+	} else if (data) {
 		return data->image.get();
 	}
 	return nullptr;

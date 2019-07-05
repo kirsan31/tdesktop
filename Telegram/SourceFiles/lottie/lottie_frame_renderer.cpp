@@ -7,13 +7,16 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "lottie/lottie_frame_renderer.h"
 
+#include "lottie/lottie_player.h"
 #include "lottie/lottie_animation.h"
-#include "rasterrenderer/rasterrenderer.h"
+#include "lottie/lottie_cache.h"
+#include "base/flat_map.h"
 #include "logs.h"
 
+#include <QPainter>
+#include <rlottie.h>
 #include <range/v3/algorithm/find.hpp>
 #include <range/v3/algorithm/count_if.hpp>
-#include <QPainter>
 
 namespace Images {
 QImage prepareColored(QColor add, QImage image);
@@ -21,8 +24,6 @@ QImage prepareColored(QColor add, QImage image);
 
 namespace Lottie {
 namespace {
-
-constexpr auto kDisplaySkipped = crl::time(-1);
 
 std::weak_ptr<FrameRenderer> GlobalInstance;
 
@@ -47,7 +48,7 @@ public:
 		crl::weak_on_queue<FrameRendererObject> weak);
 
 	void append(std::unique_ptr<SharedState> entry);
-	void frameShown(not_null<SharedState*> entry);
+	void frameShown();
 	void updateFrameRequest(
 		not_null<SharedState*> entry,
 		const FrameRequest &request);
@@ -75,22 +76,25 @@ private:
 [[nodiscard]] bool GoodForRequest(
 		const QImage &image,
 		const FrameRequest &request) {
-	if (request.resize.isEmpty()) {
+	if (request.box.isEmpty()) {
 		return true;
 	} else if (request.colored.has_value()) {
 		return false;
 	}
-	return (request.resize == image.size());
+	const auto size = image.size();
+	return (request.box.width() == size.width())
+		|| (request.box.height() == size.height());
 }
 
 [[nodiscard]] QImage PrepareByRequest(
 		const QImage &original,
 		const FrameRequest &request,
 		QImage storage) {
-	Expects(!request.resize.isEmpty());
+	Expects(!request.box.isEmpty());
 
-	if (!GoodStorageForFrame(storage, request.resize)) {
-		storage = CreateFrameStorage(request.resize);
+	const auto size = request.size(original.size());
+	if (!GoodStorageForFrame(storage, size)) {
+		storage = CreateFrameStorage(size);
 	}
 	storage.fill(Qt::transparent);
 
@@ -99,7 +103,7 @@ private:
 		p.setRenderHint(QPainter::Antialiasing);
 		p.setRenderHint(QPainter::SmoothPixmapTransform);
 		p.setRenderHint(QPainter::HighQualityAntialiasing);
-		p.drawImage(QRect(QPoint(), request.resize), original);
+		p.drawImage(QRect(QPoint(), size), original);
 	}
 	if (request.colored.has_value()) {
 		storage = Images::prepareColored(*request.colored, std::move(storage));
@@ -130,10 +134,12 @@ FrameRendererObject::FrameRendererObject(
 
 void FrameRendererObject::append(std::unique_ptr<SharedState> state) {
 	_entries.push_back({ std::move(state) });
+	auto &entry = _entries.back();
+	entry.request = entry.state->frameForPaint()->request;
 	queueGenerateFrames();
 }
 
-void FrameRendererObject::frameShown(not_null<SharedState*> entry) {
+void FrameRendererObject::frameShown() {
 	queueGenerateFrames();
 }
 
@@ -152,10 +158,25 @@ void FrameRendererObject::remove(not_null<SharedState*> entry) {
 }
 
 void FrameRendererObject::generateFrames() {
-	const auto renderOne = [&](const Entry & entry) {
-		return entry.state->renderNextFrame(entry.request);
+	auto players = base::flat_map<Player*, base::weak_ptr<Player>>();
+	const auto renderOne = [&](const Entry &entry) {
+		const auto result = entry.state->renderNextFrame(entry.request);
+		if (const auto player = result.notify.get()) {
+			players.emplace(player, result.notify);
+		}
+		return result.rendered;
 	};
-	if (ranges::count_if(_entries, renderOne) > 0) {
+	const auto rendered = ranges::count_if(_entries, renderOne);
+	if (rendered) {
+		if (!players.empty()) {
+			crl::on_main([players = std::move(players)] {
+				for (const auto &[player, weak] : players) {
+					if (weak) {
+						weak->checkStep();
+					}
+				}
+			});
+		}
 		queueGenerateFrames();
 	}
 }
@@ -171,76 +192,124 @@ void FrameRendererObject::queueGenerateFrames() {
 	});
 }
 
-SharedState::SharedState(const JsonObject &definition)
-: _scene(definition) {
-	if (_scene.isValid()) {
-		auto cover = QImage();
-		renderFrame(cover, FrameRequest::NonStrict(), 0);
-		init(std::move(cover));
+SharedState::SharedState(
+	std::unique_ptr<rlottie::Animation> animation,
+	const FrameRequest &request)
+: _animation(std::move(animation)) {
+	construct(request);
+}
+
+SharedState::SharedState(
+	const QByteArray &content,
+	std::unique_ptr<rlottie::Animation> animation,
+	std::unique_ptr<Cache> cache,
+	const FrameRequest &request)
+: _content(content)
+, _animation(std::move(animation))
+, _cache(std::move(cache)) {
+	construct(request);
+}
+
+void SharedState::construct(const FrameRequest &request) {
+	calculateProperties();
+	if (!isValid()) {
+		return;
 	}
+	auto cover = _cache ? _cache->takeFirstFrame() : QImage();
+	if (!cover.isNull()) {
+		init(std::move(cover), request);
+		return;
+	}
+	if (_cache) {
+		_cache->init(_size, _frameRate, _framesCount, request);
+	}
+	renderFrame(cover, request, 0);
+	init(std::move(cover), request);
+}
+
+void SharedState::calculateProperties() {
+	Expects(_animation != nullptr || _cache != nullptr);
+
+	auto width = size_t(0);
+	auto height = size_t(0);
+	if (_animation) {
+		_animation->size(width, height);
+	} else {
+		width = _cache->originalSize().width();
+		height = _cache->originalSize().height();
+	}
+	const auto rate = _animation
+		? _animation->frameRate()
+		: _cache->frameRate();
+	const auto count = _animation
+		? _animation->totalFrame()
+		: _cache->framesCount();
+
+	_size = QSize(
+		(width > 0 && width < kMaxSize) ? int(width) : 0,
+		(height > 0 && height < kMaxSize) ? int(height) : 0);
+	_frameRate = (rate >= 1. && rate <= kMaxFrameRate) ? int(rate) : 0;
+	_framesCount = (count > 0 && count <= kMaxFramesCount) ? int(count) : 0;
+}
+
+bool SharedState::isValid() const {
+	return (_framesCount > 0) && (_frameRate > 0) && !_size.isEmpty();
 }
 
 void SharedState::renderFrame(
 		QImage &image,
 		const FrameRequest &request,
 		int index) {
-	const auto realSize = QSize(_scene.width(), _scene.height());
-	if (realSize.isEmpty() || _scene.endFrame() <= _scene.startFrame()) {
+	if (!isValid()) {
 		return;
 	}
 
-	const auto size = request.resize.isEmpty() ? realSize : request.resize;
+	const auto size = request.box.isEmpty() ? _size : request.size(_size);
 	if (!GoodStorageForFrame(image, size)) {
 		image = CreateFrameStorage(size);
 	}
-	image.fill(Qt::transparent);
-
-	QPainter p(&image);
-	p.setRenderHints(QPainter::Antialiasing);
-	p.setRenderHints(QPainter::SmoothPixmapTransform);
-	p.setRenderHint(QPainter::TextAntialiasing);
-	p.setRenderHints(QPainter::HighQualityAntialiasing);
-	if (realSize != size) {
-		p.scale(
-			size.width() / float64(realSize.width()),
-			size.height() / float64(realSize.height()));
+	if (_cache && _cache->renderFrame(image, request, index)) {
+		return;
+	} else if (!_animation) {
+		_animation = details::CreateFromContent(_content);
 	}
 
-	const auto frame = std::clamp(
-		_scene.startFrame() + index,
-		_scene.startFrame(),
-		_scene.endFrame() - 1);
-	_scene.updateProperties(frame);
-
-	RasterRenderer renderer(&p);
-	_scene.render(renderer, frame);
+	image.fill(Qt::transparent);
+	auto surface = rlottie::Surface(
+		reinterpret_cast<uint32_t*>(image.bits()),
+		image.width(),
+		image.height(),
+		image.bytesPerLine());
+	_animation->renderSync(index, surface);
+	if (_cache) {
+		_cache->appendFrame(image, request, index);
+		if (_cache->framesReady() == _cache->framesCount()) {
+			_animation = nullptr;
+		}
+	}
 }
 
-void SharedState::init(QImage cover) {
+void SharedState::init(QImage cover, const FrameRequest &request) {
 	Expects(!initialized());
 
-	_frameRate = _scene.frameRate();
-	_framesCount = _scene.endFrame() - _scene.startFrame();
-	_duration = crl::time(1000) * _framesCount / _frameRate;
-
+	_frames[0].request = request;
 	_frames[0].original = std::move(cover);
-	_frames[0].position = 0;
+}
 
-	// Usually main thread sets displayed time before _counter increment.
-	// But in this case we update _counter, so we set a fake displayed time.
-	_frames[0].displayed = kDisplaySkipped;
-
+void SharedState::start(
+		not_null<Player*> owner,
+		crl::time started,
+		crl::time delay,
+		int skippedFrames) {
+	_owner = owner;
+	_started = started;
+	_delay = delay;
+	_skippedFrames = skippedFrames;
 	_counter.store(0, std::memory_order_release);
 }
 
-void SharedState::start(not_null<Animation*> owner, crl::time now) {
-	_owner = owner;
-	_started = now;
-}
-
 bool IsRendered(not_null<const Frame*> frame) {
-	return (frame->position != kTimeUnknown)
-		&& (frame->displayed == kTimeUnknown);
+	return (frame->displayed == kTimeUnknown);
 }
 
 void SharedState::renderNextFrame(
@@ -249,39 +318,38 @@ void SharedState::renderNextFrame(
 	Expects(_framesCount > 0);
 
 	renderFrame(frame->original, request, (++_frameIndex) % _framesCount);
+	frame->request = request;
 	PrepareFrameByRequest(frame);
-	frame->position = crl::time(1000) * _frameIndex / _frameRate;
+	frame->index = _frameIndex;
 	frame->displayed = kTimeUnknown;
 }
 
-bool SharedState::renderNextFrame(const FrameRequest &request) {
-	const auto prerender = [&](int index) {
+auto SharedState::renderNextFrame(const FrameRequest &request)
+-> RenderResult {
+	const auto prerender = [&](int index) -> RenderResult {
 		const auto frame = getFrame(index);
 		const auto next = getFrame((index + 1) % kFramesCount);
 		if (!IsRendered(frame)) {
 			renderNextFrame(frame, request);
-			return true;
+			return { true };
 		} else if (!IsRendered(next)) {
 			renderNextFrame(next, request);
-			return true;
+			return { true };
 		}
-		return false;
+		return { false };
 	};
-	const auto present = [&](int counter, int index) {
+	const auto present = [&](int counter, int index) -> RenderResult {
 		const auto frame = getFrame(index);
 		if (!IsRendered(frame)) {
 			renderNextFrame(frame, request);
 		}
-		frame->display = _started + _accumulatedDelayMs + frame->position;
+		frame->display = countFrameDisplayTime(frame->index);
 
 		// Release this frame to the main thread for rendering.
 		_counter.store(
 			(counter + 1) % (2 * kFramesCount),
 			std::memory_order_release);
-		crl::on_main(_owner, [=] {
-			_owner->checkStep();
-		});
-		return true;
+		return { true, _owner };
 	};
 
 	switch (counter()) {
@@ -294,8 +362,13 @@ bool SharedState::renderNextFrame(const FrameRequest &request) {
 	case 6: return present(6, 0);
 	case 7: return prerender(1);
 	}
-	Unexpected("Counter value in VideoTrack::Shared::prepareState.");
+	Unexpected("Counter value in Lottie::SharedState::renderNextFrame.");
+}
 
+crl::time SharedState::countFrameDisplayTime(int index) const {
+	return _started
+		+ _delay
+		+ crl::time(1000) * (_skippedFrames + index) / _frameRate;
 }
 
 int SharedState::counter() const {
@@ -319,20 +392,19 @@ not_null<const Frame*> SharedState::getFrame(int index) const {
 }
 
 Information SharedState::information() const {
-	if (!_scene.isValid()) {
+	if (!isValid()) {
 		return {};
 	}
 	auto result = Information();
-	result.frameRate = _scene.frameRate();
-	result.size = QSize(_scene.width(), _scene.height());
-	result.framesCount = _scene.endFrame() - _scene.startFrame();
+	result.frameRate = _frameRate;
+	result.size = _size;
+	result.framesCount = _framesCount;
 	return result;
 }
 
 not_null<Frame*> SharedState::frameForPaint() {
 	const auto result = getFrame(counter() / 2);
 	Assert(!result->original.isNull());
-	Assert(result->position != kTimeUnknown);
 	Assert(result->displayed != kTimeUnknown);
 
 	return result;
@@ -345,7 +417,7 @@ crl::time SharedState::nextFrameDisplayTime() const {
 		const auto frame = getFrame(index);
 		if (frame->displayed != kTimeUnknown) {
 			// Frame already displayed, but not yet shown.
-			return kTimeUnknown;
+			return kFrameDisplayTimeAlreadyDone;
 		}
 		Assert(IsRendered(frame));
 		Assert(frame->display != kTimeUnknown);
@@ -366,18 +438,48 @@ crl::time SharedState::nextFrameDisplayTime() const {
 	Unexpected("Counter value in VideoTrack::Shared::nextFrameDisplayTime.");
 }
 
-crl::time SharedState::markFrameDisplayed(crl::time now) {
+void SharedState::addTimelineDelay(crl::time delayed, int skippedFrames) {
+	if (!delayed && !skippedFrames) {
+		return;
+	}
+
+	const auto recountCurrentFrame = [&](int counter) {
+		_delay += delayed;
+		_skippedFrames += skippedFrames;
+
+		const auto next = (counter + 1) % (2 * kFramesCount);
+		const auto index = next / 2;
+		const auto frame = getFrame(index);
+		if (frame->displayed != kTimeUnknown) {
+			// Frame already displayed.
+			return;
+		}
+		Assert(IsRendered(frame));
+		Assert(frame->display != kTimeUnknown);
+		frame->display = countFrameDisplayTime(frame->index);
+	};
+
+	switch (counter()) {
+	case 0: Unexpected("Value 0 in SharedState::addTimelineDelay.");
+	case 1: return recountCurrentFrame(1);
+	case 2: Unexpected("Value 2 in SharedState::addTimelineDelay.");
+	case 3: return recountCurrentFrame(3);
+	case 4: Unexpected("Value 4 in SharedState::addTimelineDelay.");
+	case 5: return recountCurrentFrame(5);
+	case 6: Unexpected("Value 6 in SharedState::addTimelineDelay.");
+	case 7: return recountCurrentFrame(7);
+	}
+	Unexpected("Counter value in VideoTrack::Shared::nextFrameDisplayTime.");
+}
+
+void SharedState::markFrameDisplayed(crl::time now) {
 	const auto mark = [&](int counter) {
 		const auto next = (counter + 1) % (2 * kFramesCount);
 		const auto index = next / 2;
 		const auto frame = getFrame(index);
-		Assert(frame->position != kTimeUnknown);
-		Assert(frame->displayed == kTimeUnknown);
-
-		frame->displayed = now;
-		_accumulatedDelayMs += (frame->displayed - frame->display);
-
-		return frame->position;
+		if (frame->displayed == kTimeUnknown) {
+			frame->displayed = now;
+		}
 	};
 
 	switch (counter()) {
@@ -393,39 +495,44 @@ crl::time SharedState::markFrameDisplayed(crl::time now) {
 	Unexpected("Counter value in Lottie::SharedState::markFrameDisplayed.");
 }
 
-crl::time SharedState::markFrameShown() {
+bool SharedState::markFrameShown() {
 	const auto jump = [&](int counter) {
 		const auto next = (counter + 1) % (2 * kFramesCount);
 		const auto index = next / 2;
 		const auto frame = getFrame(index);
-		Assert(frame->position != kTimeUnknown);
 		if (frame->displayed == kTimeUnknown) {
-			return kTimeUnknown;
+			return false;
 		}
 		_counter.store(
 			next,
 			std::memory_order_release);
-		return frame->position;
+		return true;
 	};
 
 	switch (counter()) {
-	case 0: return kTimeUnknown;
+	case 0: return false;
 	case 1: return jump(1);
-	case 2: return kTimeUnknown;
+	case 2: return false;
 	case 3: return jump(3);
-	case 4: return kTimeUnknown;
+	case 4: return false;
 	case 5: return jump(5);
-	case 6: return kTimeUnknown;
+	case 6: return false;
 	case 7: return jump(7);
 	}
 	Unexpected("Counter value in Lottie::SharedState::markFrameShown.");
+}
+
+SharedState::~SharedState() = default;
+
+std::shared_ptr<FrameRenderer> FrameRenderer::CreateIndependent() {
+	return std::make_shared<FrameRenderer>();
 }
 
 std::shared_ptr<FrameRenderer> FrameRenderer::Instance() {
 	if (auto result = GlobalInstance.lock()) {
 		return result;
 	}
-	auto result = std::make_shared<FrameRenderer>();
+	auto result = CreateIndependent();
 	GlobalInstance = result;
 	return result;
 }
@@ -437,9 +544,9 @@ void FrameRenderer::append(std::unique_ptr<SharedState> entry) {
 	});
 }
 
-void FrameRenderer::frameShown(not_null<SharedState*> entry) {
+void FrameRenderer::frameShown() {
 	_wrapped.with([=](FrameRendererObject &unwrapped) {
-		unwrapped.frameShown(entry);
+		unwrapped.frameShown();
 	});
 }
 

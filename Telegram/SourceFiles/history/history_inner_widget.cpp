@@ -1440,7 +1440,8 @@ void HistoryInner::mouseDoubleClickEvent(QMouseEvent *e) {
 		&& !ClickHandler::getPressed()
 		&& (_mouseCursorState == CursorState::None
 			|| _mouseCursorState == CursorState::Date)
-		&& !inSelectionMode()) {
+		&& !inSelectionMode()
+		&& !_emptyPainter) {
 		if (const auto item = _mouseActionItem) {
 			mouseActionCancel();
 			_widget->replyToMessage(item);
@@ -1703,6 +1704,11 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 								});
 							}
 						}
+					} else if (const auto contact = media->sharedContact()) {
+						const auto phone = contact->phoneNumber;
+						_menu->addAction(tr::lng_profile_copy_phone(tr::now), [=] {
+							QApplication::clipboard()->setText(phone);
+						});
 					}
 				}
 				if (msg && view && !link && (view->hasVisibleText() || mediaHasTextForCopy)) {
@@ -1825,7 +1831,7 @@ void HistoryInner::copyContextImage(not_null<PhotoData*> photo) {
 }
 
 void HistoryInner::showStickerPackInfo(not_null<DocumentData*> document) {
-	StickerSetBox::Show(document);
+	StickerSetBox::Show(_controller, document);
 }
 
 void HistoryInner::cancelContextDownload(not_null<DocumentData*> document) {

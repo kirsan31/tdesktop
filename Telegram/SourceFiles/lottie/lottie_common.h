@@ -16,29 +16,15 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 namespace Lottie {
 
-constexpr auto kTimeUnknown = std::numeric_limits<crl::time>::min();
+inline constexpr auto kTimeUnknown = std::numeric_limits<crl::time>::min();
+inline constexpr auto kMaxFileSize = 1024 * 1024;
 
 class Animation;
-
-struct PlaybackOptions {
-	float64 speed = 1.;
-	bool loop = true;
-};
 
 struct Information {
 	int frameRate = 0;
 	int framesCount = 0;
 	QSize size;
-};
-
-struct DisplayFrameRequest {
-	crl::time time = 0;
-};
-
-struct Update {
-	base::variant<
-		Information,
-		DisplayFrameRequest> data;
 };
 
 enum class Error {
@@ -47,27 +33,32 @@ enum class Error {
 };
 
 struct FrameRequest {
-	QSize resize;
+	QSize box;
 	std::optional<QColor> colored;
-	bool strict = true;
 
-	static FrameRequest NonStrict() {
-		auto result = FrameRequest();
-		result.strict = false;
-		return result;
+	[[nodiscard]] bool empty() const {
+		return box.isEmpty();
+	}
+	[[nodiscard]] QSize size(const QSize &original) const {
+		Expects(!empty());
+
+		const auto result = original.scaled(box, Qt::KeepAspectRatio);
+		const auto skipw = result.width() % 2;
+		const auto skiph = result.height() % 2;
+		return QSize(
+			std::max(result.width() - skipw, 2),
+			std::max(result.height() - skiph, 2));
 	}
 
-	bool empty() const {
-		return resize.isEmpty();
-	}
-
-	bool operator==(const FrameRequest &other) const {
-		return (resize == other.resize)
+	[[nodiscard]] bool operator==(const FrameRequest &other) const {
+		return (box == other.box)
 			&& (colored == other.colored);
 	}
-	bool operator!=(const FrameRequest &other) const {
+	[[nodiscard]] bool operator!=(const FrameRequest &other) const {
 		return !(*this == other);
 	}
 };
+
+QByteArray ReadContent(const QByteArray &data, const QString &filepath);
 
 } // namespace Lottie

@@ -19,6 +19,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/image/image.h"
 #include "ui/emoji_config.h"
 #include "window/window_main_menu.h"
+#include "lottie/lottie_single_player.h"
 #include "auth_session.h"
 #include "chat_helpers/stickers.h"
 #include "window/window_session_controller.h"
@@ -856,19 +857,34 @@ LayerStackWidget::~LayerStackWidget() {
 MediaPreviewWidget::MediaPreviewWidget(
 	QWidget *parent,
 	not_null<Window::SessionController*> controller)
-: TWidget(parent)
+: RpWidget(parent)
 , _controller(controller)
 , _emojiSize(Ui::Emoji::GetSizeLarge() / cIntRetinaFactor()) {
 	setAttribute(Qt::WA_TransparentForMouseEvents);
 	subscribe(Auth().downloaderTaskFinished(), [this] { update(); });
 }
 
+QRect MediaPreviewWidget::updateArea() const {
+	const auto size = currentDimensions();
+	return QRect(
+		QPoint((width() - size.width()) / 2, (height() - size.height()) / 2),
+		size);
+}
+
 void MediaPreviewWidget::paintEvent(QPaintEvent *e) {
 	Painter p(this);
 	QRect r(e->rect());
 
-	auto image = currentImage();
-	int w = image.width() / cIntRetinaFactor(), h = image.height() / cIntRetinaFactor();
+	const auto image = [&] {
+		if (!_lottie || !_lottie->ready()) {
+			return QImage();
+		}
+		_lottie->markFrameShown();
+		return _lottie->frame();
+	}();
+	const auto pixmap = image.isNull() ? currentImage() : QPixmap();
+	const auto size = image.isNull() ? pixmap.size() : image.size();
+	int w = size.width() / cIntRetinaFactor(), h = size.height() / cIntRetinaFactor();
 	auto shown = _a_shown.value(_hiding ? 0. : 1.);
 	if (!_a_shown.animating()) {
 		if (_hiding) {
@@ -882,7 +898,13 @@ void MediaPreviewWidget::paintEvent(QPaintEvent *e) {
 //		h = qMax(qRound(h * (st::stickerPreviewMin + ((1. - st::stickerPreviewMin) * shown)) / 2.) * 2 + int(h % 2), 1);
 	}
 	p.fillRect(r, st::stickerPreviewBg);
-	p.drawPixmap((width() - w) / 2, (height() - h) / 2, image);
+	if (image.isNull()) {
+		p.drawPixmap((width() - w) / 2, (height() - h) / 2, pixmap);
+	} else {
+		p.drawImage(
+			QRect((width() - w) / 2, (height() - h) / 2, w, h),
+			image);
+	}
 	if (!_emojiList.empty()) {
 		const auto emojiCount = _emojiList.size();
 		const auto emojiWidth = (emojiCount * _emojiSize) + (emojiCount - 1) * st::stickerEmojiSkip;
@@ -977,6 +999,7 @@ void MediaPreviewWidget::fillEmojiString() {
 }
 
 void MediaPreviewWidget::resetGifAndCache() {
+	_lottie = nullptr;
 	_gif.reset();
 	_cacheStatus = CacheNotLoaded;
 	_cachedSize = QSize();
@@ -1021,11 +1044,33 @@ QSize MediaPreviewWidget::currentDimensions() const {
 	return result;
 }
 
+void MediaPreviewWidget::setupLottie() {
+	Expects(_document != nullptr);
+
+	_lottie = std::make_unique<Lottie::SinglePlayer>(
+		Lottie::ReadContent(_document->data(), _document->filepath()),
+		Lottie::FrameRequest{ currentDimensions() * cIntRetinaFactor() });
+
+	_lottie->updates(
+	) | rpl::start_with_next([=](Lottie::Update update) {
+		update.data.match([&](const Lottie::Information &) {
+			this->update();
+		}, [&](const Lottie::DisplayFrameRequest &) {
+			this->update(updateArea());
+		});
+	}, lifetime());
+}
+
 QPixmap MediaPreviewWidget::currentImage() const {
 	if (_document) {
-		if (_document->sticker()) {
+		if (const auto sticker = _document->sticker()) {
 			if (_cacheStatus != CacheLoaded) {
-				if (const auto image = _document->getStickerLarge()) {
+				if (sticker->animated && !_lottie && _document->loaded()) {
+					const_cast<MediaPreviewWidget*>(this)->setupLottie();
+				}
+				if (_lottie && _lottie->ready()) {
+					return QPixmap();
+				} else if (const auto image = _document->getStickerLarge()) {
 					QSize s = currentDimensions();
 					_cache = image->pix(_origin, s.width(), s.height());
 					_cacheStatus = CacheLoaded;
@@ -1115,7 +1160,7 @@ void MediaPreviewWidget::clipCallback(Media::Clip::Notification notification) {
 
 	case NotificationRepaint: {
 		if (_gif && !_gif->currentDisplayed()) {
-			update();
+			updateArea();
 		}
 	} break;
 	}

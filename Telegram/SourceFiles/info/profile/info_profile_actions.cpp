@@ -259,7 +259,7 @@ object_ptr<Ui::RpWidget> DetailsFiller::setupInfo() {
 
 		addInfoOneLine(
 			tr::lng_info_mobile_label(),
-			PhoneValue(user),
+			PhoneOrHiddenValue(user),
 			tr::lng_profile_copy_phone(tr::now));
 		if (user->botInfo) {
 			addInfoLine(tr::lng_info_about_label(), AboutValue(user));
@@ -270,6 +270,14 @@ object_ptr<Ui::RpWidget> DetailsFiller::setupInfo() {
 			tr::lng_info_username_label(),
 			UsernameValue(user),
 			tr::lng_context_copy_mention(tr::now));
+
+		const auto window = &_controller->parentController()->window()->controller();
+		AddMainButton(
+			result,
+			tr::lng_info_add_as_contact(),
+			CanAddContactValue(user),
+			[=] { window->show(Box(EditContactBox, window, user)); },
+			tracker);
 	} else {
 		auto linkText = LinkValue(
 			_peer
@@ -419,14 +427,6 @@ Ui::MultiSlideTracker DetailsFiller::fillUserButtons(
 		);
 	} else {
 		addSendMessageButton();
-
-		const auto window = &_controller->parentController()->window()->controller();
-		AddMainButton(
-			_wrap,
-			tr::lng_info_add_as_contact(),
-			CanAddContactValue(user),
-			[=] { window->show(Box(EditContactBox, window, user)); },
-			tracker);
 	}
 	return tracker;
 }
@@ -615,14 +615,12 @@ void ActionsFiller::addBlockAction(not_null<UserData*> user) {
 	});
 	auto callback = [=] {
 		if (user->isBlocked()) {
-			user->session().api().unblockUser(user);
+			Window::PeerMenuUnblockUserWithBotRestart(user);
 			if (user->botInfo) {
 				Ui::showPeerHistory(user, ShowAtUnreadMsgId);
 			}
-		} else if (user->isBot()) {
-			user->session().api().blockUser(user);
 		} else {
-			window->show(Box(Window::PeerMenuBlockUserBox, window, user));
+			user->session().api().blockUser(user);
 		}
 	};
 	AddActionButton(

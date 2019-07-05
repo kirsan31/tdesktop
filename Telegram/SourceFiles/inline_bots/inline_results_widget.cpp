@@ -131,6 +131,17 @@ int Inner::countHeight() {
 	return result + st::stickerPanPadding;
 }
 
+QString Inner::tooltipText() const {
+	if (const auto lnk = ClickHandler::getActive()) {
+		return lnk->tooltip();
+	}
+	return QString();
+}
+
+QPoint Inner::tooltipPos() const {
+	return _lastMousePos;
+}
+
 Inner::~Inner() = default;
 
 void Inner::paintEvent(QPaintEvent *e) {
@@ -248,6 +259,7 @@ void Inner::mouseMoveEvent(QMouseEvent *e) {
 
 void Inner::leaveEventHook(QEvent *e) {
 	clearSelection();
+	Ui::Tooltip::Hide();
 }
 
 void Inner::leaveToChildEvent(QEvent *e, QWidget *child) {
@@ -671,18 +683,24 @@ void Inner::updateSelected() {
 			_pressed = _selected;
 			if (row >= 0 && col >= 0) {
 				auto layout = _rows.at(row).items.at(col);
-				if (const auto previewDocument = layout->getPreviewDocument()) {
-					Ui::showMediaPreview(
-						Data::FileOrigin(),
-						previewDocument);
-				} else if (auto previewPhoto = layout->getPreviewPhoto()) {
-					Ui::showMediaPreview(Data::FileOrigin(), previewPhoto);
+				if (const auto w = App::wnd()) {
+					if (const auto previewDocument = layout->getPreviewDocument()) {
+						w->showMediaPreview(
+							Data::FileOrigin(),
+							previewDocument);
+					} else if (auto previewPhoto = layout->getPreviewPhoto()) {
+						w->showMediaPreview(Data::FileOrigin(), previewPhoto);
+					}
 				}
 			}
 		}
 	}
 	if (ClickHandler::setActive(lnk, lnkhost)) {
 		setCursor(lnk ? style::cur_pointer : style::cur_default);
+		Ui::Tooltip::Hide();
+	}
+	if (lnk) {
+		Ui::Tooltip::Show(1000, this);
 	}
 }
 
@@ -692,12 +710,14 @@ void Inner::showPreview() {
 	int row = _pressed / MatrixRowShift, col = _pressed % MatrixRowShift;
 	if (row < _rows.size() && col < _rows.at(row).items.size()) {
 		auto layout = _rows.at(row).items.at(col);
-		if (const auto previewDocument = layout->getPreviewDocument()) {
-			Ui::showMediaPreview(Data::FileOrigin(), previewDocument);
-			_previewShown = true;
-		} else if (const auto previewPhoto = layout->getPreviewPhoto()) {
-			Ui::showMediaPreview(Data::FileOrigin(), previewPhoto);
-			_previewShown = true;
+		if (const auto w = App::wnd()) {
+			if (const auto previewDocument = layout->getPreviewDocument()) {
+				w->showMediaPreview(Data::FileOrigin(), previewDocument);
+				_previewShown = true;
+			} else if (const auto previewPhoto = layout->getPreviewPhoto()) {
+				w->showMediaPreview(Data::FileOrigin(), previewPhoto);
+				_previewShown = true;
+			}
 		}
 	}
 }
@@ -932,7 +952,8 @@ Widget::~Widget() = default;
 
 void Widget::hideFinished() {
 	hide();
-	_controller->disableGifPauseReason(Window::GifPauseReason::InlineResults);
+	_controller->disableGifPauseReason(
+		Window::GifPauseReason::InlineResults);
 
 	_inner->hideFinish(true);
 	_a_show.stop();
@@ -953,7 +974,8 @@ void Widget::showStarted() {
 		recountContentMaxHeight();
 		_inner->preloadImages();
 		show();
-		_controller->enableGifPauseReason(Window::GifPauseReason::InlineResults);
+		_controller->enableGifPauseReason(
+			Window::GifPauseReason::InlineResults);
 		startShowAnimation();
 	} else if (_hiding) {
 		startOpacityAnimation(false);

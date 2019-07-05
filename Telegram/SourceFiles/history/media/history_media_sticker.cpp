@@ -20,7 +20,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "window/window_session_controller.h" // isGifPausedAtLeastFor.
 #include "data/data_session.h"
 #include "data/data_document.h"
-#include "lottie/lottie_animation.h"
+#include "lottie/lottie_single_player.h"
 #include "styles/style_history.h"
 
 namespace {
@@ -50,7 +50,7 @@ QSize HistorySticker::countOptimalSize() {
 
 	if (!_packLink && sticker && sticker->set.type() != mtpc_inputStickerSetEmpty) {
 		_packLink = std::make_shared<LambdaClickHandler>([document = _data] {
-			StickerSetBox::Show(document);
+			StickerSetBox::Show(App::wnd()->sessionController(), document);
 		});
 	}
 	_pixw = _data->dimensions.width();
@@ -97,22 +97,19 @@ QSize HistorySticker::countCurrentSize(int newWidth) {
 }
 
 void HistorySticker::setupLottie() {
-	if (_lottie) {
-		return;
-	}
-	_lottie = _data->data().isEmpty()
-		? Lottie::FromFile(_data->filepath())
-		: Lottie::FromData(_data->data());
+	_lottie = Stickers::LottiePlayerFromDocument(
+		_data,
+		Stickers::LottieSize::MessageHistory,
+		QSize(st::maxStickerSize, st::maxStickerSize) * cIntRetinaFactor());
 	_parent->data()->history()->owner().registerHeavyViewPart(_parent);
 
 	_lottie->updates(
-	) | rpl::start_with_next_error([=](Lottie::Update update) {
+	) | rpl::start_with_next([=](Lottie::Update update) {
 		update.data.match([&](const Lottie::Information &information) {
 			_parent->data()->history()->owner().requestViewResize(_parent);
 		}, [&](const Lottie::DisplayFrameRequest &request) {
 			_parent->data()->history()->owner().requestViewRepaint(_parent);
 		});
-	}, [=](Lottie::Error error) {
 	}, _lifetime);
 }
 
@@ -159,6 +156,10 @@ void HistorySticker::draw(Painter &p, const QRect &r, TextSelection selection, c
 		const auto w = _pixw;
 		const auto h = _pixh;
 		const auto &c = st::msgStickerOverlay;
+		const auto good = _data->goodThumbnail();
+		if (!lottieReady && good && !good->loaded()) {
+			good->load({});
+		}
 		static QPixmap empty;
 		if (lottieReady) {
 			return empty;
@@ -173,6 +174,10 @@ void HistorySticker::draw(Painter &p, const QRect &r, TextSelection selection, c
 		//	return selected
 		//		? blurred->pixBlurredColored(o, c, w, h)
 		//		: blurred->pixBlurred(o, w, h);
+		} else if (good && good->loaded()) {
+			return selected
+				? good->pixColored(o, c, w, h)
+				: good->pix(o, w, h);
 		} else if (const auto thumbnail = _data->thumbnail()) {
 			return selected
 				? thumbnail->pixBlurredColored(o, c, w, h)
@@ -187,7 +192,7 @@ void HistorySticker::draw(Painter &p, const QRect &r, TextSelection selection, c
 			pixmap);
 	} else if (lottieReady) {
 		auto request = Lottie::FrameRequest();
-		request.resize = QSize(_pixw, _pixh) * cIntRetinaFactor();
+		request.box = QSize(_pixw, _pixh) * cIntRetinaFactor();
 		if (selected) {
 			request.colored = st::msgStickerOverlay->c;
 		}
@@ -195,9 +200,15 @@ void HistorySticker::draw(Painter &p, const QRect &r, TextSelection selection, c
 		if (!paused) {
 			_lottie->markFrameShown();
 		}
+		const auto frame = _lottie->frame(request);
+		const auto size = frame.size() / cIntRetinaFactor();
 		p.drawImage(
-			QRect(usex + (usew - _pixw) / 2, (minHeight() - _pixh) / 2, _pixw, _pixh),
-			_lottie->frame(request));
+			QRect(
+				QPoint(
+					usex + (usew - size.width()) / 2,
+					(minHeight() - size.height()) / 2),
+				size),
+			frame);
 	}
 	if (!inWebPage) {
 		auto fullRight = usex + usew;

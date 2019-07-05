@@ -2891,11 +2891,11 @@ void HistoryWidget::send(Qt::KeyboardModifiers modifiers) {
 }
 
 void HistoryWidget::unblockUser() {
-	if (!_peer || !_peer->isUser()) {
+	if (const auto user = _peer ? _peer->asUser() : nullptr) {
+		Window::PeerMenuUnblockUserWithBotRestart(user);
+	} else {
 		updateControlsVisibility();
-		return;
 	}
-	session().api().unblockUser(_peer->asUser());
 }
 
 void HistoryWidget::sendBotStartCommand() {
@@ -4840,7 +4840,7 @@ void HistoryWidget::updateHistoryGeometry(bool initial, bool loadedDown, const S
 			if (!_unreadMentionsShown.animating()) {
 				// _unreadMentions is a child widget of _scroll, not me.
 				auto additionalSkip = _historyDownIsShown ? (_historyDown->height() + st::historyUnreadMentionsSkip) : 0;
-				_unreadMentions->moveToRight(st::historyToDownPosition.x(), _scroll->height() - additionalSkip - st::historyToDownPosition.y());
+				_unreadMentions->moveToRight(st::historyToDownPosition.x(), _scroll->height() - _unreadMentions->height() - additionalSkip - st::historyToDownPosition.y());
 			}
 		}
 
@@ -5299,6 +5299,9 @@ void HistoryWidget::replyToNextMessage() {
 				const auto next = nextView->data();
 				Ui::showPeerHistoryAtItem(next);
 				replyToMessage(next);
+			} else {
+				clearHighlightMessages();
+				cancelReply(false);
 			}
 		}
 	}

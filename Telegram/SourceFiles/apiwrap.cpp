@@ -507,6 +507,7 @@ void ApiWrap::toggleHistoryArchived(
 	if (const auto already = _historyArchivedRequests.take(history)) {
 		request(already->first).cancel();
 	}
+	const auto isPinned = history->isPinnedDialog();
 	const auto archiveId = Data::Folder::kId;
 	const auto requestId = request(MTPfolders_EditPeerFolders(
 		MTP_vector<MTPInputFolderPeer>(
@@ -523,6 +524,9 @@ void ApiWrap::toggleHistoryArchived(
 		}
 		if (const auto data = _historyArchivedRequests.take(history)) {
 			data->second();
+		}
+		if (isPinned) {
+			_session->data().notifyPinnedDialogsOrderUpdated();
 		}
 	}).fail([=](const RPCError &error) {
 		_historyArchivedRequests.remove(history);
@@ -2224,38 +2228,40 @@ void ApiWrap::blockUser(not_null<UserData*> user) {
 	}
 }
 
-void ApiWrap::unblockUser(not_null<UserData*> user) {
+void ApiWrap::unblockUser(not_null<UserData*> user, Fn<void()> onDone) {
 	if (!user->isBlocked()) {
 		Notify::peerUpdatedDelayed(
 			user,
 			Notify::PeerUpdate::Flag::UserIsBlocked);
-	} else if (_blockRequests.find(user) == end(_blockRequests)) {
-		const auto requestId = request(MTPcontacts_Unblock(
-			user->inputUser
-		)).done([=](const MTPBool &result) {
-			_blockRequests.erase(user);
-			user->setIsBlocked(false);
-			if (_blockedUsersSlice) {
-				auto &list = _blockedUsersSlice->list;
-				for (auto i = list.begin(); i != list.end(); ++i) {
-					if (i->user == user) {
-						list.erase(i);
-						break;
-					}
-				}
-				if (_blockedUsersSlice->total > list.size()) {
-					--_blockedUsersSlice->total;
-				}
-				_blockedUsersChanges.fire_copy(*_blockedUsersSlice);
-			}
-			if (user->isBot() && !user->isSupport()) {
-				sendBotStart(user);
-			}
-		}).fail([=](const RPCError &error) {
-			_blockRequests.erase(user);
-		}).send();
-		_blockRequests.emplace(user, requestId);
+		return;
+	} else if (_blockRequests.find(user) != end(_blockRequests)) {
+		return;
 	}
+	const auto requestId = request(MTPcontacts_Unblock(
+		user->inputUser
+	)).done([=](const MTPBool &result) {
+		_blockRequests.erase(user);
+		user->setIsBlocked(false);
+		if (_blockedUsersSlice) {
+			auto &list = _blockedUsersSlice->list;
+			for (auto i = list.begin(); i != list.end(); ++i) {
+				if (i->user == user) {
+					list.erase(i);
+					break;
+				}
+			}
+			if (_blockedUsersSlice->total > list.size()) {
+				--_blockedUsersSlice->total;
+			}
+			_blockedUsersChanges.fire_copy(*_blockedUsersSlice);
+		}
+		if (onDone) {
+			onDone();
+		}
+	}).fail([=](const RPCError &error) {
+		_blockRequests.erase(user);
+	}).send();
+	_blockRequests.emplace(user, requestId);
 }
 
 void ApiWrap::exportInviteLink(not_null<PeerData*> peer) {
@@ -2844,7 +2850,7 @@ void ApiWrap::requestAttachedStickerSets(not_null<PhotoData*> photo) {
 			? MTP_inputStickerSetID(setData->vid, setData->vaccess_hash)
 			: MTP_inputStickerSetShortName(setData->vshort_name);
 		Ui::show(
-			Box<StickerSetBox>(setId),
+			Box<StickerSetBox>(App::wnd()->sessionController(), setId),
 			LayerOption::KeepOther);
 
 	}).fail([=](const RPCError &error) {

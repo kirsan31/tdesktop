@@ -43,7 +43,8 @@ namespace {
 //https://developer.apple.com/design/human-interface-guidelines/macos/touch-bar/touch-bar-icons-and-images/
 constexpr auto kIdealIconSize = 36;
 constexpr auto kMaximumIconSize = 44;
-constexpr auto kScrubberHeight = 30;
+constexpr auto kCircleDiameter = 30;
+constexpr auto kPinnedButtonsSpace = 30;
 
 constexpr auto kCommandPlayPause = 0x002;
 constexpr auto kCommandPlaylistPrevious = 0x003;
@@ -52,9 +53,11 @@ constexpr auto kCommandClosePlayer = 0x005;
 
 constexpr auto kCommandBold = 0x010;
 constexpr auto kCommandItalic = 0x011;
-constexpr auto kCommandMonospace = 0x012;
-constexpr auto kCommandClear = 0x013;
-constexpr auto kCommandLink = 0x014;
+constexpr auto kCommandUnderline = 0x012;
+constexpr auto kCommandStrikeOut = 0x013;
+constexpr auto kCommandMonospace = 0x014;
+constexpr auto kCommandClear = 0x015;
+constexpr auto kCommandLink = 0x016;
 
 constexpr auto kCommandScrubberStickers = 0x020;
 constexpr auto kCommandScrubberEmoji = 0x021;
@@ -297,6 +300,13 @@ void SendKeyEvent(int command) {
 	case kCommandLink:
 		key = Qt::Key_K;
 		break;
+	case kCommandUnderline:
+		key = Qt::Key_U;
+		break;
+	case kCommandStrikeOut:
+		key = Qt::Key_X;
+		modifier |= Qt::ShiftModifier;
+		break;
 	}
 	QApplication::postEvent(focused, new QKeyEvent(QEvent::KeyPress, key, modifier));
 	QApplication::postEvent(focused, new QKeyEvent(QEvent::KeyRelease, key, modifier));
@@ -377,6 +387,68 @@ void AppendEmojiPacks(std::vector<PickerScrubberItem> &to) {
 
 } // namespace
 
+@interface PinButton : NSButton
+@end // @interface PinButton
+
+@implementation PinButton {
+	int _startPosition;
+	int _tempIndex;
+	bool _orderChanged;
+}
+
+- (void)touchesBeganWithEvent:(NSEvent *)event {
+	if ([event.allTouches allObjects].count > 1) {
+		return;
+	}
+	_orderChanged = false;
+	_tempIndex = self.tag  - 1;
+	_startPosition = [self getTouchX:event];
+	[super touchesBeganWithEvent:event];
+}
+
+- (void)touchesMovedWithEvent:(NSEvent *)event {
+	if (self.tag <= kSavedMessagesId) {
+		return;
+	}
+	if ([event.allTouches allObjects].count > 1) {
+		return;
+	}
+	const auto currentPosition = [self getTouchX:event];
+	const auto step = kPinnedButtonsSpace + kCircleDiameter;
+	if (std::abs(_startPosition - currentPosition) > step) {
+		const auto delta = (currentPosition > _startPosition) ? 1 : -1;
+		const auto newIndex = _tempIndex + delta;
+		const auto &order = Auth().data().pinnedChatsOrder(nullptr);
+
+		// In case the order has been changed from another device
+		// while the user is dragging the dialog.
+		if (_tempIndex >= order.size()) {
+			return;
+		}
+
+		if (newIndex >= 0 && newIndex < order.size()) {
+			Auth().data().reorderTwoPinnedChats(
+				order.at(_tempIndex).history(),
+				order.at(newIndex).history());
+			_tempIndex = newIndex;
+			_startPosition = currentPosition;
+			_orderChanged = true;
+		}
+	}
+}
+
+- (void)touchesEndedWithEvent:(NSEvent *)event {
+	if (_orderChanged) {
+		Auth().api().savePinnedOrder(nullptr);
+	}
+	[super touchesEndedWithEvent:event];
+}
+
+- (int)getTouchX:(NSEvent *)e {
+	return [[[e.allTouches allObjects] objectAtIndex:0] locationInView:self].x;
+}
+@end // @implementation PinButton
+
 @interface PinnedDialogButton : NSCustomTouchBarItem
 
 @property(nonatomic, assign) int number;
@@ -416,9 +488,13 @@ void AppendEmojiPacks(std::vector<PickerScrubberItem> &to) {
 	}
 	self.number = num;
 
-	NSButton *button = [NSButton buttonWithImage:[NSImage imageNamed:NSImageNameStopProgressTemplate] target:self action:@selector(buttonActionPin:)];
-	[button setBordered:NO];
-	[button sizeToFit];
+	PinButton *button = [[PinButton alloc] initWithFrame:NSZeroRect];
+	NSButtonCell *cell = [[NSButtonCell alloc] init];
+	[cell setBezelStyle:NSBezelStyleCircular];
+	button.cell = cell;
+	button.tag = num;
+	button.target = self;
+	button.action = @selector(buttonActionPin:);
 	self.view = button;
 
 	using Update = const Window::Theme::BackgroundUpdate;
@@ -520,14 +596,13 @@ void AppendEmojiPacks(std::vector<PickerScrubberItem> &to) {
 		const auto s = kIdealIconSize * cIntRetinaFactor();
 		_userpic = QPixmap(s, s);
 		Painter paint(&_userpic);
-		paint.fillRect(QRectF(0, 0, s, s), QColor(0, 0, 0, 255));
+		paint.fillRect(QRectF(0, 0, s, s), Qt::black);
 
-		if (self.number == kArchiveId) {
-			if (const auto folder = Auth().data().folderLoaded(Data::Folder::kId)) {
-				folder->paintUserpic(paint, 0, 0, s);
-			}
-		} else {
+		if (self.number != kArchiveId) {
 			Ui::EmptyUserpic::PaintSavedMessages(paint, 0, 0, s, s);
+		} else if (const auto folder =
+				Auth().data().folderLoaded(Data::Folder::kId)) {
+			folder->paintUserpic(paint, 0, 0, s);
 		}
 		_userpic.setDevicePixelRatio(cRetinaFactor());
 		[self updateImage:_userpic];
@@ -558,16 +633,17 @@ void AppendEmojiPacks(std::vector<PickerScrubberItem> &to) {
 
 - (void) updateImage:(QPixmap)pixmap {
 	NSButton *button = self.view;
-	button.image = [qt_mac_create_nsimage(pixmap) autorelease];
+	NSImage *image = [qt_mac_create_nsimage(pixmap) autorelease];
+	[image setSize:NSMakeSize(kCircleDiameter, kCircleDiameter)];
+	[button.cell setImage:image];
 }
 
-@end
-
+@end // @implementation PinnedDialogButton
 
 
 @interface PickerScrubberItemView : NSScrubberItemView
 @property (strong) NSImageView *imageView;
-@end
+@end // @interface PickerScrubberItemView
 @implementation PickerScrubberItemView {
 	rpl::lifetime _lifetime;
 	Data::FileOrigin _origin;
@@ -615,31 +691,34 @@ void AppendEmojiPacks(std::vector<PickerScrubberItem> &to) {
 }
 - (void)updateImage {
 	const auto size = _dimensions
-			.scaled(kScrubberHeight, kScrubberHeight, Qt::KeepAspectRatio);
+			.scaled(kCircleDiameter, kCircleDiameter, Qt::KeepAspectRatio);
 	_imageView.image = [qt_mac_create_nsimage(
 			_image->pixSingle(
 				_origin,
 				size.width(),
 				size.height(),
-				kScrubberHeight,
-				kScrubberHeight,
+				kCircleDiameter,
+				kCircleDiameter,
 				ImageRoundRadius::None))
 		autorelease];
 }
-@end
+@end // @implementation PickerScrubberItemView
 
 
 @interface PickerCustomTouchBarItem: NSCustomTouchBarItem
 	<NSScrubberDelegate,
 	NSScrubberDataSource,
 	NSScrubberFlowLayoutDelegate>
-@end
+@end // @interface PickerCustomTouchBarItem
 
 #pragma mark -
 
 @implementation PickerCustomTouchBarItem {
 	std::vector<PickerScrubberItem> _stickers;
 	NSPopoverTouchBarItem *_parentPopover;
+	std::unique_ptr<base::Timer> _previewTimer;
+	int _highlightedIndex;
+	bool _previewShown;
 }
 
 - (id) init:(ScrubberItemType)type popover:(NSPopoverTouchBarItem *)popover {
@@ -664,6 +743,14 @@ void AppendEmojiPacks(std::vector<PickerScrubberItem> &to) {
 	[scrubber registerClass:[PickerScrubberItemView class] forItemIdentifier:kStickerItemIdentifier];
 	[scrubber registerClass:[NSScrubberTextItemView class] forItemIdentifier:kPickerTitleItemIdentifier];
 	[scrubber registerClass:[NSScrubberImageItemView class] forItemIdentifier:kEmojiItemIdentifier];
+
+	_previewShown = false;
+	_highlightedIndex = 0;
+	_previewTimer = !IsSticker(type)
+		? nullptr
+		: std::make_unique<base::Timer>([=] {
+			[self showPreview];
+		});
 
 	self.view = scrubber;
 	return self;
@@ -699,14 +786,21 @@ void AppendEmojiPacks(std::vector<PickerScrubberItem> &to) {
 - (NSSize)scrubber:(NSScrubber *)scrubber layout:(NSScrubberFlowLayout *)layout sizeForItemAtIndex:(NSInteger)index {
 	if (const auto t = _stickers[index].title; !t.isEmpty()) {
 		return NSMakeSize(
-			WidthFromString(Q2NSString(t)) + 30, kScrubberHeight);
+			WidthFromString(Q2NSString(t)) + kCircleDiameter, kCircleDiameter);
 	}
-	return NSMakeSize(kScrubberHeight, kScrubberHeight);
+	return NSMakeSize(kCircleDiameter, kCircleDiameter);
 }
 
 - (void)scrubber:(NSScrubber *)scrubber didSelectItemAtIndex:(NSInteger)index {
 	if (!CanWriteToActiveChat()) {
 		return;
+	}
+	scrubber.selectedIndex = -1;
+	if (_previewShown && [self hidePreview]) {
+		return;
+	}
+	if (_previewTimer) {
+		_previewTimer->cancel();
 	}
 	const auto chat = GetActiveChat();
 
@@ -739,7 +833,47 @@ void AppendEmojiPacks(std::vector<PickerScrubberItem> &to) {
 	if (_parentPopover) {
 		[_parentPopover dismissPopover:nil];
 	}
-	scrubber.selectedIndex = -1;
+}
+
+- (void)scrubber:(NSScrubber *)scrubber didHighlightItemAtIndex:(NSInteger)index {
+	if (_previewTimer) {
+		_previewTimer->callOnce(QApplication::startDragTime());
+		_highlightedIndex = index;
+	}
+}
+
+- (void)scrubber:(NSScrubber *)scrubber didChangeVisibleRange:(NSRange)visibleRange {
+	[self didCancelInteractingWithScrubber:scrubber];
+}
+
+- (void)didCancelInteractingWithScrubber:(NSScrubber *)scrubber {
+	if (_previewTimer) {
+		_previewTimer->cancel();
+	}
+	if (_previewShown) {
+		[self hidePreview];
+	}
+}
+
+- (void)showPreview {
+	if (const auto document = _stickers[_highlightedIndex].document) {
+		if (const auto w = App::wnd()) {
+			w->showMediaPreview(document->stickerSetOrigin(), document);
+			_previewShown = true;
+		}
+	}
+}
+
+- (bool)hidePreview {
+	if (const auto w = App::wnd()) {
+		Core::Sandbox::Instance().customEnterFromEventLoop([=] {
+			w->hideMediaPreview();
+		});
+		_previewShown = false;
+		_highlightedIndex = 0;
+		return true;
+	}
+	return false;
 }
 
 - (void)updateStickers {
@@ -772,7 +906,7 @@ void AppendEmojiPacks(std::vector<PickerScrubberItem> &to) {
 	_stickers = std::move(temp);
 }
 
-@end
+@end // @implementation PickerCustomTouchBarItem
 
 
 @interface TouchBar()<NSTouchBarDelegate>
@@ -914,10 +1048,10 @@ void AppendEmojiPacks(std::vector<PickerScrubberItem> &to) {
 	Auth().data().chatsListChanges(
 	) | rpl::start_with_next([=] {
 		if (const auto window = App::wnd()) {
-			if (!Auth().data().stickerSets().size()) {
-				Auth().api().updateStickers();
-			}
 			if (const auto controller = window->sessionController()) {
+				if (!Auth().data().stickerSets().size()) {
+					Auth().api().updateStickers();
+				}
 				_lifetimeSessionControllerChecker.destroy();
 				controller->activeChatChanges(
 				) | rpl::start_with_next([=](Dialogs::Key key) {
@@ -991,28 +1125,36 @@ void AppendEmojiPacks(std::vector<PickerScrubberItem> &to) {
 		NSTouchBar *secondaryTouchBar = [[NSTouchBar alloc] init];
 		secondaryTouchBar.delegate = self;
 		secondaryTouchBar.defaultItemIdentifiers = @[kPopoverInputFormatterItemIdentifier];
-		item.pressAndHoldTouchBar = secondaryTouchBar;
 		item.popoverTouchBar = secondaryTouchBar;
 		return item;
 	} else if (isType(kTypeFormatterSegment)) {
 		NSCustomTouchBarItem *item = [[NSCustomTouchBarItem alloc] initWithIdentifier:identifier];
+		NSScrollView *scroll = [[NSScrollView alloc] init];
 		NSSegmentedControl *segment = [[NSSegmentedControl alloc] init];
 		segment.segmentStyle = NSSegmentStyleRounded;
+		segment.target = self;
+		segment.action = @selector(formatterClicked:);
+
 		static const auto strings = {
 			tr::lng_menu_formatting_bold,
 			tr::lng_menu_formatting_italic,
+			tr::lng_menu_formatting_underline,
+			tr::lng_menu_formatting_strike_out,
 			tr::lng_menu_formatting_monospace,
 			tr::lng_menu_formatting_clear,
 			tr::lng_info_link_label,
 		};
 		segment.segmentCount = strings.size();
+		auto width = 0;
 		auto count = 0;
 		for (const auto s : strings) {
-			[segment setLabel:Q2NSString(s(tr::now)) forSegment:count++];
+			const auto string = Q2NSString(s(tr::now));
+			width += WidthFromString(string) * 1.4;
+			[segment setLabel:string forSegment:count++];
 		}
-		segment.target = self;
-		segment.action = @selector(formatterClicked:);
-		item.view = segment;
+		segment.frame = NSMakeRect(0, 0, width, kCircleDiameter);
+		[scroll setDocumentView:segment];
+		item.view = scroll;
 		return item;
 	} else if (isType(kTypeScrubber)) {
 		const auto isSticker = ([dictionaryItem[@"cmd"] intValue]
@@ -1058,10 +1200,11 @@ void AppendEmojiPacks(std::vector<PickerScrubberItem> &to) {
 				button.isDeletedFromView = true;
 				continue;
 			}
-			[stackView addView:button.view inGravity:NSStackViewGravityCenter];
+			[stackView addView:button.view inGravity:NSStackViewGravityTrailing];
 		}
-
-		[stackView setSpacing:-15];
+		const auto space = kPinnedButtonsSpace;
+		[stackView setEdgeInsets:NSEdgeInsetsMake(0, space / 2., 0, space)];
+		[stackView setSpacing:space];
 		item.view = stackView;
 		[dictionaryItem setObject:item.view forKey:@"view"];
 		return item;
@@ -1073,7 +1216,7 @@ void AppendEmojiPacks(std::vector<PickerScrubberItem> &to) {
 - (void) createTouchBar {
 	_touchBarMain = [[NSTouchBar alloc] init];
 	_touchBarMain.delegate = self;
-	_touchBarMain.defaultItemIdentifiers = @[kPinnedPanelItemIdentifier];
+	[self showItemInMain:nil];
 
 	_touchBarAudioPlayer = [[NSTouchBar alloc] init];
 	_touchBarAudioPlayer.delegate = self;
@@ -1348,4 +1491,4 @@ void AppendEmojiPacks(std::vector<PickerScrubberItem> &to) {
 	[super dealloc];
 }
 
-@end
+@end // @implementation TouchBar

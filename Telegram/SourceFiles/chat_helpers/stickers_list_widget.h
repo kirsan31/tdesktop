@@ -21,6 +21,12 @@ class LinkButton;
 class RippleAnimation;
 } // namespace Ui
 
+namespace Lottie {
+class Animation;
+class MultiPlayer;
+class FrameRenderer;
+} // namespace Lottie
+
 namespace ChatHelpers {
 
 struct StickerIcon;
@@ -63,6 +69,8 @@ public:
 	void sendSearchRequest();
 	void searchForSets(const QString &query);
 
+	std::shared_ptr<Lottie::FrameRenderer> getLottieRenderer();
+
 	~StickersListWidget();
 
 protected:
@@ -94,20 +102,22 @@ private:
 	};
 
 	struct OverSticker {
-		int section;
-		int index;
-		bool overDelete;
+		int section = 0;
+		int index = 0;
+		bool overDelete = false;
 	};
 	struct OverSet {
-		int section;
+		int section = 0;
 	};
 	struct OverButton {
-		int section;
+		int section = 0;
 	};
 	struct OverGroupAdd {
 	};
 	friend inline bool operator==(OverSticker a, OverSticker b) {
-		return (a.section == b.section) && (a.index == b.index) && (a.overDelete == b.overDelete);
+		return (a.section == b.section)
+			&& (a.index == b.index)
+			&& (a.overDelete == b.overDelete);
 	}
 	friend inline bool operator==(OverSet a, OverSet b) {
 		return (a.section == b.section);
@@ -118,7 +128,11 @@ private:
 	friend inline bool operator==(OverGroupAdd a, OverGroupAdd b) {
 		return true;
 	}
-	using OverState = base::optional_variant<OverSticker, OverSet, OverButton, OverGroupAdd>;
+	using OverState = base::optional_variant<
+		OverSticker,
+		OverSet,
+		OverButton,
+		OverGroupAdd>;
 
 	struct SectionInfo {
 		int section = 0;
@@ -127,6 +141,11 @@ private:
 		int rowsCount = 0;
 		int rowsTop = 0;
 		int rowsBottom = 0;
+	};
+
+	struct Sticker {
+		not_null<DocumentData*> document;
+		Lottie::Animation *animated = nullptr;
 	};
 
 	struct Set {
@@ -138,7 +157,7 @@ private:
 			ImagePtr thumbnail,
 			bool externalLayout,
 			int count,
-			const Stickers::Pack &pack = Stickers::Pack());
+			std::vector<Sticker> &&stickers = {});
 		Set(Set &&other);
 		Set &operator=(Set &&other);
 		~Set();
@@ -148,17 +167,33 @@ private:
 		QString title;
 		QString shortName;
 		ImagePtr thumbnail;
-		Stickers::Pack pack;
+		std::vector<Sticker> stickers;
 		std::unique_ptr<Ui::RippleAnimation> ripple;
+		Lottie::MultiPlayer *lottiePlayer = nullptr;
 		bool externalLayout = false;
 		int count = 0;
 	};
+	struct LottieSet {
+		struct Item {
+			not_null<Lottie::Animation*> animation;
+			bool stale = false;
+		};
+		std::unique_ptr<Lottie::MultiPlayer> player;
+		base::flat_map<DocumentId, Item> items;
+		bool stale = false;
+		rpl::lifetime lifetime;
+	};
+
+	static std::vector<Sticker> PrepareStickers(const Stickers::Pack &pack);
+
+	QSize boundingBoxSize() const;
 
 	template <typename Callback>
 	bool enumerateSections(Callback callback) const;
 	SectionInfo sectionInfo(int section) const;
 	SectionInfo sectionInfoByOffset(int yOffset) const;
 
+	void setSection(Section section);
 	void displaySet(uint64 setId);
 	void installSet(uint64 setId);
 	void removeMegagroupSet(bool locally);
@@ -166,12 +201,14 @@ private:
 	void sendInstallRequest(
 		uint64 setId,
 		const MTPInputStickerSet &input);
+	void refreshMySets();
+	void refreshFeaturedSets();
 	void refreshSearchSets();
 	void refreshSearchIndex();
 
 	bool setHasTitle(const Set &set) const;
 	bool stickerHasDeleteButton(const Set &set, int index) const;
-	Stickers::Pack collectRecentStickers();
+	std::vector<Sticker> collectRecentStickers();
 	void refreshRecentStickers(bool resize = true);
 	void refreshFavedStickers();
 	enum class GroupStickersPlace {
@@ -197,13 +234,23 @@ private:
 	std::vector<Set> &shownSets();
 	const std::vector<Set> &shownSets() const;
 	int featuredRowHeight() const;
-	void readVisibleSets();
+	void checkVisibleFeatured(int visibleTop, int visibleBottom);
+	void readVisibleFeatured(int visibleTop, int visibleBottom);
 
-	void paintFeaturedStickers(Painter &p, QRect clip);
 	void paintStickers(Painter &p, QRect clip);
 	void paintMegagroupEmptySet(Painter &p, int y, bool buttonSelected);
-	void paintSticker(Painter &p, Set &set, int y, int index, bool selected, bool deleteSelected);
+	void paintSticker(Painter &p, Set &set, int y, int section, int index, bool selected, bool deleteSelected);
 	void paintEmptySearchResults(Painter &p);
+
+	void ensureLottiePlayer(Set &set);
+	void setupLottie(Set &set, int section, int index);
+	void markLottieFrameShown(Set &set);
+	void checkVisibleLottie();
+	void pauseInvisibleLottieIn(const SectionInfo &info);
+	void destroyLottieIn(Set &set);
+	void refillLottieData();
+	void refillLottieData(Set &set);
+	void clearLottieData();
 
 	int stickersRight() const;
 	bool featuredHasAddButton(int index) const;
@@ -253,6 +300,7 @@ private:
 	base::flat_set<uint64> _installedLocallySets;
 	std::vector<bool> _custom;
 	base::flat_set<not_null<DocumentData*>> _favedStickersMap;
+	std::weak_ptr<Lottie::FrameRenderer> _lottieRenderer;
 
 	Section _section = Section::Stickers;
 
@@ -287,6 +335,8 @@ private:
 	base::Timer _searchRequestTimer;
 	QString _searchQuery, _searchNextQuery;
 	mtpRequestId _searchRequestId = 0;
+
+	base::flat_map<uint64, LottieSet> _lottieData;
 
 	rpl::event_stream<not_null<DocumentData*>> _chosen;
 	rpl::event_stream<> _scrollUpdated;
