@@ -1892,6 +1892,9 @@ void HistoryWidget::updateControlsVisibility() {
 	updateHistoryDownVisibility();
 	updateUnreadMentionsVisibility();
 	if (!_history || _a_show.animating()) {
+		if (_tabbedPanel) {
+			_tabbedPanel->hideFast();
+		}
 		hideChildren();
 		return;
 	}
@@ -2213,29 +2216,29 @@ void HistoryWidget::messagesReceived(PeerData *peer, const MTPmessages_Messages 
 	switch (messages.type()) {
 	case mtpc_messages_messages: {
 		auto &d(messages.c_messages_messages());
-		_history->owner().processUsers(d.vusers);
-		_history->owner().processChats(d.vchats);
-		histList = &d.vmessages.v;
+		_history->owner().processUsers(d.vusers());
+		_history->owner().processChats(d.vchats());
+		histList = &d.vmessages().v;
 		count = histList->size();
 	} break;
 	case mtpc_messages_messagesSlice: {
 		auto &d(messages.c_messages_messagesSlice());
-		_history->owner().processUsers(d.vusers);
-		_history->owner().processChats(d.vchats);
-		histList = &d.vmessages.v;
-		count = d.vcount.v;
+		_history->owner().processUsers(d.vusers());
+		_history->owner().processChats(d.vchats());
+		histList = &d.vmessages().v;
+		count = d.vcount().v;
 	} break;
 	case mtpc_messages_channelMessages: {
 		auto &d(messages.c_messages_channelMessages());
 		if (peer && peer->isChannel()) {
-			peer->asChannel()->ptsReceived(d.vpts.v);
+			peer->asChannel()->ptsReceived(d.vpts().v);
 		} else {
 			LOG(("API Error: received messages.channelMessages when no channel was passed! (HistoryWidget::messagesReceived)"));
 		}
-		_history->owner().processUsers(d.vusers);
-		_history->owner().processChats(d.vchats);
-		histList = &d.vmessages.v;
-		count = d.vcount.v;
+		_history->owner().processUsers(d.vusers());
+		_history->owner().processChats(d.vchats());
+		histList = &d.vmessages().v;
+		count = d.vcount().v;
 	} break;
 	case mtpc_messages_messagesNotModified: {
 		LOG(("API Error: received messages.messagesNotModified! (HistoryWidget::messagesReceived)"));
@@ -2986,6 +2989,9 @@ void HistoryWidget::showAnimated(
 	_topShadow->setVisible(params.withTopBarShadow ? false : true);
 	_cacheOver = App::main()->grabForShowAnimation(params);
 
+	if (_tabbedPanel) {
+		_tabbedPanel->hideFast();
+	}
 	hideChildren();
 	if (params.withTopBarShadow) _topShadow->show();
 
@@ -3349,22 +3355,22 @@ void HistoryWidget::botCallbackDone(
 		}
 	}
 	answer.match([&](const MTPDmessages_botCallbackAnswer &data) {
-		if (data.has_message()) {
+		if (const auto message = data.vmessage()) {
 			if (data.is_alert()) {
-				Ui::show(Box<InformBox>(qs(data.vmessage)));
+				Ui::show(Box<InformBox>(qs(*message)));
 			} else {
-				Ui::Toast::Show(qs(data.vmessage));
+				Ui::Toast::Show(qs(*message));
 			}
-		} else if (data.has_url()) {
-			auto url = qs(data.vurl);
+		} else if (const auto url = data.vurl()) {
+			auto link = qs(*url);
 			if (info.game) {
-				url = AppendShareGameScoreUrl(url, info.msgId);
-				BotGameUrlClickHandler(info.bot, url).onClick({});
+				link = AppendShareGameScoreUrl(link, info.msgId);
+				BotGameUrlClickHandler(info.bot, link).onClick({});
 				if (item) {
 					updateSendAction(item->history(), SendAction::Type::PlayGame);
 				}
 			} else {
-				UrlClickHandler(url).onClick({});
+				UrlClickHandler(link).onClick({});
 			}
 		}
 	});
@@ -3509,7 +3515,7 @@ void HistoryWidget::inlineBotResolveDone(
 	const auto &data = result.c_contacts_resolvedPeer();
 //	Notify::inlineBotRequesting(false);
 	const auto resolvedBot = [&]() -> UserData* {
-		if (const auto result = session().data().processUsers(data.vusers)) {
+		if (const auto result = session().data().processUsers(data.vusers())) {
 			if (result->botInfo
 				&& !result->botInfo->inlinePlaceholder.isEmpty()) {
 				return result;
@@ -3517,7 +3523,7 @@ void HistoryWidget::inlineBotResolveDone(
 		}
 		return nullptr;
 	}();
-	session().data().processChats(data.vchats);
+	session().data().processChats(data.vchats());
 
 	const auto query = ParseInlineBotQuery(_field);
 	if (_inlineBotUsername == query.username) {
@@ -5948,7 +5954,7 @@ void HistoryWidget::checkPreview() {
 					MTPmessages_GetWebPagePreview(
 						MTP_flags(0),
 						MTP_string(_previewLinks),
-						MTPnullEntities),
+						MTPVector<MTPMessageEntity>()),
 					rpcDone(&HistoryWidget::gotPreview, _previewLinks));
 			} else if (i.value()) {
 				_previewData = session().data().webpage(i.value());
@@ -5970,7 +5976,7 @@ void HistoryWidget::requestPreview() {
 		MTPmessages_GetWebPagePreview(
 			MTP_flags(0),
 			MTP_string(_previewLinks),
-			MTPnullEntities),
+			MTPVector<MTPMessageEntity>()),
 		rpcDone(&HistoryWidget::gotPreview, _previewLinks));
 }
 
@@ -5979,7 +5985,7 @@ void HistoryWidget::gotPreview(QString links, const MTPMessageMedia &result, mtp
 		_previewRequest = 0;
 	}
 	if (result.type() == mtpc_messageMediaWebPage) {
-		const auto &data = result.c_messageMediaWebPage().vwebpage;
+		const auto &data = result.c_messageMediaWebPage().vwebpage();
 		const auto page = session().data().processWebpage(data);
 		_previewCache.insert(links, page->id);
 		if (page->pendingTill > 0 && page->pendingTill <= unixtime()) {

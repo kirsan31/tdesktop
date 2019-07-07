@@ -23,9 +23,9 @@ class Animation;
 
 namespace Lottie {
 
-inline constexpr auto kMaxFrameRate = 120;
-inline constexpr auto kMaxSize = 3096;
-inline constexpr auto kMaxFramesCount = 600;
+inline constexpr auto kMaxFrameRate = 60;
+inline constexpr auto kMaxSize = 512;
+inline constexpr auto kMaxFramesCount = 180;
 inline constexpr auto kFrameDisplayTimeAlreadyDone
 	= std::numeric_limits<crl::time>::max();
 inline constexpr auto kDisplayedInitial = crl::time(-1);
@@ -51,12 +51,14 @@ class SharedState {
 public:
 	SharedState(
 		std::unique_ptr<rlottie::Animation> animation,
-		const FrameRequest &request);
+		const FrameRequest &request,
+		Quality quality);
 	SharedState(
 		const QByteArray &content,
 		std::unique_ptr<rlottie::Animation> animation,
 		std::unique_ptr<Cache> cache,
-		const FrameRequest &request);
+		const FrameRequest &request,
+		Quality quality);
 
 	void start(
 		not_null<Player*> owner,
@@ -98,6 +100,7 @@ private:
 
 	QByteArray _content;
 	std::unique_ptr<rlottie::Animation> _animation;
+	Quality _quality = Quality::Default;
 
 	// crl::queue changes 0,2,4,6 to 1,3,5,7.
 	// main thread changes 1,3,5,7 to 2,4,6,0.
@@ -131,7 +134,9 @@ public:
 	static std::shared_ptr<FrameRenderer> CreateIndependent();
 	static std::shared_ptr<FrameRenderer> Instance();
 
-	void append(std::unique_ptr<SharedState> entry);
+	void append(
+		std::unique_ptr<SharedState> entry,
+		const FrameRequest &request);
 
 	void updateFrameRequest(
 		not_null<SharedState*> entry,

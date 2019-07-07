@@ -40,6 +40,22 @@ QImage CreateFrameStorage(QSize size) {
 	return QImage(size, kImageFormat);
 }
 
+int GetLottieFrameRate(not_null<rlottie::Animation*> animation, Quality quality) {
+	const auto rate = int(qRound(animation->frameRate()));
+	return (quality == Quality::Default && rate == 60) ? (rate / 2) : rate;
+}
+
+int GetLottieFramesCount(not_null<rlottie::Animation*> animation, Quality quality) {
+	const auto rate = int(qRound(animation->frameRate()));
+	const auto count = int(animation->totalFrame());
+	return (quality == Quality::Default && rate == 60) ? (count / 2) : count;
+}
+
+int GetLottieFrameIndex(not_null<rlottie::Animation*> animation, Quality quality, int index) {
+	const auto rate = int(qRound(animation->frameRate()));
+	return (quality == Quality::Default && rate == 60) ? (index * 2) : index;
+}
+
 } // namespace
 
 class FrameRendererObject final {
@@ -47,7 +63,9 @@ public:
 	explicit FrameRendererObject(
 		crl::weak_on_queue<FrameRendererObject> weak);
 
-	void append(std::unique_ptr<SharedState> entry);
+	void append(
+		std::unique_ptr<SharedState> entry,
+		const FrameRequest &request);
 	void frameShown();
 	void updateFrameRequest(
 		not_null<SharedState*> entry,
@@ -132,10 +150,10 @@ FrameRendererObject::FrameRendererObject(
 : _weak(std::move(weak)) {
 }
 
-void FrameRendererObject::append(std::unique_ptr<SharedState> state) {
-	_entries.push_back({ std::move(state) });
-	auto &entry = _entries.back();
-	entry.request = entry.state->frameForPaint()->request;
+void FrameRendererObject::append(
+		std::unique_ptr<SharedState> state,
+		const FrameRequest &request) {
+	_entries.push_back({ std::move(state), request });
 	queueGenerateFrames();
 }
 
@@ -194,8 +212,10 @@ void FrameRendererObject::queueGenerateFrames() {
 
 SharedState::SharedState(
 	std::unique_ptr<rlottie::Animation> animation,
-	const FrameRequest &request)
-: _animation(std::move(animation)) {
+	const FrameRequest &request,
+	Quality quality)
+: _animation(std::move(animation))
+, _quality(quality) {
 	construct(request);
 }
 
@@ -203,9 +223,11 @@ SharedState::SharedState(
 	const QByteArray &content,
 	std::unique_ptr<rlottie::Animation> animation,
 	std::unique_ptr<Cache> cache,
-	const FrameRequest &request)
+	const FrameRequest &request,
+	Quality quality)
 : _content(content)
 , _animation(std::move(animation))
+, _quality(quality)
 , _cache(std::move(cache)) {
 	construct(request);
 }
@@ -239,16 +261,16 @@ void SharedState::calculateProperties() {
 		height = _cache->originalSize().height();
 	}
 	const auto rate = _animation
-		? _animation->frameRate()
+		? GetLottieFrameRate(_animation.get(), _quality)
 		: _cache->frameRate();
 	const auto count = _animation
-		? _animation->totalFrame()
+		? GetLottieFramesCount(_animation.get(), _quality)
 		: _cache->framesCount();
 
 	_size = QSize(
-		(width > 0 && width < kMaxSize) ? int(width) : 0,
-		(height > 0 && height < kMaxSize) ? int(height) : 0);
-	_frameRate = (rate >= 1. && rate <= kMaxFrameRate) ? int(rate) : 0;
+		(width > 0 && width <= kMaxSize) ? int(width) : 0,
+		(height > 0 && height <= kMaxSize) ? int(height) : 0);
+	_frameRate = (rate > 0 && rate <= kMaxFrameRate) ? int(rate) : 0;
 	_framesCount = (count > 0 && count <= kMaxFramesCount) ? int(count) : 0;
 }
 
@@ -280,7 +302,9 @@ void SharedState::renderFrame(
 		image.width(),
 		image.height(),
 		image.bytesPerLine());
-	_animation->renderSync(index, surface);
+	_animation->renderSync(
+		GetLottieFrameIndex(_animation.get(), _quality, index),
+		surface);
 	if (_cache) {
 		_cache->appendFrame(image, request, index);
 		if (_cache->framesReady() == _cache->framesCount()) {
@@ -537,10 +561,12 @@ std::shared_ptr<FrameRenderer> FrameRenderer::Instance() {
 	return result;
 }
 
-void FrameRenderer::append(std::unique_ptr<SharedState> entry) {
-	_wrapped.with([entry = std::move(entry)](
+void FrameRenderer::append(
+		std::unique_ptr<SharedState> entry,
+		const FrameRequest &request) {
+	_wrapped.with([=, entry = std::move(entry)](
 			FrameRendererObject &unwrapped) mutable {
-		unwrapped.append(std::move(entry));
+		unwrapped.append(std::move(entry), request);
 	});
 }
 

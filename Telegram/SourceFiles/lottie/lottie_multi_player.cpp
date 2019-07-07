@@ -15,8 +15,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 namespace Lottie {
 
-MultiPlayer::MultiPlayer(std::shared_ptr<FrameRenderer> renderer)
-: _timer([=] { checkNextFrameRender(); })
+MultiPlayer::MultiPlayer(
+	Quality quality,
+	std::shared_ptr<FrameRenderer> renderer)
+: _quality(quality)
+, _timer([=] { checkNextFrameRender(); })
 , _renderer(renderer ? std::move(renderer) : FrameRenderer::Instance()) {
 	crl::on_main_update_requests(
 	) | rpl::start_with_next([=] {
@@ -43,7 +46,8 @@ not_null<Animation*> MultiPlayer::append(
 		std::move(get),
 		std::move(put),
 		content,
-		request));
+		request,
+		_quality));
 	return _animations.back().get();
 }
 
@@ -53,7 +57,8 @@ not_null<Animation*> MultiPlayer::append(
 	_animations.push_back(std::make_unique<Animation>(
 		this,
 		content,
-		request));
+		request,
+		_quality));
 	return _animations.back().get();
 }
 
@@ -71,8 +76,8 @@ void MultiPlayer::startAtRightTime(std::unique_ptr<SharedState> state) {
 		lastSyncTime,
 		_delay);
 	state->start(this, _started, _delay, frameIndex);
-
-	_renderer->append(std::move(state));
+	const auto request = state->frameForPaint()->request;
+	_renderer->append(std::move(state), request);
 }
 
 int MultiPlayer::countFrameIndex(
@@ -323,20 +328,22 @@ void MultiPlayer::checkNextFrameRender() {
 void MultiPlayer::updateFrameRequest(
 		not_null<const Animation*> animation,
 		const FrameRequest &request) {
-	const auto state = [&] {
+	const auto state = [&]() -> Lottie::SharedState* {
 		const auto key = animation;
 		if (const auto i = _active.find(animation); i != end(_active)) {
-			return i->second.get();
+			return i->second;
 		} else if (const auto j = _paused.find(animation);
 				j != end(_paused)) {
-			return j->second.state.get();
+			return j->second.state;
 		} else if (const auto k = _pendingToStart.find(animation);
 				k != end(_pendingToStart)) {
-			return k->second.state.get();
+			return nullptr;
 		}
 		Unexpected("Animation in MultiPlayer::updateFrameRequest.");
 	}();
-	_renderer->updateFrameRequest(state, request);
+	if (state) {
+		_renderer->updateFrameRequest(state, request);
+	}
 }
 
 void MultiPlayer::markFrameDisplayed(crl::time now) {

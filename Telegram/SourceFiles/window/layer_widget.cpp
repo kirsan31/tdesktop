@@ -1049,7 +1049,8 @@ void MediaPreviewWidget::setupLottie() {
 
 	_lottie = std::make_unique<Lottie::SinglePlayer>(
 		Lottie::ReadContent(_document->data(), _document->filepath()),
-		Lottie::FrameRequest{ currentDimensions() * cIntRetinaFactor() });
+		Lottie::FrameRequest{ currentDimensions() * cIntRetinaFactor() },
+		Lottie::Quality::High);
 
 	_lottie->updates(
 	) | rpl::start_with_next([=](Lottie::Update update) {
@@ -1160,7 +1161,7 @@ void MediaPreviewWidget::clipCallback(Media::Clip::Notification notification) {
 
 	case NotificationRepaint: {
 		if (_gif && !_gif->currentDisplayed()) {
-			updateArea();
+			update(updateArea());
 		}
 	} break;
 	}

@@ -1250,22 +1250,22 @@ void StickersListWidget::searchResultsDone(
 			std::vector<uint64>()).first;
 	}
 	auto &d = result.c_messages_foundStickerSets();
-	for (const auto &stickerSet : d.vsets.v) {
+	for (const auto &stickerSet : d.vsets().v) {
 		const MTPDstickerSet *setData = nullptr;
 		Stickers::Pack covers;
 		switch (stickerSet.type()) {
 		case mtpc_stickerSetCovered: {
 			auto &d = stickerSet.c_stickerSetCovered();
-			if (d.vset.type() == mtpc_stickerSet) {
-				setData = &d.vset.c_stickerSet();
+			if (d.vset().type() == mtpc_stickerSet) {
+				setData = &d.vset().c_stickerSet();
 			}
 		} break;
 		case mtpc_stickerSetMultiCovered: {
 			auto &d = stickerSet.c_stickerSetMultiCovered();
-			if (d.vset.type() == mtpc_stickerSet) {
-				setData = &d.vset.c_stickerSet();
+			if (d.vset().type() == mtpc_stickerSet) {
+				setData = &d.vset().c_stickerSet();
 			}
-			for (const auto &cover : d.vcovers.v) {
+			for (const auto &cover : d.vcovers().v) {
 				const auto document = Auth().data().processDocument(cover);
 				if (document->sticker()) {
 					covers.push_back(document);
@@ -1593,6 +1593,7 @@ void StickersListWidget::ensureLottiePlayer(Set &set) {
 	const auto [i, ok] = _lottieData.emplace(
 		set.id,
 		LottieSet{ std::make_unique<Lottie::MultiPlayer>(
+			Lottie::Quality::Default,
 			getLottieRenderer()) });
 	Assert(ok);
 	const auto raw = set.lottiePlayer = i->second.player.get();
@@ -2408,7 +2409,7 @@ void StickersListWidget::refreshMegagroupStickers(GroupStickersPlace place) {
 	}
 	auto &set = _megagroupSet->mgInfo->stickerSet.c_inputStickerSetID();
 	auto &sets = Auth().data().stickerSets();
-	auto it = sets.constFind(set.vid.v);
+	auto it = sets.constFind(set.vid().v);
 	if (it != sets.cend()) {
 		auto isInstalled = (it->flags & MTPDstickerSet::Flag::f_installed_date)
 			&& !(it->flags & MTPDstickerSet::Flag::f_archived);
@@ -2430,10 +2431,10 @@ void StickersListWidget::refreshMegagroupStickers(GroupStickersPlace place) {
 		}
 		return;
 	} else if (!isShownHere(hidden)
-		|| _megagroupSetIdRequested == set.vid.v) {
+		|| _megagroupSetIdRequested == set.vid().v) {
 		return;
 	}
-	_megagroupSetIdRequested = set.vid.v;
+	_megagroupSetIdRequested = set.vid().v;
 	request(MTPmessages_GetStickerSet(
 		_megagroupSet->mgInfo->stickerSet
 	)).done([=](const MTPmessages_StickerSet &result) {
@@ -2746,7 +2747,7 @@ void StickersListWidget::displaySet(uint64 setId) {
 			});
 			return;
 		} else if (_megagroupSet->mgInfo->stickerSet.type() == mtpc_inputStickerSetID) {
-			setId = _megagroupSet->mgInfo->stickerSet.c_inputStickerSetID().vid.v;
+			setId = _megagroupSet->mgInfo->stickerSet.c_inputStickerSetID().vid().v;
 		} else {
 			return;
 		}
