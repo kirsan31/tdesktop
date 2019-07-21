@@ -20,6 +20,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "auth_session.h"
 #include "apiwrap.h"
 #include "core/application.h"
+#include "base/unixtime.h"
 #include "lang/lang_instance.h"
 #include "lang/lang_cloud_manager.h"
 #include "base/timer.h"
@@ -42,31 +43,33 @@ public:
 	void setGoodProxyDomain(const QString &host, const QString &ip);
 	void suggestMainDcId(DcId mainDcId);
 	void setMainDcId(DcId mainDcId);
-	DcId mainDcId() const;
+	[[nodiscard]] DcId mainDcId() const;
 
 	void setKeyForWrite(DcId dcId, const AuthKeyPtr &key);
-	AuthKeysList getKeysForWrite() const;
+	[[nodiscard]] AuthKeysList getKeysForWrite() const;
 	void addKeysForDestroy(AuthKeysList &&keys);
 
-	not_null<DcOptions*> dcOptions();
+	[[nodiscard]] not_null<DcOptions*> dcOptions();
 
 	// Thread safe.
-	QString deviceModel() const;
-	QString systemVersion() const;
+	[[nodiscard]] QString deviceModel() const;
+	[[nodiscard]] QString systemVersion() const;
 
+	// Main thread.
 	void requestConfig();
 	void requestConfigIfOld();
 	void requestCDNConfig();
 	void setUserPhone(const QString &phone);
 	void badConfigurationError();
+	void syncHttpUnixtime();
 
 	void restart();
 	void restart(ShiftedDcId shiftedDcId);
-	int32 dcstate(ShiftedDcId shiftedDcId = 0);
-	QString dctransport(ShiftedDcId shiftedDcId = 0);
+	[[nodiscard]] int32 dcstate(ShiftedDcId shiftedDcId = 0);
+	[[nodiscard]] QString dctransport(ShiftedDcId shiftedDcId = 0);
 	void ping();
 	void cancel(mtpRequestId requestId);
-	int32 state(mtpRequestId requestId); // < 0 means waiting for such count of ms
+	[[nodiscard]] int32 state(mtpRequestId requestId); // < 0 means waiting for such count of ms
 	void killSession(ShiftedDcId shiftedDcId);
 	void killSession(std::unique_ptr<internal::Session> session);
 	void stopSession(ShiftedDcId shiftedDcId);
@@ -122,9 +125,6 @@ public:
 	}
 	bool isKeysDestroyer() const {
 		return (_mode == Instance::Mode::KeysDestroyer);
-	}
-	bool isSpecialConfigRequester() const {
-		return (_mode == Instance::Mode::SpecialConfigRequester);
 	}
 
 	void scheduleKeyDestroy(ShiftedDcId shiftedDcId);
@@ -186,6 +186,7 @@ private:
 
 	std::unique_ptr<internal::ConfigLoader> _configLoader;
 	std::unique_ptr<DomainResolver> _domainResolver;
+	std::unique_ptr<SpecialConfigRequest> _httpUnixtimeLoader;
 	QString _userPhone;
 	mtpRequestId _cdnConfigLoadRequestId = 0;
 	crl::time _lastConfigLoadedTime = 0;
@@ -244,8 +245,6 @@ void Instance::Private::start(Config &&config) {
 
 	if (isKeysDestroyer()) {
 		_instance->connect(_instance, SIGNAL(keyDestroyed(qint32)), _instance, SLOT(onKeyDestroyed(qint32)), Qt::QueuedConnection);
-	} else if (isNormal()) {
-		unixtimeInit();
 	}
 
 	for (auto &key : config.keys) {
@@ -424,6 +423,17 @@ void Instance::Private::badConfigurationError() {
 	if (_mode == Mode::Normal) {
 		Core::App().badMtprotoConfigurationError();
 	}
+}
+
+void Instance::Private::syncHttpUnixtime() {
+	if (base::unixtime::http_valid() || _httpUnixtimeLoader) {
+		return;
+	}
+	_httpUnixtimeLoader = std::make_unique<SpecialConfigRequest>([=] {
+		InvokeQueued(_instance, [=] {
+			_httpUnixtimeLoader = nullptr;
+		});
+	});
 }
 
 void Instance::Private::requestConfigIfOld() {
@@ -806,7 +816,7 @@ void Instance::Private::configLoadDone(const MTPConfig &result) {
 	Local::writeSettings();
 
 	_configExpiresAt = crl::now()
-		+ (data.vexpires().v - unixtime()) * crl::time(1000);
+		+ (data.vexpires().v - base::unixtime::now()) * crl::time(1000);
 	requestConfigIfExpired();
 
 	emit _instance->configLoaded();
@@ -1577,6 +1587,10 @@ void Instance::setUserPhone(const QString &phone) {
 
 void Instance::badConfigurationError() {
 	_private->badConfigurationError();
+}
+
+void Instance::syncHttpUnixtime() {
+	_private->syncHttpUnixtime();
 }
 
 void Instance::requestConfigIfOld() {

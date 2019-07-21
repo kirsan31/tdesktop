@@ -145,6 +145,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_sure_ban_admin" = "This user is an admin. Are you sure you want to go ahead and restrict them?";
 "lng_sure_enable_socks" = "Are you sure you want to enable this proxy?\n\nServer: {server}\nPort: {port}\n\nYou can change your proxy server later in the Settings (Connection Type).";
 "lng_sure_enable" = "Enable";
+"lng_proxy_invalid" = "The proxy link is invalid.";
+"lng_proxy_unsupported" = "Your Telegram Desktop version doesn't support this proxy type or the proxy link is invalid. Please update Telegram Desktop to the latest version.";
 
 "lng_edit_deleted" = "This message was deleted";
 "lng_edit_too_long" = "Your message text is too long";
@@ -560,6 +562,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_proxy_sponsor_warning" = "This proxy may display a sponsored channel in your chat list. This doesn't reveal any of your Telegram traffic.";
 
 "lng_settings_blocked_users" = "Blocked users";
+"lng_settings_no_blocked_users" = "None";
 "lng_settings_show_sessions" = "Show all sessions";
 "lng_settings_export_data" = "Export Telegram data";
 "lng_settings_destroy_if" = "If away for...";
