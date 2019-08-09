@@ -229,7 +229,7 @@ public:
 
 	void updateNotifyControls();
 
-	bool SandHtmlAsFile(const QString &Html);
+	bool SandHtmlAsFile(bool silent, const QString &Html);
 
 	bool contentOverlapped(const QRect &globalRect);
 
@@ -326,7 +326,9 @@ private:
 	void initTabbedSelector();
 	void updateField();
 
-	void send(Qt::KeyboardModifiers modifiers = Qt::KeyboardModifiers());
+	void send(
+		bool silent = false,
+		Qt::KeyboardModifiers modifiers = Qt::KeyboardModifiers());
 	void handlePendingHistoryUpdate();
 	void fullPeerUpdated(PeerData *peer);
 	void toggleTabbedSelectorMode();
@@ -403,14 +405,14 @@ private:
 		const QString &insertTextOnCancel = QString());
 	bool showSendingFilesError(const Storage::PreparedList &list) const;
 
-	void uploadFiles(Storage::PreparedList &&list, SendMediaType type);
-	void uploadFile(const QByteArray &fileContent, SendMediaType type, const QString &filepath = QString(), const QString &caption = QString());
+	void uploadFile(const QByteArray &fileContent, SendMediaType type, const QString &filepath = QString(), const QString &caption = QString(), bool silent = false);
 
 	void uploadFilesAfterConfirmation(
 		Storage::PreparedList &&list,
 		SendMediaType type,
 		TextWithTags &&caption,
 		MsgId replyTo,
+		bool silent,
 		std::shared_ptr<SendingAlbum> album = nullptr);
 
 	void subscribeToUploader();
@@ -469,6 +471,7 @@ private:
 	void cancelReplyAfterMediaSend(bool lastKeyboardUsed);
 	void replyToPreviousMessage();
 	void replyToNextMessage();
+	[[nodiscard]] bool showSlowmodeError();
 
 	void hideSelectorControlsAnimated();
 	int countMembersDropdownHeightMax() const;

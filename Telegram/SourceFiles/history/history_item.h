@@ -16,7 +16,6 @@ enum class UnreadMentionType;
 struct HistoryMessageReplyMarkup;
 class ReplyKeyboard;
 class HistoryMessage;
-class HistoryMedia;
 
 namespace base {
 template <typename Enum>
@@ -80,7 +79,7 @@ public:
 		return true;
 	}
 	virtual void applyGroupAdminChanges(
-		const base::flat_map<UserId, bool> &changes) {
+		const base::flat_set<UserId> &changes) {
 	}
 
 	UserData *viaBot() const;
@@ -122,7 +121,6 @@ public:
 	[[nodiscard]] bool hasUnreadMediaFlag() const;
 	void markMediaRead();
 
-
 	// For edit media in history_message.
 	virtual void returnSavedMedia() {};
 	void savePreviousMedia() {
@@ -140,19 +138,19 @@ public:
 		return 0;
 	}
 
-	bool definesReplyKeyboard() const;
-	MTPDreplyKeyboardMarkup::Flags replyKeyboardFlags() const;
+	[[nodiscard]] bool definesReplyKeyboard() const;
+	[[nodiscard]] MTPDreplyKeyboardMarkup::Flags replyKeyboardFlags() const;
 
-	bool hasSwitchInlineButton() const {
+	[[nodiscard]] bool hasSwitchInlineButton() const {
 		return _flags & MTPDmessage_ClientFlag::f_has_switch_inline_button;
 	}
-	bool hasTextLinks() const {
+	[[nodiscard]] bool hasTextLinks() const {
 		return _flags & MTPDmessage_ClientFlag::f_has_text_links;
 	}
-	bool isGroupEssential() const {
+	[[nodiscard]] bool isGroupEssential() const {
 		return _flags & MTPDmessage_ClientFlag::f_is_group_essential;
 	}
-	bool isLocalUpdateMedia() const {
+	[[nodiscard]] bool isLocalUpdateMedia() const {
 		return _flags & MTPDmessage_ClientFlag::f_is_local_update_media;
 	}
 	void setIsLocalUpdateMedia(bool flag) {
@@ -162,18 +160,28 @@ public:
 			_flags &= ~MTPDmessage_ClientFlag::f_is_local_update_media;
 		}
 	}
-	bool isGroupMigrate() const {
+	[[nodiscard]] bool isGroupMigrate() const {
 		return isGroupEssential() && isEmpty();
 	}
-	bool hasViews() const {
+	[[nodiscard]] bool isIsolatedEmoji() const {
+		return _flags & MTPDmessage_ClientFlag::f_isolated_emoji;
+	}
+	[[nodiscard]] bool hasViews() const {
 		return _flags & MTPDmessage::Flag::f_views;
 	}
-	bool isPost() const {
+	[[nodiscard]] bool isPost() const {
 		return _flags & MTPDmessage::Flag::f_post;
 	}
-	bool isSilent() const {
+	[[nodiscard]] bool isSilent() const {
 		return _flags & MTPDmessage::Flag::f_silent;
 	}
+	[[nodiscard]] bool isSending() const {
+		return _flags & MTPDmessage_ClientFlag::f_sending;
+	}
+	[[nodiscard]] bool hasFailed() const {
+		return _flags & MTPDmessage_ClientFlag::f_failed;
+	}
+	void sendFailed();
 	virtual int viewsCount() const {
 		return hasViews() ? 1 : -1;
 	}
@@ -188,7 +196,9 @@ public:
 	virtual void applyEdition(const MTPDmessageService &message) {
 	}
 	void applyEditionToHistoryCleared();
-	virtual void updateSentMedia(const MTPMessageMedia *media) {
+	virtual void updateSentContent(
+		const TextWithEntities &textWithEntities,
+		const MTPMessageMedia *media) {
 	}
 	virtual void updateReplyMarkup(const MTPReplyMarkup *markup) {
 	}
@@ -218,6 +228,7 @@ public:
 	virtual QString inReplyText() const {
 		return inDialogsText(DrawInDialog::WithoutSender);
 	}
+	virtual Ui::Text::IsolatedEmoji isolatedEmoji() const;
 	virtual TextWithEntities originalText() const {
 		return TextWithEntities();
 	}

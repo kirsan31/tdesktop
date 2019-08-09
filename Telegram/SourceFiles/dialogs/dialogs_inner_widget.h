@@ -13,7 +13,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/rp_widget.h"
 #include "base/flags.h"
 
-class AuthSession;
+namespace Main {
+class Session;
+} // namespace Main
 
 namespace Ui {
 class IconButton;
@@ -68,6 +70,7 @@ public:
 
 	bool searchReceived(
 		const QVector<MTPMessage> &result,
+		HistoryItem *inject,
 		SearchRequestType type,
 		int fullCount);
 	void peerSearchReceived(
@@ -163,7 +166,7 @@ private:
 		NextOrOriginal,
 	};
 
-	AuthSession &session() const;
+	Main::Session &session() const;
 
 	void dialogRowReplaced(Row *oldRow, Row *newRow);
 

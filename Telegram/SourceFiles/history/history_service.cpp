@@ -9,11 +9,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "lang/lang_keys.h"
 #include "mainwidget.h"
-#include "auth_session.h"
+#include "main/main_session.h"
 #include "apiwrap.h"
 #include "layout.h"
 #include "history/history.h"
-#include "history/media/history_media_invoice.h"
+#include "history/view/media/history_view_invoice.h"
 #include "history/history_message.h"
 #include "history/history_item_components.h"
 #include "history/view/history_view_service_message.h"
@@ -669,7 +669,7 @@ void HistoryService::createFromMtp(const MTPDmessageService &message) {
 		UpdateComponents(HistoryServicePayment::Bit());
 		auto amount = message.vaction().c_messageActionPaymentSent().vtotal_amount().v;
 		auto currency = qs(message.vaction().c_messageActionPaymentSent().vcurrency());
-		Get<HistoryServicePayment>()->amount = FillAmountAndCurrency(amount, currency);
+		Get<HistoryServicePayment>()->amount = HistoryView::FillAmountAndCurrency(amount, currency);
 	}
 	if (const auto replyToMsgId = message.vreply_to_msg_id()) {
 		if (message.vaction().type() == mtpc_messageActionPinMessage) {
@@ -787,7 +787,7 @@ HistoryService::PreparedText GenerateJoinedText(
 	return { tr::lng_action_you_joined(tr::now) };
 }
 
-HistoryService *GenerateJoinedMessage(
+not_null<HistoryService*> GenerateJoinedMessage(
 		not_null<History*> history,
 		TimeId inviteDate,
 		not_null<UserData*> inviter,

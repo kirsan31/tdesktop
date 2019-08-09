@@ -24,7 +24,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/shortcuts.h"
 #include "core/sandbox.h"
 #include "core/application.h"
-#include "auth_session.h"
+#include "main/main_session.h"
 #include "intro/introwidget.h"
 #include "main/main_account.h" // Account::sessionValue.
 #include "mainwidget.h"
@@ -83,7 +83,7 @@ MainWindow::MainWindow(not_null<Window::Controller*> controller)
 	setLocale(QLocale(QLocale::English, QLocale::UnitedStates));
 
 	account().sessionValue(
-	) | rpl::start_with_next([=](AuthSession *session) {
+	) | rpl::start_with_next([=](Main::Session *session) {
 		updateGlobalMenu();
 		if (!session) {
 			_mediaPreview.destroy();
@@ -200,7 +200,7 @@ void MainWindow::clearPasscodeLock() {
 		_main->showAnimated(bg, true);
 		Core::App().checkStartUrl();
 	} else {
-		Core::App().startMtp();
+		account().startMtp();
 		if (account().sessionExists()) {
 			setupMain();
 		} else {
@@ -216,7 +216,7 @@ void MainWindow::setupIntro() {
 	auto bg = animated ? grabInner() : QPixmap();
 
 	clearWidgets();
-	_intro.create(bodyWidget());
+	_intro.create(bodyWidget(), &account());
 	updateControlsGeometry();
 
 	if (animated) {
@@ -590,7 +590,9 @@ void MainWindow::onShowAddContact() {
 	if (isHidden()) showFromTray();
 
 	if (account().sessionExists()) {
-		Ui::show(Box<AddContactBox>(), LayerOption::KeepOther);
+		Ui::show(
+			Box<AddContactBox>(&account().session()),
+			LayerOption::KeepOther);
 	}
 }
 
@@ -599,7 +601,9 @@ void MainWindow::onShowNewGroup() {
 
 	if (account().sessionExists()) {
 		Ui::show(
-			Box<GroupInfoBox>(GroupInfoBox::Type::Group),
+			Box<GroupInfoBox>(
+				sessionController(),
+				GroupInfoBox::Type::Group),
 			LayerOption::KeepOther);
 	}
 }
@@ -607,9 +611,11 @@ void MainWindow::onShowNewGroup() {
 void MainWindow::onShowNewChannel() {
 	if (isHidden()) showFromTray();
 
-	if (_main) {
+	if (account().sessionExists()) {
 		Ui::show(
-			Box<GroupInfoBox>(GroupInfoBox::Type::Channel),
+			Box<GroupInfoBox>(
+				sessionController(),
+				GroupInfoBox::Type::Channel),
 			LayerOption::KeepOther);
 	}
 }
@@ -619,16 +625,15 @@ void MainWindow::onLogout() {
 		showFromTray();
 	}
 
-	const auto logout = [] {
-		Core::App().logOut();
-	};
 	const auto callback = [=] {
 		if (account().sessionExists()
 			&& account().session().data().exportInProgress()) {
 			Ui::hideLayer();
-			account().session().data().stopExportWithConfirmation(logout);
+			account().session().data().stopExportWithConfirmation([=] {
+				account().logOut();
+			});
 		} else {
-			logout();
+			account().logOut();
 		}
 	};
 	Ui::show(Box<ConfirmBox>(

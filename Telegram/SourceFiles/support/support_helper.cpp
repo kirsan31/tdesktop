@@ -25,10 +25,14 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "storage/storage_media_prepare.h"
 #include "storage/localimageloader.h"
 #include "core/sandbox.h"
-#include "auth_session.h"
+#include "main/main_session.h"
 #include "observer_peer.h"
 #include "apiwrap.h"
 #include "styles/style_boxes.h"
+
+namespace Main {
+class Session;
+} // namespace Main
 
 namespace Support {
 namespace {
@@ -41,6 +45,7 @@ class EditInfoBox : public BoxContent {
 public:
 	EditInfoBox(
 		QWidget*,
+		not_null<Main::Session*> session,
 		const TextWithTags &text,
 		Fn<void(TextWithTags, Fn<void(bool success)>)> submit);
 
@@ -49,6 +54,7 @@ protected:
 	void setInnerFocus() override;
 
 private:
+	not_null<Main::Session*> _session;
 	object_ptr<Ui::InputField> _field = { nullptr };
 	Fn<void(TextWithTags, Fn<void(bool success)>)> _submit;
 
@@ -56,9 +62,11 @@ private:
 
 EditInfoBox::EditInfoBox(
 	QWidget*,
+	not_null<Main::Session*> session,
 	const TextWithTags &text,
 	Fn<void(TextWithTags, Fn<void(bool success)>)> submit)
-: _field(
+: _session(session)
+, _field(
 	this,
 	st::supportInfoField,
 	Ui::InputField::Mode::MultiLine,
@@ -68,9 +76,10 @@ EditInfoBox::EditInfoBox(
 	_field->setMaxLength(kMaxSupportInfoLength);
 	_field->setSubmitSettings(Ui::InputField::SubmitSettings::Both);
 	_field->setInstantReplaces(Ui::InstantReplaces::Default());
-	_field->setInstantReplacesEnabled(Global::ReplaceEmojiValue());
+	_field->setInstantReplacesEnabled(
+		session->settings().replaceEmojiValue());
 	_field->setMarkdownReplacesEnabled(rpl::single(true));
-	_field->setEditLinkCallback(DefaultEditLinkCallback(_field));
+	_field->setEditLinkCallback(DefaultEditLinkCallback(session, _field));
 }
 
 void EditInfoBox::prepare() {
@@ -93,7 +102,8 @@ void EditInfoBox::prepare() {
 	connect(_field, &Ui::InputField::cancelled, [=] { closeBox(); });
 	Ui::Emoji::SuggestionsController::Init(
 		getDelegate()->outerContainer(),
-		_field);
+		_field,
+		_session);
 
 	auto cursor = _field->textCursor();
 	cursor.movePosition(QTextCursor::End);
@@ -168,7 +178,7 @@ Data::Draft OccupiedDraft(const QString &normalizedName) {
 	if (!history) {
 		return false;
 	} else if (const auto user = history->peer->asUser()) {
-		return !user->botInfo;
+		return !user->isBot();
 	}
 	return false;
 }
@@ -273,7 +283,7 @@ TimeId OccupiedBySomeoneTill(History *history) {
 
 } // namespace
 
-Helper::Helper(not_null<AuthSession*> session)
+Helper::Helper(not_null<Main::Session*> session)
 : _session(session)
 , _templates(_session)
 , _reoccupyTimer([=] { reoccupy(); })
@@ -291,7 +301,7 @@ Helper::Helper(not_null<AuthSession*> session)
 	}).send();
 }
 
-std::unique_ptr<Helper> Helper::Create(not_null<AuthSession*> session) {
+std::unique_ptr<Helper> Helper::Create(not_null<Main::Session*> session) {
 	//return std::make_unique<Helper>(session); AssertIsDebug();
 	const auto valid = session->user()->phone().startsWith(qstr("424"));
 	return valid ? std::make_unique<Helper>(session) : nullptr;
@@ -503,7 +513,9 @@ void Helper::showEditInfoBox(not_null<UserData*> user) {
 			ConvertTextTagsToEntities(result.tags)
 		}, done);
 	};
-	Ui::show(Box<EditInfoBox>(editData, save), LayerOption::KeepOther);
+	Ui::show(
+		Box<EditInfoBox>(&user->session(), editData, save),
+		LayerOption::KeepOther);
 }
 
 void Helper::saveInfo(

@@ -23,7 +23,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "mainwindow.h"
 #include "mainwidget.h"
 #include "apiwrap.h"
-#include "auth_session.h"
+#include "main/main_session.h"
 
 namespace Window {
 namespace Notifications {
@@ -35,7 +35,7 @@ constexpr auto kWaitingForAllGroupedDelay = crl::time(1000);
 
 } // namespace
 
-System::System(not_null<AuthSession*> session)
+System::System(not_null<Main::Session*> session)
 : _session(session)
 , _waitTimer([=] { showNext(); })
 , _waitForAllGroupedTimer([=] { showGrouped(); }) {
@@ -61,30 +61,27 @@ void System::createManager() {
 	}
 }
 
-void System::schedule(History *history, HistoryItem *item) {
+void System::schedule(
+		not_null<History*> history,
+		not_null<HistoryItem*> item) {
 	if (App::quitting()
 		|| !history->currentNotification()
-		|| !AuthSession::Exists()) return;
+		|| !Main::Session::Exists()) return;
 
 	const auto notifyBy = (!history->peer->isUser() && item->mentionsMe())
 		? item->from().get()
 		: nullptr;
 
-	if (item->isSilent()) {
-		history->popNotification(item);
-		return;
-	}
-
-	Auth().data().requestNotifySettings(history->peer);
+	history->owner().requestNotifySettings(history->peer);
 	if (notifyBy) {
-		Auth().data().requestNotifySettings(notifyBy);
+		history->owner().requestNotifySettings(notifyBy);
 	}
-	auto haveSetting = !Auth().data().notifyMuteUnknown(history->peer);
-	if (haveSetting && Auth().data().notifyIsMuted(history->peer)) {
+	auto haveSetting = !history->owner().notifyMuteUnknown(history->peer);
+	if (haveSetting && history->owner().notifyIsMuted(history->peer)) {
 		if (notifyBy) {
-			haveSetting = !Auth().data().notifyMuteUnknown(notifyBy);
+			haveSetting = !history->owner().notifyMuteUnknown(notifyBy);
 			if (haveSetting) {
-				if (Auth().data().notifyIsMuted(notifyBy)) {
+				if (history->owner().notifyIsMuted(notifyBy)) {
 					history->popNotification(item);
 					return;
 				}
@@ -110,7 +107,9 @@ void System::schedule(History *history, HistoryItem *item) {
 	}
 
 	auto when = ms + delay;
-	_whenAlerts[history].insert(when, notifyBy);
+	if (!item->isSilent()) {
+		_whenAlerts[history].insert(when, notifyBy);
+	}
 	if (Global::DesktopNotify() && !Platform::Notifications::SkipToast()) {
 		auto &whenMap = _whenMaps[history];
 		if (whenMap.constFind(item->id) == whenMap.cend()) {
@@ -174,12 +173,12 @@ void System::checkDelayed() {
 		const auto peer = history->peer;
 		auto loaded = false;
 		auto muted = false;
-		if (!Auth().data().notifyMuteUnknown(peer)) {
-			if (!Auth().data().notifyIsMuted(peer)) {
+		if (!peer->owner().notifyMuteUnknown(peer)) {
+			if (!peer->owner().notifyIsMuted(peer)) {
 				loaded = true;
 			} else if (const auto from = i.value().notifyBy) {
-				if (!Auth().data().notifyMuteUnknown(from)) {
-					if (!Auth().data().notifyIsMuted(from)) {
+				if (!peer->owner().notifyMuteUnknown(from)) {
+					if (!peer->owner().notifyIsMuted(from)) {
 						loaded = true;
 					} else {
 						loaded = muted = true;
@@ -193,7 +192,7 @@ void System::checkDelayed() {
 			const auto fullId = FullMsgId(
 				history->channelId(),
 				i.value().msg);
-			if (const auto item = Auth().data().message(fullId)) {
+			if (const auto item = peer->owner().message(fullId)) {
 				if (!item->notificationReady()) {
 					loaded = false;
 				}
@@ -215,7 +214,7 @@ void System::checkDelayed() {
 }
 
 void System::showGrouped() {
-	if (const auto lastItem = Auth().data().message(_lastHistoryItemId)) {
+	if (const auto lastItem = session().data().message(_lastHistoryItemId)) {
 		_waitForAllGroupedTimer.cancel();
 		_manager->showNotification(lastItem, _lastForwardedCount);
 		_lastForwardedCount = 0;
@@ -230,7 +229,9 @@ void System::showNext() {
 		if (!_lastHistoryItemId || !item) {
 			return false;
 		}
-		if (const auto lastItem = Auth().data().message(_lastHistoryItemId)) {
+		const auto lastItem = item->history()->owner().message(
+			_lastHistoryItemId);
+		if (lastItem) {
 			return (lastItem->groupId() == item->groupId() || lastItem->author() == item->author());
 		}
 		return false;
@@ -242,14 +243,14 @@ void System::showNext() {
 	for (auto i = _whenAlerts.begin(); i != _whenAlerts.end();) {
 		while (!i.value().isEmpty() && i.value().begin().key() <= ms) {
 			const auto peer = i.key()->peer;
-			const auto peerUnknown = Auth().data().notifyMuteUnknown(peer);
+			const auto peerUnknown = peer->owner().notifyMuteUnknown(peer);
 			const auto peerAlert = !peerUnknown
-				&& !Auth().data().notifyIsMuted(peer);
+				&& !peer->owner().notifyIsMuted(peer);
 			const auto from = i.value().begin().value();
 			const auto fromUnknown = (!from
-				|| Auth().data().notifyMuteUnknown(from));
+				|| peer->owner().notifyMuteUnknown(from));
 			const auto fromAlert = !fromUnknown
-				&& !Auth().data().notifyIsMuted(from);
+				&& !peer->owner().notifyIsMuted(from);
 			if (peerAlert || fromAlert) {
 				alert = true;
 			}
@@ -432,7 +433,7 @@ void System::ensureSoundCreated() {
 
 	_soundTrack = Media::Audio::Current().createTrack();
 	_soundTrack->fillFromFile(
-		Auth().settings().getSoundPath(qsl("msg_incoming")));
+		session().settings().getSoundPath(qsl("msg_incoming")));
 }
 
 void System::updateAll() {
@@ -444,16 +445,21 @@ Manager::DisplayOptions Manager::getNotificationOptions(HistoryItem *item) {
 		|| Global::ScreenIsLocked();
 
 	DisplayOptions result;
-	result.hideNameAndPhoto = hideEverything || (Global::NotifyView() > dbinvShowName);
-	result.hideMessageText = hideEverything || (Global::NotifyView() > dbinvShowPreview);
-	result.hideReplyButton = result.hideMessageText || !item || !item->history()->peer->canWrite();
+	result.hideNameAndPhoto = hideEverything
+		|| (Global::NotifyView() > dbinvShowName);
+	result.hideMessageText = hideEverything
+		|| (Global::NotifyView() > dbinvShowPreview);
+	result.hideReplyButton = result.hideMessageText
+		|| !item
+		|| !item->history()->peer->canWrite()
+		|| (item->history()->peer->slowmodeSecondsLeft() > 0);
 	return result;
 }
 
 void Manager::notificationActivated(PeerId peerId, MsgId msgId) {
 	onBeforeNotificationActivated(peerId, msgId);
 	if (auto window = App::wnd()) {
-		auto history = Auth().data().history(peerId);
+		auto history = system()->session().data().history(peerId);
 		window->showFromTray();
 		window->reActivateWindow();
 		if (Core::App().locked()) {
@@ -475,7 +481,7 @@ void Manager::openNotificationMessage(
 			|| !IsServerMsgId(messageId)) {
 			return false;
 		}
-		const auto item = Auth().data().message(history->channelId(), messageId);
+		const auto item = history->owner().message(history->channelId(), messageId);
 		if (!item || !item->mentionsMe()) {
 			return false;
 		}
@@ -504,17 +510,17 @@ void Manager::notificationReplied(
 		const TextWithTags &reply) {
 	if (!peerId) return;
 
-	const auto history = Auth().data().history(peerId);
+	const auto history = system()->session().data().history(peerId);
 
 	auto message = ApiWrap::MessageToSend(history);
 	message.textWithTags = reply;
 	message.replyTo = (msgId > 0 && !history->peer->isUser()) ? msgId : 0;
 	message.clearDraft = false;
-	Auth().api().sendMessage(std::move(message));
+	history->session().api().sendMessage(std::move(message));
 
 	const auto item = history->owner().message(history->channelId(), msgId);
 	if (item && item->isUnreadMention() && !item->isUnreadMedia()) {
-		Auth().api().markMediaRead(item);
+		history->session().api().markMediaRead(item);
 	}
 }
 

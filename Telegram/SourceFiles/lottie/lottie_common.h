@@ -13,6 +13,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QSize>
 #include <QColor>
 #include <crl/crl_time.h>
+#include <vector>
 
 namespace Lottie {
 
@@ -53,6 +54,11 @@ struct FrameRequest {
 enum class Quality : char {
 	Default,
 	High,
+};
+
+struct ColorReplacements {
+	std::vector<std::pair<std::uint32_t, std::uint32_t>> replacements;
+	uint8 tag = 0;
 };
 
 QByteArray ReadContent(const QByteArray &data, const QString &filepath);

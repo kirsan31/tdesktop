@@ -8,7 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_session.h"
 
 #include "observer_peer.h"
-#include "auth_session.h"
+#include "main/main_session.h"
 #include "apiwrap.h"
 #include "mainwidget.h"
 #include "core/application.h"
@@ -20,11 +20,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "window/notifications_manager.h"
 #include "history/history.h"
 #include "history/history_item_components.h"
-#include "history/media/history_media.h"
+#include "history/view/media/history_view_media.h"
 #include "history/view/history_view_element.h"
 #include "inline_bots/inline_bot_layout_item.h"
 #include "storage/localstorage.h"
 #include "storage/storage_encrypted_file.h"
+#include "main/main_account.h"
 #include "media/player/media_player_instance.h" // instance()->play()
 #include "media/streaming/media_streaming_loader.h" // unique_ptr<Loader>
 #include "media/streaming/media_streaming_reader.h" // make_shared<Reader>
@@ -74,7 +75,7 @@ void CheckForSwitchInlineButton(not_null<HistoryItem*> item) {
 		return;
 	}
 	if (const auto user = item->history()->peer->asUser()) {
-		if (!user->botInfo || !user->botInfo->inlineReturnPeerId) {
+		if (!user->isBot() || !user->botInfo->inlineReturnPeerId) {
 			return;
 		}
 		if (const auto markup = item->Get<HistoryMessageReplyMarkup>()) {
@@ -155,11 +156,12 @@ MTPPhotoSize FindDocumentThumbnail(const MTPDdocument &data) {
 		: MTPPhotoSize(MTP_photoSizeEmpty(MTP_string()));
 }
 
-rpl::producer<int> PinnedDialogsCountMaxValue() {
+rpl::producer<int> PinnedDialogsCountMaxValue(
+		not_null<Main::Session*> session) {
 	return rpl::single(
 		rpl::empty_value()
 	) | rpl::then(
-		Core::App().configUpdates()
+		session->account().configUpdates()
 	) | rpl::map([=] {
 		return Global::PinnedDialogsCountMax();
 	});
@@ -187,7 +189,7 @@ bool PruneDestroyedAndSet(
 
 } // namespace
 
-Session::Session(not_null<AuthSession*> session)
+Session::Session(not_null<Main::Session*> session)
 : _session(session)
 , _cache(Core::App().databases().get(
 	Local::cachePath(),
@@ -195,7 +197,7 @@ Session::Session(not_null<AuthSession*> session)
 , _bigFileCache(Core::App().databases().get(
 	Local::cacheBigFilePath(),
 	Local::cacheBigFileSettings()))
-, _chatsList(PinnedDialogsCountMaxValue())
+, _chatsList(PinnedDialogsCountMaxValue(session))
 , _contactsList(Dialogs::SortMode::Name)
 , _contactsNoChatsList(Dialogs::SortMode::Name)
 , _selfDestructTimer([=] { checkSelfDestructItems(); })
@@ -1627,23 +1629,61 @@ bool Session::checkEntitiesAndViewsUpdate(const MTPDmessage &data) {
 		return result;
 	}();
 	if (const auto existing = message(peerToChannel(peer), data.vid().v)) {
-		existing->setText({
+		existing->updateSentContent({
 			qs(data.vmessage()),
 			TextUtilities::EntitiesFromMTP(data.ventities().value_or_empty())
-		});
-		existing->updateSentMedia(data.vmedia());
+		}, data.vmedia());
 		existing->updateReplyMarkup(data.vreply_markup());
 		existing->updateForwardedInfo(data.vfwd_from());
 		existing->setViewsCount(data.vviews().value_or(-1));
 		existing->indexAsNewItem();
+		if (const auto channel = existing->history()->peer->asChannel()) {
+			if (existing->out()) {
+				channel->growSlowmodeLastMessage(data.vdate().v);
+			}
+		}
 		requestItemTextRefresh(existing);
 		if (existing->mainView()) {
-			App::checkSavedGif(existing);
+			checkSavedGif(existing);
 			return true;
 		}
 		return false;
 	}
 	return false;
+}
+
+void Session::addSavedGif(not_null<DocumentData*> document) {
+	const auto index = _savedGifs.indexOf(document);
+	if (!index) {
+		return;
+	}
+	if (index > 0) {
+		_savedGifs.remove(index);
+	}
+	_savedGifs.push_front(document);
+	if (_savedGifs.size() > Global::SavedGifsLimit()) {
+		_savedGifs.pop_back();
+	}
+	Local::writeSavedGifs();
+
+	notifySavedGifsUpdated();
+	setLastSavedGifsUpdate(0);
+	session().api().updateStickers();
+}
+
+void Session::checkSavedGif(not_null<HistoryItem*> item) {
+	if (item->Has<HistoryMessageForwarded>()
+		|| (!item->out()
+			&& item->history()->peer != session().user())) {
+		return;
+	}
+	if (const auto media = item->media()) {
+		if (const auto document = media->document()) {
+			if (document->isGifv()) {
+				addSavedGif(document);
+			}
+		}
+	}
 }
 
 void Session::updateEditedMessage(const MTPMessage &data) {
@@ -2893,7 +2933,7 @@ void Session::applyUpdate(const MTPDupdateChatParticipants &update) {
 	if (const auto chat = chatLoaded(chatId)) {
 		ApplyChatUpdate(chat, update);
 		for (const auto user : chat->participants) {
-			if (user->botInfo && !user->botInfo->inited) {
+			if (user->isBot() && !user->botInfo->inited) {
 				_session->api().requestFullPeer(user);
 			}
 		}

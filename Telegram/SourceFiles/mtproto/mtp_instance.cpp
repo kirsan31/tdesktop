@@ -17,7 +17,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "mtproto/rsa_public_key.h"
 #include "storage/localstorage.h"
 #include "calls/calls_instance.h"
-#include "auth_session.h"
+#include "main/main_account.h"
+#include "main/main_session.h"
 #include "apiwrap.h"
 #include "core/application.h"
 #include "base/unixtime.h"
@@ -167,9 +168,9 @@ private:
 
 	void checkDelayedRequests();
 
-	not_null<Instance*> _instance;
-	not_null<DcOptions*> _dcOptions;
-	Instance::Mode _mode = Instance::Mode::Normal;
+	const not_null<Instance*> _instance;
+	const not_null<DcOptions*> _dcOptions;
+	const Instance::Mode _mode = Instance::Mode::Normal;
 
 	DcId _mainDcId = Config::kDefaultMainDc;
 	bool _mainDcIdForced = false;
@@ -808,7 +809,7 @@ void Instance::Private::configLoadDone(const MTPConfig &result) {
 		data.vlang_pack_version().value_or_empty(),
 		data.vbase_lang_pack_version().value_or_empty());
 
-	Core::App().configUpdated();
+	Core::App().activeAccount().configUpdated();
 
 	if (const auto prefix = data.vautoupdate_url_prefix()) {
 		Local::writeAutoupdatePrefix(qs(*prefix));
@@ -1064,22 +1065,24 @@ void Instance::Private::execCallback(
 			}
 		};
 
-		try {
-			if (from >= end) throw mtpErrorInsufficient();
-			if (*from == mtpc_rpc_error) {
-				auto error = MTPRpcError();
-				error.read(from, end);
-				handleError(error);
-			} else {
-				if (h.onDone) {
-					(*h.onDone)(requestId, from, end);
-				}
-				unregisterRequest(requestId);
-			}
-		} catch (Exception &e) {
+		if (from >= end) {
 			handleError(RPCError::Local(
 				"RESPONSE_PARSE_FAILED",
-				QString("exception text: ") + e.what()));
+				"Empty response."));
+		} else if (*from == mtpc_rpc_error) {
+			auto error = MTPRpcError();
+			handleError(error.read(from, end) ? error : RPCError::Local(
+				"RESPONSE_PARSE_FAILED",
+				"Error parse failed."));
+		} else {
+			if (h.onDone) {
+				if (!(*h.onDone)(requestId, from, end)) {
+					handleError(RPCError::Local(
+						"RESPONSE_PARSE_FAILED",
+						"Response parse failed."));
+				}
+			}
+			unregisterRequest(requestId);
 		}
 	} else {
 		DEBUG_LOG(("RPC Info: parser not found for %1").arg(requestId));
@@ -1094,9 +1097,11 @@ bool Instance::Private::hasCallbacks(mtpRequestId requestId) {
 }
 
 void Instance::Private::globalCallback(const mtpPrime *from, const mtpPrime *end) {
-	if (_globalHandler.onDone) {
-		(*_globalHandler.onDone)(0, from, end); // some updates were received
+	if (!_globalHandler.onDone) {
+		return;
 	}
+	// Handle updates.
+	[[maybe_unused]] bool result = (*_globalHandler.onDone)(0, from, end);
 }
 
 void Instance::Private::onStateChange(int32 dcWithShift, int32 state) {
@@ -1125,7 +1130,7 @@ bool Instance::Private::rpcErrorOccured(mtpRequestId requestId, const RPCFailHan
 }
 
 bool Instance::Private::hasAuthorization() {
-	return AuthSession::Exists();
+	return Main::Session::Exists();
 }
 
 void Instance::Private::importDone(const MTPauth_Authorization &result, mtpRequestId requestId) {

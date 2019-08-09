@@ -11,7 +11,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "storage/localstorage.h"
 #include "mainwidget.h"
 #include "mainwindow.h"
-#include "auth_session.h"
+#include "main/main_session.h"
 #include "data/data_session.h"
 #include "base/unixtime.h"
 #include "boxes/confirm_box.h"
@@ -75,8 +75,9 @@ private:
 
 };
 
-SessionsBox::SessionsBox(QWidget*)
-: _shortPollTimer([=] { shortPollSessions(); }) {
+SessionsBox::SessionsBox(QWidget*, not_null<Main::Session*> session)
+: _session(session)
+, _shortPollTimer([=] { shortPollSessions(); }) {
 }
 
 void SessionsBox::prepare() {
@@ -99,7 +100,7 @@ void SessionsBox::prepare() {
 		terminateAll();
 	}, lifetime());
 
-	Auth().data().newAuthorizationChecks(
+	_session->data().newAuthorizationChecks(
 	) | rpl::start_with_next([=] {
 		shortPollSessions();
 	}, lifetime());

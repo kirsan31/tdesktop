@@ -33,7 +33,9 @@ class Element;
 class ElementDelegate;
 } // namespace HistoryView
 
-class AuthSession;
+namespace Main {
+class Session;
+} // namespace Main
 
 namespace Media {
 namespace Clip {
@@ -70,10 +72,10 @@ public:
 		QString text;
 	};
 
-	explicit Session(not_null<AuthSession*> session);
+	explicit Session(not_null<Main::Session*> session);
 	~Session();
 
-	[[nodiscard]] AuthSession &session() const {
+	[[nodiscard]] Main::Session &session() const {
 		return *_session;
 	}
 
@@ -308,6 +310,9 @@ public:
 	Stickers::SavedGifs &savedGifsRef() {
 		return _savedGifs;
 	}
+
+	void addSavedGif(not_null<DocumentData*> document);
+	void checkSavedGif(not_null<HistoryItem*> item);
 
 	HistoryItemsList idsToItems(const MessageIdsList &ids) const;
 	MessageIdsList itemsToIds(const HistoryItemsList &items) const;
@@ -808,7 +813,7 @@ private:
 
 	void setWallpapers(const QVector<MTPWallPaper> &data, int32 hash);
 
-	not_null<AuthSession*> _session;
+	not_null<Main::Session*> _session;
 
 	Storage::DatabasePointer _cache;
 	Storage::DatabasePointer _bigFileCache;

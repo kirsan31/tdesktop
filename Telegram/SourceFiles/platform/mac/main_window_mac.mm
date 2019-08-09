@@ -12,7 +12,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "mainwindow.h"
 #include "mainwidget.h"
 #include "core/application.h"
-#include "auth_session.h"
+#include "main/main_session.h"
 #include "history/history.h"
 #include "history/history_widget.h"
 #include "history/history_inner_widget.h"
@@ -21,6 +21,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "media/audio/media_audio.h"
 #include "storage/localstorage.h"
 #include "window/notifications_manager_default.h"
+#include "window/window_session_controller.h"
 #include "window/themes/window_theme.h"
 #include "platform/mac/mac_touchbar.h"
 #include "platform/platform_notifications_manager.h"
@@ -433,7 +434,7 @@ void MainWindow::initTouchBar() {
 	}
 
 	account().sessionValue(
-	) | rpl::start_with_next([=](AuthSession *session) {
+	) | rpl::start_with_next([=](Main::Session *session) {
 		if (session) {
 			// We need only common pinned dialogs.
 			if (!_private->_touchBar) {
@@ -673,7 +674,7 @@ void MainWindow::createGlobalMenu() {
 		if (!account().sessionExists()) {
 			return;
 		}
-		Ui::show(Box<PeerListBox>(std::make_unique<ContactsBoxController>(), [](not_null<PeerListBox*> box) {
+		Ui::show(Box<PeerListBox>(std::make_unique<ContactsBoxController>(sessionController()), [](not_null<PeerListBox*> box) {
 			box->addButton(tr::lng_close(), [box] { box->closeBox(); });
 			box->addLeftButton(tr::lng_profile_add_contact(), [] { App::wnd()->onShowAddContact(); });
 		}));

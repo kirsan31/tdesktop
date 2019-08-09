@@ -13,18 +13,19 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/view/history_view_element.h"
 #include "history/view/history_view_service_message.h"
 #include "history/history_item_components.h"
-#include "history/media/history_media_grouped.h"
+#include "history/view/media/history_view_media_grouped.h"
 #include "history/history_service.h"
 #include "history/history_message.h"
 #include "history/history.h"
 #include "media/clip/media_clip_reader.h"
 #include "ui/effects/ripple_animation.h"
+#include "ui/text/text_isolated_emoji.h"
 #include "ui/text_options.h"
 #include "storage/file_upload.h"
 #include "storage/storage_facade.h"
 #include "storage/storage_shared_media.h"
 //#include "storage/storage_feed_messages.h" // #feed
-#include "auth_session.h"
+#include "main/main_session.h"
 #include "apiwrap.h"
 #include "media/audio/media_audio.h"
 #include "core/application.h"
@@ -39,6 +40,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_channel.h"
 #include "data/data_chat.h"
 #include "data/data_user.h"
+#include "observer_peer.h"
 #include "styles/style_dialogs.h"
 #include "styles/style_history.h"
 
@@ -172,6 +174,9 @@ HistoryItem::HistoryItem(
 , _from(from ? history->owner().user(from) : history->peer)
 , _flags(flags)
 , _date(date) {
+	if (IsClientMsgId(id)) {
+		_history->registerLocalMessage(this);
+	}
 }
 
 TimeId HistoryItem::date() const {
@@ -367,7 +372,7 @@ UserData *HistoryItem::getMessageBot() const {
 	if (!bot) {
 		bot = history()->peer->asUser();
 	}
-	return (bot && bot->botInfo) ? bot : nullptr;
+	return (bot && bot->isBot()) ? bot : nullptr;
 };
 
 void HistoryItem::destroy() {
@@ -432,9 +437,14 @@ void HistoryItem::indexAsNewItem() {
 }
 
 void HistoryItem::setRealId(MsgId newId) {
-	Expects(!IsServerMsgId(id));
+	Expects(_flags & MTPDmessage_ClientFlag::f_sending);
+	Expects(IsClientMsgId(id));
 
 	const auto oldId = std::exchange(id, newId);
+	_flags &= ~MTPDmessage_ClientFlag::f_sending;
+	if (IsServerMsgId(id)) {
+		_history->unregisterLocalMessage(this);
+	}
 	_history->owner().notifyItemIdChange({ this, oldId });
 
 	// We don't call Notify::replyMarkupUpdated(this) and update keyboard
@@ -562,7 +572,7 @@ bool HistoryItem::suggestReport() const {
 	} else if (const auto channel = history()->peer->asChannel()) {
 		return true;
 	} else if (const auto user = history()->peer->asUser()) {
-		return user->botInfo != nullptr;
+		return user->isBot();
 	}
 	return false;
 }
@@ -656,6 +666,19 @@ MsgId HistoryItem::idOriginal() const {
 	return id;
 }
 
+void HistoryItem::sendFailed() {
+	Expects(_flags & MTPDmessage_ClientFlag::f_sending);
+	Expects(!(_flags & MTPDmessage_ClientFlag::f_failed));
+
+	_flags = (_flags | MTPDmessage_ClientFlag::f_failed)
+		& ~MTPDmessage_ClientFlag::f_sending;
+	if (history()->peer->isChannel()) {
+		Notify::peerUpdatedDelayed(
+			history()->peer,
+			Notify::PeerUpdate::Flag::ChannelLocalMessages);
+	}
+}
+
 bool HistoryItem::needCheck() const {
 	return out() || (id < 0 && history()->peer->isSelf());
 }
@@ -677,7 +700,7 @@ bool HistoryItem::unread() const {
 				return false;
 			}
 			if (const auto user = history()->peer->asUser()) {
-				if (user->botInfo) {
+				if (user->isBot()) {
 					return false;
 				}
 			} else if (const auto channel = history()->peer->asChannel()) {
@@ -755,6 +778,10 @@ QString HistoryItem::inDialogsText(DrawInDialog way) const {
 		return tr::lng_dialogs_text_with_from(tr::now, lt_from_part, fromWrapped, lt_message, plainText);
 	}
 	return plainText;
+}
+
+Ui::Text::IsolatedEmoji HistoryItem::isolatedEmoji() const {
+	return Ui::Text::IsolatedEmoji();
 }
 
 void HistoryItem::drawInDialog(

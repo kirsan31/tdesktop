@@ -23,7 +23,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "window/window_session_controller.h"
 #include "core/click_handler_types.h"
 #include "ui/toast/toast.h"
-#include "auth_session.h"
+#include "main/main_session.h"
 #include "storage/localimageloader.h"
 #include "storage/localstorage.h"
 #include "storage/file_upload.h"
@@ -2084,9 +2084,7 @@ QString FormController::getPlainTextFromValue(
 void FormController::startPhoneVerification(not_null<Value*> value) {
 	value->verification.requestId = request(MTPaccount_SendVerifyPhoneCode(
 		MTP_string(getPhoneFromValue(value)),
-		MTP_codeSettings(
-			MTP_flags(0),
-			MTPstring())
+		MTP_codeSettings(MTP_flags(0))
 	)).done([=](const MTPauth_SentCode &result) {
 		Expects(result.type() == mtpc_auth_sentCode);
 
