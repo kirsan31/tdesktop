@@ -49,6 +49,7 @@ public:
 		std::unique_ptr<Content> content);
 
 	void draw(Painter &p, const QRect &r, TextSelection selection, crl::time ms) const override;
+	PointState pointState(QPoint point) const override;
 	TextState textState(QPoint point, StateRequest request) const override;
 
 	bool toggleSelectionByHandlerClick(const ClickHandlerPtr &p) const override {
@@ -100,6 +101,12 @@ private:
 	int additionalWidth(
 		const HistoryMessageVia *via,
 		const HistoryMessageReply *reply) const;
+
+	inline int calculateFullRight(const QRect &inner) const;
+	inline QPoint calculateFastActionPosition(
+		int fullBottom,
+		int replyRight,
+		int fullRight) const;
 
 	std::unique_ptr<Content> _content;
 	QSize _contentSize;
