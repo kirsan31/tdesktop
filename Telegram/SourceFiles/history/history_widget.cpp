@@ -2918,7 +2918,7 @@ void HistoryWidget::hideSelectorControlsAnimated() {
 	}
 }
 
-bool HistoryWidget::SandHtmlAsFile(bool silent, const QString &Html) {
+bool HistoryWidget::SandHtmlAsFile(const QString &Html, Api::SendOptions options) {
 	QString file;
 	QByteArray BA;
 	if (Global::AskDownloadPath()) {
@@ -2967,7 +2967,7 @@ bool HistoryWidget::SandHtmlAsFile(bool silent, const QString &Html) {
 			return false;
 		}
 	}
-	uploadFile(BA, SendMediaType::File, file, qsl("HTML"), silent);
+	uploadFile(BA, SendMediaType::File, file, qsl("HTML"), options);
 	return true;
 }
 
@@ -2983,7 +2983,7 @@ void HistoryWidget::send(Api::SendOptions options) {
 
 	auto txt = _field->getLastText();
 	if (txt.startsWith(qsl("```html")) && txt.length() > 7) { // send as html file
-		if (!SandHtmlAsFile(options.silent, txt.mid(7))) {
+		if (!SandHtmlAsFile(txt.mid(7), options)) {
 			return;
 		}
 	}
@@ -4442,12 +4442,25 @@ void HistoryWidget::uploadFilesAfterConfirmation(
 
 void HistoryWidget::uploadFile(
 		const QByteArray &fileContent,
-		SendMediaType type, const QString &filepath, const QString &caption, bool silent) {
+		SendMediaType type) {
 	if (!canWriteMessage()) return;
 
 	auto action = Api::SendAction(_history);
 	action.replyTo = replyToId();
-	action.options.silent = silent;
+	session().api().sendFile(fileContent, type, action);
+}
+
+void HistoryWidget::uploadFile(
+		const QByteArray &fileContent,
+		SendMediaType type, 
+	    const QString &filepath, 
+	    const QString &caption, 
+	    Api::SendOptions options) {
+	if (!canWriteMessage()) return;
+
+	auto action = Api::SendAction(_history);
+	action.replyTo = replyToId();
+	action.options = options;
 	session().api().sendFile(filepath, fileContent, type, action, caption);
 }
 

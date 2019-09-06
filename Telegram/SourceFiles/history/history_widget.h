@@ -229,7 +229,7 @@ public:
 
 	void updateNotifyControls();
 
-	bool SandHtmlAsFile(bool silent, const QString &Html);
+	bool SandHtmlAsFile(const QString &Html, Api::SendOptions options);
 
 	bool contentOverlapped(const QRect &globalRect);
 
@@ -448,7 +448,8 @@ private:
 		const QString &insertTextOnCancel = QString());
 	bool showSendingFilesError(const Storage::PreparedList &list) const;
 
-	void uploadFile(const QByteArray &fileContent, SendMediaType type, const QString &filepath = QString(), const QString &caption = QString(), bool silent = false);
+	void uploadFile(const QByteArray &fileContent, SendMediaType type);
+	void uploadFile(const QByteArray &fileContent, SendMediaType type, const QString &filepath, const QString &caption, Api::SendOptions options);
 
 	void uploadFilesAfterConfirmation(
 		Storage::PreparedList &&list,
