@@ -387,6 +387,10 @@ bool Application::eventFilter(QObject *object, QEvent *e) {
 	return QObject::eventFilter(object, e);
 }
 
+void Application::saveSettingsDelayed(crl::time delay) {
+	_saveSettingsTimer.callOnce(delay);
+}
+
 void Application::setCurrentProxy(
 		const ProxyData &proxy,
 		ProxyData::Settings settings) {
@@ -432,6 +436,7 @@ void Application::startLocalStorage() {
 			}
 		}
 	});
+	_saveSettingsTimer.setCallback([=] { Local::writeSettings(); });
 }
 
 void Application::forceLogOut(const TextWithEntities &explanation) {
