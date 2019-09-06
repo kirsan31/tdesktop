@@ -2607,17 +2607,16 @@ void History::dialogEntryApplied() {
 		return;
 	}
 	if (!chatListMessage()) {
+		clear(ClearType::Unload);
+		addNewerSlice(QVector<MTPMessage>());
+		addOlderSlice(QVector<MTPMessage>());
 		if (const auto channel = peer->asChannel()) {
 			const auto inviter = channel->inviter;
 			if (inviter > 0 && channel->amIn()) {
 				if (const auto from = owner().userLoaded(inviter)) {
-					clear(ClearType::Unload);
-					addNewerSlice(QVector<MTPMessage>());
 					insertJoinedMessage();
 				}
 			}
-		} else {
-			clear(ClearType::DeleteChat);
 		}
 		return;
 	}
@@ -3061,13 +3060,14 @@ void History::clear(ClearType type) {
 		_loadedAtTop = _loadedAtBottom = false;
 	} else {
 		// Leave the 'sending' messages in local messages.
-		for (auto i = begin(_localMessages); i != end(_localMessages);) {
-			const auto item = *i;
+		auto local = base::flat_set<not_null<HistoryItem*>>();
+		for (const auto item : _localMessages) {
 			if (!item->isSending()) {
-				i = _localMessages.erase(i);
-			} else {
-				++i;
+				local.emplace(item);
 			}
+		}
+		for (const auto item : local) {
+			item->destroy();
 		}
 		_notifications.clear();
 		owner().notifyHistoryCleared(this);
