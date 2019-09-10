@@ -63,6 +63,15 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "boxes/share_box.h"
 #include "core/file_utilities.h"
 
+#include <QtWidgets/QDesktopWidget>
+#include <QtCore/QMimeDatabase>
+#include <QtGui/QGuiApplication>
+#include <QtGui/QDesktopServices>
+#include <QtWidgets/QLabel>
+#include <QtWidgets/QVBoxLayout>
+#include <QtWidgets/QScrollArea>
+#include <QtWidgets/QStyle>
+
 namespace Core {
 namespace {
 
@@ -139,7 +148,7 @@ Application::~Application() {
 	stopWebLoadManager();
 	App::deinitMedia();
 
-	Window::Theme::Unload();
+	Window::Theme::Uninitialize();
 
 	Media::Player::finish(_audio.get());
 	style::stopManager();
@@ -328,6 +337,14 @@ void Application::showHtmlDocument(const QString &filepath) {
 	else {
 		File::Launch(filepath);
 	}
+}
+
+void Application::showTheme(
+		not_null<DocumentData*> document,
+		const Data::CloudTheme &cloud) {
+	_mediaView->showTheme(document, cloud);
+	_mediaView->activateWindow();
+	_mediaView->setFocus();
 }
 
 PeerData *Application::ui_getPeerForMouseAction() {

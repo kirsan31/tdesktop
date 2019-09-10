@@ -33,6 +33,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "mainwindow.h"
 #include "core/application.h"
 #include "lottie/lottie_animation.h"
+#include <QGuiApplication>
 
 namespace {
 
@@ -322,7 +323,7 @@ void DocumentOpenClickHandler::Open(
 		LaunchWithWarning(location.name(), context);
 	};
 	const auto &location = data->location(true);
-	if (data->isTheme() && !location.isEmpty() && location.accessEnable()) {
+	if (data->isTheme() && data->loaded(DocumentData::FilePathResolve::Checked)) {
 		Core::App().showDocument(data, context);
 		location.accessDisable();
 	} else if (data->canBePlayed()) {
@@ -577,6 +578,17 @@ void DocumentData::validateLottieSticker() {
 	}
 }
 
+void DocumentData::setDataAndCache(const QByteArray &data) {
+	setData(data);
+	if (saveToCache() && data.size() <= Storage::kMaxFileInMemory) {
+		session().data().cache().put(
+			cacheKey(),
+			Storage::Cache::Database::TaggedValue(
+				base::duplicate(data),
+				cacheTag()));
+	}
+}
+
 bool DocumentData::checkWallPaperProperties() {
 	if (type == WallPaperDocument) {
 		return true;
@@ -648,6 +660,7 @@ void DocumentData::validateGoodThumbnail() {
 	if (!isVideoFile()
 		&& !isAnimation()
 		&& !isWallPaper()
+		&& !isTheme()
 		&& (!sticker() || !sticker()->animated)) {
 		_goodThumbnail = nullptr;
 	} else if (!_goodThumbnail && hasRemoteLocation()) {
@@ -702,7 +715,8 @@ bool DocumentData::saveToCache() const {
 	return (type == StickerDocument && size < Storage::kMaxStickerInMemory)
 		|| (isAnimation() && size < Storage::kMaxAnimationInMemory)
 		|| (isVoiceMessage() && size < Storage::kMaxVoiceInMemory)
-		|| (type == WallPaperDocument);
+		|| (type == WallPaperDocument)
+		|| (isTheme() && size < Storage::kMaxFileInMemory);
 }
 
 void DocumentData::unload() {
@@ -1471,7 +1485,8 @@ bool DocumentData::isGifv() const {
 
 bool DocumentData::isTheme() const {
 	return
-		_filename.endsWith(
+		_mimeString == qstr("application/x-tgtheme-tdesktop")
+		|| _filename.endsWith(
 			qstr(".tdesktop-theme"),
 			Qt::CaseInsensitive)
 		|| _filename.endsWith(

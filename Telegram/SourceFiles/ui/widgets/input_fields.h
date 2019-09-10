@@ -15,6 +15,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <spellcheckdecorator.h>
 #endif
 
+#include <QtWidgets/QLineEdit>
+#include <QtWidgets/QTextEdit>
+
 class UserData;
 
 namespace Ui {
