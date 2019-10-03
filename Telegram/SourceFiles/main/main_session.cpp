@@ -25,6 +25,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "calls/calls_instance.h"
 #include "support/support_helper.h"
 #include "observer_peer.h"
+#include "facades.h"
 
 namespace Main {
 namespace {
@@ -36,8 +37,10 @@ constexpr auto kLegacyCallsPeerToPeerNobody = 4;
 
 Session::Session(
 	not_null<Main::Account*> account,
-	const MTPUser &user)
+	const MTPUser &user,
+	Settings &&settings)
 : _account(account)
+, _settings(std::move(settings))
 , _saveSettingsTimer([=] { Local::writeUserSettings(); })
 , _autoLockTimer([=] { checkAutoLock(); })
 , _api(std::make_unique<ApiWrap>(this))
@@ -83,6 +86,15 @@ Session::Session(
 						Local::writeSelf();
 					}
 				}));
+
+		if (_settings.hadLegacyCallsPeerToPeerNobody()) {
+			api().savePrivacy(
+				MTP_inputPrivacyKeyPhoneP2P(),
+				QVector<MTPInputPrivacyRule>(
+					1,
+					MTP_inputPrivacyValueDisallowAll()));
+			saveSettingsDelayed();
+		}
 	});
 
 	Window::Theme::Background()->start();
@@ -124,18 +136,6 @@ bool Session::validateSelf(const MTPUser &user) {
 		return false;
 	}
 	return true;
-}
-
-void Session::moveSettingsFrom(Settings &&other) {
-	_settings.moveFrom(std::move(other));
-	if (_settings.hadLegacyCallsPeerToPeerNobody()) {
-		api().savePrivacy(
-			MTP_inputPrivacyKeyPhoneP2P(),
-			QVector<MTPInputPrivacyRule>(
-				1,
-				MTP_inputPrivacyValueDisallowAll()));
-		saveSettingsDelayed();
-	}
 }
 
 void Session::saveSettingsDelayed(crl::time delay) {

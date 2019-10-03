@@ -34,6 +34,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/application.h"
 #include "lottie/lottie_animation.h"
 #include <QGuiApplication>
+#include "facades.h"
+#include "app.h"
 
 namespace {
 

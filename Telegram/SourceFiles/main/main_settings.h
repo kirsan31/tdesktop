@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #pragma once
 
 #include "data/data_auto_download.h"
+#include "ui/rect_part.h"
 
 enum class SendFilesWay;
 
@@ -31,9 +32,6 @@ namespace Main {
 
 class Settings final {
 public:
-	void moveFrom(Settings &&other) {
-		_variables = std::move(other._variables);
-	}
 	[[nodiscard]] QByteArray serialize() const;
 	void constructFromSerialized(const QByteArray &serialized);
 

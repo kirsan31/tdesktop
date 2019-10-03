@@ -10,6 +10,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "mtproto/dc_options.h"
 #include "mtproto/mtp_instance.h"
 #include "mtproto/special_config_request.h"
+#include "facades.h"
 
 namespace MTP {
 namespace internal {
@@ -128,7 +129,11 @@ void ConfigLoader::createSpecialLoader() {
 			const std::string &ip,
 			int port,
 			bytes::const_span secret) {
-		addSpecialEndpoint(dcId, ip, port, secret);
+		if (ip.empty()) {
+			_specialLoader = nullptr;
+		} else {
+			addSpecialEndpoint(dcId, ip, port, secret);
+		}
 	}, _phone);
 }
 
