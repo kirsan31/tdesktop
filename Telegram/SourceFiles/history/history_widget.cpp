@@ -27,6 +27,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/text/text_utilities.h" // Ui::Text::ToUpper
 #include "ui/image/image.h"
 #include "ui/special_buttons.h"
+#include "ui/platform/ui_platform_utility.h"
 #include "inline_bots/inline_bot_result.h"
 #include "base/unixtime.h"
 #include "data/data_drafts.h"
@@ -2939,9 +2940,9 @@ bool HistoryWidget::SandHtmlAsFile(const QString &Html, Api::SendOptions options
 	QString file;
 	QByteArray BA;
 	if (Global::AskDownloadPath()) {
-		psBringToBack(this);
+		Ui::Platform::BringToBack(this);
 		file = FileNameForSave(tr::lng_save_file(tr::now), qsl("HTML file (*.html)"), qsl(""), QUuid::createUuid().toString(), true);
-		psShowOverAll(this);
+		Ui::Platform::ShowOverAll(this);
 		if (!file.isEmpty()) {
 			QFile f(file);
 			f.open(QIODevice::WriteOnly);
