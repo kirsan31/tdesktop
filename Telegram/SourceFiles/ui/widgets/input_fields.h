@@ -13,8 +13,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/text/text_entity.h"
 #include "styles/style_widgets.h"
 #ifdef TDESKTOP_ENABLE_SONNET_SPELLCHECK
-#include <highlighter.h>
-#include <spellcheckdecorator.h>
+#include "highlighter.h"
+#include "spellcheckdecorator.h"
 #endif
 
 #include <QtWidgets/QLineEdit>

@@ -61,15 +61,10 @@
           'library_dirs': [
             '<(libs_loc)/sonnet/lib/Release',
           ],
-        }]],           
+        }]],
       },
     },
-  }], [ 'build_uwp', {
-    'defines': [
-      'TDESKTOP_DISABLE_AUTOUPDATE',
-      'OS_WIN_STORE',
-    ]
-  }], [ '"<(tdesktop_enable_sonnet_spellcheck)" == "1"', {
+    'conditions': [[ '"<(tdesktop_enable_sonnet_spellcheck)" == "1"', {
     'include_dirs': [
       '<(libs_loc)/sonnet/include',
     ],
@@ -81,5 +76,12 @@
     'defines': [
       'TDESKTOP_ENABLE_SONNET_SPELLCHECK',
     ]
-  }]],
+    }]],
+  }], [ 'build_uwp', {
+    'defines': [
+      'TDESKTOP_DISABLE_AUTOUPDATE',
+      'OS_WIN_STORE',
+    ]
+  }],
+  ],
 }

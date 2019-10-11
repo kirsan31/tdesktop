@@ -52,7 +52,16 @@
       'include_dirs': [
         '/usr/local/macold/include/c++/v1',
       ],
-    }]],
+    }],
+    [ '"<(tdesktop_enable_sonnet_spellcheck)" == "1"' and 'build_win', {   
+    'include_dirs': [
+    '<(libs_loc)/sonnet/include',
+    ],   
+    'defines': [
+    'TDESKTOP_ENABLE_SONNET_SPELLCHECK',
+    ]
+    }],
+    ], 
     'include_dirs': [
       '<(src_loc)',
       '<(SHARED_INTERMEDIATE_DIR)',

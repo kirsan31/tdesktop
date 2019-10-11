@@ -3312,7 +3312,7 @@ void InputField::contextMenuEventInner(QContextMenuEvent *e) {
 #ifdef TDESKTOP_ENABLE_SONNET_SPELLCHECK		
 		if (const auto h = _SpellCheckDecorator->highlighter()) {
 			menu->addSeparator();
-			menu->addAction(h->isActive() ? qsl("Disable spell checking") : qsl("Enable spell checking"), [=] {
+			menu->addAction(h->isActive() ? QStringLiteral("Disable spell checking") : QStringLiteral("Enable spell checking"), [=] {
 				h->setActive(!h->isActive());
 			});
 		}
