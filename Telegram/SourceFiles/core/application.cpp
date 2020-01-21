@@ -292,8 +292,8 @@ void Application::showPhoto(
 	_mediaView->setFocus();
 }
 
-void Application::showDocument(not_null<DocumentData*> document, HistoryItem *item) {
-	if (cUseExternalVideoPlayer()
+void Application::showDocument(not_null<DocumentData*> document, HistoryItem *item, bool TryExternal) {
+	if ((TryExternal || cUseExternalVideoPlayer())
 		&& document->isVideoFile()
 		&& document->loaded()) {
 		QDesktopServices::openUrl(QUrl("file:///" + document->location(false).fname));

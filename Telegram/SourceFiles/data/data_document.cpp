@@ -335,7 +335,7 @@ void DocumentOpenClickHandler::Open(
 		} else if (context && data->isAnimation()) {
 			data->owner().requestAnimationPlayInline(context);
 		} else {
-			Core::App().showDocument(data, context);
+			Core::App().showDocument(data, context, QGuiApplication::keyboardModifiers().testFlag(Qt::ControlModifier));
 		}
 	} else if (!location.isEmpty()
 		|| (data->loaded()
