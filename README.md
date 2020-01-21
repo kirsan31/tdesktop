@@ -5,10 +5,8 @@ Attempt to address this TDesktop issues:
 [Auto resizing message block]  
 [removed -- to −, >> to », << to «]  
 Workaround for [Automatically Syntax-Highlight]. More [here](docs/html-code-processing.md).  
-Spell checking with Sonnet on Win (using Hunspell).
+Ability to open downloaded video in external video player by CTRL + Click.
 
-
-**Tested only on Windows7 x64!**  
 Due to lack of time to deeply understand the TDesktop code, some of my corrections are _quick fixes_ for achievement desire result.  
 
 ### Original text:
@@ -54,8 +52,6 @@ The source code is published under GPLv3 with OpenSSL exception, the license is 
 * Open Sans font ([Apache License 2.0](http://www.apache.org/licenses/LICENSE-2.0.html))
 * Emoji alpha codes ([MIT License](https://github.com/emojione/emojione/blob/master/extras/alpha-codes/LICENSE.md))
 * Catch test framework ([Boost License](https://github.com/philsquared/Catch/blob/master/LICENSE.txt))
-* Sonnet ([LGPL](https://github.com/KDE/sonnet/blob/master/COPYING.LIB))
-* Hunspell ([MPL+LGPL](https://github.com/hunspell/hunspell/blob/master/license.hunspell))
 * xxHash ([BSD License](https://github.com/Cyan4973/xxHash/blob/dev/LICENSE))
 * QR Code generator ([MIT License](https://github.com/nayuki/QR-Code-generator#license))
 * CMake ([New BSD License](https://github.com/Kitware/CMake/blob/master/Copyright.txt))
