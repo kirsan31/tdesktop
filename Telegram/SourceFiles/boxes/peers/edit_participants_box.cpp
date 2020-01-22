@@ -745,6 +745,7 @@ ParticipantsBoxController::ParticipantsBoxController(
 : PeerListController(CreateSearchController(peer, role, &_additional))
 , _navigation(navigation)
 , _peer(peer)
+, _api(_peer->session().api().instance())
 , _role(role)
 , _additional(peer, _role) {
 	subscribeToMigration();
@@ -874,7 +875,7 @@ void ParticipantsBoxController::Start(
 	};
 	Ui::show(
 		Box<PeerListBox>(std::move(controller), initBox),
-		LayerOption::KeepOther);
+		Ui::LayerOption::KeepOther);
 }
 
 void ParticipantsBoxController::addNewItem() {
@@ -907,7 +908,7 @@ void ParticipantsBoxController::addNewItem() {
 				adminDone,
 				restrictedDone),
 			initBox),
-		LayerOption::KeepOther);
+		Ui::LayerOption::KeepOther);
 }
 
 void ParticipantsBoxController::addNewParticipants() {
@@ -929,7 +930,7 @@ void ParticipantsBoxController::addNewParticipants() {
 			channel,
 			{ already.begin(), already.end() });
 	} else {
-		Ui::show(Box<MaxInviteBox>(channel), LayerOption::KeepOther);
+		Ui::show(Box<MaxInviteBox>(channel), Ui::LayerOption::KeepOther);
 	}
 }
 
@@ -1022,7 +1023,7 @@ void ParticipantsBoxController::restoreState(
 		: nullptr;
 	if (const auto my = dynamic_cast<SavedState*>(typeErasedState)) {
 		if (const auto requestId = base::take(_loadRequestId)) {
-			request(requestId).cancel();
+			_api.request(requestId).cancel();
 		}
 
 		_additional = std::move(my->additional);
@@ -1251,7 +1252,7 @@ void ParticipantsBoxController::loadMoreRows() {
 		: kParticipantsFirstPageCount;
 	const auto participantsHash = 0;
 
-	_loadRequestId = request(MTPchannels_GetParticipants(
+	_loadRequestId = _api.request(MTPchannels_GetParticipants(
 		channel->inputChannel,
 		filter,
 		MTP_int(_offset),
@@ -1474,7 +1475,7 @@ void ParticipantsBoxController::showAdmin(not_null<UserData*> user) {
 		});
 		box->setSaveCallback(SaveAdminCallback(_peer, user, done, fail));
 	}
-	_editParticipantBox = Ui::show(std::move(box), LayerOption::KeepOther);
+	_editParticipantBox = Ui::show(std::move(box), Ui::LayerOption::KeepOther);
 }
 
 void ParticipantsBoxController::editAdminDone(
@@ -1552,7 +1553,7 @@ void ParticipantsBoxController::showRestricted(not_null<UserData*> user) {
 		box->setSaveCallback(
 			SaveRestrictedCallback(_peer, user, done, fail));
 	}
-	_editParticipantBox = Ui::show(std::move(box), LayerOption::KeepOther);
+	_editParticipantBox = Ui::show(std::move(box), Ui::LayerOption::KeepOther);
 }
 
 void ParticipantsBoxController::editRestrictedDone(
@@ -1618,7 +1619,7 @@ void ParticipantsBoxController::kickMember(not_null<UserData*> user) {
 			text,
 			tr::lng_box_remove(tr::now),
 			crl::guard(this, [=] { kickMemberSure(user); })),
-		LayerOption::KeepOther);
+		Ui::LayerOption::KeepOther);
 }
 
 void ParticipantsBoxController::unkickMember(not_null<UserData*> user) {
@@ -1661,7 +1662,7 @@ void ParticipantsBoxController::removeAdmin(not_null<UserData*> user) {
 				user->firstName),
 			tr::lng_box_remove(tr::now),
 			crl::guard(this, [=] { removeAdminSure(user); })),
-		LayerOption::KeepOther);
+		Ui::LayerOption::KeepOther);
 }
 
 void ParticipantsBoxController::removeAdminSure(not_null<UserData*> user) {
@@ -1786,7 +1787,7 @@ std::unique_ptr<PeerListRow> ParticipantsBoxController::createRow(
 			row->setActionLink(tr::lng_profile_kick(tr::now));
 		}
 	}
-	return std::move(row);
+	return row;
 }
 
 auto ParticipantsBoxController::computeType(
@@ -1906,7 +1907,8 @@ ParticipantsBoxSearchController::ParticipantsBoxSearchController(
 	not_null<ParticipantsAdditionalData*> additional)
 : _channel(channel)
 , _role(role)
-, _additional(additional) {
+, _additional(additional)
+, _api(_channel->session().api().instance()) {
 	_timer.setCallback([=] { searchOnServer(); });
 }
 
@@ -1931,14 +1933,14 @@ auto ParticipantsBoxSearchController::saveState() const
 	result->offset = _offset;
 	result->allLoaded = _allLoaded;
 	result->wasLoading = (_requestId != 0);
-	return std::move(result);
+	return result;
 }
 
 void ParticipantsBoxSearchController::restoreState(
 		std::unique_ptr<SavedStateBase> state) {
 	if (auto my = dynamic_cast<SavedState*>(state.get())) {
 		if (auto requestId = base::take(_requestId)) {
-			request(requestId).cancel();
+			_api.request(requestId).cancel();
 		}
 		_cache.clear();
 		_queries.clear();
@@ -2002,7 +2004,7 @@ bool ParticipantsBoxSearchController::loadMoreRows() {
 	auto perPage = kParticipantsPerPage;
 	auto participantsHash = 0;
 
-	_requestId = request(MTPchannels_GetParticipants(
+	_requestId = _api.request(MTPchannels_GetParticipants(
 		_channel->inputChannel,
 		filter,
 		MTP_int(_offset),

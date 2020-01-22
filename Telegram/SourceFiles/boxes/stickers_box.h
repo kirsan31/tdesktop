@@ -26,6 +26,7 @@ class RippleAnimation;
 class SettingsSlider;
 class SlideAnimation;
 class CrossButton;
+class BoxContentDivider;
 } // namespace Ui
 
 namespace Main {
@@ -33,7 +34,7 @@ class Session;
 } // namespace Main
 
 class StickersBox final
-	: public BoxContent
+	: public Ui::BoxContent
 	, public RPCSender
 	, private base::Subscriber {
 public:
@@ -152,8 +153,7 @@ private:
 // This class is hold in header because it requires Qt preprocessing.
 class StickersBox::Inner
 	: public Ui::RpWidget
-	, private base::Subscriber
-	, private MTP::Sender {
+	, private base::Subscriber {
 	Q_OBJECT
 
 public:
@@ -319,6 +319,7 @@ private:
 	int countMaxNameWidth() const;
 
 	const not_null<Main::Session*> _session;
+	MTP::Sender _api;
 
 	Section _section;
 
@@ -365,7 +366,7 @@ private:
 	object_ptr<AddressField> _megagroupSetField = { nullptr };
 	object_ptr<Ui::PlainShadow> _megagroupSelectedShadow = { nullptr };
 	object_ptr<Ui::CrossButton> _megagroupSelectedRemove = { nullptr };
-	object_ptr<BoxContentDivider> _megagroupDivider = { nullptr };
+	object_ptr<Ui::BoxContentDivider> _megagroupDivider = { nullptr };
 	object_ptr<Ui::FlatLabel> _megagroupSubTitle = { nullptr };
 	base::Timer _megagroupSetAddressChangedTimer;
 	mtpRequestId _megagroupSetRequestId = 0;

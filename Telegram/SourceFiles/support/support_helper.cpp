@@ -30,6 +30,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "observer_peer.h"
 #include "apiwrap.h"
 #include "facades.h"
+#include "styles/style_layers.h"
 #include "styles/style_boxes.h"
 
 namespace Main {
@@ -43,7 +44,7 @@ constexpr auto kOccupyFor = TimeId(60);
 constexpr auto kReoccupyEach = 30 * crl::time(1000);
 constexpr auto kMaxSupportInfoLength = MaxMessageSize * 4;
 
-class EditInfoBox : public BoxContent {
+class EditInfoBox : public Ui::BoxContent {
 public:
 	EditInfoBox(
 		QWidget*,
@@ -287,10 +288,11 @@ TimeId OccupiedBySomeoneTill(History *history) {
 
 Helper::Helper(not_null<Main::Session*> session)
 : _session(session)
+, _api(_session->api().instance())
 , _templates(_session)
 , _reoccupyTimer([=] { reoccupy(); })
 , _checkOccupiedTimer([=] { checkOccupiedChats(); }) {
-	request(MTPhelp_GetSupportName(
+	_api.request(MTPhelp_GetSupportName(
 	)).done([=](const MTPhelp_SupportName &result) {
 		result.match([&](const MTPDhelp_supportName &data) {
 			setSupportName(qs(data.vname()));
@@ -421,7 +423,7 @@ bool Helper::isOccupiedBySomeone(History *history) const {
 }
 
 void Helper::refreshInfo(not_null<UserData*> user) {
-	request(MTPhelp_GetUserInfo(
+	_api.request(MTPhelp_GetUserInfo(
 		user->inputUser
 	)).done([=](const MTPhelp_UserInfo &result) {
 		applyInfo(user, result);
@@ -517,7 +519,7 @@ void Helper::showEditInfoBox(not_null<UserData*> user) {
 	};
 	Ui::show(
 		Box<EditInfoBox>(&user->session(), editData, save),
-		LayerOption::KeepOther);
+		Ui::LayerOption::KeepOther);
 }
 
 void Helper::saveInfo(
@@ -530,7 +532,7 @@ void Helper::saveInfo(
 			return;
 		} else {
 			i->second.data = text;
-			request(base::take(i->second.requestId)).cancel();
+			_api.request(base::take(i->second.requestId)).cancel();
 		}
 	} else {
 		_userInfoSaving.emplace(user, SavingInfo{ text });
@@ -544,7 +546,7 @@ void Helper::saveInfo(
 	const auto entities = Api::EntitiesToMTP(
 		text.entities,
 		Api::ConvertOption::SkipLocal);
-	_userInfoSaving[user].requestId = request(MTPhelp_EditUserInfo(
+	_userInfoSaving[user].requestId = _api.request(MTPhelp_EditUserInfo(
 		user->inputUser,
 		MTP_string(text.text),
 		entities

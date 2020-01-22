@@ -24,11 +24,6 @@ public:
 	explicit MainWindow(not_null<Window::Controller*> controller);
 
 	void psFirstShow();
-	void psInitSysMenu();
-	void psUpdateMargins();
-
-	void psRefreshTaskbarIcon() {
-	}
 
 	bool psFilterNativeEvent(void *event);
 
@@ -54,6 +49,7 @@ public slots:
 	void psMacPaste();
 	void psMacDelete();
 	void psMacSelectAll();
+	void psMacEmojiAndSymbols();
 
 	void psMacBold();
 	void psMacItalic();

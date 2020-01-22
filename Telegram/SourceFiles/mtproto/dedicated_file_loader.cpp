@@ -7,10 +7,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "mtproto/dedicated_file_loader.h"
 
+#include "mtproto/facade.h"
 #include "main/main_session.h"
-#include "core/application.h"
 #include "main/main_account.h" // Account::sessionChanges.
-#include "facades.h"
+#include "core/application.h"
+#include "base/call_delayed.h"
 
 namespace MTP {
 namespace {
@@ -321,7 +322,7 @@ void DedicatedLoader::sendRequest() {
 	_offset += kChunkSize;
 
 	if (_requests.size() < kRequestsCount) {
-		App::CallDelayed(kNextRequestDelay, this, [=] { sendRequest(); });
+		base::call_delayed(kNextRequestDelay, this, [=] { sendRequest(); });
 	}
 }
 

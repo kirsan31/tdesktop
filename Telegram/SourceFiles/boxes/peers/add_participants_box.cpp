@@ -98,13 +98,13 @@ void AddParticipantsBoxController::rowClicked(not_null<PeerListRow*> row) {
 		if (!_peer->isMegagroup()) {
 			Ui::show(
 				Box<MaxInviteBox>(_peer->asChannel()),
-				LayerOption::KeepOther);
+				Ui::LayerOption::KeepOther);
 		}
 	} else if (count >= Global::ChatSizeMax()
 		&& count < Global::MegagroupSizeMax()) {
 		Ui::show(
 			Box<InformBox>(tr::lng_profile_add_more_after_create(tr::now)),
-			LayerOption::KeepOther);
+			Ui::LayerOption::KeepOther);
 	}
 }
 
@@ -210,7 +210,7 @@ void AddParticipantsBoxController::Start(
 		Box<PeerListBox>(
 			std::move(controller),
 			std::move(initBox)),
-		LayerOption::KeepOther);
+		Ui::LayerOption::KeepOther);
 }
 
 void AddParticipantsBoxController::Start(
@@ -251,7 +251,7 @@ void AddParticipantsBoxController::Start(
 		Box<PeerListBox>(
 			std::move(controller),
 			std::move(initBox)),
-		LayerOption::KeepOther);
+		Ui::LayerOption::KeepOther);
 }
 
 void AddParticipantsBoxController::Start(
@@ -276,6 +276,7 @@ AddSpecialBoxController::AddSpecialBoxController(
 	peer,
 	&_additional))
 , _peer(peer)
+, _api(_peer->session().api().instance())
 , _role(role)
 , _additional(peer, Role::Members)
 , _adminDoneCallback(std::move(adminDoneCallback))
@@ -408,7 +409,7 @@ void AddSpecialBoxController::loadMoreRows() {
 	const auto participantsHash = 0;
 	const auto channel = _peer->asChannel();
 
-	_loadRequestId = request(MTPchannels_GetParticipants(
+	_loadRequestId = _api.request(MTPchannels_GetParticipants(
 		channel->inputChannel,
 		MTP_channelParticipantsRecent(),
 		MTP_int(_offset),
@@ -464,7 +465,7 @@ bool AddSpecialBoxController::checkInfoLoaded(
 
 	// We don't know what this user status is in the group.
 	const auto channel = _peer->asChannel();
-	request(MTPchannels_GetParticipant(
+	_api.request(MTPchannels_GetParticipant(
 		channel->inputChannel,
 		user->inputUser
 	)).done([=](const MTPchannels_ChannelParticipant &result) {
@@ -517,19 +518,19 @@ void AddSpecialBoxController::showAdmin(
 						Box<ConfirmBox>(
 							tr::lng_sure_add_admin_unremove(tr::now),
 							showAdminSure),
-						LayerOption::KeepOther);
+						Ui::LayerOption::KeepOther);
 					return;
 				}
 			} else {
 				Ui::show(Box<InformBox>(
 					tr::lng_error_cant_add_admin_unban(tr::now)),
-					LayerOption::KeepOther);
+					Ui::LayerOption::KeepOther);
 				return;
 			}
 		} else {
 			Ui::show(Box<InformBox>(
 				tr::lng_error_cant_add_admin_invite(tr::now)),
-				LayerOption::KeepOther);
+				Ui::LayerOption::KeepOther);
 			return;
 		}
 	} else if (_additional.restrictedRights(user).has_value()) {
@@ -540,13 +541,13 @@ void AddSpecialBoxController::showAdmin(
 					Box<ConfirmBox>(
 						tr::lng_sure_add_admin_unremove(tr::now),
 						showAdminSure),
-					LayerOption::KeepOther);
+					Ui::LayerOption::KeepOther);
 				return;
 			}
 		} else {
 			Ui::show(Box<InformBox>(
 				tr::lng_error_cant_add_admin_unban(tr::now)),
-				LayerOption::KeepOther);
+				Ui::LayerOption::KeepOther);
 			return;
 		}
 	} else if (_additional.isExternal(user)) {
@@ -560,13 +561,13 @@ void AddSpecialBoxController::showAdmin(
 					Box<ConfirmBox>(
 						text,
 						showAdminSure),
-					LayerOption::KeepOther);
+					Ui::LayerOption::KeepOther);
 				return;
 			}
 		} else {
 			Ui::show(
 				Box<InformBox>(tr::lng_error_cant_add_admin_invite(tr::now)),
-				LayerOption::KeepOther);
+				Ui::LayerOption::KeepOther);
 			return;
 		}
 	}
@@ -597,7 +598,7 @@ void AddSpecialBoxController::showAdmin(
 		});
 		box->setSaveCallback(SaveAdminCallback(_peer, user, done, fail));
 	}
-	_editParticipantBox = Ui::show(std::move(box), LayerOption::KeepOther);
+	_editParticipantBox = Ui::show(std::move(box), Ui::LayerOption::KeepOther);
 }
 
 void AddSpecialBoxController::editAdminDone(
@@ -669,13 +670,13 @@ void AddSpecialBoxController::showRestricted(
 					Box<ConfirmBox>(
 						tr::lng_sure_ban_admin(tr::now),
 						showRestrictedSure),
-					LayerOption::KeepOther);
+					Ui::LayerOption::KeepOther);
 				return;
 			}
 		} else {
 			Ui::show(
 				Box<InformBox>(tr::lng_error_cant_ban_admin(tr::now)),
-				LayerOption::KeepOther);
+				Ui::LayerOption::KeepOther);
 			return;
 		}
 	}
@@ -704,7 +705,7 @@ void AddSpecialBoxController::showRestricted(
 		box->setSaveCallback(
 			SaveRestrictedCallback(_peer, user, done, fail));
 	}
-	_editParticipantBox = Ui::show(std::move(box), LayerOption::KeepOther);
+	_editParticipantBox = Ui::show(std::move(box), Ui::LayerOption::KeepOther);
 }
 
 void AddSpecialBoxController::editRestrictedDone(
@@ -759,13 +760,13 @@ void AddSpecialBoxController::kickUser(
 					Box<ConfirmBox>(
 						tr::lng_sure_ban_admin(tr::now),
 						kickUserSure),
-					LayerOption::KeepOther);
+					Ui::LayerOption::KeepOther);
 				return;
 			}
 		} else {
 			Ui::show(
 				Box<InformBox>(tr::lng_error_cant_ban_admin(tr::now)),
-				LayerOption::KeepOther);
+				Ui::LayerOption::KeepOther);
 			return;
 		}
 	}
@@ -780,7 +781,7 @@ void AddSpecialBoxController::kickUser(
 				user->name);
 		_editBox = Ui::show(
 			Box<ConfirmBox>(text, kickUserSure),
-			LayerOption::KeepOther);
+			Ui::LayerOption::KeepOther);
 		return;
 	}
 
@@ -829,6 +830,7 @@ AddSpecialBoxSearchController::AddSpecialBoxSearchController(
 	not_null<ParticipantsAdditionalData*> additional)
 : _peer(peer)
 , _additional(additional)
+, _api(_peer->session().api().instance())
 , _timer([=] { searchOnServer(); }) {
 	subscribeToMigration();
 }
@@ -924,7 +926,7 @@ void AddSpecialBoxSearchController::requestParticipants() {
 	const auto participantsHash = 0;
 	const auto channel = _peer->asChannel();
 
-	_requestId = request(MTPchannels_GetParticipants(
+	_requestId = _api.request(MTPchannels_GetParticipants(
 		channel->inputChannel,
 		MTP_channelParticipantsSearch(MTP_string(_query)),
 		MTP_int(_offset),
@@ -1012,7 +1014,7 @@ void AddSpecialBoxSearchController::requestGlobal() {
 	}
 
 	auto perPage = SearchPeopleLimit;
-	_requestId = request(MTPcontacts_Search(
+	_requestId = _api.request(MTPcontacts_Search(
 		MTP_string(_query),
 		MTP_int(perPage)
 	)).done([=](const MTPcontacts_Found &result, mtpRequestId requestId) {

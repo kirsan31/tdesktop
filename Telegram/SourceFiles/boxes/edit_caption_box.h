@@ -11,6 +11,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "storage/storage_media_prepare.h"
 #include "ui/wrap/slide_wrap.h"
 #include "media/clip/media_clip_reader.h"
+#include "mtproto/mtproto_rpc_sender.h"
 
 namespace ChatHelpers {
 class TabbedPanel;
@@ -36,7 +37,7 @@ class SessionController;
 } // namespace Window
 
 class EditCaptionBox
-	: public BoxContent
+	: public Ui::BoxContent
 	, public RPCSender
 	, private base::Subscriber {
 public:

@@ -9,6 +9,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "data/data_document.h"
 #include "data/data_session.h"
+#include "data/data_file_origin.h"
 #include "boxes/stickers_box.h"
 #include "boxes/confirm_box.h"
 #include "lang/lang_keys.h"
@@ -82,7 +83,7 @@ void ApplyArchivedResult(const MTPDmessages_stickerSetInstallResultArchive &d) {
 	toast.multiline = true;
 	toast.padding = st::stickersToastPadding;
 	Ui::Toast::Show(toast);
-//	Ui::show(Box<StickersBox>(archived, &Auth()), LayerOption::KeepOther);
+//	Ui::show(Box<StickersBox>(archived, &Auth()), Ui::LayerOption::KeepOther);
 
 	Auth().data().notifyStickersUpdated();
 }
@@ -187,7 +188,7 @@ void UndoInstallLocally(uint64 setId) {
 
 	Ui::show(
 		Box<InformBox>(tr::lng_stickers_not_found(tr::now)),
-		LayerOption::KeepOther);
+		Ui::LayerOption::KeepOther);
 }
 
 bool IsFaved(not_null<const DocumentData*> document) {
@@ -891,7 +892,7 @@ std::optional<std::vector<not_null<EmojiPtr>>> GetEmojiListFromSet(
 		if (result.empty()) {
 			return std::nullopt;
 		}
-		return std::move(result);
+		return result;
 	}
 	return std::nullopt;
 }

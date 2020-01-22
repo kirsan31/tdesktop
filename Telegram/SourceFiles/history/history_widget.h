@@ -116,7 +116,7 @@ public:
 	void leaveToChildEvent(QEvent *e, QWidget *child) override;
 	void dragEnterEvent(QDragEnterEvent *e) override;
 	void dragLeaveEvent(QDragLeaveEvent *e) override;
-    void dropEvent(QDropEvent *e) override;
+	void dropEvent(QDropEvent *e) override;
 
 	bool isItemCompletelyHidden(HistoryItem *item) const;
 	void updateTopBarSelection();
@@ -512,8 +512,8 @@ private:
 	void applyInlineBotQuery(UserData *bot, const QString &query);
 
 	void cancelReplyAfterMediaSend(bool lastKeyboardUsed);
-	void replyToPreviousMessage();
-	void replyToNextMessage();
+	bool replyToPreviousMessage();
+	bool replyToNextMessage();
 	[[nodiscard]] bool showSlowmodeError();
 
 	void hideSelectorControlsAnimated();

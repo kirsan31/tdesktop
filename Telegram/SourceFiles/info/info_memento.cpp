@@ -160,10 +160,10 @@ object_ptr<Window::SectionWidget> Memento::createWidget(
 		wrap,
 		this);
 	result->setGeometry(geometry);
-	return std::move(result);
+	return result;
 }
 
-object_ptr<Window::LayerWidget> Memento::createLayer(
+object_ptr<Ui::LayerWidget> Memento::createLayer(
 		not_null<Window::SessionController*> controller,
 		const QRect &geometry) {
 	if (geometry.width() >= LayerWidget::MinimalSupportedWidth()) {
@@ -198,10 +198,10 @@ object_ptr<Window::SectionWidget> MoveMemento::createWidget(
 		wrap,
 		this);
 	result->setGeometry(geometry);
-	return std::move(result);
+	return result;
 }
 
-object_ptr<Window::LayerWidget> MoveMemento::createLayer(
+object_ptr<Ui::LayerWidget> MoveMemento::createLayer(
 		not_null<Window::SessionController*> controller,
 		const QRect &geometry) {
 	if (geometry.width() < LayerWidget::MinimalSupportedWidth()) {

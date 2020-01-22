@@ -192,7 +192,7 @@ public:
 		max_w = avail.width();
 		accumulate_max(max_w, st::windowMinWidth);
 		max_h = avail.height();
-		accumulate_max(max_h, st::titleHeight + st::windowMinHeight);
+		accumulate_max(max_h, st::defaultWindowTitle.height + st::windowMinHeight);
 
 		HINSTANCE appinst = (HINSTANCE)GetModuleHandle(0);
 		HWND hwnd = _window ? _window->psHwnd() : nullptr;
@@ -825,7 +825,7 @@ void MainWindow::psFirstShow() {
 			&& cStartMinimized()
 			&& !Core::App().passcodeLocked())) {
 		DEBUG_LOG(("Window Pos: First show, setting minimized after."));
-		setWindowState(Qt::WindowMinimized);
+		setWindowState(windowState() | Qt::WindowMinimized);
 		if (Global::WorkMode().value() == dbiwmTrayOnly
 			|| Global::WorkMode().value() == dbiwmWindowAndTray) {
 			hide();

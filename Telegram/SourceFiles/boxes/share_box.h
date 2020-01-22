@@ -12,6 +12,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/timer.h"
 #include "ui/effects/animations.h"
 #include "ui/effects/round_checkbox.h"
+#include "mtproto/mtproto_rpc_sender.h"
 
 enum class SendMenuType;
 
@@ -52,7 +53,7 @@ void ShareGameScoreByHash(
 	not_null<Main::Session*> session,
 	const QString &hash);
 
-class ShareBox : public BoxContent, public RPCSender {
+class ShareBox : public Ui::BoxContent, public RPCSender {
 public:
 	using CopyCallback = Fn<void()>;
 	using SubmitCallback = Fn<void(

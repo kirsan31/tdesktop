@@ -14,7 +14,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "boxes/share_box.h"
 #include "boxes/edit_caption_box.h"
 #include "core/file_utilities.h"
-#include "core/event_filter.h"
 #include "ui/toast/toast.h"
 #include "ui/special_buttons.h"
 #include "ui/emoji_config.h"
@@ -29,7 +28,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/special_buttons.h"
 #include "ui/platform/ui_platform_utility.h"
 #include "inline_bots/inline_bot_result.h"
+#include "base/event_filter.h"
 #include "base/unixtime.h"
+#include "base/call_delayed.h"
 #include "data/data_drafts.h"
 #include "data/data_session.h"
 #include "data/data_web_page.h"
@@ -40,6 +41,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_chat.h"
 #include "data/data_user.h"
 #include "data/data_scheduled_messages.h"
+#include "data/data_file_origin.h"
 #include "history/history.h"
 #include "history/history_item.h"
 #include "history/history_message.h"
@@ -126,6 +128,10 @@ constexpr auto kSaveDraftAnywayTimeout = 5000;
 constexpr auto kSaveCloudDraftIdleTimeout = 14000;
 constexpr auto kRecordingUpdateDelta = crl::time(100);
 constexpr auto kRefreshSlowmodeLabelTimeout = crl::time(200);
+constexpr auto kCommonModifiers = 0
+	| Qt::ShiftModifier
+	| Qt::MetaModifier
+	| Qt::ControlModifier;
 
 ApiWrap::RequestMessageDataCallback replyEditMessageDataCallback() {
 	return [](ChannelData *channel, MsgId msgId) {
@@ -399,6 +405,7 @@ HistoryWidget::HistoryWidget(
 		_parsedLinks = std::move(parsed);
 		checkPreview();
 	}, lifetime());
+	_field->rawTextEdit()->installEventFilter(this);
 	_field->rawTextEdit()->installEventFilter(_fieldAutocomplete);
 	_field->setMimeDataHook([=](
 			not_null<const QMimeData*> data,
@@ -413,6 +420,7 @@ HistoryWidget::HistoryWidget(
 		}
 		Unexpected("action in MimeData hook.");
 	});
+	InitSpellchecker(&controller->session(), _field);
 
 	const auto suggestions = Ui::Emoji::SuggestionsController::Init(
 		this,
@@ -557,7 +565,7 @@ HistoryWidget::HistoryWidget(
 				updateNotifyControls();
 			}
 			if (update.flags & UpdateFlag::UnavailableReasonChanged) {
-				const auto unavailable = _peer->unavailableReason();
+				const auto unavailable = _peer->computeUnavailableReason();
 				if (!unavailable.isEmpty()) {
 					controller->showBackFromStack();
 					Ui::show(Box<InformBox>(unavailable));
@@ -683,11 +691,11 @@ void HistoryWidget::initTabbedSelector() {
 
 	const auto selector = controller()->tabbedSelector();
 
-	Core::InstallEventFilter(this, selector, [=](not_null<QEvent*> e) {
+	base::install_event_filter(this, selector, [=](not_null<QEvent*> e) {
 		if (_tabbedPanel && e->type() == QEvent::ParentChange) {
 			setTabbedPanel(nullptr);
 		}
-		return Core::EventFilter::Result::Continue;
+		return base::EventFilterResult::Continue;
 	});
 
 	selector->emojiChosen(
@@ -1471,7 +1479,9 @@ void HistoryWidget::notify_userIsBotChanged(UserData *user) {
 void HistoryWidget::setupShortcuts() {
 	Shortcuts::Requests(
 	) | rpl::filter([=] {
-		return isActiveWindow() && !Ui::isLayerShown() && inFocusChain();
+		return Ui::AppInFocus()
+			&& Ui::InFocusChain(this)
+			&& !Ui::isLayerShown();
 	}) | rpl::start_with_next([=](not_null<Shortcuts::Request*> request) {
 		using Command = Shortcuts::Command;
 		if (_history) {
@@ -1701,9 +1711,8 @@ void HistoryWidget::showHistory(
 		cancelTypingAction();
 	}
 
-	if (!session().settings().autoplayGifs()) {
-		session().data().stopAutoplayAnimations();
-	}
+	session().data().stopPlayingVideoFiles();
+
 	clearReplyReturns();
 	clearAllLoadRequests();
 
@@ -1794,8 +1803,6 @@ void HistoryWidget::showHistory(
 	_nonEmptySelection = false;
 
 	if (_peer) {
-		session().downloader().clearPriorities();
-
 		_history = _peer->owner().history(_peer);
 		_migrated = _history->migrateFrom();
 		if (_migrated
@@ -2736,6 +2743,7 @@ void HistoryWidget::preloadHistoryIfNeeded() {
 	}
 
 	updateHistoryDownVisibility();
+	updateUnreadMentionsVisibility();
 	if (!_scrollToAnimation.animating()) {
 		preloadHistoryByScroll();
 		checkReplyReturns();
@@ -3066,7 +3074,7 @@ void HistoryWidget::sendScheduled() {
 	const auto callback = [=](Api::SendOptions options) { send(options); };
 	Ui::show(
 		HistoryView::PrepareScheduleBox(_list, sendMenuType(), callback),
-		LayerOption::KeepOther);
+		Ui::LayerOption::KeepOther);
 }
 
 SendMenuType HistoryWidget::sendMenuType() const {
@@ -3662,6 +3670,28 @@ bool HistoryWidget::insertBotCommand(const QString &cmd) {
 }
 
 bool HistoryWidget::eventFilter(QObject *obj, QEvent *e) {
+	if (e->type() == QEvent::KeyPress) {
+		const auto k = static_cast<QKeyEvent*>(e);
+		if ((k->modifiers() & kCommonModifiers) == Qt::ControlModifier) {
+			if (k->key() == Qt::Key_Up) {
+#ifdef Q_OS_MAC
+				// Cmd + Up is used instead of Home.
+				if (!_field->textCursor().atStart()) {
+					return false;
+				}
+#endif
+				return replyToPreviousMessage();
+			} else if (k->key() == Qt::Key_Down) {
+#ifdef Q_OS_MAC
+				// Cmd + Down is used instead of End.
+				if (!_field->textCursor().atEnd()) {
+					return false;
+				}
+#endif
+				return replyToNextMessage();
+			}
+		}
+	}
 	if ((obj == _historyDown || obj == _unreadMentions) && e->type() == QEvent::Wheel) {
 		return _scroll->viewportEvent(e);
 	}
@@ -3818,7 +3848,7 @@ void HistoryWidget::updateSendButtonType() {
 		&& (type == Type::Send || type == Type::Record));
 
 	if (delay != 0) {
-		App::CallDelayed(
+		base::call_delayed(
 			kRefreshSlowmodeLabelTimeout,
 			this,
 			[=] { updateSendButtonType(); });
@@ -5452,13 +5482,24 @@ void HistoryWidget::updateUnreadMentionsVisibility() {
 	if (showUnreadMentions) {
 		session().api().preloadEnoughUnreadMentions(_history);
 	}
-	auto unreadMentionsIsVisible = [this, showUnreadMentions] {
+	const auto unreadMentionsIsShown = [&] {
 		if (!showUnreadMentions || _firstLoadRequest) {
 			return false;
 		}
-		return (_history->getUnreadMentionsLoadedCount() > 0);
-	};
-	auto unreadMentionsIsShown = unreadMentionsIsVisible();
+		if (!_history->getUnreadMentionsLoadedCount()) {
+			return false;
+		}
+		// If we have an unheard voice message with the mention
+		// and our message is the last one, we can't see the status
+		// (delivered/read) of this message.
+		// (Except for MacBooks with the TouchPad.)
+		if (_scroll->scrollTop() == _scroll->scrollTopMax()) {
+			if (const auto lastMessage = _history->lastMessage()) {
+				return !lastMessage->from()->isSelf();
+			}
+		}
+		return true;
+	}();
 	if (unreadMentionsIsShown) {
 		_unreadMentions->setUnreadCount(_history->getUnreadMentionsCount());
 	}
@@ -5494,6 +5535,7 @@ void HistoryWidget::mousePressEvent(QMouseEvent *e) {
 void HistoryWidget::keyPressEvent(QKeyEvent *e) {
 	if (!_history) return;
 
+	const auto commonModifiers = e->modifiers() & kCommonModifiers;
 	if (e->key() == Qt::Key_Escape) {
 		e->ignore();
 	} else if (e->key() == Qt::Key_Back) {
@@ -5503,29 +5545,21 @@ void HistoryWidget::keyPressEvent(QKeyEvent *e) {
 		_scroll->keyPressEvent(e);
 	} else if (e->key() == Qt::Key_PageUp) {
 		_scroll->keyPressEvent(e);
-	} else if (e->key() == Qt::Key_Down) {
-		if (!(e->modifiers() & (Qt::ShiftModifier | Qt::MetaModifier | Qt::ControlModifier))) {
-			_scroll->keyPressEvent(e);
-		} else if ((e->modifiers() & (Qt::ShiftModifier | Qt::MetaModifier | Qt::ControlModifier)) == Qt::ControlModifier) {
-			replyToNextMessage();
+	} else if (e->key() == Qt::Key_Down && !commonModifiers) {
+		_scroll->keyPressEvent(e);
+	} else if (e->key() == Qt::Key_Up && !commonModifiers) {
+		const auto item = _history
+			? _history->lastSentMessage()
+			: nullptr;
+		if (item
+			&& item->allowsEdit(base::unixtime::now())
+			&& _field->empty()
+			&& !_editMsgId
+			&& !_replyToId) {
+			editMessage(item);
+			return;
 		}
-	} else if (e->key() == Qt::Key_Up) {
-		if (!(e->modifiers() & (Qt::ShiftModifier | Qt::MetaModifier | Qt::ControlModifier))) {
-			const auto item = _history
-				? _history->lastSentMessage()
-				: nullptr;
-			if (item
-				&& item->allowsEdit(base::unixtime::now())
-				&& _field->empty()
-				&& !_editMsgId
-				&& !_replyToId) {
-				editMessage(item);
-				return;
-			}
-			_scroll->keyPressEvent(e);
-		} else if ((e->modifiers() & (Qt::ShiftModifier | Qt::MetaModifier | Qt::ControlModifier)) == Qt::ControlModifier) {
-			replyToPreviousMessage();
-		}
+		_scroll->keyPressEvent(e);
 	} else if (e->key() == Qt::Key_Return || e->key() == Qt::Key_Enter) {
 		if (!_botStart->isHidden()) {
 			sendBotStartCommand();
@@ -5574,9 +5608,9 @@ void HistoryWidget::handlePeerMigration() {
 	}
 }
 
-void HistoryWidget::replyToPreviousMessage() {
+bool HistoryWidget::replyToPreviousMessage() {
 	if (!_history || _editMsgId) {
-		return;
+		return false;
 	}
 	const auto fullId = FullMsgId(
 		_history->channelId(),
@@ -5587,17 +5621,20 @@ void HistoryWidget::replyToPreviousMessage() {
 				const auto previous = previousView->data();
 				Ui::showPeerHistoryAtItem(previous);
 				replyToMessage(previous);
+				return true;
 			}
 		}
 	} else if (const auto previous = _history->lastMessage()) {
 		Ui::showPeerHistoryAtItem(previous);
 		replyToMessage(previous);
+		return true;
 	}
+	return false;
 }
 
-void HistoryWidget::replyToNextMessage() {
+bool HistoryWidget::replyToNextMessage() {
 	if (!_history || _editMsgId) {
-		return;
+		return false;
 	}
 	const auto fullId = FullMsgId(
 		_history->channelId(),
@@ -5612,8 +5649,10 @@ void HistoryWidget::replyToNextMessage() {
 				clearHighlightMessages();
 				cancelReply(false);
 			}
+			return true;
 		}
 	}
+	return false;
 }
 
 bool HistoryWidget::showSlowmodeError() {
@@ -5802,7 +5841,7 @@ bool HistoryWidget::sendExistingDocument(not_null<DocumentData*> document) {
 		? Data::RestrictionError(_peer, ChatRestriction::f_send_stickers)
 		: std::nullopt;
 	if (error) {
-		Ui::show(Box<InformBox>(*error), LayerOption::KeepOther);
+		Ui::show(Box<InformBox>(*error), Ui::LayerOption::KeepOther);
 		return false;
 	} else if (!_peer || !_peer->canWrite()) {
 		return false;
@@ -5833,7 +5872,7 @@ bool HistoryWidget::sendExistingPhoto(not_null<PhotoData*> photo) {
 		? Data::RestrictionError(_peer, ChatRestriction::f_send_media)
 		: std::nullopt;
 	if (error) {
-		Ui::show(Box<InformBox>(*error), LayerOption::KeepOther);
+		Ui::show(Box<InformBox>(*error), Ui::LayerOption::KeepOther);
 		return false;
 	} else if (!_peer || !_peer->canWrite()) {
 		return false;

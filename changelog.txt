@@ -1,3 +1,37 @@
+1.9.6 (22.01.20)
+
+- Bug fixes and other minor improvements.
+
+1.9.5 (21.01.20)
+
+- Bug fixes and other minor improvements.
+
+1.9.4 (17.01.20)
+
+- Bug fixes and other minor improvements.
+
+1.9.3 (31.12.19)
+
+- Videos in chats start playing automatically.
+- Resume playback from where you left off when watching long videos and listening to long audio tracks.
+- Control automatic playback for videos, GIFs and round video messages in Settings > Advanced > Automatic media download.
+- Enjoy system spell checker support on all modern systems.
+
+1.9.2 beta (29.12.19)
+
+- Videos in chats start playing automatically.
+- Resume playback from where you left off when watching long videos.
+- Control videos, GIFs and round video messages automatic playback in Settings > Advanced > Automatic media download.
+- Spell checker on Linux using Enchant.
+
+1.9.1 beta (06.11.19)
+
+- Bug fixes and other minor improvements.
+
+1.9 beta (05.11.19)
+
+- System spellchecker on Windows 8+ and macOS 10.12+.
+
 1.8.15 (07.10.19)
 
 - Bug fixes and other minor improvements.
@@ -382,8 +416,8 @@ Also in this update:
 
 1.3.11 alpha (01.08.18)
 
-- Added a new night theme. 
-- You can now assign custom themes as night and day themes to quickly switch between them.  
+- Added a new night theme.
+- You can now assign custom themes as night and day themes to quickly switch between them.
 
 1.3.10 (13.07.18)
 

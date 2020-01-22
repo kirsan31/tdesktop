@@ -50,8 +50,8 @@ GOTO:EOF
     git submodule init
     git submodule update
     cd %SRC_DIR%\Telegram
-    call gyp\refresh.bat --api-id 17349 --api-hash 344583e45741c457fe1862106095a5eb
-GOTO:EOF
+    call gyp\refresh.bat --api-id 17349 --api-hash 344583e45741c457fe1862106095a5eb --ci-build
+ GOTO:EOF
 
 :configureBuild
     call:logInfo "Configuring build"
@@ -63,7 +63,7 @@ GOTO:EOF
     )
 
     echo %BUILD_VERSION% | findstr /C:"disable_crash_reports">nul && (
-        set TDESKTOP_BUILD_DEFINES=%TDESKTOP_BUILD_DEFINES%,TDESKTOP_DISABLE_CRASH_REPORTS
+        set TDESKTOP_BUILD_DEFINES=%TDESKTOP_BUILD_DEFINES%,DESKTOP_APP_DISABLE_CRASH_REPORTS
     )
 
     echo %BUILD_VERSION% | findstr /C:"disable_network_proxy">nul && (

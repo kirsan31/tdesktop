@@ -30,7 +30,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_channel.h"
 #include "data/data_file_origin.h"
 #include "core/file_utilities.h"
-#include "platform/platform_info.h"
+#include "base/platform/base_platform_info.h"
 #include "window/window_peer_menu.h"
 #include "window/window_session_controller.h"
 #include "lang/lang_keys.h"
@@ -168,12 +168,19 @@ void AddDocumentActions(
 		});
 		return;
 	}
-	if (document->loaded()
-		&& document->isGifv()
-		&& !document->session().settings().autoplayGifs()) {
-		menu->addAction(tr::lng_context_open_gif(tr::now), [=] {
-			OpenGif(contextId);
-		});
+	if (const auto item = document->session().data().message(contextId)) {
+		const auto notAutoplayedGif = [&] {
+			return document->isGifv()
+				&& !Data::AutoDownload::ShouldAutoPlay(
+					document->session().settings().autoDownload(),
+					item->history()->peer,
+					document);
+		}();
+		if (notAutoplayedGif) {
+			menu->addAction(tr::lng_context_open_gif(tr::now), [=] {
+				OpenGif(contextId);
+			});
+		}
 	}
 	if (document->sticker()
 		&& document->sticker()->set.type() != mtpc_inputStickerSetEmpty) {

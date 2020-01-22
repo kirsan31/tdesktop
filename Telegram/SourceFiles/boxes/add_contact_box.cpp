@@ -7,8 +7,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "boxes/add_contact_box.h"
 
-#include "styles/style_boxes.h"
-#include "styles/style_dialogs.h"
 #include "lang/lang_keys.h"
 #include "mtproto/sender.h"
 #include "base/flat_set.h"
@@ -42,6 +40,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "observer_peer.h"
 #include "main/main_session.h"
 #include "facades.h"
+#include "styles/style_layers.h"
+#include "styles/style_boxes.h"
+#include "styles/style_dialogs.h"
 
 #include <QtGui/QGuiApplication>
 #include <QtGui/QClipboard>
@@ -164,7 +165,7 @@ void ShowAddParticipantsError(
 					tr::lng_cant_invite_make_admin(tr::now),
 					tr::lng_cancel(tr::now),
 					makeAdmin),
-				LayerOption::KeepOther);
+				Ui::LayerOption::KeepOther);
 			return;
 		}
 	}
@@ -199,10 +200,10 @@ void ShowAddParticipantsError(
 		}
 		return tr::lng_failed_add_participant(tr::now);
 	}();
-	Ui::show(Box<InformBox>(text), LayerOption::KeepOther);
+	Ui::show(Box<InformBox>(text), Ui::LayerOption::KeepOther);
 }
 
-class RevokePublicLinkBox::Inner : public TWidget, private MTP::Sender {
+class RevokePublicLinkBox::Inner : public TWidget {
 public:
 	Inner(
 		QWidget *parent,
@@ -227,6 +228,7 @@ private:
 	void updateSelected();
 
 	const not_null<Main::Session*> _session;
+	MTP::Sender _api;
 
 	PeerData *_selected = nullptr;
 	PeerData *_pressed = nullptr;
@@ -449,6 +451,7 @@ GroupInfoBox::GroupInfoBox(
 	const QString &title,
 	Fn<void(not_null<ChannelData*>)> channelDone)
 : _navigation(navigation)
+, _api(_navigation->session().api().instance())
 , _type(type)
 , _initialTitle(title)
 , _channelDone(std::move(channelDone)) {
@@ -568,7 +571,7 @@ void GroupInfoBox::createGroup(
 	if (inputs.empty()) {
 		return;
 	}
-	_creationRequestId = request(MTPmessages_CreateChat(
+	_creationRequestId = _api.request(MTPmessages_CreateChat(
 		MTP_vector<MTPInputUser>(inputs),
 		MTP_string(title)
 	)).done([=](const MTPUpdates &result) {
@@ -588,16 +591,16 @@ void GroupInfoBox::createGroup(
 		} else if (error.type() == qstr("USERS_TOO_FEW")) {
 			Ui::show(
 				Box<InformBox>(tr::lng_cant_invite_privacy(tr::now)),
-				LayerOption::KeepOther);
+				Ui::LayerOption::KeepOther);
 		} else if (error.type() == qstr("PEER_FLOOD")) {
 			Ui::show(
 				Box<InformBox>(
 					PeerFloodErrorText(PeerFloodType::InviteGroup)),
-				LayerOption::KeepOther);
+				Ui::LayerOption::KeepOther);
 		} else if (error.type() == qstr("USER_RESTRICTED")) {
 			Ui::show(
 				Box<InformBox>(tr::lng_cant_do_this(tr::now)),
-				LayerOption::KeepOther);
+				Ui::LayerOption::KeepOther);
 		}
 	}).send();
 }
@@ -636,7 +639,7 @@ void GroupInfoBox::submit() {
 			Box<PeerListBox>(
 				std::make_unique<AddParticipantsBoxController>(_navigation),
 				std::move(initBox)),
-			LayerOption::KeepOther);
+			Ui::LayerOption::KeepOther);
 	}
 }
 
@@ -644,7 +647,7 @@ void GroupInfoBox::createChannel(const QString &title, const QString &descriptio
 	const auto flags = (_type == Type::Megagroup)
 		? MTPchannels_CreateChannel::Flag::f_megagroup
 		: MTPchannels_CreateChannel::Flag::f_broadcast;
-	_creationRequestId = request(MTPchannels_CreateChannel(
+	_creationRequestId = _api.request(MTPchannels_CreateChannel(
 		MTP_flags(flags),
 		MTP_string(title),
 		MTP_string(description),
@@ -681,7 +684,7 @@ void GroupInfoBox::createChannel(const QString &title, const QString &descriptio
 						std::move(image));
 				}
 				_createdChannel = channel;
-				_creationRequestId = request(MTPmessages_ExportChatInvite(
+				_creationRequestId = _api.request(MTPmessages_ExportChatInvite(
 					_createdChannel->input
 				)).done([=](const MTPExportedChatInvite &result) {
 					_creationRequestId = 0;
@@ -765,7 +768,7 @@ SetupChannelBox::SetupChannelBox(
 	st::defaultBoxCheckbox)
 , _aboutPublicWidth(st::boxWideWidth
 	- st::boxPadding.left()
-	- st::boxButtonPadding.right()
+	- st::defaultBox.buttonPadding.right()
 	- st::newGroupPadding.left()
 	- st::defaultRadio.diameter
 	- st::defaultBoxCheckbox.textPosition.x())
@@ -1031,7 +1034,7 @@ void SetupChannelBox::privacyChanged(Privacy value) {
 				Box<RevokePublicLinkBox>(
 					&_channel->session(),
 					callback),
-				LayerOption::KeepOther);
+				Ui::LayerOption::KeepOther);
 			return;
 		}
 		_link->show();
@@ -1126,14 +1129,14 @@ void SetupChannelBox::showRevokePublicLinkBoxForEdit() {
 	const auto callback = [=] {
 		Ui::show(
 			Box<SetupChannelBox>(navigation, channel, existing),
-			LayerOption::KeepOther);
+			Ui::LayerOption::KeepOther);
 	};
 	closeBox();
 	Ui::show(
 		Box<RevokePublicLinkBox>(
 			&channel->session(),
 			callback),
-		LayerOption::KeepOther);
+		Ui::LayerOption::KeepOther);
 }
 
 bool SetupChannelBox::onFirstCheckFail(const RPCError &error) {
@@ -1286,6 +1289,7 @@ RevokePublicLinkBox::Inner::Inner(
 	Fn<void()> revokeCallback)
 : TWidget(parent)
 , _session(session)
+, _api(_session->api().instance())
 , _rowHeight(st::contactsPadding.top() + st::contactsPhotoSize + st::contactsPadding.bottom())
 , _revokeWidth(st::normalFont->width(tr::lng_channels_too_much_public_revoke(tr::now)))
 , _revokeCallback(std::move(revokeCallback)) {
@@ -1293,7 +1297,7 @@ RevokePublicLinkBox::Inner::Inner(
 
 	resize(width(), 5 * _rowHeight);
 
-	request(MTPchannels_GetAdminedPublicChannels(
+	_api.request(MTPchannels_GetAdminedPublicChannels(
 		MTP_flags(0)
 	)).done([=](const MTPmessages_Chats &result) {
 		const auto &chats = result.match([](const auto &data) {
@@ -1344,7 +1348,7 @@ void RevokePublicLinkBox::prepare() {
 		if (callback) {
 			callback();
 		}
-	}), st::boxLayerScroll, _innerTop);
+	}), st::boxScroll, _innerTop);
 
 	addButton(tr::lng_cancel(), [=] { closeBox(); });
 
@@ -1400,7 +1404,7 @@ void RevokePublicLinkBox::Inner::mouseReleaseEvent(QMouseEvent *e) {
 		auto confirmText = tr::lng_channels_too_much_public_revoke(tr::now);
 		_weakRevokeConfirmBox = Ui::show(Box<ConfirmBox>(text, confirmText, crl::guard(this, [this, pressed]() {
 			if (_revokeRequestId) return;
-			_revokeRequestId = request(MTPchannels_UpdateUsername(
+			_revokeRequestId = _api.request(MTPchannels_UpdateUsername(
 				pressed->asChannel()->inputChannel,
 				MTP_string()
 			)).done([=](const MTPBool &result) {
@@ -1412,7 +1416,7 @@ void RevokePublicLinkBox::Inner::mouseReleaseEvent(QMouseEvent *e) {
 					callback();
 				}
 			}).send();
-		})), LayerOption::KeepOther);
+		})), Ui::LayerOption::KeepOther);
 	}
 }
 

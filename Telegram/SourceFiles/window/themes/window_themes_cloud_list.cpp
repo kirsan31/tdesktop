@@ -211,6 +211,7 @@ void CloudListCheck::validateBackgroundCache(int width) {
 			imageWidth,
 			_backgroundFull.height());
 	Images::prepareRound(_backgroundCache, ImageRoundRadius::Large);
+	_backgroundCache.setDevicePixelRatio(cRetinaFactor());
 }
 
 void CloudListCheck::paint(Painter &p, int left, int top, int outerWidth) {
@@ -595,7 +596,7 @@ void CloudList::showMenu(Element &element) {
 	}
 	const auto id = cloud.id;
 	_contextMenu->addAction(tr::lng_theme_delete(tr::now), [=] {
-		const auto box = std::make_shared<QPointer<BoxContent>>();
+		const auto box = std::make_shared<QPointer<Ui::BoxContent>>();
 		const auto remove = [=] {
 			if (*box) {
 				(*box)->closeBox();

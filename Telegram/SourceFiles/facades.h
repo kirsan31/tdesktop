@@ -9,7 +9,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "base/type_traits.h"
 #include "base/observer.h"
-#include "ui/effects/animation_value.h"
+#include "base/call_delayed.h"
+#include "mtproto/mtproto_proxy_data.h"
 
 class History;
 
@@ -28,27 +29,6 @@ class ItemBase;
 } // namespace InlineBots
 
 namespace App {
-namespace internal {
-
-void CallDelayed(int duration, FnMut<void()> &&lambda);
-
-} // namespace internal
-
-template <typename Guard, typename Lambda>
-inline void CallDelayed(
-		int duration,
-		crl::guarded_wrap<Guard, Lambda> &&guarded) {
-	return internal::CallDelayed(
-		duration,
-		std::move(guarded));
-}
-
-template <typename Guard, typename Lambda>
-inline void CallDelayed(int duration, Guard &&object, Lambda &&lambda) {
-	return internal::CallDelayed(duration, crl::guard(
-		std::forward<Guard>(object),
-		std::forward<Lambda>(lambda)));
-}
 
 template <typename Guard, typename Lambda>
 [[nodiscard]] inline auto LambdaDelayed(int duration, Guard &&object, Lambda &&lambda) {
@@ -57,7 +37,7 @@ template <typename Guard, typename Lambda>
 		std::forward<Lambda>(lambda));
 	return [saved = std::move(guarded), duration] {
 		auto copy = saved;
-		internal::CallDelayed(duration, std::move(copy));
+		base::call_delayed(duration, std::move(copy));
 	};
 }
 
@@ -244,9 +224,9 @@ DeclareVar(Notify::ScreenCorner, NotificationsCorner);
 DeclareVar(bool, NotificationsDemoIsShown);
 
 DeclareVar(bool, TryIPv6);
-DeclareVar(std::vector<ProxyData>, ProxiesList);
-DeclareVar(ProxyData, SelectedProxy);
-DeclareVar(ProxyData::Settings, ProxySettings);
+DeclareVar(std::vector<MTP::ProxyData>, ProxiesList);
+DeclareVar(MTP::ProxyData, SelectedProxy);
+DeclareVar(MTP::ProxyData::Settings, ProxySettings);
 DeclareVar(bool, UseProxyForCalls);
 DeclareRefVar(base::Observable<void>, ConnectionTypeChanged);
 

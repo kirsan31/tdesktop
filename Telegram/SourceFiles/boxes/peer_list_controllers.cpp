@@ -142,7 +142,8 @@ void PeerListRowWithLink::paintAction(
 
 PeerListGlobalSearchController::PeerListGlobalSearchController(
 	not_null<Window::SessionNavigation*> navigation)
-: _navigation(navigation) {
+: _navigation(navigation)
+, _api(_navigation->session().api().instance()) {
 	_timer.setCallback([this] { searchOnServer(); });
 }
 
@@ -169,7 +170,7 @@ bool PeerListGlobalSearchController::searchInCache() {
 }
 
 void PeerListGlobalSearchController::searchOnServer() {
-	_requestId = request(MTPcontacts_Search(
+	_requestId = _api.request(MTPcontacts_Search(
 		MTP_string(_query),
 		MTP_int(SearchPeopleLimit)
 	)).done([=](const MTPcontacts_Found &result, mtpRequestId requestId) {
@@ -464,7 +465,7 @@ void AddBotToGroupBoxController::shareBotGame(not_null<PeerData*> chat) {
 	}();
 	Ui::show(
 		Box<ConfirmBox>(confirmText, std::move(send)),
-		LayerOption::KeepOther);
+		Ui::LayerOption::KeepOther);
 }
 
 void AddBotToGroupBoxController::addBotToGroup(not_null<PeerData*> chat) {
@@ -472,7 +473,7 @@ void AddBotToGroupBoxController::addBotToGroup(not_null<PeerData*> chat) {
 		if (!megagroup->canAddMembers()) {
 			Ui::show(
 				Box<InformBox>(tr::lng_error_cant_add_member(tr::now)),
-				LayerOption::KeepOther);
+				Ui::LayerOption::KeepOther);
 			return;
 		}
 	}
@@ -482,7 +483,7 @@ void AddBotToGroupBoxController::addBotToGroup(not_null<PeerData*> chat) {
 	auto confirmText = tr::lng_bot_sure_invite(tr::now, lt_group, chat->name);
 	Ui::show(
 		Box<ConfirmBox>(confirmText, send),
-		LayerOption::KeepOther);
+		Ui::LayerOption::KeepOther);
 }
 
 auto AddBotToGroupBoxController::createRow(not_null<History*> history)

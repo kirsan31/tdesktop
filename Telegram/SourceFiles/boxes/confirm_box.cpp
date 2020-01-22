@@ -7,7 +7,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "boxes/confirm_box.h"
 
-#include "styles/style_boxes.h"
 #include "lang/lang_keys.h"
 #include "mainwidget.h"
 #include "mainwindow.h"
@@ -31,11 +30,14 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_channel.h"
 #include "data/data_chat.h"
 #include "data/data_user.h"
+#include "data/data_file_origin.h"
 #include "base/unixtime.h"
 #include "main/main_session.h"
 #include "observer_peer.h"
 #include "facades.h"
 #include "app.h"
+#include "styles/style_layers.h"
+#include "styles/style_boxes.h"
 
 #include <QtGui/QGuiApplication>
 #include <QtGui/QClipboard>
@@ -55,7 +57,7 @@ ConfirmBox::ConfirmBox(
 : _confirmText(tr::lng_box_ok(tr::now))
 , _cancelText(tr::lng_cancel(tr::now))
 , _confirmStyle(st::defaultBoxButton)
-, _text(st::boxWidth - st::boxPadding.left() - st::boxButtonPadding.right())
+, _text(st::boxWidth - st::boxPadding.left() - st::defaultBox.buttonPadding.right())
 , _confirmedCallback(std::move(confirmedCallback))
 , _cancelledCallback(std::move(cancelledCallback)) {
 	init(text);
@@ -70,7 +72,7 @@ ConfirmBox::ConfirmBox(
 : _confirmText(confirmText)
 , _cancelText(tr::lng_cancel(tr::now))
 , _confirmStyle(st::defaultBoxButton)
-, _text(st::boxWidth - st::boxPadding.left() - st::boxButtonPadding.right())
+, _text(st::boxWidth - st::boxPadding.left() - st::defaultBox.buttonPadding.right())
 , _confirmedCallback(std::move(confirmedCallback))
 , _cancelledCallback(std::move(cancelledCallback)) {
 	init(text);
@@ -85,7 +87,7 @@ ConfirmBox::ConfirmBox(
 : _confirmText(confirmText)
 , _cancelText(tr::lng_cancel(tr::now))
 , _confirmStyle(st::defaultBoxButton)
-, _text(st::boxWidth - st::boxPadding.left() - st::boxButtonPadding.right())
+, _text(st::boxWidth - st::boxPadding.left() - st::defaultBox.buttonPadding.right())
 , _confirmedCallback(std::move(confirmedCallback))
 , _cancelledCallback(std::move(cancelledCallback)) {
 	init(text);
@@ -101,7 +103,7 @@ ConfirmBox::ConfirmBox(
 : _confirmText(confirmText)
 , _cancelText(tr::lng_cancel(tr::now))
 , _confirmStyle(confirmStyle)
-, _text(st::boxWidth - st::boxPadding.left() - st::boxButtonPadding.right())
+, _text(st::boxWidth - st::boxPadding.left() - st::defaultBox.buttonPadding.right())
 , _confirmedCallback(std::move(confirmedCallback))
 , _cancelledCallback(std::move(cancelledCallback)) {
 	init(text);
@@ -117,7 +119,7 @@ ConfirmBox::ConfirmBox(
 : _confirmText(confirmText)
 , _cancelText(cancelText)
 , _confirmStyle(st::defaultBoxButton)
-, _text(st::boxWidth - st::boxPadding.left() - st::boxButtonPadding.right())
+, _text(st::boxWidth - st::boxPadding.left() - st::defaultBox.buttonPadding.right())
 , _confirmedCallback(std::move(confirmedCallback))
 , _cancelledCallback(std::move(cancelledCallback)) {
 	init(text);
@@ -134,7 +136,7 @@ ConfirmBox::ConfirmBox(
 : _confirmText(confirmText)
 , _cancelText(cancelText)
 , _confirmStyle(st::defaultBoxButton)
-, _text(st::boxWidth - st::boxPadding.left() - st::boxButtonPadding.right())
+, _text(st::boxWidth - st::boxPadding.left() - st::defaultBox.buttonPadding.right())
 , _confirmedCallback(std::move(confirmedCallback))
 , _cancelledCallback(std::move(cancelledCallback)) {
 	init(text);
@@ -148,7 +150,7 @@ ConfirmBox::ConfirmBox(
 : _confirmText(doneText)
 , _confirmStyle(st::defaultBoxButton)
 , _informative(true)
-, _text(st::boxWidth - st::boxPadding.left() - st::boxButtonPadding.right())
+, _text(st::boxWidth - st::boxPadding.left() - st::defaultBox.buttonPadding.right())
 , _confirmedCallback(generateInformCallback(closedCallback))
 , _cancelledCallback(generateInformCallback(closedCallback)) {
 	init(text);
@@ -162,7 +164,7 @@ ConfirmBox::ConfirmBox(
 : _confirmText(doneText)
 , _confirmStyle(st::defaultBoxButton)
 , _informative(true)
-, _text(st::boxWidth - st::boxPadding.left() - st::boxButtonPadding.right())
+, _text(st::boxWidth - st::boxPadding.left() - st::defaultBox.buttonPadding.right())
 , _confirmedCallback(generateInformCallback(closedCallback))
 , _cancelledCallback(generateInformCallback(closedCallback)) {
 	init(text);
@@ -219,7 +221,7 @@ void ConfirmBox::setMaxLineCount(int count) {
 }
 
 void ConfirmBox::textUpdated() {
-	_textWidth = st::boxWidth - st::boxPadding.left() - st::boxButtonPadding.right();
+	_textWidth = st::boxWidth - st::boxPadding.left() - st::defaultBox.buttonPadding.right();
 	_textHeight = _text.countHeight(_textWidth);
 	if (_maxLineCount > 0) {
 		accumulate_min(_textHeight, _maxLineCount * st::boxLabelStyle.lineHeight);
@@ -323,7 +325,7 @@ InformBox::InformBox(QWidget*, const TextWithEntities &text, const QString &done
 
 MaxInviteBox::MaxInviteBox(QWidget*, not_null<ChannelData*> channel) : BoxContent()
 , _channel(channel)
-, _text(st::boxLabelStyle, tr::lng_participant_invite_sorry(tr::now, lt_count, Global::ChatSizeMax()), _confirmBoxTextOptions, st::boxWidth - st::boxPadding.left() - st::boxButtonPadding.right()) {
+, _text(st::boxLabelStyle, tr::lng_participant_invite_sorry(tr::now, lt_count, Global::ChatSizeMax()), _confirmBoxTextOptions, st::boxWidth - st::boxPadding.left() - st::defaultBox.buttonPadding.right()) {
 }
 
 void MaxInviteBox::prepare() {
@@ -331,7 +333,7 @@ void MaxInviteBox::prepare() {
 
 	addButton(tr::lng_box_ok(), [=] { closeBox(); });
 
-	_textWidth = st::boxWidth - st::boxPadding.left() - st::boxButtonPadding.right();
+	_textWidth = st::boxWidth - st::boxPadding.left() - st::defaultBox.buttonPadding.right();
 	_textHeight = qMin(_text.countHeight(_textWidth), 16 * st::boxLabelStyle.lineHeight);
 	setDimensions(st::boxWidth, st::boxPadding.top() + _textHeight + st::boxTextFont->height + st::boxTextFont->height * 2 + st::newGroupLinkPadding.bottom());
 
