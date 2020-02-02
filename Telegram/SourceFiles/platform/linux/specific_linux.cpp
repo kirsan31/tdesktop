@@ -24,6 +24,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtCore/QProcess>
 #include <QtCore/QVersionNumber>
 
+#ifndef TDESKTOP_DISABLE_DBUS_INTEGRATION
+#include <QtDBus/QDBusInterface>
+#endif
+
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <cstdlib>
@@ -38,6 +42,36 @@ using Platform::File::internal::EscapeShell;
 
 namespace {
 
+constexpr auto kDesktopFile = ":/misc/telegramdesktop.desktop"_cs;
+
+bool XDGDesktopPortalIsPresent = false;
+
+#ifndef TDESKTOP_DISABLE_DBUS_INTEGRATION
+void SandboxAutostart(bool autostart) {
+	QVariantMap options;
+	options["reason"] = tr::lng_settings_auto_start(tr::now);
+	options["autostart"] = autostart;
+	options["commandline"] = QStringList({
+		cExeName(),
+		qsl("-autostart")
+	});
+	options["dbus-activatable"] = false;
+
+	const auto requestBackgroundReply = QDBusInterface(
+		qsl("org.freedesktop.portal.Desktop"),
+		qsl("/org/freedesktop/portal/desktop"),
+		qsl("org.freedesktop.portal.Background")
+	).call(qsl("RequestBackground"), QString(), options);
+
+	if (requestBackgroundReply.type() == QDBusMessage::ErrorMessage) {
+		LOG(("Flatpak autostart error: %1")
+			.arg(requestBackgroundReply.errorMessage()));
+	} else if (requestBackgroundReply.type() != QDBusMessage::ReplyMessage) {
+		LOG(("Flatpak autostart error: invalid reply"));
+	}
+}
+#endif
+
 bool RunShellCommand(const QByteArray &command) {
 	auto result = system(command.constData());
 	if (result) {
@@ -49,7 +83,7 @@ bool RunShellCommand(const QByteArray &command) {
 }
 
 void FallbackFontConfig() {
-#ifndef DESKTOP_APP_USE_PACKAGED
+#ifdef TDESKTOP_USE_FONT_CONFIG_FALLBACK
 	const auto custom = cWorkingDir() + "tdata/fc-custom-1.conf";
 	const auto finish = gsl::finally([&] {
 		if (QFile(custom).exists()) {
@@ -84,7 +118,61 @@ void FallbackFontConfig() {
 	}
 
 	QFile(":/fc/fc-custom.conf").copy(custom);
-#endif // !DESKTOP_APP_USE_PACKAGED
+#endif // TDESKTOP_USE_FONT_CONFIG_FALLBACK
+}
+
+bool GenerateDesktopFile(const QString &targetPath, const QString &args) {
+	DEBUG_LOG(("App Info: placing .desktop file to %1").arg(targetPath));
+	if (!QDir(targetPath).exists()) QDir().mkpath(targetPath);
+
+	const auto targetFile = targetPath + GetLauncherFilename();
+
+	QString fileText;
+
+	QFile source(kDesktopFile.utf16());
+	if (source.open(QIODevice::ReadOnly)) {
+		QTextStream s(&source);
+		fileText = s.readAll();
+		source.close();
+	} else {
+		LOG(("App Error: Could not open '%1' for read")
+			.arg(kDesktopFile.utf16()));
+
+		return false;
+	}
+
+	QFile target(targetFile);
+	if (target.open(QIODevice::WriteOnly)) {
+#ifdef DESKTOP_APP_USE_PACKAGED
+		fileText = fileText.replace(
+			QRegularExpression(qsl("^Exec=(.*) -- %u$"),
+				QRegularExpression::MultilineOption),
+			qsl("Exec=\\1")
+				+ (args.isEmpty() ? QString() : ' ' + args));
+#else
+		fileText = fileText.replace(
+			QRegularExpression(qsl("^TryExec=.*$"),
+				QRegularExpression::MultilineOption),
+			qsl("TryExec=")
+				+ EscapeShell(QFile::encodeName(cExeDir() + cExeName())));
+		fileText = fileText.replace(
+			QRegularExpression(qsl("^Exec=.*$"),
+				QRegularExpression::MultilineOption),
+			qsl("Exec=")
+				+ EscapeShell(QFile::encodeName(cExeDir() + cExeName()))
+				+ (args.isEmpty() ? QString() : ' ' + args));
+#endif
+		target.write(fileText.toUtf8());
+		target.close();
+
+		DEBUG_LOG(("App Info: removing old .desktop file"));
+		QFile(qsl("%1telegram.desktop").arg(targetPath)).remove();
+
+		return true;
+	} else {
+		LOG(("App Error: Could not open '%1' for write").arg(targetFile));
+		return false;
+	}
 }
 
 } // namespace
@@ -98,9 +186,18 @@ void SetApplicationIcon(const QIcon &icon) {
 bool InSandbox() {
 	static const auto Sandbox = QFileInfo::exists(
 		QStandardPaths::writableLocation(QStandardPaths::RuntimeLocation)
-		+ qsl("/flatpak-info"));
+			+ qsl("/flatpak-info"));
 	return Sandbox;
 }
+
+bool InSnap() {
+	static const auto Snap = qEnvironmentVariableIsSet("SNAP");
+	return Snap;
+}
+
+bool IsXDGDesktopPortalPresent() {
+	return XDGDesktopPortalIsPresent;
+};
 
 QString CurrentExecutablePath(int argc, char *argv[]) {
 	constexpr auto kMaxPath = 1024;
@@ -126,14 +223,45 @@ QString SingleInstanceLocalServerName(const QString &hash) {
 	if (InSandbox()) {
 		return runtimeDir
 			+ qsl("/app/")
-			+ QString::fromUtf8(qgetenv("FLATPAK_ID"))
+			+ QString::fromLatin1(qgetenv("FLATPAK_ID"))
 			+ '/' + hash;
+	} else if (QFileInfo::exists(runtimeDir) && InSnap()) {
+		return runtimeDir + '/' + hash;
 	} else if (QFileInfo::exists(runtimeDir)) {
 		return runtimeDir + '/' + hash + '-' + cGUIDStr();
 	} else { // non-systemd distros
 		return QStandardPaths::writableLocation(QStandardPaths::TempLocation)
 			+ '/' + hash + '-' + cGUIDStr();
 	}
+}
+
+QString GetLauncherBasename() {
+	static const auto LauncherBasename = [&] {
+		QString launcherBasename;
+
+		if (InSnap()) {
+			launcherBasename = qsl("%1_%2")
+				.arg(QString::fromLatin1(qgetenv("SNAP_NAME")))
+				.arg(qsl(MACRO_TO_STRING(TDESKTOP_LAUNCHER_BASENAME)));
+
+			LOG(("SNAP Environment detected, "
+				"launcher filename is %1.desktop")
+					.arg(launcherBasename));
+		} else {
+			launcherBasename =
+				qsl(MACRO_TO_STRING(TDESKTOP_LAUNCHER_BASENAME));
+		}
+
+		return launcherBasename;
+	}();
+
+	return LauncherBasename;
+}
+
+QString GetLauncherFilename() {
+	static const auto LauncherFilename = GetLauncherBasename()
+		+ qsl(".desktop");
+	return LauncherFilename;
 }
 
 } // namespace Platform
@@ -250,6 +378,21 @@ namespace Platform {
 
 void start() {
 	FallbackFontConfig();
+
+#if !defined(TDESKTOP_DISABLE_DBUS_INTEGRATION) && defined(TDESKTOP_FORCE_GTK_FILE_DIALOG)
+	LOG(("Checking for XDG Desktop Portal..."));
+	XDGDesktopPortalIsPresent = QDBusInterface(
+		"org.freedesktop.portal.Desktop",
+		"/org/freedesktop/portal/desktop").isValid();
+
+	// this can give us a chance to use a proper file dialog for current session
+	if(XDGDesktopPortalIsPresent) {
+		LOG(("XDG Desktop Portal is present!"));
+		qputenv("QT_QPA_PLATFORMTHEME", "xdgdesktopportal");
+	} else {
+		LOG(("XDG Desktop Portal is not present :("));
+	}
+#endif // !TDESKTOP_DISABLE_DBUS_INTEGRATION && TDESKTOP_FORCE_GTK_FILE_DIALOG
 }
 
 void finish() {
@@ -258,104 +401,45 @@ void finish() {
 void RegisterCustomScheme() {
 #ifndef TDESKTOP_DISABLE_REGISTER_CUSTOM_SCHEME
 	auto home = getHomeDir();
-	if (home.isEmpty() || cAlphaVersion() || cExeName().isEmpty()) return; // don't update desktop file for alpha version
+	if (home.isEmpty() || cAlphaVersion() || cExeName().isEmpty())
+		return; // don't update desktop file for alpha version
 	if (Core::UpdaterDisabled())
 		return;
 
+	const auto applicationsPath = QStandardPaths::writableLocation(
+		QStandardPaths::ApplicationsLocation) + '/';
+
 #ifndef TDESKTOP_DISABLE_DESKTOP_FILE_GENERATION
-	DEBUG_LOG(("App Info: placing .desktop file"));
-	if (QDir(home + qsl(".local/")).exists()) {
-		QString apps = home + qsl(".local/share/applications/");
-		QString icons = home + qsl(".local/share/icons/");
-		if (!QDir(apps).exists()) QDir().mkpath(apps);
-		if (!QDir(icons).exists()) QDir().mkpath(icons);
+	GenerateDesktopFile(applicationsPath, qsl("-- %u"));
 
-		QString path = cWorkingDir() + qsl("tdata/"), file = path + qsl("telegramdesktop.desktop");
-		QDir().mkpath(path);
-		QFile f(file);
-		if (f.open(QIODevice::WriteOnly)) {
-			QString icon = icons + qsl("telegram.png");
-			auto iconExists = QFile(icon).exists();
-			if (Local::oldSettingsVersion() < 10021 && iconExists) {
-				// Icon was changed.
-				if (QFile(icon).remove()) {
-					iconExists = false;
-				}
-			}
-			if (!iconExists) {
-				if (QFile(qsl(":/gui/art/logo_256.png")).copy(icon)) {
-					DEBUG_LOG(("App Info: Icon copied to 'tdata'"));
-				}
-			}
+	const auto icons =
+		QStandardPaths::writableLocation(
+			QStandardPaths::GenericDataLocation)
+		+ qsl("/icons/");
 
-			QTextStream s(&f);
-			s.setCodec("UTF-8");
-			s << "[Desktop Entry]\n";
-			s << "Version=1.0\n";
-			s << "Name=Telegram Desktop\n";
-			s << "Comment=Official desktop application for the Telegram messaging service\n";
-			s << "TryExec=" << EscapeShell(QFile::encodeName(cExeDir() + cExeName())) << "\n";
-			s << "Exec=" << EscapeShell(QFile::encodeName(cExeDir() + cExeName())) << " -- %u\n";
-			s << "Icon=telegram\n";
-			s << "Terminal=false\n";
-			s << "StartupWMClass=TelegramDesktop\n";
-			s << "Type=Application\n";
-			s << "Categories=Network;InstantMessaging;Qt;\n";
-			s << "MimeType=x-scheme-handler/tg;\n";
-			s << "Keywords=tg;chat;im;messaging;messenger;sms;tdesktop;\n";
-			s << "X-GNOME-UsesNotifications=true\n";
-			f.close();
+	if (!QDir(icons).exists()) QDir().mkpath(icons);
 
-			if (RunShellCommand("desktop-file-install --dir=" + EscapeShell(QFile::encodeName(home + qsl(".local/share/applications"))) + " --delete-original " + EscapeShell(QFile::encodeName(file)))) {
-				DEBUG_LOG(("App Info: removing old .desktop file"));
-				QFile(qsl("%1.local/share/applications/telegram.desktop").arg(home)).remove();
-
-				RunShellCommand("update-desktop-database " + EscapeShell(QFile::encodeName(home + qsl(".local/share/applications"))));
-				RunShellCommand("xdg-mime default telegramdesktop.desktop x-scheme-handler/tg");
-			}
-		} else {
-			LOG(("App Error: Could not open '%1' for write").arg(file));
+	const auto icon = icons + qsl("telegram.png");
+	auto iconExists = QFile(icon).exists();
+	if (Local::oldSettingsVersion() < 10021 && iconExists) {
+		// Icon was changed.
+		if (QFile(icon).remove()) {
+			iconExists = false;
+		}
+	}
+	if (!iconExists) {
+		if (QFile(qsl(":/gui/art/logo_256.png")).copy(icon)) {
+			DEBUG_LOG(("App Info: Icon copied to 'tdata'"));
 		}
 	}
 #endif // !TDESKTOP_DISABLE_DESKTOP_FILE_GENERATION
 
-	DEBUG_LOG(("App Info: registerting for Gnome"));
-	if (RunShellCommand("gconftool-2 -t string -s /desktop/gnome/url-handlers/tg/command " + EscapeShell(EscapeShell(QFile::encodeName(cExeDir() + cExeName())) + " -- %s"))) {
-		RunShellCommand("gconftool-2 -t bool -s /desktop/gnome/url-handlers/tg/needs_terminal false");
-		RunShellCommand("gconftool-2 -t bool -s /desktop/gnome/url-handlers/tg/enabled true");
-	}
+	RunShellCommand("update-desktop-database "
+		+ EscapeShell(QFile::encodeName(applicationsPath)));
 
-	DEBUG_LOG(("App Info: placing .protocol file"));
-	QString services;
-	if (QDir(home + qsl(".kde4/")).exists()) {
-		services = home + qsl(".kde4/share/kde4/services/");
-	} else if (QDir(home + qsl(".kde/")).exists()) {
-		services = home + qsl(".kde/share/kde4/services/");
-	}
-	if (!services.isEmpty()) {
-		if (!QDir(services).exists()) QDir().mkpath(services);
-
-		QString path = services, file = path + qsl("tg.protocol");
-		QFile f(file);
-		if (f.open(QIODevice::WriteOnly)) {
-			QTextStream s(&f);
-			s.setCodec("UTF-8");
-			s << "[Protocol]\n";
-			s << "exec=" << QFile::decodeName(EscapeShell(QFile::encodeName(cExeDir() + cExeName()))) << " -- %u\n";
-			s << "protocol=tg\n";
-			s << "input=none\n";
-			s << "output=none\n";
-			s << "helper=true\n";
-			s << "listing=false\n";
-			s << "reading=false\n";
-			s << "writing=false\n";
-			s << "makedir=false\n";
-			s << "deleting=false\n";
-			f.close();
-		} else {
-			LOG(("App Error: Could not open '%1' for write").arg(file));
-		}
-	}
+	RunShellCommand("xdg-mime default "
+		+ GetLauncherFilename().toLatin1()
+		+ " x-scheme-handler/tg");
 #endif // !TDESKTOP_DISABLE_REGISTER_CUSTOM_SCHEME
 }
 
@@ -417,6 +501,26 @@ bool psShowOpenWithMenu(int x, int y, const QString &file) {
 }
 
 void psAutoStart(bool start, bool silent) {
+	auto home = getHomeDir();
+	if (home.isEmpty() || cAlphaVersion() || cExeName().isEmpty())
+		return;
+
+	if (InSandbox()) {
+#ifndef TDESKTOP_DISABLE_DBUS_INTEGRATION
+		SandboxAutostart(start);
+#endif
+	} else {
+		const auto autostart =
+			QStandardPaths::writableLocation(
+				QStandardPaths::GenericConfigLocation)
+			+ qsl("/autostart/");
+
+		if (start) {
+			GenerateDesktopFile(autostart, qsl("-autostart"));
+		} else {
+			QFile::remove(autostart + GetLauncherFilename());
+		}
+	}
 }
 
 void psSendToMenu(bool send, bool silent) {

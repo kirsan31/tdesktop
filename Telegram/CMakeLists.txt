@@ -20,6 +20,7 @@ add_subdirectory(lib_lottie)
 add_subdirectory(lib_qr)
 add_subdirectory(codegen)
 
+include(CheckCXXSourceCompiles)
 include(lib_ui/cmake/generate_styles.cmake)
 include(cmake/generate_lang.cmake)
 include(cmake/generate_numbers.cmake)
@@ -103,6 +104,16 @@ PRIVATE
 
 if (NOT DESKTOP_APP_USE_PACKAGED)
     target_link_libraries(Telegram PRIVATE desktop-app::external_opus)
+endif()
+
+# Telegram uses long atomic types, so on some architectures libatomic is needed.
+check_cxx_source_compiles("
+#include <atomic>
+std::atomic_int64_t foo;
+int main() {return foo;}
+" HAVE_LONG_ATOMIC_WITHOUT_LIB)
+if (NOT HAVE_LONG_ATOMIC_WITHOUT_LIB)
+    target_link_libraries(Telegram PRIVATE atomic)
 endif()
 
 target_precompile_headers(Telegram PRIVATE ${src_loc}/stdafx.h)
@@ -1169,7 +1180,7 @@ if ((NOT disable_autoupdate OR NOT LINUX) AND NOT build_macstore AND NOT build_w
     set_target_properties(Updater PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${output_folder})
 
     if (LINUX)
-        target_link_options(Updater INTERFACE -static-libstdc++)
+        target_link_options(Updater PRIVATE -static-libstdc++)
     endif()
 
     if (DESKTOP_APP_SPECIAL_TARGET)

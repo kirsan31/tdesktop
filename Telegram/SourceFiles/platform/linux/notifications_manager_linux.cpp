@@ -7,13 +7,13 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "platform/linux/notifications_manager_linux.h"
 
+#include "platform/linux/specific_linux.h"
 #include "history/history.h"
 #include "lang/lang_keys.h"
 #include "facades.h"
 
 #ifndef TDESKTOP_DISABLE_DBUS_INTEGRATION
 #include <QtCore/QVersionNumber>
-#include <QtDBus/QDBusConnection>
 #include <QtDBus/QDBusReply>
 #include <QtDBus/QDBusMetaType>
 #endif
@@ -24,14 +24,14 @@ namespace Notifications {
 #ifndef TDESKTOP_DISABLE_DBUS_INTEGRATION
 namespace {
 
-constexpr auto kService = str_const("org.freedesktop.Notifications");
-constexpr auto kObjectPath = str_const("/org/freedesktop/Notifications");
+constexpr auto kService = "org.freedesktop.Notifications"_cs;
+constexpr auto kObjectPath = "/org/freedesktop/Notifications"_cs;
 constexpr auto kInterface = kService;
 
 std::vector<QString> GetServerInformation(
 		const std::shared_ptr<QDBusInterface> &notificationInterface) {
 	std::vector<QString> serverInformation;
-	auto serverInformationReply = notificationInterface
+	const auto serverInformationReply = notificationInterface
 		->call(qsl("GetServerInformation"));
 
 	if (serverInformationReply.type() == QDBusMessage::ReplyMessage) {
@@ -47,7 +47,7 @@ std::vector<QString> GetServerInformation(
 		}
 	} else if (serverInformationReply.type() == QDBusMessage::ErrorMessage) {
 		LOG(("Native notification error: %1")
-			.arg(QDBusError(serverInformationReply).message()));
+			.arg(serverInformationReply.errorMessage()));
 	} else {
 		LOG(("Native notification error: "
 			"error while getting information about notification daemon"));
@@ -58,7 +58,7 @@ std::vector<QString> GetServerInformation(
 
 QStringList GetCapabilities(
 		const std::shared_ptr<QDBusInterface> &notificationInterface) {
-	QDBusReply<QStringList> capabilitiesReply = notificationInterface
+	const QDBusReply<QStringList> capabilitiesReply = notificationInterface
 		->call(qsl("GetCapabilities"));
 
 	if (capabilitiesReply.isValid()) {
@@ -95,7 +95,7 @@ NotificationData::NotificationData(
 , _title(title)
 , _peerId(peerId)
 , _msgId(msgId) {
-	auto capabilities = GetCapabilities(_notificationInterface);
+	const auto capabilities = GetCapabilities(_notificationInterface);
 
 	if (capabilities.contains(qsl("body-markup"))) {
 		_body = subtitle.isEmpty()
@@ -112,17 +112,25 @@ NotificationData::NotificationData(
 	if (capabilities.contains(qsl("actions"))) {
 		_actions << qsl("default") << QString();
 
-		connect(_notificationInterface.get(),
-			SIGNAL(ActionInvoked(uint, QString)),
-			this, SLOT(notificationClicked(uint)));
+		_notificationInterface->connection().connect(
+			kService.utf16(),
+			kObjectPath.utf16(),
+			kInterface.utf16(),
+			qsl("ActionInvoked"),
+			this,
+			SLOT(notificationClicked(uint)));
 
 		if (capabilities.contains(qsl("inline-reply"))) {
 			_actions << qsl("inline-reply")
 				<< tr::lng_notification_reply(tr::now);
 
-			connect(_notificationInterface.get(),
-				SIGNAL(NotificationReplied(uint,QString)),
-				this, SLOT(notificationReplied(uint,QString)));
+			_notificationInterface->connection().connect(
+				kService.utf16(),
+				kObjectPath.utf16(),
+				kInterface.utf16(),
+				qsl("NotificationReplied"),
+				this,
+				SLOT(notificationReplied(uint,QString)));
 		} else {
 			// icon name according to https://specifications.freedesktop.org/icon-naming-spec/icon-naming-spec-latest.html
 			_actions << qsl("mail-reply-sender")
@@ -150,18 +158,28 @@ NotificationData::NotificationData(
 
 	_hints["category"] = qsl("im.received");
 
-	_hints["desktop-entry"] =
-		qsl(MACRO_TO_STRING(TDESKTOP_LAUNCHER_BASENAME));
+	_hints["desktop-entry"] = GetLauncherBasename();
 
-	connect(_notificationInterface.get(),
-		SIGNAL(NotificationClosed(uint, uint)),
-		this, SLOT(notificationClosed(uint)));
+	_notificationInterface->connection().connect(
+		kService.utf16(),
+		kObjectPath.utf16(),
+		kInterface.utf16(),
+		qsl("NotificationClosed"),
+		this,
+		SLOT(notificationClosed(uint)));
 }
 
 bool NotificationData::show() {
-	QDBusReply<uint> notifyReply = _notificationInterface->call(qsl("Notify"),
-		str_const_toString(AppName), uint(0), QString(), _title, _body,
-		_actions, _hints, -1);
+	const QDBusReply<uint> notifyReply = _notificationInterface->call(
+		qsl("Notify"),
+		AppName.utf16(),
+		uint(0),
+		QString(),
+		_title,
+		_body,
+		_actions,
+		_hints,
+		-1);
 
 	if (notifyReply.isValid()) {
 		_notificationId = notifyReply.value();
@@ -174,7 +192,7 @@ bool NotificationData::show() {
 }
 
 bool NotificationData::close() {
-	QDBusReply<void> closeReply = _notificationInterface
+	const QDBusReply<void> closeReply = _notificationInterface
 		->call(qsl("CloseNotification"), _notificationId);
 
 	if (!closeReply.isValid()) {
@@ -186,7 +204,7 @@ bool NotificationData::close() {
 }
 
 void NotificationData::setImage(const QString &imagePath) {
-	auto specificationVersion = ParseSpecificationVersion(
+	const auto specificationVersion = ParseSpecificationVersion(
 		GetServerInformation(_notificationInterface));
 
 	QString imageKey;
@@ -211,9 +229,16 @@ void NotificationData::setImage(const QString &imagePath) {
 		return;
 	}
 
-	auto image = QImage(imagePath).convertToFormat(QImage::Format_RGBA8888);
-	QByteArray imageBytes((const char*)image.constBits(),
+	const auto image = QImage(imagePath)
+		.convertToFormat(QImage::Format_RGBA8888);
+
+	const QByteArray imageBytes(
+		(const char*)image.constBits(),
+#if QT_VERSION < QT_VERSION_CHECK(5, 10, 0)
+		image.byteCount());
+#else
 		image.sizeInBytes());
+#endif
 
 	ImageData imageData;
 	imageData.width = image.width();
@@ -285,10 +310,11 @@ const QDBusArgument &operator>>(const QDBusArgument &argument,
 
 bool Supported() {
 #ifndef TDESKTOP_DISABLE_DBUS_INTEGRATION
-	static auto Available = QDBusInterface(
-		str_const_toString(kService),
-		str_const_toString(kObjectPath),
-		str_const_toString(kInterface)).isValid();
+	static const auto Available = QDBusInterface(
+		kService.utf16(),
+		kObjectPath.utf16(),
+		kInterface.utf16()
+	).isValid();
 
 	return Available;
 #else
@@ -310,16 +336,17 @@ std::unique_ptr<Window::Notifications::Manager> Create(
 Manager::Private::Private(Manager *manager, Type type)
 : _cachedUserpics(type)
 , _manager(manager)
-, _notificationInterface(std::make_shared<QDBusInterface>(
-		str_const_toString(kService),
-		str_const_toString(kObjectPath),
-		str_const_toString(kInterface))) {
+, _notificationInterface(
+	std::make_shared<QDBusInterface>(
+		kService.utf16(),
+		kObjectPath.utf16(),
+		kInterface.utf16())) {
 	qDBusRegisterMetaType<NotificationData::ImageData>();
 
-	auto specificationVersion = ParseSpecificationVersion(
+	const auto specificationVersion = ParseSpecificationVersion(
 		GetServerInformation(_notificationInterface));
 
-	auto capabilities = GetCapabilities(_notificationInterface);
+	const auto capabilities = GetCapabilities(_notificationInterface);
 
 	if (!specificationVersion.isNull()) {
 		LOG(("Notification daemon specification version: %1")
