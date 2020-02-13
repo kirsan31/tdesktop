@@ -58,13 +58,6 @@ Go to ***BuildPath*** and run
     cd ../
     git clone --branch 0.10.0 https://github.com/ericniebler/range-v3
 
-    git clone https://github.com/madler/zlib.git
-    cd zlib
-    ./configure
-    make $MAKE_THREADS_CNT
-    sudo make install
-    cd ..
-
     git clone https://github.com/xiph/opus
     cd opus
     git checkout v1.3
@@ -235,10 +228,11 @@ Go to ***BuildPath*** and run
 
     git clone git://code.qt.io/qt/qt5.git qt_5_12_5
     cd qt_5_12_5
-    perl init-repository --module-subset=qtbase,qtimageformats
+    perl init-repository --module-subset=qtbase,qtimageformats,qtsvg
     git checkout v5.12.5
     git submodule update qtbase
     git submodule update qtimageformats
+    git submodule update qtsvg
     cd qtbase
     git apply ../../patches/qtbase_5_12_5.diff
     cd src/plugins/platforminputcontexts
@@ -253,12 +247,12 @@ Go to ***BuildPath*** and run
     -force-debug-info \
     -opensource \
     -confirm-license \
+    -qt-zlib \
     -qt-libpng \
     -qt-libjpeg \
     -qt-harfbuzz \
     -qt-pcre \
     -qt-xcb \
-    -system-zlib \
     -system-freetype \
     -fontconfig \
     -no-opengl \

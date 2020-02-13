@@ -212,10 +212,6 @@ void Application::run() {
 
 	_window = std::make_unique<Window::Controller>(&activeAccount());
 
-	const auto currentGeometry = _window->widget()->geometry();
-	_mediaView = std::make_unique<Media::View::OverlayWidget>();
-	_window->widget()->setGeometry(currentGeometry);
-
 	QCoreApplication::instance()->installEventFilter(this);
 	connect(
 		static_cast<QGuiApplication*>(QCoreApplication::instance()),
@@ -244,8 +240,15 @@ void Application::run() {
 			_window->setupIntro();
 		}
 	}
+
+	_window->widget()->show();
+
+	const auto currentGeometry = _window->widget()->geometry();
+	_mediaView = std::make_unique<Media::View::OverlayWidget>();
+	_window->widget()->setGeometry(currentGeometry);
+
 	DEBUG_LOG(("Application Info: showing."));
-	_window->firstShow();
+	_window->finishFirstShow();
 
 	if (!locked() && cStartToSettings()) {
 		_window->showSettings();
@@ -279,6 +282,8 @@ void Application::showPhoto(not_null<const PhotoOpenClickHandler*> link) {
 }
 
 void Application::showPhoto(not_null<PhotoData*> photo, HistoryItem *item) {
+	Expects(_mediaView != nullptr);
+
 	_mediaView->showPhoto(photo, item);
 	_mediaView->activateWindow();
 	_mediaView->setFocus();
@@ -287,12 +292,16 @@ void Application::showPhoto(not_null<PhotoData*> photo, HistoryItem *item) {
 void Application::showPhoto(
 		not_null<PhotoData*> photo,
 		not_null<PeerData*> peer) {
+	Expects(_mediaView != nullptr);
+
 	_mediaView->showPhoto(photo, peer);
 	_mediaView->activateWindow();
 	_mediaView->setFocus();
 }
 
 void Application::showDocument(not_null<DocumentData*> document, HistoryItem *item, bool TryExternal) {
+        Expects(_mediaView != nullptr);
+
 	if ((TryExternal || cUseExternalVideoPlayer())
 		&& document->isVideoFile()
 		&& document->loaded()) {
@@ -357,6 +366,8 @@ void Application::showHtmlDocument(const QString &filepath) {
 void Application::showTheme(
 		not_null<DocumentData*> document,
 		const Data::CloudTheme &cloud) {
+	Expects(_mediaView != nullptr);
+
 	_mediaView->showTheme(document, cloud);
 	_mediaView->activateWindow();
 	_mediaView->setFocus();
