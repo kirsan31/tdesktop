@@ -491,10 +491,10 @@ void PipPanel::setPositionOnScreen(Position position, QRect available) {
 		? QSize(max, max * _ratio.height() / _ratio.width())
 		: QSize(max * _ratio.width() / _ratio.height(), max);
 
-	// At least one side should not be greater than half of screen size.
+	// At least one side should not be greater than screen size.
 	const auto byWidth = (scaled.width() * screen.height())
 		> (scaled.height() * screen.width());
-	const auto fit = QSize(screen.width() / 2, screen.height() / 2);
+	const auto fit = QSize(screen.width(), screen.height());
 	const auto normalized = (byWidth && scaled.width() > fit.width())
 		? QSize(fit.width(), fit.width() * scaled.height() / scaled.width())
 		: (!byWidth && scaled.height() > fit.height())
@@ -691,8 +691,8 @@ void PipPanel::processDrag(QPoint point) {
 		st::pipMinimalSize,
 		Qt::KeepAspectRatioByExpanding);
 	const auto maximalSize = _ratio.scaled(
-		screen.width() / 2,
-		screen.height() / 2,
+		screen.width(),
+		screen.height(),
 		Qt::KeepAspectRatio);
 	const auto geometry = Transformed(
 		_dragStartGeometry,
