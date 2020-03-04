@@ -24,6 +24,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_user.h"
 #include "data/data_scheduled_messages.h"
 #include "data/data_file_origin.h"
+#include "data/data_histories.h"
 #include "api/api_text_entities.h"
 #include "ui/special_buttons.h"
 #include "ui/widgets/buttons.h"
@@ -2217,10 +2218,8 @@ void MainWidget::dialogsToUp() {
 	_dialogs->jumpToTop();
 }
 
-void MainWidget::markActiveHistoryAsRead() {
-	if (const auto activeHistory = _history->history()) {
-		session().api().readServerHistory(activeHistory);
-	}
+void MainWidget::checkHistoryActivation() {
+	_history->checkHistoryActivation();
 }
 
 void MainWidget::showAnimated(const QPixmap &bgAnimCache, bool back) {
@@ -3519,15 +3518,8 @@ bool MainWidget::isActive() const {
 	return !_isIdle && isVisible() && !_a_show.animating();
 }
 
-bool MainWidget::doWeReadServerHistory() const {
-	return isActive()
-		&& !session().supportMode()
-		&& !_mainSection
-		&& _history->doWeReadServerHistory();
-}
-
-bool MainWidget::doWeReadMentions() const {
-	return isActive() && !_mainSection && _history->doWeReadMentions();
+bool MainWidget::doWeMarkAsRead() const {
+	return isActive() && !_mainSection;
 }
 
 bool MainWidget::lastWasOnline() const {
@@ -4036,7 +4028,7 @@ void MainWidget::feedUpdate(const MTPUpdate &update) {
 	//				d.vunread_count()->v,
 	//				d.vunread_muted_count()->v);
 	//		} else {
-	//			session().api().requestDialogEntry(feed);
+	//			session().data().histories().requestDialogEntry(feed);
 	//		}
 	//	}
 	//} break;
@@ -4412,7 +4404,7 @@ void MainWidget::feedUpdate(const MTPUpdate &update) {
 			session().api().requestPinnedDialogs(folder);
 		}
 		if (!loaded) {
-			session().api().requestDialogEntry(folder);
+			session().data().histories().requestDialogEntry(folder);
 		}
 	} break;
 
@@ -4470,12 +4462,12 @@ void MainWidget::feedUpdate(const MTPUpdate &update) {
 				//if (const auto feed = channel->feed()) { // #feed
 				//	feed->requestChatListMessage();
 				//	if (!feed->unreadCountKnown()) {
-				//		feed->session().api().requestDialogEntry(feed);
+				//		feed->owner().histories().requestDialogEntry(feed);
 				//	}
 				//} else {
 					history->requestChatListMessage();
 					if (!history->unreadCountKnown()) {
-						history->session().api().requestDialogEntry(history);
+						history->owner().histories().requestDialogEntry(history);
 					}
 				//}
 				if (!channel->amCreator()) {

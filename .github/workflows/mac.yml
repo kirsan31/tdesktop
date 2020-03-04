@@ -26,15 +26,17 @@ jobs:
       GIT: "https://github.com"
       PREFIX: "/usr/local/macos"
       MACOSX_DEPLOYMENT_TARGET: "10.12"
-      XZ: "xz-5.0.5"
+      XZ: "xz-5.2.4"
       QT: "5_12_5"
       OPENSSL_VER: "1_1_1"
       QT_PREFIX: "/usr/local/desktop-app/Qt-5.12.5"
-      LIBICONV_VER: "libiconv-1.15"
+      LIBICONV_VER: "libiconv-1.16"
       UPLOAD_ARTIFACT: "false"
       ONLY_CACHE: "false"
       MANUAL_CACHING: "2"
       DOC_PATH: "docs/building-xcode.md"
+      AUTO_CACHING: "1"
+
     steps:
       - name: Get repository name.
         run: echo ::set-env name=REPO_NAME::${GITHUB_REPOSITORY##*/}
@@ -61,6 +63,10 @@ jobs:
           echo $MIN_MAC >> CACHE_KEY.txt
           echo $PREFIX >> CACHE_KEY.txt
           echo $MANUAL_CACHING >> CACHE_KEY.txt
+          if [ "$AUTO_CACHING" == "1" ]; then
+            thisFile=$REPO_NAME/.github/workflows/mac.yml
+            echo `md5 -q $thisFile` >> CACHE_KEY.txt
+          fi
           echo ::set-env name=CACHE_KEY::`md5 -q CACHE_KEY.txt`
 
           echo ::add-path::$PWD/Libraries/depot_tools

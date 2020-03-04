@@ -58,8 +58,8 @@ The source code is published under GPLv3 with OpenSSL exception, the license is 
 ## Build instructions
 
 * [Visual Studio 2019][msvc]
-* [Xcode 10][xcode]
-* [GYP/CMake on GNU/Linux][cmake]
+* [Xcode 11][xcode]
+* [CMake on GNU/Linux][cmake]
 
 [//]: # (LINKS)
 [Change the Always on Top behavior of the Call Popup]: https://github.com/telegramdesktop/tdesktop/issues/3382
