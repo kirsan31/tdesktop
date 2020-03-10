@@ -30,7 +30,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtDBus/QDBusMessage>
 #include <QtDBus/QDBusReply>
 #include <QtDBus/QDBusError>
-#endif
+#endif // !TDESKTOP_DISABLE_DBUS_INTEGRATION
 
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -61,23 +61,29 @@ void SandboxAutostart(bool autostart, bool silent = false) {
 	});
 	options["dbus-activatable"] = false;
 
-	const auto requestBackgroundReply = QDBusInterface(
+	auto message = QDBusMessage::createMethodCall(
 		qsl("org.freedesktop.portal.Desktop"),
 		qsl("/org/freedesktop/portal/desktop"),
-		qsl("org.freedesktop.portal.Background")
-	).call(qsl("RequestBackground"), QString(), options);
+		qsl("org.freedesktop.portal.Background"),
+		qsl("RequestBackground"));
 
-	if (!silent) {
-		if (requestBackgroundReply.type() == QDBusMessage::ErrorMessage) {
-			LOG(("Flatpak autostart error: %1")
-				.arg(requestBackgroundReply.errorMessage()));
-		} else if (requestBackgroundReply.type()
-			!= QDBusMessage::ReplyMessage) {
-			LOG(("Flatpak autostart error: invalid reply"));
+	message.setArguments({
+		QString(),
+		options
+	});
+
+	if (silent) {
+		QDBusConnection::sessionBus().send(message);
+	} else {
+		const QDBusReply<void> reply = QDBusConnection::sessionBus().call(
+			message);
+
+		if (!reply.isValid()) {
+			LOG(("Flatpak autostart error: %1").arg(reply.error().message()));
 		}
 	}
 }
-#endif
+#endif // !TDESKTOP_DISABLE_DBUS_INTEGRATION
 
 bool RunShellCommand(const QByteArray &command) {
 	auto result = system(command.constData());
@@ -168,7 +174,7 @@ bool GenerateDesktopFile(
 				QRegularExpression::MultilineOption),
 			qsl("Exec=\\1")
 				+ (args.isEmpty() ? QString() : ' ' + args));
-#else
+#else // DESKTOP_APP_USE_PACKAGED
 		fileText = fileText.replace(
 			QRegularExpression(
 				qsl("^TryExec=.*$"),
@@ -184,7 +190,7 @@ bool GenerateDesktopFile(
 				+ EscapeShell(QFile::encodeName(cExeDir() + cExeName()))
 					.replace('\\', qsl("\\\\"))
 				+ (args.isEmpty() ? QString() : ' ' + args));
-#endif
+#endif // !DESKTOP_APP_USE_PACKAGED
 		target.write(fileText.toUtf8());
 		target.close();
 
@@ -209,9 +215,7 @@ void SetApplicationIcon(const QIcon &icon) {
 }
 
 bool InSandbox() {
-	static const auto Sandbox = QFileInfo::exists(
-		QStandardPaths::writableLocation(QStandardPaths::RuntimeLocation)
-			+ qsl("/flatpak-info"));
+	static const auto Sandbox = QFileInfo::exists(qsl("/.flatpak-info"));
 	return Sandbox;
 }
 
@@ -228,12 +232,18 @@ bool IsXDGDesktopPortalPresent() {
 		"org.freedesktop.portal.Desktop",
 		"/org/freedesktop/portal/desktop").isValid();
 #endif // !TDESKTOP_DISABLE_DBUS_INTEGRATION
+
 	return XDGDesktopPortalPresent;
 }
 
 bool UseXDGDesktopPortal() {
-	static const auto UsePortal = qEnvironmentVariableIsSet("TDESKTOP_USE_PORTAL")
-		&& IsXDGDesktopPortalPresent();
+	static const auto UsePortal = [&] {
+		const auto envVar = qEnvironmentVariableIsSet("TDESKTOP_USE_PORTAL");
+		const auto portalPresent = IsXDGDesktopPortalPresent();
+
+		return envVar && portalPresent;
+	}();
+
 	return UsePortal;
 }
 
@@ -360,7 +370,8 @@ std::optional<crl::time> LastUserInputTime() {
 
 	if (reply.isValid()) {
 		return (crl::now() - static_cast<crl::time>(reply.value()));
-	} else if (reply.error().type() != QDBusError::ServiceUnknown) {
+	} else if (reply.error().type() != QDBusError::ServiceUnknown
+		&& reply.error().type() != QDBusError::NotSupported) {
 		LOG(("Unable to get last user input time: %1: %2")
 			.arg(reply.error().name())
 			.arg(reply.error().message()));
@@ -488,6 +499,9 @@ void start() {
 	LOG(("Launcher filename: %1").arg(GetLauncherFilename()));
 	FallbackFontConfig();
 
+	qputenv("PULSE_PROP_application.name", AppName.utf8());
+	qputenv("PULSE_PROP_application.icon_name", GetIconName().toLatin1());
+
 #ifdef TDESKTOP_FORCE_GTK_FILE_DIALOG
 	LOG(("Checking for XDG Desktop Portal..."));
 	// this can give us a chance to use a proper file dialog for current session
@@ -510,18 +524,21 @@ void finish() {
 
 void RegisterCustomScheme(bool force) {
 #ifndef TDESKTOP_DISABLE_REGISTER_CUSTOM_SCHEME
-	auto home = getHomeDir();
+	const auto home = getHomeDir();
 	if (home.isEmpty() || cExeName().isEmpty())
 		return;
 
+	static const auto disabledByEnv = qEnvironmentVariableIsSet(
+		"TDESKTOP_DISABLE_DESKTOP_FILE_GENERATION");
+
 	// don't update desktop file for alpha version or if updater is disabled
-	if ((cAlphaVersion() || Core::UpdaterDisabled()) && !force)
+	if ((cAlphaVersion() || Core::UpdaterDisabled() || disabledByEnv)
+		&& !force)
 		return;
 
 	const auto applicationsPath = QStandardPaths::writableLocation(
 		QStandardPaths::ApplicationsLocation) + '/';
 
-#ifndef TDESKTOP_DISABLE_DESKTOP_FILE_GENERATION
 	GenerateDesktopFile(applicationsPath, qsl("-- %u"));
 
 	const auto icons =
@@ -544,7 +561,6 @@ void RegisterCustomScheme(bool force) {
 			DEBUG_LOG(("App Info: Icon copied to '%1'").arg(icon));
 		}
 	}
-#endif // !TDESKTOP_DISABLE_DESKTOP_FILE_GENERATION
 
 	RunShellCommand("update-desktop-database "
 		+ EscapeShell(QFile::encodeName(applicationsPath)));
@@ -615,14 +631,14 @@ bool psShowOpenWithMenu(int x, int y, const QString &file) {
 }
 
 void psAutoStart(bool start, bool silent) {
-	auto home = getHomeDir();
+	const auto home = getHomeDir();
 	if (home.isEmpty() || cExeName().isEmpty())
 		return;
 
 	if (InSandbox()) {
 #ifndef TDESKTOP_DISABLE_DBUS_INTEGRATION
 		SandboxAutostart(start, silent);
-#endif
+#endif // !DESKTOP_APP_USE_PACKAGED
 	} else {
 		const auto autostart = [&] {
 			if (InSnap()) {
