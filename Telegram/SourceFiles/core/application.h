@@ -215,7 +215,6 @@ public:
 	void handleAppDeactivated();
 
 	void switchDebugMode();
-	void switchWorkMode();
 	void switchTestMode();
 	void writeInstallBetaVersionsSetting();
 
