@@ -1772,6 +1772,7 @@ void HistoryWidget::showHistory(
 
 	_showAtMsgId = showAtMsgId;
 	_historyInited = false;
+	_contactStatus = nullptr;
 
 	// Unload lottie animations.
 	Auth().data().unloadHeavyViewParts(HistoryInner::ElementDelegate());
@@ -1789,8 +1790,6 @@ void HistoryWidget::showHistory(
 		}, _contactStatus->lifetime());
 		orderWidgets();
 		controller()->tabbedSelector()->setCurrentPeer(_peer);
-	} else {
-		_contactStatus = nullptr;
 	}
 	refreshTabbedPanel();
 
