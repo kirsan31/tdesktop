@@ -166,6 +166,7 @@ void FiltersMenu::refresh() {
 	if (filters->list().empty() || _ignoreRefresh) {
 		return;
 	}
+	const auto oldTop = _scroll.scrollTop();
 
 	if (!_list) {
 		setupList();
@@ -185,6 +186,12 @@ void FiltersMenu::refresh() {
 	_reorder->start();
 
 	_container->resizeToWidth(_outer.width());
+
+	// After the filters are refreshed, the scroll is reset,
+	// so we have to restore it.
+	_scroll.scrollToY(oldTop);
+	const auto i = _filters.find(_activeFilterId);
+	scrollToButton((i != end(_filters)) ? i->second : _all);
 }
 
 void FiltersMenu::setupList() {
@@ -198,7 +205,7 @@ void FiltersMenu::setupList() {
 		_container,
 		-1,
 		tr::lng_filters_setup(tr::now),
-		Ui::FilterIcon::Setup);
+		Ui::FilterIcon::Edit);
 	_reorder = std::make_unique<Ui::VerticalLayoutReorder>(_list, &_scroll);
 
 	_reorder->updates(

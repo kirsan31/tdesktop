@@ -89,11 +89,16 @@ stickersRowDisabledOpacity: 0.4;
 stickersRowDuration: 200;
 
 stickersSettings: icon {{ "emoji_settings", emojiIconFg }};
-stickersTrending: icon {{ "emoji_trending", emojiIconFg }};
+stickersTrending: icon {{ "stickers_add", emojiIconFg }};
+stickersTrendingUnread: icon {
+	{ "stickers_add_unread", emojiIconFg },
+	{ "stickers_add_dot", dialogsUnreadBg }
+};
+stickersRecent: icon {{ "stickers_recent", emojiIconFg }};
 stickersSearch: icon {{ "stickers_search", emojiIconFg, point(0px, 1px) }};
 
-stickersSettingsUnreadSize: 17px;
-stickersSettingsUnreadPosition: point(4px, 5px);
+stickersSettingsUnreadSize: 6px;
+stickersSettingsUnreadPosition: point(6px, 10px);
 
 filtersRemove: IconButton(stickersRemove) {
 	ripple: defaultRippleAnimation;
@@ -213,8 +218,11 @@ stickerGroupCategoryAbout: defaultTextStyle;
 stickerGroupCategoryAddMargin: margins(0px, 10px, 0px, 5px);
 stickerGroupCategoryAdd: stickersTrendingAdd;
 
-stickersToastMaxWidth: 340px;
-stickersToastPadding: margins(16px, 13px, 16px, 12px);
+stickersToast: Toast(defaultToast) {
+	minWidth: 340px;
+	maxWidth: 340px;
+	padding: margins(16px, 13px, 16px, 12px);
+}
 
 stickersEmpty: icon {{ "stickers_empty", windowSubTextFg }};
 
@@ -266,7 +274,7 @@ autocompleteRowAnswer: defaultTextStyle;
 manageEmojiPreview: 22px;
 manageEmojiPreviewWidth: 48px;
 manageEmojiPreviewHeight: 48px;
-manageEmojiPreviewPadding: margins(23px, 9px, 19px, 9px);
+manageEmojiPreviewPadding: margins(22px, 9px, 19px, 9px);
 manageEmojiMarginRight: 21px;
 manageEmojiNameTop: 3px;
 manageEmojiStatusTop: 25px;

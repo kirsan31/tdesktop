@@ -57,7 +57,7 @@ Session::Session(
 , _data(std::make_unique<Data::Session>(this))
 , _user(_data->processUser(user))
 , _emojiStickersPack(std::make_unique<Stickers::EmojiPack>(this))
-, _diceStickersPack(std::make_unique<Stickers::DicePack>(this))
+, _diceStickersPacks(std::make_unique<Stickers::DicePacks>(this))
 , _changelogs(Core::Changelogs::Create(this))
 , _supportHelper(Support::Helper::Create(this)) {
 	Core::App().passcodeLockChanges(
@@ -69,9 +69,9 @@ Session::Session(
 		notifications().updateAll();
 	}, _lifetime);
 	subscribe(Global::RefConnectionTypeChanged(), [=] {
-		_api->refreshProxyPromotion();
+		_api->refreshTopPromotion();
 	});
-	_api->refreshProxyPromotion();
+	_api->refreshTopPromotion();
 	_api->requestTermsUpdate();
 	_api->requestFullPeer(_user);
 

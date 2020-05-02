@@ -46,7 +46,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 namespace Data {
 namespace {
 
-Call ComputeCallData(const MTPDmessageActionPhoneCall &call) {
+constexpr auto kFastRevokeRestriction = 24 * 60 * TimeId(60);
+
+[[nodiscard]] Call ComputeCallData(const MTPDmessageActionPhoneCall &call) {
 	auto result = Call();
 	result.finishReason = [&] {
 		if (const auto reason = call.vreason()) {
@@ -68,7 +70,7 @@ Call ComputeCallData(const MTPDmessageActionPhoneCall &call) {
 	return result;
 }
 
-Invoice ComputeInvoiceData(
+[[nodiscard]] Invoice ComputeInvoiceData(
 		not_null<HistoryItem*> item,
 		const MTPDmessageMediaInvoice &data) {
 	auto result = Invoice();
@@ -84,7 +86,7 @@ Invoice ComputeInvoiceData(
 	return result;
 }
 
-QString WithCaptionDialogsText(
+[[nodiscard]] QString WithCaptionDialogsText(
 		const QString &attachType,
 		const QString &caption) {
 	if (caption.isEmpty()) {
@@ -102,7 +104,7 @@ QString WithCaptionDialogsText(
 		TextUtilities::Clean(caption));
 }
 
-QString WithCaptionNotificationText(
+[[nodiscard]] QString WithCaptionNotificationText(
 		const QString &attachType,
 		const QString &caption) {
 	if (caption.isEmpty()) {
@@ -220,7 +222,7 @@ bool Media::allowsEditMedia() const {
 	return false;
 }
 
-bool Media::allowsRevoke() const {
+bool Media::allowsRevoke(TimeId now) const {
 	return true;
 }
 
@@ -1326,21 +1328,34 @@ std::unique_ptr<HistoryView::Media> MediaPoll::createView(
 	return std::make_unique<HistoryView::Poll>(message, _poll);
 }
 
-MediaDice::MediaDice(not_null<HistoryItem*> parent, int value)
+MediaDice::MediaDice(not_null<HistoryItem*> parent, QString emoji, int value)
 : Media(parent)
+, _emoji(emoji)
 , _value(value) {
 }
 
 std::unique_ptr<Media> MediaDice::clone(not_null<HistoryItem*> parent) {
-	return std::make_unique<MediaDice>(parent, _value);
+	return std::make_unique<MediaDice>(parent, _emoji, _value);
 }
 
-int MediaDice::diceValue() const {
+QString MediaDice::emoji() const {
+	return _emoji;
+}
+
+int MediaDice::value() const {
 	return _value;
 }
 
+bool MediaDice::allowsRevoke(TimeId now) const {
+	const auto peer = parent()->history()->peer;
+	if (peer->isSelf() || !peer->isUser()) {
+		return true;
+	}
+	return (now >= parent()->date() + kFastRevokeRestriction);
+}
+
 QString MediaDice::notificationText() const {
-	return QString::fromUtf8("\xF0\x9F\x8E\xB2");
+	return _emoji;
 }
 
 QString MediaDice::pinnedTextSubstring() const {

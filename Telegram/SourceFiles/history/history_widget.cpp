@@ -134,6 +134,7 @@ constexpr auto kCommonModifiers = 0
 	| Qt::ShiftModifier
 	| Qt::MetaModifier
 	| Qt::ControlModifier;
+const auto kPsaAboutPrefix = "cloud_lng_about_psa_";
 
 ApiWrap::RequestMessageDataCallback replyEditMessageDataCallback() {
 	return [](ChannelData *channel, MsgId msgId) {
@@ -238,11 +239,18 @@ object_ptr<Ui::FlatButton> SetupDiscussButton(
 }
 
 void ShowErrorToast(const QString &text) {
-	auto config = Ui::Toast::Config();
-	config.multiline = true;
-	config.minWidth = st::msgMinWidth;
-	config.text = text;
-	Ui::Toast::Show(config);
+	Ui::Toast::Show(Ui::Toast::Config{
+		.text = { text },
+		.st = &st::historyErrorToast,
+		.multiline = true,
+	});
+}
+
+[[nodiscard]] crl::time CountToastDuration(const TextWithEntities &text) {
+	return std::clamp(
+		crl::time(1000) * text.text.size() / 14,
+		crl::time(1000) * 5,
+		crl::time(1000) * 8);
 }
 
 } // namespace
@@ -522,13 +530,13 @@ HistoryWidget::HistoryWidget(
 		| UpdateFlag::MigrationChanged
 		| UpdateFlag::UnavailableReasonChanged
 		| UpdateFlag::PinnedMessageChanged
+		| UpdateFlag::TopPromotedChanged
 		| UpdateFlag::UserIsBlocked
 		| UpdateFlag::AdminsChanged
 		| UpdateFlag::MembersChanged
 		| UpdateFlag::UserOnlineChanged
 		| UpdateFlag::NotificationsEnabled
 		| UpdateFlag::ChannelAmIn
-		| UpdateFlag::ChannelPromotedChanged
 		| UpdateFlag::ChannelLinkedChat
 		| UpdateFlag::ChannelSlowmode
 		| UpdateFlag::ChannelLocalMessages;
@@ -566,8 +574,7 @@ HistoryWidget::HistoryWidget(
 					this->update();
 				}
 			}
-			if (update.flags & UpdateFlag::ChannelPromotedChanged) {
-				refreshAboutProxyPromotion();
+			if (update.flags & UpdateFlag::TopPromotedChanged) {
 				updateHistoryGeometry();
 				updateControlsVisibility();
 				updateControlsGeometry();
@@ -1651,6 +1658,7 @@ void HistoryWidget::showHistory(
 	}
 
 	clearHighlightMessages();
+	hideInfoTooltip(anim::type::instant);
 	if (_history) {
 		if (_peer->id == peerId && !reload) {
 			updateForwarding();
@@ -1844,7 +1852,8 @@ void HistoryWidget::showHistory(
 		}
 
 		_scroll->hide();
-		_list = _scroll->setOwnedWidget(object_ptr<HistoryInner>(this, controller(), _scroll, _history));
+		_list = _scroll->setOwnedWidget(
+			object_ptr<HistoryInner>(this, _scroll, controller(), _history));
 		_list->show();
 
 		_updateHistoryItems.stop();
@@ -1904,6 +1913,7 @@ void HistoryWidget::showHistory(
 			}
 		}
 		unreadCountUpdated(); // set _historyDown badge.
+		showAboutTopPromotion();
 	} else {
 		_topBar->setActiveChat(
 			Dialogs::Key(),
@@ -2070,7 +2080,6 @@ void HistoryWidget::updateControlsVisibility() {
 	if (_contactStatus) {
 		_contactStatus->show();
 	}
-	refreshAboutProxyPromotion();
 	if (!editingMessage() && (isBlocked() || isJoinChannel() || isMuteUnmute() || isBotStart())) {
 		if (isBlocked()) {
 			_joinChannel->hide();
@@ -2263,21 +2272,25 @@ void HistoryWidget::updateControlsVisibility() {
 	updateMouseTracking();
 }
 
-void HistoryWidget::refreshAboutProxyPromotion() {
-	if (_history->useProxyPromotion()) {
-		if (!_aboutProxyPromotion) {
-			_aboutProxyPromotion = object_ptr<Ui::PaddingWrap<Ui::FlatLabel>>(
-				this,
-				object_ptr<Ui::FlatLabel>(
-					this,
-					tr::lng_proxy_sponsor_about(tr::now),
-					st::historyAboutProxy),
-				st::historyAboutProxyPadding);
-		}
-		_aboutProxyPromotion->show();
-	} else {
-		_aboutProxyPromotion.destroy();
+void HistoryWidget::showAboutTopPromotion() {
+	Expects(_history != nullptr);
+	Expects(_list != nullptr);
+
+	if (!_history->useTopPromotion() || _history->topPromotionAboutShown()) {
+		return;
 	}
+	_history->markTopPromotionAboutShown();
+	const auto type = _history->topPromotionType();
+	const auto custom = type.isEmpty()
+		? QString()
+		: Lang::Current().getNonDefaultValue(
+			kPsaAboutPrefix + type.toUtf8());
+	const auto text = type.isEmpty()
+		? tr::lng_proxy_sponsor_about(tr::now, Ui::Text::RichLangValue)
+		: custom.isEmpty()
+		? tr::lng_about_psa_default(tr::now, Ui::Text::RichLangValue)
+		: Ui::Text::RichLangValue(custom);
+	showInfoTooltip(text, nullptr);
 }
 
 void HistoryWidget::updateMouseTracking() {
@@ -2916,7 +2929,26 @@ void HistoryWidget::historyDownClicked() {
 }
 
 void HistoryWidget::showNextUnreadMention() {
-	showHistory(_peer->id, _history->getMinLoadedUnreadMention());
+	const auto msgId = _history->getMinLoadedUnreadMention();
+	const auto already = (_showAtMsgId == msgId);
+
+	// Mark mention voice/video message as read.
+	// See https://github.com/telegramdesktop/tdesktop/issues/5623
+	if (msgId && already) {
+		const auto item = _history->owner().message(
+			_history->channelId(),
+			msgId);
+		if (const auto media = item ? item->media() : nullptr) {
+			if (const auto document = media->document()) {
+				if (!media->webpage()
+					&& (document->isVoiceMessage()
+						|| document->isVideoMessage())) {
+					document->owner().markMediaRead(document);
+				}
+			}
+		}
+	}
+	showHistory(_peer->id, msgId);
 }
 
 void HistoryWidget::saveEditMsg() {
@@ -3146,6 +3178,8 @@ void HistoryWidget::send(Api::SendOptions options) {
 	if (!_keyboard->hasMarkup() && _keyboard->forceReply() && !_kbReplyTo) {
 		toggleKeyboard();
 	}
+	App::main()->historyToDown(_history);
+	App::main()->dialogsToUp();
 }
 
 void HistoryWidget::sendWithModifiers(Qt::KeyboardModifiers modifiers) {
@@ -3691,7 +3725,7 @@ void HistoryWidget::botCallbackDone(
 					updateSendAction(item->history(), SendAction::Type::PlayGame);
 				}
 			} else {
-				UrlClickHandler(link).onClick({});
+				UrlClickHandler::Open(link);
 			}
 		}
 	});
@@ -4229,12 +4263,6 @@ void HistoryWidget::moveFieldControls() {
 	} else {
 		_muteUnmute->setGeometry(fullWidthButtonRect);
 	}
-
-	if (_aboutProxyPromotion) {
-		_aboutProxyPromotion->moveToLeft(
-			0,
-			fullWidthButtonRect.y() - _aboutProxyPromotion->height());
-	}
 }
 
 void HistoryWidget::updateFieldSize() {
@@ -4502,20 +4530,15 @@ bool HistoryWidget::confirmSendingFiles(
 bool HistoryWidget::canSendFiles(not_null<const QMimeData*> data) const {
 	if (!canWriteMessage()) {
 		return false;
-	}
-	if (const auto urls = data->urls(); !urls.empty()) {
+	} else if (const auto urls = data->urls(); !urls.empty()) {
 		if (ranges::find_if(
 			urls,
 			[](const QUrl &url) { return !url.isLocalFile(); }
 		) == urls.end()) {
 			return true;
 		}
-	}
-	if (data->hasImage()) {
-		const auto image = qvariant_cast<QImage>(data->imageData());
-		if (!image.isNull()) {
-			return true;
-		}
+	} else if (data->hasImage()) {
+		return true;
 	}
 	return false;
 }
@@ -5253,10 +5276,6 @@ void HistoryWidget::updateHistoryGeometry(
 	}
 	if (!editingMessage() && (isBlocked() || isBotStart() || isJoinChannel() || isMuteUnmute())) {
 		newScrollHeight -= _unblock->height();
-		if (_aboutProxyPromotion) {
-			_aboutProxyPromotion->resizeToWidth(width());
-			newScrollHeight -= _aboutProxyPromotion->height();
-		}
 	} else {
 		if (editingMessage() || _canSendMessages) {
 			newScrollHeight -= (_field->height() + 2 * st::historySendPadding);
@@ -5972,6 +5991,37 @@ bool HistoryWidget::sendExistingPhoto(not_null<PhotoData*> photo) {
 
 	_field->setFocus();
 	return true;
+}
+
+void HistoryWidget::showInfoTooltip(
+		const TextWithEntities &text,
+		Fn<void()> hiddenCallback) {
+	hideInfoTooltip(anim::type::normal);
+	_topToast = Ui::Toast::Show(_scroll, Ui::Toast::Config{
+		.text = text,
+		.st = &st::historyInfoToast,
+		.durationMs = CountToastDuration(text),
+		.multiline = true,
+		.dark = true,
+		.slideSide = RectPart::Top,
+	});
+	if (const auto strong = _topToast.get()) {
+		if (hiddenCallback) {
+			connect(strong->widget(), &QObject::destroyed, hiddenCallback);
+		}
+	} else if (hiddenCallback) {
+		hiddenCallback();
+	}
+}
+
+void HistoryWidget::hideInfoTooltip(anim::type animated) {
+	if (const auto strong = _topToast.get()) {
+		if (animated == anim::type::normal) {
+			strong->hideAnimated();
+		} else {
+			strong->hide();
+		}
+	}
 }
 
 void HistoryWidget::setFieldText(
@@ -6887,12 +6937,9 @@ void HistoryWidget::paintEditHeader(Painter &p, const QRect &rect, int left, int
 	p.setFont(st::msgServiceNameFont);
 	p.drawTextLeft(left, top + st::msgReplyPadding.top(), width(), tr::lng_edit_message(tr::now));
 
-	if (!_replyEditMsg || _replyEditMsg->history()->peer->isSelf()) return;
-
-	if (const auto megagroup = _replyEditMsg->history()->peer->asMegagroup()) {
-		if (megagroup->amCreator() || megagroup->hasAdminRights()) {
-			return;
-		}
+	if (!_replyEditMsg
+		|| _replyEditMsg->history()->peer->canEditMessagesIndefinitely()) {
+		return;
 	}
 
 	QString editTimeLeftText;
@@ -7041,9 +7088,6 @@ void HistoryWidget::paintEvent(QPaintEvent *e) {
 			}
 		} else if (const auto error = writeRestriction()) {
 			drawRestrictedWrite(p, *error);
-		}
-		if (_aboutProxyPromotion) {
-			p.fillRect(_aboutProxyPromotion->geometry(), st::historyReplyBg);
 		}
 		if (_pinnedBar && !_pinnedBar->cancel->isHidden()) {
 			drawPinnedBar(p);

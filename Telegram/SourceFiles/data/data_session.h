@@ -678,8 +678,11 @@ public:
 	void setMimeForwardIds(MessageIdsList &&list);
 	MessageIdsList takeMimeForwardIds();
 
-	void setProxyPromoted(PeerData *promoted);
-	PeerData *proxyPromoted() const;
+	void setTopPromoted(
+		PeerData *promoted,
+		const QString &type,
+		const QString &message);
+	PeerData *topPromoted() const;
 
 	bool updateWallpapers(const MTPaccount_WallPapers &data);
 	void removeWallpaper(const WallPaper &paper);
@@ -822,6 +825,8 @@ private:
 
 	void setWallpapers(const QVector<MTPWallPaper> &data, int32 hash);
 
+	void checkPollsClosings();
+
 	not_null<Main::Session*> _session;
 
 	Storage::DatabasePointer _cache;
@@ -943,6 +948,9 @@ private:
 	base::flat_set<not_null<GameData*>> _gamesUpdated;
 	base::flat_set<not_null<PollData*>> _pollsUpdated;
 
+	base::flat_multi_map<TimeId, not_null<PollData*>> _pollsClosings;
+	base::Timer _pollsClosingTimer;
+
 	base::flat_map<FolderId, std::unique_ptr<Folder>> _folders;
 	//rpl::variable<FeedId> _defaultFeedId = FeedId(); // #feed
 
@@ -952,7 +960,7 @@ private:
 
 	base::flat_set<not_null<ViewElement*>> _heavyViewParts;
 
-	PeerData *_proxyPromoted = nullptr;
+	PeerData *_topPromoted = nullptr;
 
 	NotifySettings _defaultUserNotifySettings;
 	NotifySettings _defaultChatNotifySettings;

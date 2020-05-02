@@ -9,6 +9,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "platform/linux/linux_libs.h"
 #include "platform/linux/linux_gdk_helper.h"
+#include "platform/linux/specific_linux.h"
 #include "core/application.h"
 #include "mainwindow.h"
 #include "boxes/abstract_box.h"
@@ -18,6 +19,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "facades.h"
 
 #include <QtCore/QProcess>
+#include <QtGui/QDesktopServices>
 
 #ifndef TDESKTOP_DISABLE_GTK_INTEGRATION
 #include <private/qguiapplication_p.h>
@@ -57,6 +59,44 @@ QByteArray EscapeShell(const QByteArray &content) {
 
 } // namespace internal
 
+void UnsafeOpenUrl(const QString &url) {
+	if (InSnap()) {
+		const QStringList arguments{
+			url
+		};
+		QProcess process;
+		process.startDetached(qsl("xdg-open"), arguments);
+	} else {
+		QDesktopServices::openUrl(url);
+	}
+}
+
+void UnsafeOpenEmailLink(const QString &email) {
+	const auto url = qstr("mailto:") + email;
+
+	if (InSnap()) {
+		const QStringList arguments{
+			url
+		};
+		QProcess process;
+		process.startDetached(qsl("xdg-open"), arguments);
+	} else {
+		QDesktopServices::openUrl(QUrl(url));
+	}
+}
+
+void UnsafeLaunch(const QString &filepath) {
+	if (InSnap()) {
+		const QStringList arguments{
+			QFileInfo(filepath).absoluteFilePath()
+		};
+		QProcess process;
+		process.startDetached(qsl("xdg-open"), arguments);
+	} else {
+		QDesktopServices::openUrl(QUrl::fromLocalFile(filepath));
+	}
+}
+
 void UnsafeShowInFolder(const QString &filepath) {
 	// Hide mediaview to make other apps visible.
 	Ui::hideLayer(anim::type::instant);
@@ -83,11 +123,11 @@ constexpr auto kPreviewHeight = 512;
 using Type = ::FileDialog::internal::Type;
 
 #ifndef TDESKTOP_DISABLE_GTK_INTEGRATION
-bool NativeSupported() {
+bool NativeSupported(Type type = Type::ReadFile) {
 #ifndef TDESKTOP_FORCE_GTK_FILE_DIALOG
 	return false;
 #endif // TDESKTOP_FORCE_GTK_FILE_DIALOG
-	return !Platform::UseXDGDesktopPortal()
+	return (!Platform::UseXDGDesktopPortal() || type == Type::ReadFolder)
 		&& Platform::internal::GdkHelperLoaded()
 		&& (Libs::gtk_widget_hide_on_delete != nullptr)
 		&& (Libs::gtk_clipboard_store != nullptr)
@@ -192,7 +232,7 @@ bool Get(
 		parent = parent->window();
 	}
 #ifndef TDESKTOP_DISABLE_GTK_INTEGRATION
-	if (NativeSupported()) {
+	if (NativeSupported(type)) {
 		return GetNative(
 			parent,
 			files,

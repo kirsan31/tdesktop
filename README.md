@@ -26,14 +26,14 @@ The source code is published under GPLv3 with OpenSSL exception, the license is 
 * Windows XP - Windows 10 (**not** RT)
 * Mac OS X 10.8 - Mac OS X 10.15
 * Mac OS X 10.6 - Mac OS X 10.7 (separate build)
-* Ubuntu 12.04 - Ubuntu 19.10
+* Ubuntu 12.04 - Ubuntu 20.04
 * Fedora 22 - Fedora 31
 * [Snappy](https://snapcraft.io/telegram-desktop)
 * [Flathub](https://flathub.org/apps/details/org.telegram.desktop)
 
 ## Third-party
 
-* Qt 5.12.5 and 5.6.2, slightly patched ([LGPL](http://doc.qt.io/qt-5/lgpl.html))
+* Qt 5.12.8 and 5.6.2, slightly patched ([LGPL](http://doc.qt.io/qt-5/lgpl.html))
 * OpenSSL 1.1.1 ([OpenSSL License](https://www.openssl.org/source/license.html))
 * zlib 1.2.11 ([zlib License](http://www.zlib.net/zlib_license.html))
 * LZMA SDK 9.20 ([public domain](http://www.7-zip.org/sdk.html))

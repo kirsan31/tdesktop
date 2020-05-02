@@ -383,6 +383,7 @@ struct HistoryMessage::CreateConfig {
 	QString author;
 	PeerId senderOriginal = 0;
 	QString senderNameOriginal;
+	QString forwardPsaType;
 	MsgId originalId = 0;
 	PeerId savedFromPeer = 0;
 	MsgId savedFromMsgId = 0;
@@ -407,6 +408,7 @@ void HistoryMessage::FillForwardedInfo(
 	}
 	config.originalDate = data.vdate().v;
 	config.senderNameOriginal = qs(data.vfrom_name().value_or_empty());
+	config.forwardPsaType = qs(data.vpsa_type().value_or_empty());
 	config.originalId = data.vchannel_post().value_or_empty();
 	config.authorOriginal = qs(data.vpost_author().value_or_empty());
 	const auto savedFromPeer = data.vsaved_from_peer();
@@ -768,15 +770,8 @@ bool HistoryMessage::allowsSendNow() const {
 }
 
 bool HistoryMessage::isTooOldForEdit(TimeId now) const {
-	const auto peer = _history->peer;
-	if (peer->isSelf()) {
-		return false;
-	} else if (const auto megagroup = peer->asMegagroup()) {
-		if (megagroup->canPinMessages()) {
-			return false;
-		}
-	}
-	return (now - date() >= Global::EditTimeLimit());
+	return !_history->peer->canEditMessagesIndefinitely()
+		&& (now - date() >= Global::EditTimeLimit());
 }
 
 bool HistoryMessage::allowsEdit(TimeId now) const {
@@ -874,6 +869,7 @@ void HistoryMessage::setupForwardedComponent(const CreateConfig &config) {
 	}
 	forwarded->originalId = config.originalId;
 	forwarded->originalAuthor = config.authorOriginal;
+	forwarded->psaType = config.forwardPsaType;
 	forwarded->savedFromPeer = history()->owner().peerLoaded(
 		config.savedFromPeer);
 	forwarded->savedFromMsgId = config.savedFromMsgId;
@@ -1025,7 +1021,10 @@ std::unique_ptr<Data::Media> HistoryMessage::CreateMedia(
 			item,
 			item->history()->owner().processPoll(media));
 	}, [&](const MTPDmessageMediaDice &media) -> Result {
-		return std::make_unique<Data::MediaDice>(item, media.vvalue().v);
+		return std::make_unique<Data::MediaDice>(
+			item,
+			qs(media.vemoticon()),
+			media.vvalue().v);
 	}, [](const MTPDmessageMediaEmpty &) -> Result {
 		return nullptr;
 	}, [](const MTPDmessageMediaUnsupported &) -> Result {

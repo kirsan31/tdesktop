@@ -22,7 +22,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "facades.h"
 #include "app.h"
 
-#include <QtGui/QDesktopServices>
 #include <QtGui/QGuiApplication>
 
 namespace {
@@ -51,9 +50,14 @@ void HiddenUrlClickHandler::Open(QString url, QVariant context) {
 		if (UrlRequiresConfirmation(url)
 			&& QGuiApplication::keyboardModifiers() != Qt::ControlModifier) {
 			Core::App().hideMediaView();
-			const auto displayUrl = parsedUrl.isValid()
+			const auto displayed = parsedUrl.isValid()
 				? parsedUrl.toDisplayString()
 				: url;
+			const auto displayUrl = !IsSuspicious(displayed)
+				? displayed
+				: parsedUrl.isValid()
+				? QString::fromUtf8(parsedUrl.toEncoded())
+				: ShowEncoded(displayed);
 			Ui::show(
 				Box<ConfirmBox>(
 					(tr::lng_open_this_link(tr::now)

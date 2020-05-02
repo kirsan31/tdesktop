@@ -238,8 +238,12 @@ QIcon TrayIconGen(int counter, bool muted) {
 bool IsIndicatorApplication() {
 	// Hack for indicator-application, which doesn't handle icons sent across D-Bus:
 	// save the icon to a temp file and set the icon name to that filename.
-	static const auto IndicatorApplication = [&] {
+	static const auto IndicatorApplication = [] {
 		const auto interface = QDBusConnection::sessionBus().interface();
+
+		if (!interface) {
+			return false;
+		}
 
 		const auto ubuntuIndicator = interface->isServiceRegistered(
 			qsl("com.canonical.indicator.application"));
@@ -338,10 +342,15 @@ quint32 djbStringHash(QString string) {
 
 #ifndef TDESKTOP_DISABLE_DBUS_INTEGRATION
 bool AppMenuSupported() {
-	static const auto Available = QDBusInterface(
-		kAppMenuService.utf16(),
-		kAppMenuObjectPath.utf16(),
-		kAppMenuInterface.utf16()).isValid();
+	static const auto Available = []() -> bool {
+		const auto interface = QDBusConnection::sessionBus().interface();
+
+		if (!interface) {
+			return false;
+		}
+
+		return interface->isServiceRegistered(kAppMenuService.utf16());
+	}();
 
 	return Available;
 }
@@ -447,11 +456,16 @@ void MainWindow::initHook() {
 		LOG(("Not using Unity launcher counter."));
 	}
 #endif // !TDESKTOP_DISABLE_DBUS_INTEGRATION
+
+	style::PaletteChanged(
+	) | rpl::start_with_next([=] {
+		updateWaylandDecorationColors();
+	}, lifetime());
 }
 
 bool MainWindow::hasTrayIcon() const {
 #ifndef TDESKTOP_DISABLE_DBUS_INTEGRATION
-	return trayIcon || _sniTrayIcon;
+	return trayIcon || (SNIAvailable && _sniTrayIcon);
 #else
 	return trayIcon;
 #endif // !TDESKTOP_DISABLE_DBUS_INTEGRATION
@@ -544,12 +558,6 @@ void MainWindow::onSNIOwnerChanged(
 	} else {
 		return;
 	}
-
-	if (_sniTrayIcon) {
-		_sniTrayIcon->setContextMenu(0);
-		_sniTrayIcon->deleteLater();
-	}
-	_sniTrayIcon = nullptr;
 
 	if (trayIcon) {
 		trayIcon->setContextMenu(0);
@@ -671,6 +679,13 @@ void MainWindow::updateIconCounters() {
 	if (trayIcon && IsIconRegenerationNeeded(counter, muted)) {
 		trayIcon->setIcon(TrayIconGen(counter, muted));
 	}
+}
+
+void MainWindow::updateWaylandDecorationColors() {
+	windowHandle()->setProperty("__material_decoration_backgroundColor", st::titleBgActive->c);
+	windowHandle()->setProperty("__material_decoration_foregroundColor", st::titleFgActive->c);
+	windowHandle()->setProperty("__material_decoration_backgroundInactiveColor", st::titleBg->c);
+	windowHandle()->setProperty("__material_decoration_foregroundInactiveColor", st::titleFg->c);
 }
 
 void MainWindow::LibsLoaded() {

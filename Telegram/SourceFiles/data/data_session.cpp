@@ -191,6 +191,7 @@ Session::Session(not_null<Main::Session*> session)
 , _sendActionsAnimation([=](crl::time now) {
 	return sendActionsAnimationCallback(now);
 })
+, _pollsClosingTimer([=] { checkPollsClosings(); })
 , _unmuteByFinishedTimer([=] { unmuteByFinished(); })
 , _groups(this)
 , _chatsFilters(std::make_unique<ChatFilters>(this))
@@ -2877,6 +2878,10 @@ not_null<PollData*> Session::processPoll(const MTPPoll &data) {
 		if (changed) {
 			notifyPollUpdateDelayed(result);
 		}
+		if (result->closeDate > 0 && !result->closed()) {
+			_pollsClosings.emplace(result->closeDate, result);
+			checkPollsClosings();
+		}
 		return result;
 	});
 }
@@ -2888,6 +2893,29 @@ not_null<PollData*> Session::processPoll(const MTPDmessageMediaPoll &data) {
 		notifyPollUpdateDelayed(result);
 	}
 	return result;
+}
+
+void Session::checkPollsClosings() {
+	const auto now = base::unixtime::now();
+	auto closest = 0;
+	for (auto i = _pollsClosings.begin(); i != _pollsClosings.end();) {
+		if (i->first <= now) {
+			if (i->second->closeByTimer()) {
+				notifyPollUpdateDelayed(i->second);
+			}
+			i = _pollsClosings.erase(i);
+		} else {
+			if (!closest) {
+				closest = i->first;
+			}
+			++i;
+		}
+	}
+	if (closest) {
+		_pollsClosingTimer.callOnce((closest - now) * crl::time(1000));
+	} else {
+		_pollsClosingTimer.cancel();
+	}
 }
 
 void Session::applyUpdate(const MTPDupdateMessagePoll &update) {
@@ -3685,30 +3713,37 @@ MessageIdsList Session::takeMimeForwardIds() {
 	return std::move(_mimeForwardIds);
 }
 
-void Session::setProxyPromoted(PeerData *promoted) {
-	if (_proxyPromoted != promoted) {
-		if (const auto history = historyLoaded(_proxyPromoted)) {
-			history->cacheProxyPromoted(false);
+void Session::setTopPromoted(
+		PeerData *promoted,
+		const QString &type,
+		const QString &message) {
+	const auto changed = (_topPromoted != promoted);
+	const auto history = promoted ? this->history(promoted).get() : nullptr;
+	if (changed
+		|| (history && history->topPromotionMessage() != message)) {
+		if (changed) {
+			if (const auto history = historyLoaded(_topPromoted)) {
+				history->cacheTopPromotion(false, QString(), QString());
+			}
 		}
-		const auto old = std::exchange(_proxyPromoted, promoted);
-		if (_proxyPromoted) {
-			const auto history = this->history(_proxyPromoted);
-			history->cacheProxyPromoted(true);
+		const auto old = std::exchange(_topPromoted, promoted);
+		if (history) {
+			history->cacheTopPromotion(true, type, message);
 			history->requestChatListMessage();
 			Notify::peerUpdatedDelayed(
-				_proxyPromoted,
-				Notify::PeerUpdate::Flag::ChannelPromotedChanged);
+				_topPromoted,
+				Notify::PeerUpdate::Flag::TopPromotedChanged);
 		}
-		if (old) {
+		if (changed && old) {
 			Notify::peerUpdatedDelayed(
 				old,
-				Notify::PeerUpdate::Flag::ChannelPromotedChanged);
+				Notify::PeerUpdate::Flag::TopPromotedChanged);
 		}
 	}
 }
 
-PeerData *Session::proxyPromoted() const {
-	return _proxyPromoted;
+PeerData *Session::topPromoted() const {
+	return _topPromoted;
 }
 
 bool Session::updateWallpapers(const MTPaccount_WallPapers &data) {

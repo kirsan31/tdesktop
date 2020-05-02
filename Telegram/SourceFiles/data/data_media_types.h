@@ -95,7 +95,7 @@ public:
 	virtual bool allowsEdit() const;
 	virtual bool allowsEditCaption() const;
 	virtual bool allowsEditMedia() const;
-	virtual bool allowsRevoke() const;
+	virtual bool allowsRevoke(TimeId now) const;
 	virtual bool forwardedBecomesUnread() const;
 	virtual QString errorTextForForward(not_null<PeerData*> peer) const;
 
@@ -407,12 +407,14 @@ private:
 
 class MediaDice final : public Media {
 public:
-	MediaDice(not_null<HistoryItem*> parent, int value);
+	MediaDice(not_null<HistoryItem*> parent, QString emoji, int value);
 
 	std::unique_ptr<Media> clone(not_null<HistoryItem*> parent) override;
 
-	int diceValue() const;
+	[[nodiscard]] QString emoji() const;
+	[[nodiscard]] int value() const;
 
+	bool allowsRevoke(TimeId now) const override;
 	QString notificationText() const override;
 	QString pinnedTextSubstring() const override;
 	TextForMimeData clipboardText() const override;
@@ -423,6 +425,7 @@ public:
 		not_null<HistoryItem*> realParent) override;
 
 private:
+	QString _emoji;
 	int _value = 0;
 
 };
