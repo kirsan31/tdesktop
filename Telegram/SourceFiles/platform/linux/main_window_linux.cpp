@@ -65,6 +65,7 @@ QIcon TrayIcon;
 QString TrayIconThemeName, TrayIconName;
 
 bool SNIAvailable = false;
+bool AppMenuSupported = false;
 
 QString GetPanelIconName(int counter, bool muted) {
 	return (counter > 0)
@@ -341,18 +342,14 @@ quint32 djbStringHash(QString string) {
 }
 
 #ifndef TDESKTOP_DISABLE_DBUS_INTEGRATION
-bool AppMenuSupported() {
-	static const auto Available = []() -> bool {
-		const auto interface = QDBusConnection::sessionBus().interface();
+bool IsAppMenuSupported() {
+	const auto interface = QDBusConnection::sessionBus().interface();
 
-		if (!interface) {
-			return false;
-		}
+	if (!interface) {
+		return false;
+	}
 
-		return interface->isServiceRegistered(kAppMenuService.utf16());
-	}();
-
-	return Available;
+	return interface->isServiceRegistered(kAppMenuService.utf16());
 }
 
 void RegisterAppMenu(uint winId, const QDBusObjectPath &menuPath) {
@@ -438,13 +435,27 @@ void MainWindow::initHook() {
 		this,
 		&MainWindow::onSNIOwnerChanged);
 
+	AppMenuSupported = IsAppMenuSupported();
+
+	auto appMenuWatcher = new QDBusServiceWatcher(
+		kAppMenuService.utf16(),
+		QDBusConnection::sessionBus(),
+		QDBusServiceWatcher::WatchForOwnerChange,
+		this);
+
+	connect(
+		appMenuWatcher,
+		&QDBusServiceWatcher::serviceOwnerChanged,
+		this,
+		&MainWindow::onAppMenuOwnerChanged);
+
 	connect(
 		windowHandle(),
 		&QWindow::visibleChanged,
 		this,
 		&MainWindow::onVisibleChanged);
 
-	if (AppMenuSupported()) {
+	if (AppMenuSupported) {
 		LOG(("Using D-Bus global menu."));
 	} else {
 		LOG(("Not using D-Bus global menu."));
@@ -456,6 +467,8 @@ void MainWindow::initHook() {
 		LOG(("Not using Unity launcher counter."));
 	}
 #endif // !TDESKTOP_DISABLE_DBUS_INTEGRATION
+
+	updateWaylandDecorationColors();
 
 	style::PaletteChanged(
 	) | rpl::start_with_next([=] {
@@ -578,6 +591,25 @@ void MainWindow::onSNIOwnerChanged(
 		LOG(("System tray is not available."));
 	}
 }
+
+void MainWindow::onAppMenuOwnerChanged(
+		const QString &service,
+		const QString &oldOwner,
+		const QString &newOwner) {
+	if (oldOwner.isEmpty() && !newOwner.isEmpty()) {
+		AppMenuSupported = true;
+		LOG(("Using D-Bus global menu."));
+	} else if (!oldOwner.isEmpty() && newOwner.isEmpty()) {
+		AppMenuSupported = false;
+		LOG(("Not using D-Bus global menu."));
+	}
+
+	if (AppMenuSupported && !_mainMenuPath.path().isEmpty()) {
+		RegisterAppMenu(winId(), _mainMenuPath);
+	} else {
+		UnregisterAppMenu(winId());
+	}
+}
 #endif // !TDESKTOP_DISABLE_DBUS_INTEGRATION
 
 void MainWindow::psSetupTrayIcon() {
@@ -686,6 +718,9 @@ void MainWindow::updateWaylandDecorationColors() {
 	windowHandle()->setProperty("__material_decoration_foregroundColor", st::titleFgActive->c);
 	windowHandle()->setProperty("__material_decoration_backgroundInactiveColor", st::titleBg->c);
 	windowHandle()->setProperty("__material_decoration_foregroundInactiveColor", st::titleFg->c);
+
+	// Trigger a QtWayland client-side decoration update
+	windowHandle()->resize(windowHandle()->size());
 }
 
 void MainWindow::LibsLoaded() {
@@ -712,8 +747,6 @@ void MainWindow::updateGlobalMenuHook() {
 #else // TDESKTOP_DISABLE_DBUS_INTEGRATION
 
 void MainWindow::createGlobalMenu() {
-	if (!AppMenuSupported()) return;
-
 	psMainMenu = new QMenu(this);
 
 	auto file = psMainMenu->addMenu(tr::lng_mac_menu_file(tr::now));
@@ -892,7 +925,9 @@ void MainWindow::createGlobalMenu() {
 		_mainMenuPath.path(),
 		psMainMenu);
 
-	RegisterAppMenu(winId(), _mainMenuPath);
+	if (AppMenuSupported) {
+		RegisterAppMenu(winId(), _mainMenuPath);
+	}
 
 	updateGlobalMenu();
 }
@@ -950,7 +985,7 @@ void MainWindow::psLinuxClearFormat() {
 }
 
 void MainWindow::updateGlobalMenuHook() {
-	if (!AppMenuSupported() || !App::wnd() || !positionInited()) return;
+	if (!App::wnd() || !positionInited()) return;
 
 	const auto focused = QApplication::focusWidget();
 	auto canUndo = false;
@@ -1012,7 +1047,7 @@ void MainWindow::updateGlobalMenuHook() {
 }
 
 void MainWindow::onVisibleChanged(bool visible) {
-	if (AppMenuSupported() && !_mainMenuPath.path().isEmpty()) {
+	if (AppMenuSupported && !_mainMenuPath.path().isEmpty()) {
 		if (visible) {
 			RegisterAppMenu(winId(), _mainMenuPath);
 		} else {
@@ -1027,11 +1062,12 @@ MainWindow::~MainWindow() {
 #ifndef TDESKTOP_DISABLE_DBUS_INTEGRATION
 	delete _sniTrayIcon;
 
-	if (AppMenuSupported()) {
+	if (AppMenuSupported) {
 		UnregisterAppMenu(winId());
-		delete _mainMenuExporter;
-		delete psMainMenu;
 	}
+
+	delete _mainMenuExporter;
+	delete psMainMenu;
 #endif // !TDESKTOP_DISABLE_DBUS_INTEGRATION
 
 	delete _trayIconMenuXEmbed;

@@ -4129,20 +4129,22 @@ void HistoryWidget::onModerateKeyActivate(int index, bool *outHandled) {
 	*outHandled = _keyboard->isHidden() ? false : _keyboard->moderateKeyActivate(index);
 }
 
-void HistoryWidget::pushTabbedSelectorToThirdSection(
+bool HistoryWidget::pushTabbedSelectorToThirdSection(
+		not_null<PeerData*> peer,
 		const Window::SectionShow &params) {
-	if (!_history || !_tabbedPanel) {
-		return;
-	} else if (!_canSendMessages) {
+	if (!_tabbedPanel) {
+		return true;
+	} else if (!peer->canWrite()) {
 		session().settings().setTabbedReplacedWithInfo(true);
-		controller()->showPeerInfo(_peer, params.withThirdColumn());
-		return;
+		controller()->showPeerInfo(peer, params.withThirdColumn());
+		return false;
 	}
 	session().settings().setTabbedReplacedWithInfo(false);
 	controller()->resizeForThirdSection();
 	controller()->showSection(
 		ChatHelpers::TabbedMemento(),
 		params.withThirdColumn());
+	return true;
 }
 
 bool HistoryWidget::returnTabbedSelector() {
@@ -4172,11 +4174,15 @@ void HistoryWidget::setTabbedPanel(std::unique_ptr<TabbedPanel> panel) {
 }
 
 void HistoryWidget::toggleTabbedSelectorMode() {
+	if (!_peer) {
+		return;
+	}
 	if (_tabbedPanel) {
 		if (controller()->canShowThirdSection() && !Adaptive::OneColumn()) {
 			session().settings().setTabbedSelectorSectionEnabled(true);
 			session().saveSettingsDelayed();
 			pushTabbedSelectorToThirdSection(
+				_peer,
 				Window::SectionShow::Way::ClearStack);
 		} else {
 			_tabbedPanel->toggleAnimated();
@@ -4530,6 +4536,8 @@ bool HistoryWidget::confirmSendingFiles(
 bool HistoryWidget::canSendFiles(not_null<const QMimeData*> data) const {
 	if (!canWriteMessage()) {
 		return false;
+	} else if (data->hasImage()) {
+		return true;
 	} else if (const auto urls = data->urls(); !urls.empty()) {
 		if (ranges::find_if(
 			urls,
@@ -4537,8 +4545,6 @@ bool HistoryWidget::canSendFiles(not_null<const QMimeData*> data) const {
 		) == urls.end()) {
 			return true;
 		}
-	} else if (data->hasImage()) {
-		return true;
 	}
 	return false;
 }

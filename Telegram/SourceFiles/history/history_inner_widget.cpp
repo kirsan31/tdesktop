@@ -2480,8 +2480,9 @@ void HistoryInner::elementStartStickerLoop(
 }
 
 void HistoryInner::elementShowPollResults(
-	not_null<PollData*> poll,
-	FullMsgId context) {
+		not_null<PollData*> poll,
+		FullMsgId context) {
+	_controller->showPollResults(poll, context);
 }
 
 void HistoryInner::elementShowTooltip(
