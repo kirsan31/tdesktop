@@ -90,7 +90,7 @@ if (LINUX)
         PRIVATE
             desktop-app::external_statusnotifieritem
             desktop-app::external_dbusmenu_qt
-            desktop-app::external_fcitx_qt5
+            desktop-app::external_fcitx5_qt5
             desktop-app::external_hime_qt
         )
     endif()
@@ -138,7 +138,7 @@ endif()
 
 if (DESKTOP_APP_USE_PACKAGED)
     set(CMAKE_THREAD_PREFER_PTHREAD TRUE)
-    find_package(Threads)
+    find_package(Threads REQUIRED)
 
     target_link_libraries(Telegram
     PRIVATE
@@ -1042,6 +1042,8 @@ PRIVATE
     qrc/emoji_3.qrc
     qrc/emoji_4.qrc
     qrc/emoji_5.qrc
+    qrc/emoji_6.qrc
+    qrc/emoji_7.qrc
     qrc/emoji_preview.qrc
     qrc/telegram/telegram.qrc
     qrc/telegram/sounds.qrc
@@ -1209,6 +1211,10 @@ if ((NOT DESKTOP_APP_DISABLE_AUTOUPDATE OR NOT LINUX) AND NOT build_macstore AND
     )
 
     set_target_properties(Updater PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${output_folder})
+
+    if (WIN32 AND NOT CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
+        target_link_options(Updater PRIVATE -municode)
+    endif()
 
     if (LINUX)
         target_link_options(Updater PRIVATE -static-libstdc++)

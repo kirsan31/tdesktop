@@ -1464,6 +1464,12 @@ int Message::plainMaxWidth() const {
 		+ st::msgPadding.right();
 }
 
+int Message::monospaceMaxWidth() const {
+	return st::msgPadding.left()
+		+ (hasVisibleText() ? message()->_text.countMaxMonospaceWidth() : 0)
+		+ st::msgPadding.right();
+}
+
 void Message::initLogEntryOriginal() {
 	if (const auto log = message()->Get<HistoryMessageLogEntryOriginal>()) {
 		AddComponents(LogEntryOriginal::Bit());
