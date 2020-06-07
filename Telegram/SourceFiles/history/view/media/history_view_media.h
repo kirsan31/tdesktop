@@ -141,8 +141,7 @@ public:
 	}
 	virtual void clearStickerLoopPlayed() {
 	}
-	virtual int checkAnimationCount() {
-		return 0;
+	virtual void checkAnimation() {
 	}
 
 	[[nodiscard]] virtual QSize sizeForGrouping() const {
@@ -253,6 +252,9 @@ public:
 		crl::time ms) const {
 	}
 
+	virtual bool hasHeavyPart() const {
+		return false;
+	}
 	virtual void unloadHeavyPart() {
 	}
 

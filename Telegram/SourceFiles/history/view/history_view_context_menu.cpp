@@ -13,6 +13,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/history_item.h"
 #include "history/history_message.h"
 #include "history/history_item_text.h"
+#include "history/view/history_view_schedule_box.h"
 #include "history/view/media/history_view_media.h"
 #include "history/view/media/history_view_web_page.h"
 #include "ui/widgets/popup_menu.h"
@@ -23,12 +24,14 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "boxes/confirm_box.h"
 #include "boxes/sticker_set_box.h"
 #include "data/data_photo.h"
+#include "data/data_photo_media.h"
 #include "data/data_document.h"
 #include "data/data_media_types.h"
 #include "data/data_session.h"
 #include "data/data_groups.h"
 #include "data/data_channel.h"
 #include "data/data_file_origin.h"
+#include "data/data_scheduled_messages.h"
 #include "core/file_utilities.h"
 #include "base/platform/base_platform_info.h"
 #include "window/window_peer_menu.h"
@@ -61,11 +64,21 @@ constexpr auto kExportLocalTimeout = crl::time(1000);
 //	}
 //}
 
+MsgId ItemIdAcrossData(not_null<HistoryItem*> item) {
+	if (!item->isScheduled()) {
+		return item->id;
+	}
+	const auto session = &item->history()->session();
+	return session->data().scheduledMessages().lookupId(item);
+}
+
 void SavePhotoToFile(not_null<PhotoData*> photo) {
-	if (photo->isNull() || !photo->loaded()) {
+	const auto media = photo->activeMediaView();
+	if (photo->isNull() || !media || !media->loaded()) {
 		return;
 	}
 
+	const auto image = media->image(Data::PhotoSize::Large)->original();
 	FileDialog::GetWritePath(
 		Core::App().getFileDialogParent(),
 		tr::lng_save_photo(tr::now),
@@ -73,17 +86,19 @@ void SavePhotoToFile(not_null<PhotoData*> photo) {
 		filedialogDefaultName(qsl("photo"), qsl(".jpg")),
 		crl::guard(&photo->session(), [=](const QString &result) {
 			if (!result.isEmpty()) {
-				photo->large()->original().save(result, "JPG");
+				image.save(result, "JPG");
 			}
 		}));
 }
 
 void CopyImage(not_null<PhotoData*> photo) {
-	if (photo->isNull() || !photo->loaded()) {
+	const auto media = photo->activeMediaView();
+	if (photo->isNull() || !media || !media->loaded()) {
 		return;
 	}
 
-	QGuiApplication::clipboard()->setImage(photo->large()->original());
+	const auto image = media->image(Data::PhotoSize::Large)->original();
+	QGuiApplication::clipboard()->setImage(image);
 }
 
 void ShowStickerPackInfo(not_null<DocumentData*> document) {
@@ -124,8 +139,7 @@ void OpenGif(FullMsgId itemId) {
 }
 
 void ShowInFolder(not_null<DocumentData*> document) {
-	const auto filepath = document->filepath(
-		DocumentData::FilePathResolve::Checked);
+	const auto filepath = document->filepath(true);
 	if (!filepath.isEmpty()) {
 		File::ShowInFolder(filepath);
 	}
@@ -195,8 +209,7 @@ void AddDocumentActions(
 				: tr::lng_faved_stickers_add(tr::now)),
 			[=] { ToggleFavedSticker(document, contextId); });
 	}
-	if (!document->filepath(
-			DocumentData::FilePathResolve::Checked).isEmpty()) {
+	if (!document->filepath(true).isEmpty()) {
 		menu->addAction(
 			(Platform::IsMac()
 				? tr::lng_context_show_in_finder(tr::now)
@@ -385,6 +398,49 @@ bool AddSendNowMessageAction(
 	return true;
 }
 
+bool AddRescheduleMessageAction(
+		not_null<Ui::PopupMenu*> menu,
+		const ContextMenuRequest &request) {
+	const auto item = request.item;
+	if (!item || item->isSending() || !request.selectedItems.empty()) {
+		return false;
+	}
+	const auto peer = item->history()->peer;
+	if (const auto channel = peer->asChannel()) {
+		if (!channel->canEditMessages()) {
+			return false;
+		}
+	}
+	const auto owner = &item->history()->owner();
+	const auto itemId = item->fullId();
+	menu->addAction(tr::lng_context_reschedule(tr::now), [=] {
+		const auto item = owner->message(itemId);
+		if (!item) {
+			return;
+		}
+		const auto callback = [=](Api::SendOptions options) {
+			item->history()->session().api().rescheduleMessage(item, options);
+		};
+
+		const auto sendMenuType = !peer
+			? SendMenuType::Disabled
+			: peer->isSelf()
+			? SendMenuType::Reminder
+			: HistoryView::CanScheduleUntilOnline(peer)
+			? SendMenuType::ScheduledToUser
+			: SendMenuType::Scheduled;
+
+		Ui::show(
+			HistoryView::PrepareScheduleBox(
+				&request.navigation->session(),
+				sendMenuType,
+				callback,
+			item->date() + 600),
+			Ui::LayerOption::KeepOther);
+	});
+	return true;
+}
+
 void AddSendNowAction(
 		not_null<Ui::PopupMenu*> menu,
 		const ContextMenuRequest &request,
@@ -436,7 +492,8 @@ bool AddDeleteMessageAction(
 	if (asGroup) {
 		if (const auto group = owner->groups().find(item)) {
 			if (ranges::find_if(group->items, [](auto item) {
-				return !IsServerMsgId(item->id) || !item->canDelete();
+				const auto id = ItemIdAcrossData(item);
+				return !IsServerMsgId(id) || !item->canDelete();
 			}) != end(group->items)) {
 				return false;
 			}
@@ -495,7 +552,10 @@ bool AddSelectMessageAction(
 	const auto item = request.item;
 	if (request.overSelection && !request.selectedItems.empty()) {
 		return false;
-	} else if (!item || !IsServerMsgId(item->id) || item->serviceMsg()) {
+	} else if (!item
+			|| item->isSending()
+			|| !IsServerMsgId(ItemIdAcrossData(item))
+			|| item->serviceMsg()) {
 		return false;
 	}
 	const auto owner = &item->history()->owner();
@@ -531,6 +591,7 @@ void AddMessageActions(
 	AddSendNowAction(menu, request, list);
 	AddDeleteAction(menu, request, list);
 	AddSelectionAction(menu, request, list);
+	AddRescheduleMessageAction(menu, request);
 }
 
 void AddCopyLinkAction(

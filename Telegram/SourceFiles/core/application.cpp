@@ -22,6 +22,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/ui_integration.h"
 #include "chat_helpers/emoji_keywords.h"
 #include "storage/localstorage.h"
+#include "base/platform/base_platform_info.h"
 #include "platform/platform_specific.h"
 #include "mainwindow.h"
 #include "dialogs/dialogs_entry.h"
@@ -179,6 +180,10 @@ void Application::run() {
 		psNewVersion();
 	}
 
+	if (cAutoStart() && !Platform::AutostartSupported()) {
+		cSetAutoStart(false);
+	}
+
 	if (cLaunchMode() == LaunchModeAutoStart && !cAutoStart()) {
 		psAutoStart(false, true);
 		App::quit();
@@ -305,7 +310,7 @@ void Application::showDocument(not_null<DocumentData*> document, HistoryItem *it
 
 	if ((TryExternal || cUseExternalVideoPlayer())
 		&& document->isVideoFile()
-		&& document->loaded()) {
+		&& !document->filepath().isEmpty()) {
 		File::Launch(document->location(false).fname);
 	} else {
 		_mediaView->showDocument(document, item);
@@ -821,6 +826,17 @@ void Application::notifyFileDialogShown(bool shown) {
 		_mediaView->notifyFileDialogShown(shown);
 	}
 }
+
+QWidget *Application::getModalParent() {
+#ifdef Q_OS_LINUX
+	return Platform::IsWayland()
+		? App::wnd()
+		: nullptr;
+#endif // Q_OS_LINUX
+
+	return nullptr;
+}
+
 
 void Application::checkMediaViewActivation() {
 	if (_mediaView && !_mediaView->isHidden()) {

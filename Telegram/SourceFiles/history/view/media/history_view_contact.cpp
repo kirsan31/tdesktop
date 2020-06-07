@@ -22,6 +22,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_session.h"
 #include "data/data_user.h"
 #include "data/data_media_types.h"
+#include "data/data_cloud_file.h"
 #include "main/main_session.h"
 #include "app.h"
 #include "styles/style_history.h"
@@ -80,6 +81,10 @@ Contact::Contact(
 
 Contact::~Contact() {
 	history()->owner().unregisterContactView(_userId, _parent);
+	if (_userpic) {
+		_userpic = nullptr;
+		_parent->checkHeavyPart();
+	}
 }
 
 void Contact::updateSharedContactUserId(UserId userId) {
@@ -167,7 +172,11 @@ void Contact::draw(Painter &p, const QRect &r, TextSelection selection, crl::tim
 
 		QRect rthumb(style::rtlrect(st::msgFileThumbPadding.left(), st::msgFileThumbPadding.top() - topMinus, st::msgFileThumbSize, st::msgFileThumbSize, paintw));
 		if (_contact) {
-			_contact->paintUserpic(p, rthumb.x(), rthumb.y(), st::msgFileThumbSize);
+			const auto was = (_userpic != nullptr);
+			_contact->paintUserpic(p, _userpic, rthumb.x(), rthumb.y(), st::msgFileThumbSize);
+			if (!was && _userpic) {
+				history()->owner().registerHeavyViewPart(_parent);
+			}
 		} else {
 			_photoEmpty->paint(p, st::msgFileThumbPadding.left(), st::msgFileThumbPadding.top() - topMinus, paintw, st::msgFileThumbSize);
 		}
@@ -220,6 +229,14 @@ TextState Contact::textState(QPoint point, StateRequest request) const {
 		return result;
 	}
 	return result;
+}
+
+void Contact::unloadHeavyPart() {
+	_userpic = nullptr;
+}
+
+bool Contact::hasHeavyPart() const {
+	return (_userpic != nullptr);
 }
 
 } // namespace HistoryView

@@ -14,6 +14,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include <QtCore/QPointer>
 
+namespace Data {
+class DocumentMedia;
+} // namespace Data
+
 namespace Ui {
 class IconButton;
 template <typename Widget>
@@ -121,7 +125,7 @@ public:
 
 	Pip(
 		not_null<Delegate*> delegate,
-		not_null<DocumentData*> document,
+		not_null<DocumentData*> data,
 		FullMsgId contextId,
 		std::shared_ptr<Streaming::Document> shared,
 		FnMut<void()> closeAndContinue,
@@ -165,6 +169,7 @@ private:
 	void updatePlayPauseResumeState(const Player::TrackState &state);
 	void restartAtSeekPosition(crl::time position);
 
+	[[nodiscard]] bool canUseVideoFrame() const;
 	[[nodiscard]] QImage videoFrame(const FrameRequest &request) const;
 	[[nodiscard]] QImage videoFrameForDirectPaint(
 		const FrameRequest &request) const;
@@ -197,12 +202,13 @@ private:
 	void seekFinish(float64 value);
 
 	const not_null<Delegate*> _delegate;
-	not_null<DocumentData*> _document;
+	not_null<DocumentData*> _data;
 	FullMsgId _contextId;
 	Streaming::Instance _instance;
 	PipPanel _panel;
 	QSize _size;
 	std::unique_ptr<PlaybackProgress> _playbackProgress;
+	std::shared_ptr<Data::DocumentMedia> _dataMedia;
 
 	bool _showPause = false;
 	bool _startPaused = false;

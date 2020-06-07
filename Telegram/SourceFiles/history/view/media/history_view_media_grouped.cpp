@@ -61,6 +61,11 @@ GroupedMedia::GroupedMedia(
 	Ensures(result);
 }
 
+GroupedMedia::~GroupedMedia() {
+	// Destroy all parts while the media object is still not destroyed.
+	base::take(_parts);
+}
+
 QSize GroupedMedia::countOptimalSize() {
 	if (_caption.hasSkipBlock()) {
 		_caption.updateSkipBlock(
@@ -409,21 +414,28 @@ void GroupedMedia::updateNeedBubbleState() {
 }
 
 void GroupedMedia::stopAnimation() {
-	for (auto &part : _parts) {
+	for (const auto &part : _parts) {
 		part.content->stopAnimation();
 	}
 }
 
-int GroupedMedia::checkAnimationCount() {
-	auto result = 0;
-	for (auto &part : _parts) {
-		result += part.content->checkAnimationCount();
+void GroupedMedia::checkAnimation() {
+	for (const auto &part : _parts) {
+		part.content->checkAnimation();
 	}
-	return result;
+}
+
+bool GroupedMedia::hasHeavyPart() const {
+	for (const auto &part : _parts) {
+		if (part.content->hasHeavyPart()) {
+			return true;
+		}
+	}
+	return false;
 }
 
 void GroupedMedia::unloadHeavyPart() {
-	for (auto &part : _parts) {
+	for (const auto &part : _parts) {
 		part.content->unloadHeavyPart();
 	}
 }

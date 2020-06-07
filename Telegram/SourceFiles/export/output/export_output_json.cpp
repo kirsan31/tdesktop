@@ -257,9 +257,7 @@ QByteArray SerializeMessage(
 		SerializeString(message.action.content ? "service" : "message")
 	},
 	{ "date", SerializeDate(message.date) },
-	{ "edited", SerializeDate(message.edited) },
 	};
-
 	context.nesting.push_back(Context::kObject);
 	const auto serialized = [&] {
 		context.nesting.pop_back();
@@ -273,6 +271,10 @@ QByteArray SerializeMessage(
 			values.emplace_back(key, value);
 		}
 	};
+	if (message.edited) {
+		pushBare("edited", SerializeDate(message.edited));
+	}
+
 	const auto push = [&](const QByteArray &key, const auto &value) {
 		if constexpr (std::is_arithmetic_v<std::decay_t<decltype(value)>>) {
 			pushBare(key, Data::NumberToString(value));
@@ -630,7 +632,9 @@ Result JsonWriter::start(
 	_environment = environment;
 	_stats = stats;
 	_output = fileWithRelativePath(mainFileRelativePath());
-
+	if (_settings.onlySinglePeer()) {
+		return Result::Success();
+	}
 	auto block = pushNesting(Context::kObject);
 	block.append(prepareObjectItemStart("about"));
 	block.append(SerializeString(_environment.aboutTelegram));
@@ -993,9 +997,11 @@ Result JsonWriter::writeDialogsStart(const Data::DialogsInfo &data) {
 Result JsonWriter::writeDialogStart(const Data::DialogInfo &data) {
 	Expects(_output != nullptr);
 
-	const auto result = validateDialogsMode(data.isLeftChannel);
-	if (!result) {
-		return result;
+	if (!_settings.onlySinglePeer()) {
+		const auto result = validateDialogsMode(data.isLeftChannel);
+		if (!result) {
+			return result;
+		}
 	}
 
 	using Type = Data::DialogInfo::Type;
@@ -1014,7 +1020,9 @@ Result JsonWriter::writeDialogStart(const Data::DialogInfo &data) {
 		Unexpected("Dialog type in TypeString.");
 	};
 
-	auto block = prepareArrayItemStart();
+	auto block = _settings.onlySinglePeer()
+		? QByteArray()
+		: prepareArrayItemStart();
 	block.append(pushNesting(Context::kObject));
 	if (data.type != Type::Self) {
 		block.append(prepareObjectItemStart("name")
@@ -1073,6 +1081,9 @@ Result JsonWriter::writeDialogEnd() {
 }
 
 Result JsonWriter::writeDialogsEnd() {
+	if (_settings.onlySinglePeer()) {
+		return Result::Success();
+	}
 	return writeChatsEnd();
 }
 
@@ -1099,6 +1110,10 @@ Result JsonWriter::writeChatsEnd() {
 Result JsonWriter::finish() {
 	Expects(_output != nullptr);
 
+	if (_settings.onlySinglePeer()) {
+		Assert(_context.nesting.empty());
+		return Result::Success();
+	}
 	auto block = popNesting();
 	Assert(_context.nesting.empty());
 	return _output->writeBlock(block);

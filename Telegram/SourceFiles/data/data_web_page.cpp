@@ -12,9 +12,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "mainwidget.h"
 #include "data/data_session.h"
 #include "data/data_photo.h"
+#include "data/data_channel.h"
 #include "data/data_document.h"
 #include "ui/image/image.h"
-#include "ui/image/image_source.h"
 #include "ui/text/text_entity.h"
 
 namespace {
@@ -237,15 +237,49 @@ bool WebPageData::applyChanges(
 }
 
 void WebPageData::replaceDocumentGoodThumbnail() {
-	if (!document || !photo || !document->goodThumbnail()) {
+	if (document && photo) {
+		document->setGoodThumbnailPhoto(photo);
+	}
+}
+
+void WebPageData::ApplyChanges(
+		not_null<Main::Session*> session,
+		ChannelData *channel,
+		const MTPmessages_Messages &result) {
+	result.match([&](
+			const MTPDmessages_channelMessages &data) {
+		if (channel) {
+			channel->ptsReceived(data.vpts().v);
+		} else {
+			LOG(("API Error: received messages.channelMessages "
+				"when no channel was passed! (WebPageData::ApplyChanges)"));
+		}
+	}, [&](const auto &) {
+	});
+	const auto list = result.match([](
+			const MTPDmessages_messagesNotModified &) {
+		LOG(("API Error: received messages.messagesNotModified! "
+			"(WebPageData::ApplyChanges)"));
+		return static_cast<const QVector<MTPMessage>*>(nullptr);
+	}, [&](const auto &data) {
+		session->data().processUsers(data.vusers());
+		session->data().processChats(data.vchats());
+		return &data.vmessages().v;
+	});
+	if (!list) {
 		return;
 	}
-	const auto &location = photo->large()->location();
-	if (location.valid()) {
-		document->replaceGoodThumbnail(
-			std::make_unique<Images::StorageSource>(
-				location,
-				photo->large()->bytesSize()));
-	}
 
+	for (const auto &message : *list) {
+		message.match([&](const MTPDmessage &data) {
+			if (const auto media = data.vmedia()) {
+				media->match([&](const MTPDmessageMediaWebPage &data) {
+					session->data().processWebpage(data.vwebpage());
+				}, [&](const auto &) {
+				});
+			}
+		}, [&](const auto &) {
+		});
+	}
+	session->data().sendWebPageGamePollNotifications();
 }
