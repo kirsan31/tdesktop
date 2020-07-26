@@ -37,8 +37,6 @@ enum {
 	AudioVoiceMsgMaxLength = 100 * 60, // 100 minutes
 	AudioVoiceMsgChannels = 2, // stereo
 
-	StickerMaxSize = 2048, // 2048x2048 is a max image size for sticker
-
 	PreloadHeightsCount = 3, // when 3 screens to scroll left make a preload request
 
 	SearchPeopleLimit = 5,
@@ -128,11 +126,6 @@ extern QString gKeyFile;
 inline const QString &cDataFile() {
 	if (!gKeyFile.isEmpty()) return gKeyFile;
 	static const QString res(qsl("data"));
-	return res;
-}
-
-inline const QString &cTempDir() {
-	static const QString res = cWorkingDir() + qsl("tdata/tdld/");
 	return res;
 }
 

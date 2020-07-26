@@ -586,7 +586,7 @@ void CloudList::showMenu(Element &element) {
 	if (const auto slug = element.theme.slug; !slug.isEmpty()) {
 		_contextMenu->addAction(tr::lng_theme_share(tr::now), [=] {
 			QGuiApplication::clipboard()->setText(
-				Core::App().createInternalLinkFull("addtheme/" + slug));
+				_window->session().createInternalLinkFull("addtheme/" + slug));
 			Ui::Toast::Show(tr::lng_background_link_copied(tr::now));
 		});
 	}
@@ -666,8 +666,7 @@ void CloudList::subscribeToDownloadFinished() {
 	if (_downloadFinishedLifetime) {
 		return;
 	}
-	base::ObservableViewer(
-		_window->session().downloaderTaskFinished()
+	_window->session().downloaderTaskFinished(
 	) | rpl::start_with_next([=] {
 		auto &&waiting = _elements | ranges::view::filter(&Element::waiting);
 		const auto still = ranges::count_if(waiting, [&](Element &element) {

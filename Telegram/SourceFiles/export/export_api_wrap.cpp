@@ -27,7 +27,7 @@ constexpr auto kFileNextRequestDelay = crl::time(20);
 constexpr auto kChatsSliceLimit = 100;
 constexpr auto kMessagesSliceLimit = 100;
 constexpr auto kTopPeerSliceLimit = 100;
-constexpr auto kFileMaxSize = 1500 * 1024 * 1024;
+constexpr auto kFileMaxSize = 2000 * 1024 * 1024;
 constexpr auto kLocationCacheSize = 100'000;
 
 struct LocationKey {
@@ -410,8 +410,8 @@ auto ApiWrap::fileRequest(const Data::FileLocation &location, int offset) {
 	}).toDC(MTP::ShiftDcId(location.dcId, MTP::kExportMediaDcShift)));
 }
 
-ApiWrap::ApiWrap(Fn<void(FnMut<void()>)> runner)
-: _mtp(std::move(runner))
+ApiWrap::ApiWrap(QPointer<MTP::Instance> weak, Fn<void(FnMut<void()>)> runner)
+: _mtp(weak, std::move(runner))
 , _fileCache(std::make_unique<LoadedFileCache>(kLocationCacheSize)) {
 }
 

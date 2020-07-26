@@ -19,11 +19,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/wrap/slide_wrap.h"
 #include "ui/text_options.h"
 #include "lang/lang_keys.h"
-#include "observer_peer.h"
 #include "storage/file_download.h"
 #include "data/data_peer_values.h"
 #include "data/data_chat.h"
 #include "data/data_session.h"
+#include "data/data_changes.h"
 #include "base/unixtime.h"
 #include "window/themes/window_theme.h"
 #include "styles/style_layers.h"
@@ -662,19 +662,23 @@ PeerListContent::PeerListContent(
 , _st(st)
 , _controller(controller)
 , _rowHeight(_st.item.height) {
-	subscribe(_controller->session().downloaderTaskFinished(), [=] {
+	_controller->session().downloaderTaskFinished(
+	) | rpl::start_with_next([=] {
 		update();
-	});
+	}, lifetime());
 
-	using UpdateFlag = Notify::PeerUpdate::Flag;
-	auto changes = UpdateFlag::NameChanged | UpdateFlag::PhotoChanged;
-	subscribe(Notify::PeerUpdated(), Notify::PeerUpdatedHandler(changes, [this](const Notify::PeerUpdate &update) {
-		if (update.flags & UpdateFlag::PhotoChanged) {
-			this->update();
-		} else if (update.flags & UpdateFlag::NameChanged) {
-			handleNameChanged(update);
+	using UpdateFlag = Data::PeerUpdate::Flag;
+	_controller->session().changes().peerUpdates(
+		UpdateFlag::Name | UpdateFlag::Photo
+	) | rpl::start_with_next([=](const Data::PeerUpdate &update) {
+		if (update.flags & UpdateFlag::Name) {
+			handleNameChanged(update.peer);
 		}
-	}));
+		if (update.flags & UpdateFlag::Photo) {
+			this->update();
+		}
+	}, lifetime());
+
 	subscribe(Window::Theme::Background(), [this](const Window::Theme::BackgroundUpdate &update) {
 		if (update.paletteChanged()) {
 			invalidatePixmapsCache();
@@ -1295,7 +1299,6 @@ crl::time PeerListContent::paintRow(
 			p.drawTextLeft(_st.item.statusPosition.x(), _st.item.statusPosition.y(), width(), highlightedPart);
 		} else {
 			grayedPart = st::contactsStatusFont->elided(grayedPart, availableWidth - highlightedWidth);
-			auto grayedWidth = st::contactsStatusFont->width(grayedPart);
 			p.setPen(_st.item.statusFgActive);
 			p.drawTextLeft(_st.item.statusPosition.x(), _st.item.statusPosition.y(), width(), highlightedPart);
 			p.setPen(selected ? _st.item.statusFgOver : _st.item.statusFg);
@@ -1717,8 +1720,8 @@ PeerListContent::RowIndex PeerListContent::findRowIndex(
 	return result;
 }
 
-void PeerListContent::handleNameChanged(const Notify::PeerUpdate &update) {
-	auto byPeer = _rowsByPeer.find(update.peer);
+void PeerListContent::handleNameChanged(not_null<PeerData*> peer) {
+	auto byPeer = _rowsByPeer.find(peer);
 	if (byPeer != _rowsByPeer.cend()) {
 		for (auto row : byPeer->second) {
 			if (addingToSearchIndex()) {

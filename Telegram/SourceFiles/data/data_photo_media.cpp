@@ -12,6 +12,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_file_origin.h"
 #include "data/data_auto_download.h"
 #include "main/main_session.h"
+#include "main/main_session_settings.h"
 #include "history/history_item.h"
 #include "history/history.h"
 #include "storage/file_download.h"
@@ -81,7 +82,26 @@ void PhotoMedia::set(PhotoSize size, QImage image) {
 			Qt::SmoothTransformation);
 	}
 	_images[index] = std::make_unique<Image>(std::move(image));
-	_owner->session().downloaderTaskFinished().notify();
+	_owner->session().notifyDownloaderTaskFinished();
+}
+
+QByteArray PhotoMedia::videoContent() const {
+	return _videoBytes;
+}
+
+QSize PhotoMedia::videoSize() const {
+	const auto &location = _owner->videoLocation();
+	return { location.width(), location.height() };
+}
+
+void PhotoMedia::videoWanted(Data::FileOrigin origin) {
+	if (_videoBytes.isEmpty()) {
+		_owner->loadVideo(origin);
+	}
+}
+
+void PhotoMedia::setVideo(QByteArray content) {
+	_videoBytes = std::move(content);
 }
 
 bool PhotoMedia::loaded() const {
@@ -98,7 +118,6 @@ float64 PhotoMedia::progress() const {
 void PhotoMedia::automaticLoad(
 		Data::FileOrigin origin,
 		const HistoryItem *item) {
-	const auto index = PhotoSizeIndex(PhotoSize::Large);
 	if (!item || loaded() || _owner->cancelled()) {
 		return;
 	}

@@ -14,14 +14,19 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_user.h"
 #include "data/data_peer_values.h"
 #include "data/data_file_origin.h"
+#include "data/data_session.h"
+#include "data/stickers/data_stickers.h"
+#include "chat_helpers/stickers_lottie.h"
 #include "mainwindow.h"
 #include "apiwrap.h"
-#include "storage/localstorage.h"
+#include "main/main_session.h"
+#include "storage/storage_account.h"
+#include "core/application.h"
+#include "core/core_settings.h"
 #include "lottie/lottie_single_player.h"
 #include "ui/widgets/scroll_area.h"
 #include "ui/image/image.h"
 #include "ui/ui_utility.h"
-#include "chat_helpers/stickers.h"
 #include "base/unixtime.h"
 #include "window/window_session_controller.h"
 #include "facades.h"
@@ -172,8 +177,7 @@ inline int indexOfInFirstN(const T &v, const U &elem, int last) {
 }
 
 internal::StickerRows FieldAutocomplete::getStickerSuggestions() {
-	const auto list = Stickers::GetListByEmoji(
-		&_controller->session(),
+	const auto list = _controller->session().data().stickers().getListByEmoji(
 		_emoji,
 		_stickersSeed
 	);
@@ -254,7 +258,7 @@ void FieldAutocomplete::updateFiltered(bool resetScroll) {
 			};
 			mrows.reserve(mrows.size() + (_chat->participants.empty() ? _chat->lastAuthors.size() : _chat->participants.size()));
 			if (_chat->noParticipantInfo()) {
-				Auth().api().requestFullPeer(_chat);
+				_chat->session().api().requestFullPeer(_chat);
 			} else if (!_chat->participants.empty()) {
 				for (const auto user : _chat->participants) {
 					if (user->isInaccessible()) continue;
@@ -277,7 +281,7 @@ void FieldAutocomplete::updateFiltered(bool resetScroll) {
 		} else if (_channel && _channel->isMegagroup()) {
 			QMultiMap<int32, UserData*> ordered;
 			if (_channel->lastParticipantsRequestNeeded()) {
-				Auth().api().requestLastParticipants(_channel);
+				_channel->session().api().requestLastParticipants(_channel);
 			} else {
 				mrows.reserve(mrows.size() + _channel->mgInfo->lastParticipants.size());
 				for (const auto user : _channel->mgInfo->lastParticipants) {
@@ -561,22 +565,26 @@ bool FieldAutocomplete::chooseSelected(ChooseMethod method) const {
 
 bool FieldAutocomplete::eventFilter(QObject *obj, QEvent *e) {
 	auto hidden = isHidden();
-	auto moderate = Global::ModerateModeEnabled();
+	auto moderate = Core::App().settings().moderateModeEnabled();
 	if (hidden && !moderate) return QWidget::eventFilter(obj, e);
 
 	if (e->type() == QEvent::KeyPress) {
 		QKeyEvent *ev = static_cast<QKeyEvent*>(e);
 		if (!(ev->modifiers() & (Qt::AltModifier | Qt::ControlModifier | Qt::ShiftModifier | Qt::MetaModifier))) {
+			const auto key = ev->key();
 			if (!hidden) {
-				if (ev->key() == Qt::Key_Up || ev->key() == Qt::Key_Down || (!_srows.empty() && (ev->key() == Qt::Key_Left || ev->key() == Qt::Key_Right))) {
-					return _inner->moveSel(ev->key());
-				} else if (ev->key() == Qt::Key_Enter || ev->key() == Qt::Key_Return) {
+				if (key == Qt::Key_Up || key == Qt::Key_Down || (!_srows.empty() && (key == Qt::Key_Left || key == Qt::Key_Right))) {
+					return _inner->moveSel(key);
+				} else if (key == Qt::Key_Enter || key == Qt::Key_Return) {
 					return _inner->chooseSelected(ChooseMethod::ByEnter);
 				}
 			}
-			if (moderate && ((ev->key() >= Qt::Key_1 && ev->key() <= Qt::Key_9) || ev->key() == Qt::Key_Q)) {
+			if (moderate
+				&& ((key >= Qt::Key_1 && key <= Qt::Key_9)
+					|| key == Qt::Key_Q
+					|| key == Qt::Key_W)) {
 				bool handled = false;
-				emit moderateKeyActivate(ev->key(), &handled);
+				emit moderateKeyActivate(key, &handled);
 				return handled;
 			}
 		}
@@ -600,7 +608,10 @@ FieldAutocompleteInner::FieldAutocompleteInner(
 , _brows(brows)
 , _srows(srows)
 , _previewTimer([=] { showPreview(); }) {
-	subscribe(Auth().downloaderTaskFinished(), [this] { update(); });
+	controller->session().downloaderTaskFinished(
+	) | rpl::start_with_next([=] {
+		update();
+	}, lifetime());
 }
 
 void FieldAutocompleteInner::paintEvent(QPaintEvent *e) {
@@ -609,8 +620,6 @@ void FieldAutocompleteInner::paintEvent(QPaintEvent *e) {
 	QRect r(e->rect());
 	if (r != rect()) p.setClipRect(r);
 
-	auto atwidth = st::mentionFont->width('@');
-	auto hashwidth = st::mentionFont->width('#');
 	auto mentionleft = 2 * st::mentionPadding.left() + st::mentionPhotoSize;
 	auto mentionwidth = width()
 		- mentionleft
@@ -928,7 +937,7 @@ void FieldAutocompleteInner::mousePressEvent(QMouseEvent *e) {
 				}
 			}
 			if (removed) {
-				Local::writeRecentHashtagsAndBots();
+				_controller->session().local().writeRecentHashtagsAndBots();
 			}
 			_parent->updateFiltered();
 
@@ -1017,9 +1026,9 @@ auto FieldAutocompleteInner::getLottieRenderer()
 
 void FieldAutocompleteInner::setupLottie(StickerSuggestion &suggestion) {
 	const auto document = suggestion.document;
-	suggestion.animated = Stickers::LottiePlayerFromDocument(
+	suggestion.animated = ChatHelpers::LottiePlayerFromDocument(
 		suggestion.documentMedia.get(),
-		Stickers::LottieSize::InlineResults,
+		ChatHelpers::StickerLottieSize::InlineResults,
 		stickerBoundingBox() * cIntRetinaFactor(),
 		Lottie::Quality::Default,
 		getLottieRenderer());

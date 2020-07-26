@@ -22,10 +22,6 @@ namespace Api {
 struct SendOptions;
 } // namespace Api
 
-namespace Notify {
-struct PeerUpdate;
-} // namespace Notify
-
 namespace Storage {
 struct PreparedList;
 } // namespace Storage
@@ -88,8 +84,8 @@ public:
 	bool returnTabbedSelector() override;
 
 	// Float player interface.
-	bool wheelEventFromFloatPlayer(QEvent *e) override;
-	QRect rectForFloatPlayer() const override;
+	bool floatPlayerHandleWheelEvent(QEvent *e) override;
+	QRect floatPlayerAvailableRect() override;
 
 	// ListDelegate interface.
 	Context listContext() override;
@@ -133,6 +129,8 @@ private:
 
 	void setupComposeControls();
 
+	void setupDragArea();
+
 	void setupScrollDownButton();
 	void scrollDownClicked();
 	void scrollDownAnimationFinish();
@@ -145,6 +143,10 @@ private:
 
 	void send();
 	void send(Api::SendOptions options);
+	void edit(
+		not_null<HistoryItem*> item,
+		Api::SendOptions options,
+		mtpRequestId *const saveEditMsgRequestId);
 	void highlightSingleNewMessage(const Data::MessagesSlice &slice);
 	void chooseAttach();
 	[[nodiscard]] SendMenuType sendMenuType() const;

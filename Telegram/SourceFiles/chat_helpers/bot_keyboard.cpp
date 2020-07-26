@@ -98,7 +98,9 @@ int Style::minButtonWidth(HistoryMessageMarkupButton::Type type) const {
 
 } // namespace
 
-BotKeyboard::BotKeyboard(QWidget *parent) : TWidget(parent)
+BotKeyboard::BotKeyboard(not_null<Main::Session*> session, QWidget *parent)
+: TWidget(parent)
+, _session(session)
 , _st(&st::botKbButton) {
 	setGeometry(0, 0, _st->margin, st::botKbScroll.deltat);
 	_height = st::botKbScroll.deltat;
@@ -149,7 +151,7 @@ void BotKeyboard::leaveEventHook(QEvent *e) {
 }
 
 bool BotKeyboard::moderateKeyActivate(int key) {
-	if (const auto item = Auth().data().message(_wasForMsgId)) {
+	if (const auto item = _session->data().message(_wasForMsgId)) {
 		if (const auto markup = item->Get<HistoryMessageReplyMarkup>()) {
 			if (key >= Qt::Key_1 && key <= Qt::Key_9) {
 				const auto index = int(key - Qt::Key_1);
@@ -159,12 +161,14 @@ bool BotKeyboard::moderateKeyActivate(int key) {
 					App::activateBotCommand(item, 0, index);
 					return true;
 				}
-			} else if (key == Qt::Key_Q) {
-				if (const auto user = item->history()->peer->asUser()) {
-					if (user->isBot() && item->from() == user) {
+			} else if (const auto user = item->history()->peer->asUser()) {
+				if (user->isBot() && item->from() == user) {
+					if (key == Qt::Key_Q) {
 						App::sendBotCommand(user, user, qsl("/translate"));
-						return true;
+					} else if (key == Qt::Key_W) {
+						App::sendBotCommand(user, user, qsl("/eng"));
 					}
+					return true;
 				}
 			}
 		}

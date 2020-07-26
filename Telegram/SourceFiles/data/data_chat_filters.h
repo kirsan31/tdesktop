@@ -95,6 +95,8 @@ public:
 	explicit ChatFilters(not_null<Session*> owner);
 	~ChatFilters();
 
+	void setPreloaded(const QVector<MTPDialogFilter> &result);
+
 	void load();
 	void apply(const MTPUpdate &update);
 	void set(ChatFilter filter);
@@ -105,8 +107,6 @@ public:
 	bool loadNextExceptions(bool chatsListLoaded);
 
 	void refreshHistory(not_null<History*> history);
-	[[nodiscard]] auto refreshHistoryRequests() const
-		-> rpl::producer<not_null<History*>>;
 
 	[[nodiscard]] not_null<Dialogs::MainList*> chatsList(FilterId filterId);
 
@@ -127,6 +127,7 @@ public:
 
 private:
 	void load(bool force);
+	void received(const QVector<MTPDialogFilter> &list);
 	bool applyOrder(const QVector<MTPint> &order);
 	bool applyChange(ChatFilter &filter, ChatFilter &&updated);
 	void applyInsert(ChatFilter filter, int position);
@@ -137,7 +138,6 @@ private:
 	std::vector<ChatFilter> _list;
 	base::flat_map<FilterId, std::unique_ptr<Dialogs::MainList>> _chatsLists;
 	rpl::event_stream<> _listChanged;
-	rpl::event_stream<not_null<History*>> _refreshHistoryRequests;
 	mtpRequestId _loadRequestId = 0;
 	mtpRequestId _saveOrderRequestId = 0;
 	mtpRequestId _saveOrderAfterId = 0;

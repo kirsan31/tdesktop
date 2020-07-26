@@ -16,10 +16,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_chat.h"
 #include "data/data_channel.h"
 #include "ui/text_options.h"
+#include "core/core_settings.h"
+#include "core/application.h"
 #include "mainwidget.h"
 #include "layout.h"
 #include "lang/lang_keys.h"
-#include "facades.h"
 #include "app.h"
 #include "styles/style_history.h"
 
@@ -316,7 +317,7 @@ not_null<HistoryService*> Service::message() const {
 
 QRect Service::countGeometry() const {
 	auto result = QRect(0, 0, width(), height());
-	if (Adaptive::ChatWide()) {
+	if (Core::App().settings().chatWide()) {
 //		result.setWidth(qMin(result.width(), st::msgMaxWidth + 2 * st::msgPhotoSkip + 2 * st::msgMargin.left()));
 		result.setWidth(result.width() - st::msgServiceMargin.left() - st::msgServiceMargin.left());
 	}
@@ -340,9 +341,9 @@ QSize Service::performCountCurrentSize(int newWidth) {
 		item->_textHeight = 0;
 	} else {
 		auto contentWidth = newWidth;
-		/*
-		if (Adaptive::ChatWide()) {
-			accumulate_min(contentWidth, st::msgMaxWidth + 2 * st::msgPhotoSkip + 2 * st::msgMargin.left());			
+        /*
+		if (Core::App().settings().chatWide()) {
+			accumulate_min(contentWidth, st::msgMaxWidth + 2 * st::msgPhotoSkip + 2 * st::msgMargin.left());
 		}
 		*/
 		contentWidth -= st::msgServiceMargin.left() + st::msgServiceMargin.left(); // two small margins

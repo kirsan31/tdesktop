@@ -167,8 +167,8 @@ public:
 	[[nodiscard]] bool videoThumbnailLoading() const;
 	[[nodiscard]] bool videoThumbnailFailed() const;
 	void loadVideoThumbnail(Data::FileOrigin origin);
-	const ImageLocation &videoThumbnailLocation() const;
-	int videoThumbnailByteSize() const;
+	[[nodiscard]] const ImageLocation &videoThumbnailLocation() const;
+	[[nodiscard]] int videoThumbnailByteSize() const;
 
 	void updateThumbnails(
 		const QByteArray &inlineThumbnailBytes,
@@ -336,16 +336,11 @@ public:
 		not_null<DocumentData*> document,
 		FullMsgId context = FullMsgId());
 
-	[[nodiscard]] bool valid() const {
-		return !_session.empty();
-	}
-
 	[[nodiscard]] not_null<DocumentData*> document() const {
 		return _document;
 	}
 
 private:
-	const base::weak_ptr<Main::Session> _session;
 	const not_null<DocumentData*> _document;
 
 };
@@ -433,6 +428,7 @@ private:
 };
 
 QString FileNameForSave(
+	not_null<Main::Session*> session,
 	const QString &title,
 	const QString &filter,
 	const QString &prefix,

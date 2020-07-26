@@ -16,6 +16,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/click_handler_types.h"
 #include "mainwindow.h"
 #include "main/main_account.h"
+#include "main/main_session.h"
+#include "main/main_domain.h"
 #include "info/info_memento.h"
 #include "info/settings/info_settings_widget.h"
 #include "window/window_session_controller.h"
@@ -172,7 +174,7 @@ private:
 
 class MtpChecker : public Checker {
 public:
-	MtpChecker(QPointer<MTP::Instance> instance, bool testing);
+	MtpChecker(base::weak_ptr<Main::Session> session, bool testing);
 
 	void start() override;
 
@@ -877,9 +879,11 @@ void HttpLoaderActor::partFailed(QNetworkReply::NetworkError e) {
 	_parent->threadSafeFailed();
 }
 
-MtpChecker::MtpChecker(QPointer<MTP::Instance> instance, bool testing)
+MtpChecker::MtpChecker(
+	base::weak_ptr<Main::Session> session,
+	bool testing)
 : Checker(testing)
-, _mtp(instance) {
+, _mtp(session) {
 }
 
 void MtpChecker::start() {
@@ -891,7 +895,8 @@ void MtpChecker::start() {
 	const auto updaterVersion = Platform::AutoUpdateVersion();
 	const auto feed = "tdhbcfeed"
 		+ (updaterVersion > 1 ? QString::number(updaterVersion) : QString());
-	MTP::ResolveChannel(&_mtp, feed, [=](const MTPInputChannel &channel) {
+	MTP::ResolveChannel(&_mtp, feed, [=](
+			const MTPInputChannel &channel) {
 		_mtp.send(
 			MTPmessages_GetHistory(
 				MTP_inputPeerChannel(
@@ -1033,7 +1038,7 @@ public:
 	int already() const;
 	int size() const;
 
-	void setMtproto(const QPointer<MTP::Instance> &mtproto);
+	void setMtproto(base::weak_ptr<Main::Session> session);
 
 	~Updater();
 
@@ -1078,7 +1083,7 @@ private:
 	Implementation _mtpImplementation;
 	std::shared_ptr<Loader> _activeLoader;
 	bool _usingMtprotoLoader = (cAlphaVersion() != 0);
-	QPointer<MTP::Instance> _mtproto;
+	base::weak_ptr<Main::Session> _session;
 
 	rpl::lifetime _lifetime;
 
@@ -1226,7 +1231,7 @@ void Updater::start(bool forceWait) {
 			std::make_unique<HttpChecker>(_testing));
 		startImplementation(
 			&_mtpImplementation,
-			std::make_unique<MtpChecker>(_mtproto, _testing));
+			std::make_unique<MtpChecker>(_session, _testing));
 
 		_checking.fire({});
 	} else {
@@ -1289,8 +1294,8 @@ void Updater::test() {
 	start(false);
 }
 
-void Updater::setMtproto(const QPointer<MTP::Instance> &mtproto) {
-	_mtproto = mtproto;
+void Updater::setMtproto(base::weak_ptr<Main::Session> session) {
+	_session = session;
 }
 
 void Updater::handleTimeout() {
@@ -1387,9 +1392,9 @@ Updater::~Updater() {
 
 UpdateChecker::UpdateChecker()
 : _updater(GetUpdaterInstance()) {
-	if (IsAppLaunched()) {
-		if (const auto mtproto = Core::App().activeAccount().mtp()) {
-			_updater->setMtproto(mtproto);
+	if (IsAppLaunched() && Core::App().domain().started()) {
+		if (const auto session = Core::App().activeAccount().maybeSession()) {
+			_updater->setMtproto(session);
 		}
 	}
 }
@@ -1423,8 +1428,8 @@ void UpdateChecker::test() {
 	_updater->test();
 }
 
-void UpdateChecker::setMtproto(const QPointer<MTP::Instance> &mtproto) {
-	_updater->setMtproto(mtproto);
+void UpdateChecker::setMtproto(base::weak_ptr<Main::Session> session) {
+	_updater->setMtproto(session);
 }
 
 void UpdateChecker::stop() {
@@ -1579,12 +1584,12 @@ void UpdateApplication() {
 			if (const auto controller = window->sessionController()) {
 				controller->showSection(
 					Info::Memento(
-						Info::Settings::Tag{ Auth().user() },
+						Info::Settings::Tag{ controller->session().user() },
 						Info::Section::SettingsType::Advanced),
 					Window::SectionShow());
 			} else {
 				window->showSpecialLayer(
-					Box<::Settings::LayerWidget>(),
+					Box<::Settings::LayerWidget>(&window->controller()),
 					anim::type::normal);
 			}
 			window->showFromTray();

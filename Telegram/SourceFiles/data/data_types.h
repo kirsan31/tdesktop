@@ -10,27 +10,31 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/value_ordering.h"
 #include "ui/text/text.h" // For QFIXED_MAX
 
+class HistoryItem;
+using HistoryItemsList = std::vector<not_null<HistoryItem*>>;
+
+class StorageImageLocation;
+class WebFileLocation;
+struct GeoPointLocation;
+
 namespace Storage {
 namespace Cache {
 struct Key;
 } // namespace Cache
 } // namespace Storage
 
-class HistoryItem;
-using HistoryItemsList = std::vector<not_null<HistoryItem*>>;
-
 namespace Ui {
 class InputField;
 } // namespace Ui
+
+namespace Main {
+class Session;
+} // namespace Main
 
 namespace Images {
 enum class Option;
 using Options = base::flags<Option>;
 } // namespace Images
-
-class StorageImageLocation;
-class WebFileLocation;
-struct GeoPointLocation;
 
 namespace Data {
 
@@ -317,6 +321,14 @@ enum DocumentType {
         HtmlDocument = 88,
 };
 
+inline constexpr auto kStickerSideSize = 512;
+
+[[nodiscard]] inline bool GoodStickerDimensions(int width, int height) {
+	return (width > 0 && width <= kStickerSideSize)
+		&& (height > 0 && height <= kStickerSideSize)
+		&& (width == kStickerSideSize || height == kStickerSideSize);
+}
+
 using MediaKey = QPair<uint64, uint64>;
 
 class AudioMsgId {
@@ -419,38 +431,17 @@ inline bool operator==(
 		&& (a.scroll == b.scroll);
 }
 
-struct SendAction {
-	enum class Type {
-		Typing,
-		RecordVideo,
-		UploadVideo,
-		RecordVoice,
-		UploadVoice,
-		RecordRound,
-		UploadRound,
-		UploadPhoto,
-		UploadFile,
-		ChooseLocation,
-		ChooseContact,
-		PlayGame,
-	};
-	SendAction(
-		Type type,
-		crl::time until,
-		int progress = 0)
-	: type(type)
-	, until(until)
-	, progress(progress) {
-	}
-	Type type = Type::Typing;
-	crl::time until = 0;
-	int progress = 0;
-
-};
-
 class FileClickHandler : public LeftButtonClickHandler {
 public:
-	FileClickHandler(FullMsgId context) : _context(context) {
+	FileClickHandler(
+		not_null<Main::Session*> session,
+		FullMsgId context)
+	: _session(session)
+	, _context(context) {
+	}
+
+	[[nodiscard]] Main::Session &session() const {
+		return *_session;
 	}
 
 	void setMessageId(FullMsgId context) {
@@ -465,6 +456,7 @@ protected:
 	HistoryItem *getActionItem() const;
 
 private:
+	const not_null<Main::Session*> _session;
 	FullMsgId _context;
 
 };

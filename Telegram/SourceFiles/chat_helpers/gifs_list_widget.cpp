@@ -15,20 +15,19 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_file_origin.h"
 #include "data/data_photo_media.h"
 #include "data/data_document_media.h"
+#include "data/stickers/data_stickers.h"
 #include "ui/widgets/buttons.h"
 #include "ui/widgets/input_fields.h"
 #include "ui/effects/ripple_animation.h"
 #include "ui/image/image.h"
 #include "boxes/stickers_box.h"
 #include "inline_bots/inline_bot_result.h"
-#include "chat_helpers/stickers.h"
 #include "storage/localstorage.h"
 #include "lang/lang_keys.h"
 #include "mainwindow.h"
-#include "apiwrap.h"
+#include "main/main_session.h"
 #include "window/window_session_controller.h"
 #include "history/view/history_view_cursor_state.h"
-#include "facades.h"
 #include "app.h"
 #include "styles/style_chat_helpers.h"
 
@@ -37,7 +36,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 namespace ChatHelpers {
 namespace {
 
-constexpr auto kSaveChosenTabTimeout = 1000;
 constexpr auto kSearchRequestDelay = 400;
 constexpr auto kInlineItemsMaxPerRow = 5;
 constexpr auto kSearchBotUsername = "gif"_cs;
@@ -135,7 +133,7 @@ GifsListWidget::GifsListWidget(
 	QWidget *parent,
 	not_null<Window::SessionController*> controller)
 : Inner(parent, controller)
-, _api(controller->session().api().instance())
+, _api(&controller->session().mtp())
 , _section(Section::Gifs)
 , _updateInlineItems([=] { updateInlineItems(); })
 , _previewTimer([=] { showPreview(); }) {
@@ -149,14 +147,15 @@ GifsListWidget::GifsListWidget(
 		this,
 		[=] { sendInlineRequest(); });
 
-	controller->session().data().savedGifsUpdated(
-	) | rpl::start_with_next([this] {
+	controller->session().data().stickers().savedGifsUpdated(
+	) | rpl::start_with_next([=] {
 		refreshSavedGifs();
 	}, lifetime());
 
-	subscribe(controller->session().downloaderTaskFinished(), [this] {
+	controller->session().downloaderTaskFinished(
+	) | rpl::start_with_next([=] {
 		update();
-	});
+	}, lifetime());
 
 	subscribe(controller->gifPauseLevelChanged(), [=] {
 		if (!controller->isGifPausedAtLeastFor(
@@ -511,13 +510,13 @@ void GifsListWidget::refreshSavedGifs() {
 	if (_section == Section::Gifs) {
 		clearInlineRows(false);
 
-		auto &saved = controller()->session().data().savedGifs();
+		const auto &saved = controller()->session().data().stickers().savedGifs();
 		if (!saved.isEmpty()) {
 			_rows.reserve(saved.size());
 			auto row = Row();
 			row.items.reserve(kInlineItemsMaxPerRow);
 			auto sumWidth = 0;
-			for_const (auto &gif, saved) {
+			for (const auto &gif : saved) {
 				inlineRowsAddItem(gif, 0, row, sumWidth);
 			}
 			inlineRowFinalize(row, sumWidth, true);
@@ -540,8 +539,8 @@ void GifsListWidget::clearInlineRows(bool resultsDeleted) {
 		_selected = _pressed = -1;
 	} else {
 		clearSelection();
-		for_const (auto &row, _rows) {
-			for_const (auto &item, row.items) {
+		for (const auto &row : std::as_const(_rows)) {
+			for (const auto &item : std::as_const(row.items)) {
 				item->setPosition(-1);
 			}
 		}
@@ -803,7 +802,6 @@ bool GifsListWidget::inlineItemVisible(const InlineBots::Layout::ItemBase *layou
 	auto col = position % MatrixRowShift;
 	Assert((row < _rows.size()) && (col < _rows[row].items.size()));
 
-	auto &inlineItems = _rows[row].items;
 	auto top = 0;
 	for (auto i = 0; i != row; ++i) {
 		top += _rows[i].height;
@@ -952,9 +950,7 @@ void GifsListWidget::updateSelected() {
 		return;
 	}
 
-	auto newSelected = -1;
 	auto p = mapFromGlobal(_lastMousePos);
-
 	int sx = (rtl() ? width() - p.x() : p.x()) - (st::inlineResultsLeft - st::buttonRadius);
 	int sy = p.y() - st::stickerPanPadding;
 	int row = -1, col = -1, sel = -1;

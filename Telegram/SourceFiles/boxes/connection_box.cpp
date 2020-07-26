@@ -171,7 +171,7 @@ private:
 
 };
 
-class ProxyBox : public Ui::BoxContent {
+class ProxyBox final : public Ui::BoxContent {
 public:
 	ProxyBox(
 		QWidget*,
@@ -179,11 +179,13 @@ public:
 		Fn<void(ProxyData)> callback,
 		Fn<void(ProxyData)> shareCallback);
 
-protected:
-	void prepare() override;
-
 private:
 	using Type = ProxyData::Type;
+
+	void prepare() override;
+	void setInnerFocus() override {
+		_host->setFocusFast();
+	}
 
 	void refreshButtons();
 	ProxyData collectData();
@@ -693,8 +695,8 @@ void ProxiesBox::applyView(View &&view) {
 		setupButtons(id, i->second.get());
 		if (_noRows) {
 			_noRows.reset();
-			wrap->resizeToWidth(width());
 		}
+		wrap->resizeToWidth(width());
 	} else if (view.host.isEmpty()) {
 		_rows.erase(i);
 	} else {
@@ -764,6 +766,31 @@ ProxyBox::ProxyBox(
 
 void ProxyBox::prepare() {
 	setTitle(tr::lng_proxy_edit());
+
+	connect(_host.data(), &Ui::InputField::changed, [=] {
+		Ui::PostponeCall(_host, [=] {
+			const auto host = _host->getLastText().trimmed();
+			static const auto mask = u"^\\d+\\.\\d+\\.\\d+\\.\\d+:(\\d*)$"_q;
+			const auto match = QRegularExpression(mask).match(host);
+			if (_host->textCursor().position() == host.size()
+				&& match.hasMatch()) {
+				const auto port = match.captured(1);
+				_port->setText(port);
+				_port->setCursorPosition(port.size());
+				_port->setFocus();
+				_host->setText(host.mid(0, host.size() - port.size() - 1));
+			}
+		});
+	});
+	_port.data()->events(
+	) | rpl::start_with_next([=](not_null<QEvent*> e) {
+		if (e->type() == QEvent::KeyPress
+			&& (static_cast<QKeyEvent*>(e.get())->key() == Qt::Key_Backspace)
+			&& _port->cursorPosition() == 0) {
+			_host->setCursorPosition(_host->getLastText().size());
+			_host->setFocus();
+		}
+	}, _port->lifetime());
 
 	refreshButtons();
 	setDimensionsToContent(st::boxWideWidth, _content);
@@ -978,8 +1005,9 @@ void ProxyBox::addLabel(
 
 } // namespace
 
-ProxiesBoxController::ProxiesBoxController()
-: _saveTimer([] { Local::writeSettings(); }) {
+ProxiesBoxController::ProxiesBoxController(not_null<Main::Account*> account)
+: _account(account)
+, _saveTimer([] { Local::writeSettings(); }) {
 	_list = ranges::view::all(
 		Global::ProxiesList()
 	) | ranges::view::transform([&](const ProxyData &proxy) {
@@ -1027,7 +1055,7 @@ void ProxiesBoxController::ShowApplyConfirmation(
 				: QString());
 		*box = Ui::show(Box<ConfirmBox>(text, tr::lng_sure_enable(tr::now), [=] {
 			auto &proxies = Global::RefProxiesList();
-			if (ranges::find(proxies, proxy) == end(proxies)) {
+			if (!ranges::contains(proxies, proxy)) {
 				proxies.push_back(proxy);
 			}
 			Core::App().setCurrentProxy(
@@ -1058,7 +1086,7 @@ void ProxiesBoxController::refreshChecker(Item &item) {
 	const auto type = (item.data.type == Type::Http)
 		? Variants::Http
 		: Variants::Tcp;
-	const auto mtproto = Core::App().activeAccount().mtp();
+	const auto mtproto = &_account->mtp();
 	const auto dcId = mtproto->mainDcId();
 
 	item.state = ItemState::Checking;
@@ -1081,7 +1109,7 @@ void ProxiesBoxController::refreshChecker(Item &item) {
 			dcId);
 		item.checkerv6 = nullptr;
 	} else {
-		const auto options = mtproto->dcOptions()->lookup(
+		const auto options = mtproto->dcOptions().lookup(
 			dcId,
 			MTP::DcType::Regular,
 			true);
@@ -1142,8 +1170,9 @@ void ProxiesBoxController::setupChecker(int id, const Checker &checker) {
 	pointer->connect(pointer, &Connection::error, failed);
 }
 
-object_ptr<Ui::BoxContent> ProxiesBoxController::CreateOwningBox() {
-	auto controller = std::make_unique<ProxiesBoxController>();
+object_ptr<Ui::BoxContent> ProxiesBoxController::CreateOwningBox(
+		not_null<Main::Account*> account) {
+	auto controller = std::make_unique<ProxiesBoxController>(account);
 	auto box = controller->create();
 	Ui::AttachAsChild(box, std::move(controller));
 	return box;
@@ -1372,7 +1401,7 @@ void ProxiesBoxController::setTryIPv6(bool enabled) {
 		return;
 	}
 	Global::SetTryIPv6(enabled);
-	MTP::restart();
+	_account->mtp().restart();
 	Global::RefConnectionTypeChanged().notify();
 	saveDelayed();
 }
@@ -1386,7 +1415,6 @@ auto ProxiesBoxController::views() const -> rpl::producer<ItemView> {
 }
 
 void ProxiesBoxController::updateView(const Item &item) {
-	const auto ping = 0;
 	const auto selected = (Global::SelectedProxy() == item.data);
 	const auto deleted = item.deleted;
 	const auto type = [&] {
@@ -1404,7 +1432,7 @@ void ProxiesBoxController::updateView(const Item &item) {
 		if (!selected
 			|| (Global::ProxySettings() != ProxyData::Settings::Enabled)) {
 			return item.state;
-		} else if (MTP::dcstate() == MTP::ConnectedState) {
+		} else if (_account->mtp().dcstate() == MTP::ConnectedState) {
 			return ItemState::Online;
 		}
 		return ItemState::Connecting;

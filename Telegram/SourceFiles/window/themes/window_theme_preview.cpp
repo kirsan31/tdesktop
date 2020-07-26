@@ -19,7 +19,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_history.h"
 #include "styles/style_dialogs.h"
 #include "styles/style_info.h"
-#include "facades.h"
+#include "core/application.h"
 
 namespace Window {
 namespace Theme {
@@ -249,7 +249,7 @@ void Generator::addAudioBubble(QVector<int> waveform, int waveactive, QString wa
 	tleft = st::msgFilePadding.left() + st::msgFileSize + st::msgFilePadding.right();
 	tright = st::msgFileThumbPadding.left();
 	accumulate_max(width, tleft + st::normalFont->width(wavestatus) + skipBlock.width() + st::msgPadding.right());
-	if (!Adaptive::ChatWide())
+	if (!Core::App().settings().chatWide())
 		accumulate_min(width, st::msgMaxWidth);
 
 	auto height = st::msgFilePadding.top() + st::msgFileSize + st::msgFilePadding.bottom();
@@ -278,7 +278,7 @@ void Generator::addTextBubble(QString text, QString date, Status status) {
 
 	auto width = _history.width() - st::msgMargin.left() - st::msgMargin.right();
 	accumulate_min(width, st::msgPadding.left() + bubble.text.maxWidth() + st::msgPadding.right());
-	if (!Adaptive::ChatWide())
+	if (!Core::App().settings().chatWide())
 		accumulate_min(width, st::msgMaxWidth);
 
 	auto textWidth = qMax(width - st::msgPadding.left() - st::msgPadding.right(), 1);
@@ -303,7 +303,7 @@ void Generator::addPhotoBubble(QString image, QString caption, QString date, Sta
 
 	auto width = _history.width() - st::msgMargin.left() - st::msgMargin.right();
 	accumulate_min(width, bubble.photoWidth);
-	if (!Adaptive::ChatWide())
+	if (!Core::App().settings().chatWide())
 		accumulate_min(width, st::msgMaxWidth);
 
 	auto textWidth = qMax(width - st::msgPadding.left() - st::msgPadding.right(), 1);
@@ -631,7 +631,6 @@ void Generator::paintRow(const Row &row) {
 	auto availableWidth = namewidth;
 	if (row.unreadCounter) {
 		auto counter = QString::number(row.unreadCounter);
-		auto mutedCounter = row.muted;
 		auto unreadRight = x + fullWidth - st::dialogsPadding.x();
 		auto unreadTop = texttop + st::dialogsTextFont->ascent - st::dialogsUnreadFont->ascent - (st::dialogsUnreadHeight - st::dialogsUnreadFont->height) / 2;
 

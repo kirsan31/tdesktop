@@ -285,6 +285,12 @@ ListWidget::ListWidget(
 			}
 		}
 	}, lifetime());
+
+	session().downloaderTaskFinished(
+	) | rpl::start_with_next([=] {
+		update();
+	}, lifetime());
+
 	session().data().itemRemoved(
 	) | rpl::start_with_next(
 		[this](auto item) { itemRemoved(item); },
@@ -303,6 +309,10 @@ ListWidget::ListWidget(
 
 Main::Session &ListWidget::session() const {
 	return _controller->session();
+}
+
+not_null<Window::SessionController*> ListWidget::controller() const {
+	return _controller;
 }
 
 not_null<ListDelegate*> ListWidget::delegate() const {
@@ -354,7 +364,7 @@ std::optional<int> ListWidget::scrollTopForPosition(
 	}
 	const auto index = findNearestItem(position);
 	const auto view = _items[index];
-	return scrollTopForView(_items[index]);
+	return scrollTopForView(view);
 }
 
 std::optional<int> ListWidget::scrollTopForView(
@@ -598,7 +608,7 @@ void ListWidget::visibleTopBottomUpdated(
 	} else {
 		scrollDateHideByTimer();
 	}
-	_controller->floatPlayerAreaUpdated().notify(true);
+	_controller->floatPlayerAreaUpdated();
 	_applyUpdatedScrollState.call();
 }
 
@@ -1123,17 +1133,6 @@ bool ListWidget::elementUnderCursor(
 	return (_overElement == view);
 }
 
-void ListWidget::elementAnimationAutoplayAsync(
-		not_null<const Element*> view) {
-	crl::on_main(this, [this, msgId = view->data()->fullId()]{
-		if (const auto view = viewForItem(msgId)) {
-			if (const auto media = view->media()) {
-				media->autoplayAnimation();
-			}
-		}
-	});
-}
-
 crl::time ListWidget::elementHighlightTime(
 		not_null<const HistoryView::Element*> element) {
 	if (element->data()->fullId() == _highlightedMessageId) {
@@ -1170,6 +1169,10 @@ void ListWidget::elementShowPollResults(
 void ListWidget::elementShowTooltip(
 	const TextWithEntities &text,
 	Fn<void()> hiddenCallback) {
+}
+
+bool ListWidget::elementIsGifPaused() {
+	return _controller->isGifPausedAtLeastFor(Window::GifPauseReason::Any);
 }
 
 void ListWidget::saveState(not_null<ListMemento*> memento) {
@@ -1751,11 +1754,9 @@ void ListWidget::updateDragSelection() {
 	}
 	const auto fromView = selectingUp ? overView : pressView;
 	const auto tillView = selectingUp ? pressView : overView;
-	updateDragSelection(
-		selectingUp ? overView : pressView,
-		selectingUp ? _overState : _pressState,
-		selectingUp ? pressView : overView,
-		selectingUp ? _pressState : _overState);
+	const auto fromState = selectingUp ? _overState : _pressState;
+	const auto tillState = selectingUp ? _pressState : _overState;
+	updateDragSelection(fromView, fromState, tillView, tillState);
 }
 
 void ListWidget::updateDragSelection(
@@ -2176,7 +2177,7 @@ void ListWidget::mouseActionUpdate() {
 					auto dateLeft = st::msgServiceMargin.left();
 					auto maxwidth = view->width();
 					/*
-					if (Adaptive::ChatWide()) {
+					if (Core::App().settings().chatWide()) {
 						maxwidth = qMin(maxwidth, int32(st::msgMaxWidth + 2 * st::msgPhotoSkip + 2 * st::msgMargin.left()));
 					}
 					*/
@@ -2555,6 +2556,14 @@ QPoint ListWidget::mapPointToItem(
 		return QPoint();
 	}
 	return point - QPoint(0, itemTop(view));
+}
+
+rpl::producer<FullMsgId> ListWidget::editMessageRequested() const {
+	return _requestedToEditMessage.events();
+}
+
+void ListWidget::editMessageRequestNotify(FullMsgId item) {
+	_requestedToEditMessage.fire(std::move(item));
 }
 
 ListWidget::~ListWidget() = default;

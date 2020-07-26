@@ -14,13 +14,15 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_auto_download.h"
 #include "media/clip/media_clip_reader.h"
 #include "main/main_session.h"
+#include "main/main_session_settings.h"
 #include "lottie/lottie_animation.h"
 #include "history/history_item.h"
 #include "history/history.h"
 #include "window/themes/window_theme_preview.h"
+#include "core/core_settings.h"
+#include "core/application.h"
 #include "storage/file_download.h"
 #include "ui/image/image.h"
-#include "facades.h"
 #include "app.h"
 
 #include <QtCore/QBuffer>
@@ -31,7 +33,6 @@ namespace {
 
 constexpr auto kReadAreaLimit = 12'032 * 9'024;
 constexpr auto kWallPaperThumbnailLimit = 960;
-constexpr auto kMaxVideoFrameArea = 7'680 * 4'320;
 constexpr auto kGoodThumbQuality = 87;
 
 enum class FileType {
@@ -166,7 +167,7 @@ void DocumentMedia::setGoodThumbnail(QImage thumbnail) {
 		return;
 	}
 	_goodThumbnail = std::make_unique<Image>(std::move(thumbnail));
-	_owner->session().downloaderTaskFinished().notify();
+	_owner->session().notifyDownloaderTaskFinished();
 }
 
 Image *DocumentMedia::thumbnailInline() const {
@@ -204,7 +205,7 @@ QSize DocumentMedia::thumbnailSize() const {
 
 void DocumentMedia::setThumbnail(QImage thumbnail) {
 	_thumbnail = std::make_unique<Image>(std::move(thumbnail));
-	_owner->session().downloaderTaskFinished().notify();
+	_owner->session().notifyDownloaderTaskFinished();
 }
 
 QByteArray DocumentMedia::videoThumbnailContent() const {
@@ -258,7 +259,7 @@ void DocumentMedia::automaticLoad(
 		return;
 	}
 	const auto toCache = _owner->saveToCache();
-	if (!toCache && Global::AskDownloadPath()) {
+	if (!toCache && Core::App().settings().askDownloadPath()) {
 		// We need a filename, but we're supposed to ask user for it.
 		// No automatic download in this case.
 		return;

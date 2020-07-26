@@ -47,7 +47,7 @@ void SaveLastPlaybackPosition(
 	not_null<DocumentData*> document,
 	const TrackState &state);
 
-Instance *instance();
+not_null<Instance*> instance();
 
 class Instance : private base::Subscriber {
 public:
@@ -148,16 +148,14 @@ public:
 
 	rpl::producer<> playlistChanges(AudioMsgId::Type type) const;
 
-	void playerWidgetToggledNotify(bool toggled) {
-		_playerWidgetToggled.fire_copy({toggled});
-	}
-	rpl::producer<bool> playerWidgetToggled() const {
-		return _playerWidgetToggled.events();
-	}
 	rpl::producer<TrackState> updatedNotifier() const {
 		return _updatedNotifier.events();
 	}
 
+	rpl::producer<> stops(AudioMsgId::Type type) const;
+	rpl::producer<> startsPlay(AudioMsgId::Type type) const;
+
+	bool pauseGifByRoundVideo() const;
 
 	void documentLoadProgress(DocumentData *document);
 
@@ -180,9 +178,11 @@ private:
 		std::optional<SliceKey> playlistRequestedKey;
 		std::optional<int> playlistIndex;
 		rpl::lifetime playlistLifetime;
+		rpl::lifetime sessionLifetime;
 		rpl::event_stream<> playlistChanges;
 		History *history = nullptr;
 		History *migrated = nullptr;
+		Main::Session *session = nullptr;
 		bool repeatEnabled = false;
 		bool isPlaying = false;
 		bool resumeOnCallEnd = false;
@@ -252,8 +252,12 @@ private:
 	void requestRoundVideoResize() const;
 	void requestRoundVideoRepaint() const;
 
+	void setHistory(not_null<Data*> data, History *history);
+	void setSession(not_null<Data*> data, Main::Session *session);
+
 	Data _songData;
 	Data _voiceData;
+	bool _roundPlaying = false;
 
 	base::Observable<Switch> _switchToNextNotifier;
 	base::Observable<bool> _playerWidgetOver;
@@ -261,7 +265,8 @@ private:
 	base::Observable<AudioMsgId::Type> _trackChangedNotifier;
 	base::Observable<AudioMsgId::Type> _repeatChangedNotifier;
 
-	rpl::event_stream<bool> _playerWidgetToggled;
+	rpl::event_stream<AudioMsgId::Type> _playerStopped;
+	rpl::event_stream<AudioMsgId::Type> _playerStartedPlay;
 	rpl::event_stream<TrackState> _updatedNotifier;
 	rpl::lifetime _lifetime;
 

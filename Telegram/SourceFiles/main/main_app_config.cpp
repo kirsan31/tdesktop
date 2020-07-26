@@ -20,16 +20,17 @@ constexpr auto kRefreshTimeout = 3600 * crl::time(1000);
 
 AppConfig::AppConfig(not_null<Account*> account) : _account(account) {
 	account->mtpValue(
-	) | rpl::start_with_next([=](MTP::Instance *instance) {
-		if (instance) {
-			_api.emplace(instance);
-			refresh();
-		} else {
-			_api.reset();
-			_requestId = 0;
-		}
+	) | rpl::start_with_next([=](not_null<MTP::Instance*> instance) {
+		_api.emplace(instance);
+		refresh();
 	}, _lifetime);
-	refresh();
+
+	account->sessionChanges(
+	) | rpl::filter([=](Session *session) {
+		return (session != nullptr);
+	}) | rpl::start_with_next([=] {
+		refresh();
+	}, _lifetime);
 }
 
 void AppConfig::refresh() {
@@ -64,6 +65,10 @@ void AppConfig::refreshDelayed() {
 
 rpl::producer<> AppConfig::refreshed() const {
 	return _refreshed.events();
+}
+
+rpl::producer<> AppConfig::value() const {
+	return _refreshed.events_starting_with({});
 }
 
 template <typename Extractor>
@@ -123,6 +128,31 @@ std::vector<QString> AppConfig::getStringArray(
 			return std::move(fallback);
 		});
 	});
+}
+
+bool AppConfig::suggestionCurrent(const QString &key) const {
+	return !_dismissedSuggestions.contains(key)
+		&& ranges::contains(
+			get<std::vector<QString>>(
+				u"pending_suggestions"_q,
+				std::vector<QString>()),
+			key);
+}
+
+rpl::producer<> AppConfig::suggestionRequested(const QString &key) const {
+	return value(
+	) | rpl::filter([=] {
+		return suggestionCurrent(key);
+	});
+}
+
+void AppConfig::dismissSuggestion(const QString &key) {
+	if (!_dismissedSuggestions.emplace(key).second) {
+		return;
+	}
+	_api->request(MTPhelp_DismissSuggestion(
+		MTP_string(key)
+	)).send();
 }
 
 } // namespace Main

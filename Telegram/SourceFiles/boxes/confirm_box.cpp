@@ -33,10 +33,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_file_origin.h"
 #include "data/data_histories.h"
 #include "data/data_photo_media.h"
+#include "data/data_changes.h"
 #include "base/unixtime.h"
 #include "main/main_session.h"
-#include "observer_peer.h"
-#include "facades.h"
+#include "mtproto/mtproto_config.h"
+#include "facades.h" // Ui::showChatsList
 #include "app.h"
 #include "styles/style_layers.h"
 #include "styles/style_boxes.h"
@@ -351,7 +352,7 @@ MaxInviteBox::MaxInviteBox(QWidget*, not_null<ChannelData*> channel) : BoxConten
 	tr::lng_participant_invite_sorry(
 		tr::now,
 		lt_count,
-		Global::ChatSizeMax()),
+		channel->session().serverConfig().chatSizeMax),
 	kInformBoxTextOptions,
 	(st::boxWidth
 		- st::boxPadding.left()
@@ -367,11 +368,12 @@ void MaxInviteBox::prepare() {
 	_textHeight = qMin(_text.countHeight(_textWidth), 16 * st::boxLabelStyle.lineHeight);
 	setDimensions(st::boxWidth, st::boxPadding.top() + _textHeight + st::boxTextFont->height + st::boxTextFont->height * 2 + st::newGroupLinkPadding.bottom());
 
-	subscribe(Notify::PeerUpdated(), Notify::PeerUpdatedHandler(Notify::PeerUpdate::Flag::InviteLinkChanged, [this](const Notify::PeerUpdate &update) {
-		if (update.peer == _channel) {
-			rtlupdate(_invitationLink);
-		}
-	}));
+	_channel->session().changes().peerUpdates(
+		_channel,
+		Data::PeerUpdate::Flag::InviteLink
+	) | rpl::start_with_next([=] {
+		rtlupdate(_invitationLink);
+	}, lifetime());
 }
 
 void MaxInviteBox::mouseMoveEvent(QMouseEvent *e) {
@@ -432,6 +434,7 @@ PinMessageBox::PinMessageBox(
 	not_null<PeerData*> peer,
 	MsgId msgId)
 : _peer(peer)
+, _api(&peer->session().mtp())
 , _msgId(msgId)
 , _text(this, tr::lng_pinned_pin_sure(tr::now), st::boxLabel) {
 }
@@ -474,24 +477,16 @@ void PinMessageBox::pinMessage() {
 	if (_notify && !_notify->checked()) {
 		flags |= MTPmessages_UpdatePinnedMessage::Flag::f_silent;
 	}
-	_requestId = MTP::send(
-		MTPmessages_UpdatePinnedMessage(
-			MTP_flags(flags),
-			_peer->input,
-			MTP_int(_msgId)),
-		rpcDone(&PinMessageBox::pinDone),
-		rpcFail(&PinMessageBox::pinFail));
-}
-
-void PinMessageBox::pinDone(const MTPUpdates &updates) {
-	_peer->session().api().applyUpdates(updates);
-	Ui::hideLayer();
-}
-
-bool PinMessageBox::pinFail(const RPCError &error) {
-	if (MTP::isDefaultHandledError(error)) return false;
-	Ui::hideLayer();
-	return true;
+	_requestId = _api.request(MTPmessages_UpdatePinnedMessage(
+		MTP_flags(flags),
+		_peer->input,
+		MTP_int(_msgId)
+	)).done([=](const MTPUpdates &result) {
+		_peer->session().api().applyUpdates(result);
+		Ui::hideLayer();
+	}).fail([=](const RPCError &error) {
+		Ui::hideLayer();
+	}).send();
 }
 
 DeleteMessagesBox::DeleteMessagesBox(
@@ -683,10 +678,7 @@ auto DeleteMessagesBox::revokeText(not_null<PeerData*> peer) const
 	const auto cannotRevoke = [&](HistoryItem *item) {
 		return !item->canDeleteForEveryone(now);
 	};
-	const auto canRevokeAll = ranges::find_if(
-		items,
-		cannotRevoke
-	) == end(items);
+	const auto canRevokeAll = ranges::none_of(items, cannotRevoke);
 	auto outgoing = items | ranges::view::filter(&HistoryItem::out);
 	const auto canRevokeOutgoingCount = canRevokeAll
 		? -1
@@ -775,9 +767,10 @@ void DeleteMessagesBox::deleteAndClear() {
 		if (justClear) {
 			peer->session().api().clearHistory(peer, revoke);
 		} else {
-			const auto controller = App::wnd()->sessionController();
-			if (controller->activeChatCurrent().peer() == peer) {
-				Ui::showChatsList();
+			for (const auto controller : peer->session().windows()) {
+				if (controller->activeChatCurrent().peer() == peer) {
+					Ui::showChatsList(&peer->session());
+				}
 			}
 			// Don't delete old history by default,
 			// because Android app doesn't.
@@ -847,8 +840,8 @@ void DeleteMessagesBox::deleteAndClear() {
 		peer->session().api().request(MTPmessages_DeleteScheduledMessages(
 			peer->input,
 			MTP_vector<MTPint>(ids)
-		)).done([=, peer=peer](const MTPUpdates &updates) {
-			peer->session().api().applyUpdates(updates);
+		)).done([peer=peer](const MTPUpdates &result) {
+			peer->session().api().applyUpdates(result);
 		}).send();
 	}
 
@@ -867,145 +860,6 @@ void DeleteMessagesBox::deleteAndClear() {
 	Ui::hideLayer();
 	session->data().sendHistoryChangeNotifications();
 }
-
-ConfirmInviteBox::ConfirmInviteBox(
-	QWidget*,
-	not_null<Main::Session*> session,
-	const MTPDchatInvite &data,
-	Fn<void()> submit)
-: _session(session)
-, _submit(std::move(submit))
-, _title(this, st::confirmInviteTitle)
-, _status(this, st::confirmInviteStatus)
-, _participants(GetParticipants(_session, data))
-, _isChannel(data.is_channel() && !data.is_megagroup()) {
-	const auto title = qs(data.vtitle());
-	const auto count = data.vparticipants_count().v;
-	const auto status = [&] {
-		return (!_participants.empty() && _participants.size() < count)
-			? tr::lng_group_invite_members(tr::now, lt_count, count)
-			: (count > 0)
-			? tr::lng_chat_status_members(tr::now, lt_count_decimal, count)
-			: _isChannel
-			? tr::lng_channel_status(tr::now)
-			: tr::lng_group_status(tr::now);
-	}();
-	_title->setText(title);
-	_status->setText(status);
-
-	const auto photo = _session->data().processPhoto(data.vphoto());
-	if (!photo->isNull()) {
-		_photo = photo->createMediaView();
-		_photo->wanted(Data::PhotoSize::Small, Data::FileOrigin());
-		if (!_photo->image(Data::PhotoSize::Small)) {
-			subscribe(_session->downloaderTaskFinished(), [=] {
-				update();
-			});
-		}
-	} else {
-		_photoEmpty = std::make_unique<Ui::EmptyUserpic>(
-			Data::PeerUserpicColor(0),
-			title);
-	}
-}
-
-auto ConfirmInviteBox::GetParticipants(
-	not_null<Main::Session*> session,
-	const MTPDchatInvite &data)
--> std::vector<Participant> {
-	const auto participants = data.vparticipants();
-	if (!participants) {
-		return {};
-	}
-	const auto &v = participants->v;
-	auto result = std::vector<Participant>();
-	result.reserve(v.size());
-	for (const auto &participant : v) {
-		if (const auto user = session->data().processUser(participant)) {
-			result.push_back(Participant{ user });
-		}
-	}
-	return result;
-}
-
-void ConfirmInviteBox::prepare() {
-	addButton(
-		(_isChannel
-			? tr::lng_profile_join_channel()
-			: tr::lng_profile_join_group()),
-		_submit);
-	addButton(tr::lng_cancel(), [=] { closeBox(); });
-
-	while (_participants.size() > 4) {
-		_participants.pop_back();
-	}
-
-	auto newHeight = st::confirmInviteStatusTop + _status->height() + st::boxPadding.bottom();
-	if (!_participants.empty()) {
-		int skip = (st::boxWideWidth - 4 * st::confirmInviteUserPhotoSize) / 5;
-		int padding = skip / 2;
-		_userWidth = (st::confirmInviteUserPhotoSize + 2 * padding);
-		int sumWidth = _participants.size() * _userWidth;
-		int left = (st::boxWideWidth - sumWidth) / 2;
-		for (const auto &participant : _participants) {
-			auto name = new Ui::FlatLabel(this, st::confirmInviteUserName);
-			name->resizeToWidth(st::confirmInviteUserPhotoSize + padding);
-			name->setText(participant.user->firstName.isEmpty()
-				? participant.user->name
-				: participant.user->firstName);
-			name->moveToLeft(left + (padding / 2), st::confirmInviteUserNameTop);
-			left += _userWidth;
-		}
-
-		newHeight += st::confirmInviteUserHeight;
-	}
-	setDimensions(st::boxWideWidth, newHeight);
-}
-
-void ConfirmInviteBox::resizeEvent(QResizeEvent *e) {
-	BoxContent::resizeEvent(e);
-	_title->move((width() - _title->width()) / 2, st::confirmInviteTitleTop);
-	_status->move((width() - _status->width()) / 2, st::confirmInviteStatusTop);
-}
-
-void ConfirmInviteBox::paintEvent(QPaintEvent *e) {
-	BoxContent::paintEvent(e);
-
-	Painter p(this);
-
-	if (_photo) {
-		if (const auto image = _photo->image(Data::PhotoSize::Small)) {
-			p.drawPixmap(
-				(width() - st::confirmInvitePhotoSize) / 2,
-				st::confirmInvitePhotoTop,
-				image->pixCircled(
-					st::confirmInvitePhotoSize,
-					st::confirmInvitePhotoSize));
-		}
-	} else if (_photoEmpty) {
-		_photoEmpty->paint(
-			p,
-			(width() - st::confirmInvitePhotoSize) / 2,
-			st::confirmInvitePhotoTop,
-			width(),
-			st::confirmInvitePhotoSize);
-	}
-
-	int sumWidth = _participants.size() * _userWidth;
-	int left = (width() - sumWidth) / 2;
-	for (auto &participant : _participants) {
-		participant.user->paintUserpicLeft(
-			p,
-			participant.userpic,
-			left + (_userWidth - st::confirmInviteUserPhotoSize) / 2,
-			st::confirmInviteUserPhotoTop,
-			width(),
-			st::confirmInviteUserPhotoSize);
-		left += _userWidth;
-	}
-}
-
-ConfirmInviteBox::~ConfirmInviteBox() = default;
 
 ConfirmDontWarnBox::ConfirmDontWarnBox(
 	QWidget*,

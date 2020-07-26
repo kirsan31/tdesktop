@@ -9,9 +9,15 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "intro/intro_widget.h"
 #include "storage/localstorage.h"
+#include "storage/storage_account.h"
 #include "lang/lang_keys.h"
 #include "lang/lang_cloud_manager.h"
 #include "main/main_account.h"
+#include "main/main_domain.h"
+#include "main/main_session.h"
+#include "main/main_session_settings.h"
+#include "core/application.h"
+#include "core/core_settings.h"
 #include "apiwrap.h"
 #include "mainwindow.h"
 #include "boxes/confirm_box.h"
@@ -21,9 +27,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/effects/slide_animation.h"
 #include "data/data_user.h"
 #include "data/data_auto_download.h"
+#include "data/data_session.h"
+#include "data/data_chat_filters.h"
 #include "window/window_controller.h"
 #include "window/themes/window_theme.h"
-#include "facades.h"
 #include "app.h"
 #include "styles/style_intro.h"
 #include "styles/style_window.h"
@@ -32,17 +39,17 @@ namespace Intro {
 namespace details {
 namespace {
 
-void PrepareSupportMode() {
+void PrepareSupportMode(not_null<Main::Session*> session) {
 	using ::Data::AutoDownload::Full;
 
 	anim::SetDisabled(true);
-	Local::writeSettings();
+	Core::App().settings().setDesktopNotify(false);
+	Core::App().settings().setSoundNotify(false);
+	Core::App().settings().setFlashBounceNotify(false);
+	Core::App().saveSettings();
 
-	Global::SetDesktopNotify(false);
-	Global::SetSoundNotify(false);
-	Global::SetFlashBounceNotify(false);
-	Auth().settings().autoDownload() = Full::FullDisabled();
-	Local::writeUserSettings();
+	session->settings().autoDownload() = Full::FullDisabled();
+	session->saveSettings();
 }
 
 } // namespace
@@ -97,25 +104,36 @@ Step::Step(
 
 Step::~Step() = default;
 
+MTP::Sender &Step::api() const {
+	if (!_api) {
+		_api.emplace(&_account->mtp());
+	}
+	return *_api;
+}
+
+void Step::apiClear() {
+	_api.reset();
+}
+
 rpl::producer<QString> Step::nextButtonText() const {
 	return tr::lng_intro_next();
 }
 
 void Step::goBack() {
 	if (_goCallback) {
-		_goCallback(nullptr, Direction::Back);
+		_goCallback(nullptr, StackAction::Back, Animate::Back);
 	}
 }
 
 void Step::goNext(Step *step) {
 	if (_goCallback) {
-		_goCallback(step, Direction::Forward);
+		_goCallback(step, StackAction::Forward, Animate::Forward);
 	}
 }
 
-void Step::goReplace(Step *step) {
+void Step::goReplace(Step *step, Animate animate) {
 	if (_goCallback) {
-		_goCallback(step, Direction::Replace);
+		_goCallback(step, StackAction::Replace, animate);
 	}
 }
 
@@ -129,6 +147,33 @@ void Step::finish(const MTPUser &user, QImage &&photo) {
 		return;
 	}
 
+	// Check if such account is authorized already.
+	for (const auto &[index, existing] : Core::App().domain().accounts()) {
+		const auto raw = existing.get();
+		if (const auto session = raw->maybeSession()) {
+			if (raw->mtp().environment() == _account->mtp().environment()
+				&& user.c_user().vid().v == session->userId()) {
+				_account->logOut();
+				crl::on_main(raw, [=] {
+					Core::App().domain().activate(raw);
+				});
+				return;
+			}
+		}
+	}
+
+	api().request(MTPmessages_GetDialogFilters(
+	)).done([=](const MTPVector<MTPDialogFilter> &result) {
+		createSession(user, photo, result.v);
+	}).fail([=](const RPCError &error) {
+		createSession(user, photo, QVector<MTPDialogFilter>());
+	}).send();
+}
+
+void Step::createSession(
+		const MTPUser &user,
+		QImage photo,
+		const QVector<MTPDialogFilter> &filters) {
 	// Save the default language if we've suggested some other and user ignored it.
 	const auto currentId = Lang::Current().id();
 	const auto defaultId = Lang::DefaultLanguageId();
@@ -138,21 +183,24 @@ void Step::finish(const MTPUser &user, QImage &&photo) {
 		Local::writeLangPack();
 	}
 
+	auto settings = std::make_unique<Main::SessionSettings>();
+	settings->setDialogsFiltersEnabled(!filters.isEmpty());
+
 	const auto account = _account;
-	const auto weak = base::make_weak(account.get());
-	account->createSession(user);
-	Local::writeMtpData();
-	App::wnd()->controller().setupMain();
+	account->createSession(user, std::move(settings));
 
 	// "this" is already deleted here by creating the main widget.
-	if (weak && account->sessionExists()) {
-		auto &session = account->session();
-		if (!photo.isNull()) {
-			session.api().uploadPeerPhoto(session.user(), std::move(photo));
-		}
-		if (session.supportMode()) {
-			PrepareSupportMode();
-		}
+	account->local().writeMtpData();
+	auto &session = account->session();
+	session.data().chatsFilters().setPreloaded(filters);
+	if (!filters.isEmpty()) {
+		session.saveSettingsDelayed();
+	}
+	if (!photo.isNull()) {
+		session.api().uploadPeerPhoto(session.user(), std::move(photo));
+	}
+	if (session.supportMode()) {
+		PrepareSupportMode(&session);
 	}
 }
 
@@ -444,12 +492,12 @@ QPixmap Step::prepareSlideAnimation() {
 		QRect(grabLeft, grabTop, st::introStepWidth, st::introStepHeight));
 }
 
-void Step::showAnimated(Direction direction) {
+void Step::showAnimated(Animate animate) {
 	setFocus();
 	show();
 	hideChildren();
 	if (_slideAnimation) {
-		auto slideLeft = (direction == Direction::Back);
+		auto slideLeft = (animate == Animate::Back);
 		_slideAnimation->start(
 			slideLeft,
 			[=] { update(0, contentTop(), width(), st::introStepHeight); },
@@ -463,7 +511,8 @@ void Step::setShowAnimationClipping(QRect clipping) {
 	_coverAnimation.clipping = clipping;
 }
 
-void Step::setGoCallback(Fn<void(Step *step, Direction direction)> callback) {
+void Step::setGoCallback(
+		Fn<void(Step *step, StackAction action, Animate animate)> callback) {
 	_goCallback = std::move(callback);
 }
 
@@ -473,6 +522,10 @@ void Step::setShowResetCallback(Fn<void()> callback) {
 
 void Step::setShowTermsCallback(Fn<void()> callback) {
 	_showTermsCallback = std::move(callback);
+}
+
+void Step::setCancelNearestDcCallback(Fn<void()> callback) {
+	_cancelNearestDcCallback = std::move(callback);
 }
 
 void Step::setAcceptTermsCallback(

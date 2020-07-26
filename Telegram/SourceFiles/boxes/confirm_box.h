@@ -8,7 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #pragma once
 
 #include "boxes/abstract_box.h"
-#include "mtproto/mtproto_rpc_sender.h"
+#include "mtproto/sender.h"
 
 namespace Data {
 class PhotoMedia;
@@ -129,7 +129,7 @@ private:
 
 };
 
-class PinMessageBox : public Ui::BoxContent, public RPCSender {
+class PinMessageBox final : public Ui::BoxContent {
 public:
 	PinMessageBox(QWidget*, not_null<PeerData*> peer, MsgId msgId);
 
@@ -141,10 +141,9 @@ protected:
 
 private:
 	void pinMessage();
-	void pinDone(const MTPUpdates &updates);
-	bool pinFail(const RPCError &error);
 
-	not_null<PeerData*> _peer;
+	const not_null<PeerData*> _peer;
+	MTP::Sender _api;
 	MsgId _msgId;
 
 	object_ptr<Ui::FlatLabel> _text;
@@ -154,7 +153,7 @@ private:
 
 };
 
-class DeleteMessagesBox : public Ui::BoxContent, public RPCSender {
+class DeleteMessagesBox final : public Ui::BoxContent {
 public:
 	DeleteMessagesBox(
 		QWidget*,
@@ -204,47 +203,6 @@ private:
 	object_ptr<Ui::Checkbox> _deleteAll = { nullptr };
 
 	Fn<void()> _deleteConfirmedCallback;
-
-};
-
-class ConfirmInviteBox
-	: public Ui::BoxContent
-	, public RPCSender
-	, private base::Subscriber {
-public:
-	ConfirmInviteBox(
-		QWidget*,
-		not_null<Main::Session*> session,
-		const MTPDchatInvite &data,
-		Fn<void()> submit);
-	~ConfirmInviteBox();
-
-protected:
-	void prepare() override;
-
-	void resizeEvent(QResizeEvent *e) override;
-	void paintEvent(QPaintEvent *e) override;
-
-private:
-	struct Participant {
-		not_null<UserData*> user;
-		std::shared_ptr<Data::CloudImageView> userpic;
-	};
-	static std::vector<Participant> GetParticipants(
-		not_null<Main::Session*> session,
-		const MTPDchatInvite &data);
-
-	const not_null<Main::Session*> _session;
-
-	Fn<void()> _submit;
-	object_ptr<Ui::FlatLabel> _title;
-	object_ptr<Ui::FlatLabel> _status;
-	std::shared_ptr<Data::PhotoMedia> _photo;
-	std::unique_ptr<Ui::EmptyUserpic> _photoEmpty;
-	std::vector<Participant> _participants;
-	bool _isChannel = false;
-
-	int _userWidth = 0;
 
 };
 

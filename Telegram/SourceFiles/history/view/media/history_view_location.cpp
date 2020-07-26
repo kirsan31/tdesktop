@@ -21,7 +21,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_cloud_file.h"
 #include "app.h"
 #include "styles/style_history.h"
-#include "facades.h"
+#include "core/application.h"
 
 namespace HistoryView {
 
@@ -79,7 +79,7 @@ void Location::ensureMediaCreated() const {
 QSize Location::countOptimalSize() {
 	auto tw = fullWidth();
 	auto th = fullHeight();
-	if (!Adaptive::ChatWide() && tw > st::maxMediaSize) {
+	if (!Core::App().settings().chatWide() && tw > st::maxMediaSize) {
 		th = (st::maxMediaSize * th) / tw;
 		tw = st::maxMediaSize;
 	}
@@ -109,7 +109,7 @@ QSize Location::countCurrentSize(int newWidth) {
 
 	auto tw = fullWidth();
 	auto th = fullHeight();
-	if (!Adaptive::ChatWide() && tw > st::maxMediaSize) {
+	if (!Core::App().settings().chatWide() && tw > st::maxMediaSize) {
 		th = (st::maxMediaSize * th) / tw;
 		tw = st::maxMediaSize;
 	}

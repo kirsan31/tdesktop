@@ -585,21 +585,27 @@ void ListWidget::start() {
 			invalidatePaletteCache();
 		}
 	}, lifetime());
-	ObservableViewer(
-		session().downloaderTaskFinished()
-	) | rpl::start_with_next([this] { update(); }, lifetime());
+
+	session().downloaderTaskFinished(
+	) | rpl::start_with_next([=] {
+		update();
+	}, lifetime());
+
 	session().data().itemLayoutChanged(
 	) | rpl::start_with_next([this](auto item) {
 		itemLayoutChanged(item);
 	}, lifetime());
+
 	session().data().itemRemoved(
 	) | rpl::start_with_next([this](auto item) {
 		itemRemoved(item);
 	}, lifetime());
+
 	session().data().itemRepaintRequest(
 	) | rpl::start_with_next([this](auto item) {
 		repaintItem(item);
 	}, lifetime());
+
 	_controller->mediaSourceQueryValue(
 	) | rpl::start_with_next([this]{
 		restart();
@@ -1280,14 +1286,14 @@ void ListWidget::showContextMenu(
 	}
 
 	auto canDeleteAll = [&] {
-		return ranges::find_if(_selected, [](auto &&item) {
+		return ranges::none_of(_selected, [](auto &&item) {
 			return !item.second.canDelete;
-		}) == _selected.end();
+		});
 	};
 	auto canForwardAll = [&] {
-		return ranges::find_if(_selected, [](auto &&item) {
+		return ranges::none_of(_selected, [](auto &&item) {
 			return !item.second.canForward;
-		}) == _selected.end();
+		});
 	};
 
 	auto link = ClickHandler::getActive();

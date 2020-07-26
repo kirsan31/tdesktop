@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "boxes/edit_caption_box.h"
 
 #include "apiwrap.h"
+#include "api/api_editing.h"
 #include "api/api_text_entities.h"
 #include "main/main_session.h"
 #include "chat_helpers/emoji_suggestions_widget.h"
@@ -15,6 +16,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "chat_helpers/tabbed_panel.h"
 #include "chat_helpers/tabbed_selector.h"
 #include "base/event_filter.h"
+#include "core/application.h"
+#include "core/core_settings.h"
 #include "core/file_utilities.h"
 #include "core/mime_type.h"
 #include "data/data_document.h"
@@ -27,6 +30,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_photo_media.h"
 #include "data/data_document_media.h"
 #include "history/history.h"
+#include "history/history_drag_area.h"
 #include "history/history_item.h"
 #include "platform/platform_specific.h"
 #include "lang/lang_keys.h"
@@ -35,8 +39,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "media/streaming/media_streaming_player.h"
 #include "media/streaming/media_streaming_document.h"
 #include "media/streaming/media_streaming_loader_local.h"
+#include "platform/platform_file_utilities.h"
 #include "storage/localimageloader.h"
 #include "storage/storage_media_prepare.h"
+#include "mtproto/mtproto_config.h"
 #include "ui/image/image.h"
 #include "ui/widgets/input_fields.h"
 #include "ui/widgets/checkbox.h"
@@ -45,7 +51,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/text_options.h"
 #include "window/window_session_controller.h"
 #include "confirm_box.h"
-#include "facades.h"
+#include "apiwrap.h"
+#include "facades.h" // App::LambdaDelayed.
 #include "app.h"
 #include "styles/style_layers.h"
 #include "styles/style_boxes.h"
@@ -58,6 +65,50 @@ namespace {
 
 using namespace ::Media::Streaming;
 using Data::PhotoSize;
+
+auto ListFromMimeData(not_null<const QMimeData*> data) {
+	using Error = Storage::PreparedList::Error;
+	auto result = data->hasUrls()
+		? Storage::PrepareMediaList(
+			// When we edit media, we need only 1 file.
+			data->urls().mid(0, 1),
+			st::sendMediaPreviewSize)
+		: Storage::PreparedList(Error::EmptyFile, QString());
+	if (result.error == Error::None) {
+		return result;
+	} else if (data->hasImage()) {
+		auto image = Platform::GetImageFromClipboard();
+		if (image.isNull()) {
+			image = qvariant_cast<QImage>(data->imageData());
+		}
+		if (!image.isNull()) {
+			return Storage::PrepareMediaFromImage(
+				std::move(image),
+				QByteArray(),
+				st::sendMediaPreviewSize);
+		}
+	}
+	return result;
+}
+
+auto CheckMimeData(not_null<const QMimeData*> data, bool isAlbum) {
+	if (data->urls().size() > 1) {
+		return false;
+	} else if (data->hasImage()) {
+		return true;
+	}
+
+	if (isAlbum && data->hasUrls()) {
+		const auto url = data->urls().front();
+		if (url.isLocalFile()) {
+			using namespace Core;
+			const auto info = QFileInfo(Platform::File::UrlToLocal(url));
+			return IsMimeAcceptedForAlbum(MimeTypeForFile(info).name());
+		}
+	}
+
+	return true;
+}
 
 } // namespace
 
@@ -286,7 +337,8 @@ EditCaptionBox::EditCaptionBox(
 	Assert(_thumbnailImageLoaded || _refreshThumbnail);
 
 	if (!_thumbnailImageLoaded) {
-		subscribe(_controller->session().downloaderTaskFinished(), [=] {
+		_controller->session().downloaderTaskFinished(
+		) | rpl::start_with_next([=] {
 			if (_thumbnailImageLoaded
 				|| (_photoMedia && !_photoMedia->image(PhotoSize::Large))
 				|| (_documentMedia && !_documentMedia->thumbnail())) {
@@ -294,7 +346,7 @@ EditCaptionBox::EditCaptionBox(
 			}
 			_refreshThumbnail();
 			update();
-		});
+		}, lifetime());
 	}
 	_field.create(
 		this,
@@ -302,16 +354,18 @@ EditCaptionBox::EditCaptionBox(
 		Ui::InputField::Mode::MultiLine,
 		tr::lng_photo_caption(),
 		editData);
-	_field->setMaxLength(Global::CaptionLengthMax());
-	_field->setSubmitSettings(_controller->session().settings().sendSubmitWay());
+	_field->setMaxLength(
+		_controller->session().serverConfig().captionLengthMax);
+	_field->setSubmitSettings(
+		Core::App().settings().sendSubmitWay());
 	_field->setInstantReplaces(Ui::InstantReplaces::Default());
 	_field->setInstantReplacesEnabled(
-		_controller->session().settings().replaceEmojiValue());
+		Core::App().settings().replaceEmojiValue());
 	_field->setMarkdownReplacesEnabled(rpl::single(true));
 	_field->setEditLinkCallback(
-		DefaultEditLinkCallback(&_controller->session(), _field));
+		DefaultEditLinkCallback(_controller, _field));
 
-	InitSpellchecker(&_controller->session(), _field);
+	InitSpellchecker(_controller, _field);
 
 	auto r = object_ptr<Ui::SlideWrap<Ui::Checkbox>>(
 		this,
@@ -609,12 +663,8 @@ void EditCaptionBox::prepare() {
 		if (action == Ui::InputField::MimeAction::Check) {
 			if (!data->hasText() && !_isAllowedEditMedia) {
 				return false;
-			} else if (data->hasImage()) {
+			} else if (CheckMimeData(data, _isAlbum)) {
 				return true;
-			} else if (const auto urls = data->urls(); !urls.empty()) {
-				if (ranges::all_of(urls, &QUrl::isLocalFile)) {
-					return true;
-				}
 			}
 			return data->hasText();
 		} else if (action == Ui::InputField::MimeAction::Insert) {
@@ -632,6 +682,8 @@ void EditCaptionBox::prepare() {
 	auto cursor = _field->textCursor();
 	cursor.movePosition(QTextCursor::End);
 	_field->setTextCursor(cursor);
+
+	setupDragArea();
 }
 
 bool EditCaptionBox::fileFromClipboard(not_null<const QMimeData*> data) {
@@ -639,50 +691,34 @@ bool EditCaptionBox::fileFromClipboard(not_null<const QMimeData*> data) {
 		return false;
 	}
 	using Error = Storage::PreparedList::Error;
+	using AlbumType = Storage::PreparedFile::AlbumType;
+	auto list = ListFromMimeData(data);
 
-	auto list = [&] {
-		auto url = QList<QUrl>();
-		auto canAddUrl = false;
-		// When we edit media, we need only 1 file.
-		if (data->hasUrls()) {
-			const auto first = data->urls().front();
-			url.push_front(first);
-			canAddUrl = first.isLocalFile();
-		}
-		auto result = canAddUrl
-			? Storage::PrepareMediaList(url, st::sendMediaPreviewSize)
-			: Storage::PreparedList(
-				Error::EmptyFile,
-				QString());
-		if (result.error == Error::None) {
-			return result;
-		} else if (data->hasImage()) {
-			auto image = Platform::GetImageFromClipboard();
-			if (image.isNull()) {
-				image = qvariant_cast<QImage>(data->imageData());
-			}
-			if (!image.isNull()) {
-				_isImage = true;
-				_photo = true;
-				return Storage::PrepareMediaFromImage(
-					std::move(image),
-					QByteArray(),
-					st::sendMediaPreviewSize);
-			}
-		}
-		return result;
-	}();
 	if (list.error != Error::None || list.files.empty()) {
 		return false;
 	}
-	if (list.files.front().type == Storage::PreparedFile::AlbumType::None
-		&& _isAlbum) {
-		Ui::show(
-			Box<InformBox>(tr::lng_edit_media_album_error(tr::now)),
-			Ui::LayerOption::KeepOther);
+
+	const auto file = &list.files.front();
+	if (_isAlbum && (file->type == AlbumType::None)) {
+		const auto imageAsDoc = [&] {
+			using Info = FileMediaInformation;
+			const auto fileMedia = &file->information->media;
+			if (const auto image = base::get_if<Info::Image>(fileMedia)) {
+				return !Storage::ValidateThumbDimensions(
+					image->data.width(),
+					image->data.height());
+			}
+			return false;
+		}();
+
+		if (!data->hasText() || imageAsDoc) {
+			Ui::show(
+				Box<InformBox>(tr::lng_edit_media_album_error(tr::now)),
+				Ui::LayerOption::KeepOther);
+		}
 		return false;
 	}
-
+	_photo = _isImage = (file->type == AlbumType::Photo);
 	_preparedList = std::move(list);
 	updateEditPreview();
 	return true;
@@ -727,6 +763,35 @@ void EditCaptionBox::setupEmojiPanel() {
 	});
 }
 
+
+void EditCaptionBox::setupDragArea() {
+	auto enterFilter = [=](not_null<const QMimeData*> data) {
+		return !_isAllowedEditMedia ? false : CheckMimeData(data, _isAlbum);
+	};
+	// Avoid both drag areas appearing at one time.
+	auto computeState = [=](const QMimeData *data) {
+		const auto state = Storage::ComputeMimeDataState(data);
+		return (state == Storage::MimeDataState::PhotoFiles)
+			? Storage::MimeDataState::Image
+			: state;
+	};
+	const auto areas = DragArea::SetupDragAreaToContainer(
+		this,
+		std::move(enterFilter),
+		[=](bool f) { _field->setAcceptDrops(f); },
+		nullptr,
+		std::move(computeState));
+
+	const auto droppedCallback = [=](bool compress) {
+		return [=](const QMimeData *data) {
+			fileFromClipboard(data);
+			Window::ActivateWindow(_controller);
+		};
+	};
+	areas.document->setDroppedCallback(droppedCallback(false));
+	areas.photo->setDroppedCallback(droppedCallback(true));
+}
+
 void EditCaptionBox::updateBoxSize() {
 	auto newHeight = st::boxPhotoPadding.top() + st::boxPhotoCaptionSkip + _field->height() + errorTopSkip() + st::normalFont->height;
 	if (_photo) {
@@ -751,8 +816,7 @@ int EditCaptionBox::errorTopSkip() const {
 void EditCaptionBox::checkStreamedIsStarted() {
 	if (!_streamed) {
 		return;
-	}
-	if (_streamed->paused()) {
+	} else if (_streamed->paused()) {
 		_streamed->resume();
 	}
 	if (!_streamed->active() && !_streamed->failed()) {
@@ -922,88 +986,60 @@ void EditCaptionBox::save() {
 		return;
 	}
 
-	auto flags = MTPmessages_EditMessage::Flag::f_message | 0;
-	if (_previewCancelled) {
-		flags |= MTPmessages_EditMessage::Flag::f_no_webpage;
-	}
 	const auto textWithTags = _field->getTextWithAppliedMarkdown();
-	auto sending = TextWithEntities{
+	const auto sending = TextWithEntities{
 		textWithTags.text,
 		TextUtilities::ConvertTextTagsToEntities(textWithTags.tags)
 	};
-	const auto prepareFlags = Ui::ItemTextOptions(
-		item->history(),
-		_controller->session().user()).flags;
-	TextUtilities::PrepareForSending(sending, prepareFlags);
-	TextUtilities::Trim(sending);
 
-	const auto sentEntities = Api::EntitiesToMTP(
-		&item->history()->session(),
-		sending.entities,
-		Api::ConvertOption::SkipLocal);
-	if (!sentEntities.v.isEmpty()) {
-		flags |= MTPmessages_EditMessage::Flag::f_entities;
-	}
+	auto options = Api::SendOptions();
+	options.scheduled = item->isScheduled() ? item->date() : 0;
 
 	if (!_preparedList.files.empty()) {
-		const auto textWithTags = _field->getTextWithAppliedMarkdown();
-		auto sending = TextWithEntities{
-			textWithTags.text,
-			TextUtilities::ConvertTextTagsToEntities(textWithTags.tags)
-		};
-		item->setText(sending);
+		auto action = Api::SendAction(item->history());
+		action.options = options;
 
 		_controller->session().api().editMedia(
 			std::move(_preparedList),
 			(!_asFile && _photo) ? SendMediaType::Photo : SendMediaType::File,
 			_field->getTextWithAppliedMarkdown(),
-			Api::SendAction(item->history()),
+			action,
 			item->fullId().msg);
 		closeBox();
 		return;
 	}
 
-	_saveRequestId = MTP::send(
-		MTPmessages_EditMessage(
-			MTP_flags(flags),
-			item->history()->peer->input,
-			MTP_int(item->id),
-			MTP_string(sending.text),
-			MTPInputMedia(),
-			MTPReplyMarkup(),
-			sentEntities,
-			MTP_int(0)), // schedule_date
-		rpcDone(&EditCaptionBox::saveDone),
-		rpcFail(&EditCaptionBox::saveFail));
-}
-
-void EditCaptionBox::saveDone(const MTPUpdates &updates) {
-	_saveRequestId = 0;
-	const auto controller = _controller;
-	closeBox();
-	controller->session().api().applyUpdates(updates);
-}
-
-bool EditCaptionBox::saveFail(const RPCError &error) {
-	if (MTP::isDefaultHandledError(error)) return false;
-
-	_saveRequestId = 0;
-	const auto &type = error.type();
-	if (type == qstr("MESSAGE_ID_INVALID")
-		|| type == qstr("CHAT_ADMIN_REQUIRED")
-		|| type == qstr("MESSAGE_EDIT_TIME_EXPIRED")) {
-		_error = tr::lng_edit_error(tr::now);
-	} else if (type == qstr("MESSAGE_NOT_MODIFIED")) {
+	const auto done = crl::guard(this, [=](const MTPUpdates &updates) {
+		_saveRequestId = 0;
 		closeBox();
-		return true;
-	} else if (type == qstr("MESSAGE_EMPTY")) {
-		_field->setFocus();
-		_field->showError();
-	} else {
-		_error = tr::lng_edit_error(tr::now);
-	}
-	update();
-	return true;
+	});
+
+	const auto fail = crl::guard(this, [=](const RPCError &error) {
+		_saveRequestId = 0;
+		const auto &type = error.type();
+		if (ranges::contains(Api::kDefaultEditMessagesErrors, type)) {
+			_error = tr::lng_edit_error(tr::now);
+			update();
+		} else if (type == u"MESSAGE_NOT_MODIFIED"_q) {
+			closeBox();
+		} else if (type == u"MESSAGE_EMPTY"_q) {
+			_field->setFocus();
+			_field->showError();
+			update();
+		} else {
+			_error = tr::lng_edit_error(tr::now);
+			update();
+		}
+	});
+
+	lifetime().add([=] {
+		if (_saveRequestId) {
+			auto &session = _controller->session();
+			session.api().request(base::take(_saveRequestId)).cancel();
+		}
+	});
+
+	_saveRequestId = Api::EditCaption(item, sending, options, done, fail);
 }
 
 void EditCaptionBox::setName(QString nameString, qint64 size) {

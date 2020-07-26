@@ -9,6 +9,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "api/api_self_destruct.h"
 #include "api/api_sensitive_content.h"
+#include "api/api_global_privacy.h"
 #include "settings/settings_common.h"
 #include "settings/settings_privacy_controllers.h"
 #include "boxes/peer_list_box.h"
@@ -18,6 +19,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "boxes/sessions_box.h"
 #include "boxes/confirm_box.h"
 #include "boxes/self_destruction_box.h"
+#include "core/application.h"
+#include "core/core_settings.h"
 #include "ui/wrap/vertical_layout.h"
 #include "ui/wrap/slide_wrap.h"
 #include "ui/wrap/fade_wrap.h"
@@ -164,7 +167,7 @@ void SetupPrivacy(
 	add(
 		tr::lng_settings_forwards_privacy(),
 		Key::Forwards,
-		[=] { return std::make_unique<ForwardsPrivacyController>(session); });
+		[=] { return std::make_unique<ForwardsPrivacyController>(controller); });
 	add(
 		tr::lng_settings_profile_photo_privacy(),
 		Key::ProfilePhoto,
@@ -182,6 +185,49 @@ void SetupPrivacy(
 
 	AddSkip(container, st::settingsPrivacySecurityPadding);
 	AddDividerText(container, tr::lng_settings_group_privacy_about());
+}
+
+void SetupArchiveAndMute(
+		not_null<Window::SessionController*> controller,
+		not_null<Ui::VerticalLayout*> container) {
+	using namespace rpl::mappers;
+
+	const auto wrap = container->add(
+		object_ptr<Ui::SlideWrap<Ui::VerticalLayout>>(
+			container,
+			object_ptr<Ui::VerticalLayout>(container)));
+	const auto inner = wrap->entity();
+
+	AddSkip(inner);
+	AddSubsectionTitle(inner, tr::lng_settings_new_unknown());
+
+	const auto session = &controller->session();
+
+	const auto privacy = &session->api().globalPrivacy();
+	privacy->reload();
+	AddButton(
+		inner,
+		tr::lng_settings_auto_archive(),
+		st::settingsButton
+	)->toggleOn(
+		privacy->archiveAndMute()
+	)->toggledChanges(
+	) | rpl::filter([=](bool toggled) {
+		return toggled != privacy->archiveAndMuteCurrent();
+	}) | rpl::start_with_next([=](bool toggled) {
+		privacy->update(toggled);
+	}, container->lifetime());
+
+	AddSkip(inner);
+	AddDividerText(inner, tr::lng_settings_auto_archive_about());
+
+	using namespace rpl::mappers;
+	wrap->toggleOn(rpl::single(
+		false
+	) | rpl::then(
+		session->api().globalPrivacy().showArchiveAndMute(
+		) | rpl::filter(_1) | rpl::take(1)
+	));
 }
 
 not_null<Ui::SlideWrap<Ui::PlainShadow>*> AddSeparator(
@@ -238,7 +284,7 @@ void SetupLocalPasscode(
 		: tr::lng_passcode_autolock_inactive;
 	auto value = PasscodeChanges(
 	) | rpl::map([] {
-		const auto autolock = Global::AutoLock();
+		const auto autolock = Core::App().settings().autoLock();
 		return (autolock % 3600)
 			? tr::lng_passcode_autolock_minutes(tr::now, lt_count, autolock / 60)
 			: tr::lng_passcode_autolock_hours(tr::now, lt_count, autolock / 3600);
@@ -366,7 +412,9 @@ void SetupCloudPassword(
 		if (!state) {
 			return;
 		}
-		auto validation = ConfirmRecoveryEmail(state->unconfirmedPattern);
+		auto validation = ConfirmRecoveryEmail(
+			&controller->session(),
+			state->unconfirmedPattern);
 
 		std::move(
 			validation.reloadRequests
@@ -552,7 +600,7 @@ object_ptr<Ui::BoxContent> EditCloudPasswordBox(not_null<Main::Session*> session
 	const auto box = result.data();
 
 	rpl::merge(
-		box->newPasswordSet() | rpl::map([] { return rpl::empty_value(); }),
+		box->newPasswordSet() | rpl::to_empty,
 		box->passwordReloadNeeded()
 	) | rpl::start_with_next([=] {
 		session->api().reloadPasswordState();
@@ -579,8 +627,7 @@ void RemoveCloudPassword(not_null<::Main::Session*> session) {
 	const auto box = Ui::show(Box<PasscodeBox>(session, fields));
 
 	rpl::merge(
-		box->newPasswordSet(
-		) | rpl::map([] { return rpl::empty_value(); }),
+		box->newPasswordSet() | rpl::to_empty,
 		box->passwordReloadNeeded()
 	) | rpl::start_with_next([=] {
 		session->api().reloadPasswordState();
@@ -644,6 +691,7 @@ void PrivacySecurity::setupContent(
 	const auto content = Ui::CreateChild<Ui::VerticalLayout>(this);
 
 	SetupPrivacy(controller, content);
+	SetupArchiveAndMute(controller, content);
 	SetupSessionsList(controller, content);
 	SetupLocalPasscode(controller, content);
 	SetupCloudPassword(controller, content);

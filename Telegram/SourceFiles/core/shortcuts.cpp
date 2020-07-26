@@ -74,11 +74,11 @@ const auto CommandByName = base::flat_map<QString, Command>{
 	{ qsl("first_chat")        , Command::ChatFirst },
 	{ qsl("last_chat")         , Command::ChatLast },
 	{ qsl("self_chat")         , Command::ChatSelf },
-	
+
 	{ qsl("previous_folder")   , Command::FolderPrevious },
 	{ qsl("next_folder")       , Command::FolderNext },
 	{ qsl("all_chats")         , Command::ShowAllChats },
-	
+
 	{ qsl("folder1")           , Command::ShowFolder1 },
 	{ qsl("folder2")           , Command::ShowFolder2 },
 	{ qsl("folder3")           , Command::ShowFolder3 },
@@ -116,11 +116,11 @@ const auto CommandNames = base::flat_map<Command, QString>{
 	{ Command::ChatFirst      , qsl("first_chat") },
 	{ Command::ChatLast       , qsl("last_chat") },
 	{ Command::ChatSelf       , qsl("self_chat") },
-	
+
 	{ Command::FolderPrevious , qsl("previous_folder") },
 	{ Command::FolderNext     , qsl("next_folder") },
 	{ Command::ShowAllChats   , qsl("all_chats") },
-	                                                   
+
 	{ Command::ShowFolder1    , qsl("folder1") },
 	{ Command::ShowFolder2    , qsl("folder2") },
 	{ Command::ShowFolder3    , qsl("folder3") },
@@ -559,7 +559,6 @@ bool HandleEvent(not_null<QShortcutEvent*> event) {
 void ToggleMediaShortcuts(bool toggled) {
 	Data.toggleMedia(toggled);
 	Platform::SetWatchingMediaKeys(toggled);
-	Media::Player::instance()->playerWidgetToggledNotify(toggled);
 }
 
 void ToggleSupportShortcuts(bool toggled) {

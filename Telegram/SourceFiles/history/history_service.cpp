@@ -23,6 +23,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_game.h"
 #include "data/data_channel.h"
 #include "data/data_user.h"
+#include "data/data_changes.h"
+#include "core/application.h"
 #include "window/notifications_manager.h"
 #include "window/window_session_controller.h"
 #include "storage/storage_shared_media.h"
@@ -354,7 +356,7 @@ bool HistoryService::updateDependent(bool force) {
 		updateDependentText();
 	}
 	if (force && gotDependencyItem) {
-		history()->session().notifications().checkDelayed();
+		Core::App().notifications().checkDelayed();
 	}
 	return (dependent->msg || !dependent->msgId);
 }
@@ -407,7 +409,7 @@ HistoryService::PreparedText HistoryService::prepareGameScoreText() {
 	auto result = PreparedText {};
 	auto gamescore = Get<HistoryServiceGameScore>();
 
-	auto computeGameTitle = [gamescore, &result]() -> QString {
+	auto computeGameTitle = [&]() -> QString {
 		if (gamescore && gamescore->msg) {
 			if (const auto media = gamescore->msg->media()) {
 				if (const auto game = media->game()) {
@@ -415,6 +417,7 @@ HistoryService::PreparedText HistoryService::prepareGameScoreText() {
 					const auto column = 0;
 					result.links.push_back(
 						std::make_shared<ReplyMarkupClickHandler>(
+							&history()->owner(),
 							row,
 							column,
 							gamescore->msg->fullId()));
@@ -687,7 +690,7 @@ void HistoryService::createFromMtp(const MTPDmessageService &message) {
 				history()->session().api().requestMessageData(
 					history()->peer->asChannel(),
 					dependent->msgId,
-					HistoryDependentItemCallback(fullId()));
+					HistoryDependentItemCallback(this));
 			}
 		}
 	}
@@ -747,10 +750,9 @@ void HistoryService::updateDependentText() {
 	//		feed->updateChatListEntry();
 	//	}
 	//}
-	if (const auto main = App::main()) {
-		// #TODO feeds search results
-		main->repaintDialogRow({ history(), fullId() });
-	}
+	history()->session().changes().messageUpdated(
+		this,
+		Data::MessageUpdate::Flag::DialogRowRepaint);
 	history()->owner().updateDependentMessages(this);
 }
 

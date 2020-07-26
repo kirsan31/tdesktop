@@ -17,6 +17,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/view/media/history_view_media_common.h"
 #include "ui/image/image.h"
 #include "ui/emoji_config.h"
+#include "core/application.h"
+#include "core/core_settings.h"
 #include "main/main_session.h"
 #include "main/main_account.h"
 #include "main/main_app_config.h"
@@ -27,6 +29,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_document_media.h"
 #include "data/data_file_origin.h"
 #include "lottie/lottie_single_player.h"
+#include "chat_helpers/stickers_lottie.h"
 #include "styles/style_history.h"
 
 namespace HistoryView {
@@ -68,7 +71,7 @@ Sticker::Sticker(
 		_data->loadThumbnail(parent->data()->fullId());
 	}
 	if (const auto media = replacing ? replacing->media() : nullptr) {
-		_lottie = media->stickerTakeLottie();
+		_lottie = media->stickerTakeLottie(_data, _replacements);
 		if (_lottie) {
 			lottieCreated();
 		}
@@ -133,10 +136,9 @@ QSize Sticker::GetAnimatedEmojiSize(not_null<Main::Session*> session) {
 QSize Sticker::GetAnimatedEmojiSize(
 		not_null<Main::Session*> session,
 		QSize documentSize) {
-	constexpr auto kIdealStickerSize = 512;
 	const auto zoom = GetEmojiStickerZoom(session);
 	const auto convert = [&](int size) {
-		return int(size * st::maxStickerSize * zoom / kIdealStickerSize);
+		return int(size * st::maxStickerSize * zoom / kStickerSideSize);
 	};
 	return { convert(documentSize.width()), convert(documentSize.height()) };
 }
@@ -182,13 +184,13 @@ void Sticker::paintLottie(Painter &p, const QRect &r, bool selected) {
 		return;
 	}
 
-	const auto paused = App::wnd()->sessionController()->isGifPausedAtLeastFor(Window::GifPauseReason::Any);
+	const auto paused = _parent->delegate()->elementIsGifPaused();
 	const auto playOnce = (_diceIndex > 0)
 		? true
 		: (_diceIndex == 0)
 		? false
 		: (isEmojiSticker()
-			|| !_data->session().settings().loopAnimatedStickers());
+			|| !Core::App().settings().loopAnimatedStickers());
 	const auto count = _lottie->information().framesCount;
 	_atTheEnd = (frame.index + 1 == count);
 	_nextLastDiceFrame = !paused
@@ -293,10 +295,10 @@ void Sticker::setDiceIndex(const QString &emoji, int index) {
 void Sticker::setupLottie() {
 	Expects(_dataMedia != nullptr);
 
-	_lottie = Stickers::LottiePlayerFromDocument(
+	_lottie = ChatHelpers::LottiePlayerFromDocument(
 		_dataMedia.get(),
 		_replacements,
-		Stickers::LottieSize::MessageHistory,
+		ChatHelpers::StickerLottieSize::MessageHistory,
 		_size * cIntRetinaFactor(),
 		Lottie::Quality::High);
 	lottieCreated();
@@ -338,8 +340,12 @@ void Sticker::unloadLottie() {
 	_parent->checkHeavyPart();
 }
 
-std::unique_ptr< Lottie::SinglePlayer> Sticker::stickerTakeLottie() {
-	return std::move(_lottie);
+std::unique_ptr<Lottie::SinglePlayer> Sticker::stickerTakeLottie(
+		not_null<DocumentData*> data,
+		const Lottie::ColorReplacements *replacements) {
+	return (data == _data && replacements == _replacements)
+		? std::move(_lottie)
+		: nullptr;
 }
 
 } // namespace HistoryView

@@ -216,18 +216,7 @@ bool ChatFilter::contains(not_null<History*> history) const {
 }
 
 ChatFilters::ChatFilters(not_null<Session*> owner) : _owner(owner) {
-	//using Flag = ChatFilter::Flag;
-	//const auto all = Flag::Contacts
-	//	| Flag::NonContacts
-	//	| Flag::Groups
-	//	| Flag::Channels
-	//	| Flag::Bots
-	//	| Flag::NoArchived;
-	//_list.push_back(
-	//	ChatFilter(1, "Unmuted", all | Flag::NoMuted, {}, {}));
-	//_list.push_back(
-	//	ChatFilter(2, "Unread", all | Flag::NoRead, {}, {}));
-	load();
+	crl::on_main(&owner->session(), [=] { load(); });
 }
 
 ChatFilters::~ChatFilters() = default;
@@ -236,10 +225,21 @@ not_null<Dialogs::MainList*> ChatFilters::chatsList(FilterId filterId) {
 	auto &pointer = _chatsLists[filterId];
 	if (!pointer) {
 		pointer = std::make_unique<Dialogs::MainList>(
+			&_owner->session(),
 			filterId,
 			rpl::single(ChatFilter::kPinnedLimit));
 	}
 	return pointer.get();
+}
+
+void ChatFilters::setPreloaded(const QVector<MTPDialogFilter> &result) {
+	_loadRequestId = -1;
+	received(result);
+	crl::on_main(&_owner->session(), [=] {
+		if (_loadRequestId == -1) {
+			_loadRequestId = 0;
+		}
+	});
 }
 
 void ChatFilters::load() {
@@ -254,38 +254,42 @@ void ChatFilters::load(bool force) {
 	api.request(_loadRequestId).cancel();
 	_loadRequestId = api.request(MTPmessages_GetDialogFilters(
 	)).done([=](const MTPVector<MTPDialogFilter> &result) {
-		auto position = 0;
-		auto changed = false;
-		for (const auto &filter : result.v) {
-			auto parsed = ChatFilter::FromTL(filter, _owner);
-			const auto b = begin(_list) + position, e = end(_list);
-			const auto i = ranges::find(b, e, parsed.id(), &ChatFilter::id);
-			if (i == e) {
-				applyInsert(std::move(parsed), position);
-				changed = true;
-			} else if (i == b) {
-				if (applyChange(*b, std::move(parsed))) {
-					changed = true;
-				}
-			} else {
-				std::swap(*i, *b);
-				applyChange(*b, std::move(parsed));
-				changed = true;
-			}
-			++position;
-		}
-		while (position < _list.size()) {
-			applyRemove(position);
-			changed = true;
-		}
-		if (changed || !_loaded) {
-			_loaded = true;
-			_listChanged.fire({});
-		}
+		received(result.v);
 		_loadRequestId = 0;
 	}).fail([=](const RPCError &error) {
 		_loadRequestId = 0;
 	}).send();
+}
+
+void ChatFilters::received(const QVector<MTPDialogFilter> &list) {
+	auto position = 0;
+	auto changed = false;
+	for (const auto &filter : list) {
+		auto parsed = ChatFilter::FromTL(filter, _owner);
+		const auto b = begin(_list) + position, e = end(_list);
+		const auto i = ranges::find(b, e, parsed.id(), &ChatFilter::id);
+		if (i == e) {
+			applyInsert(std::move(parsed), position);
+			changed = true;
+		} else if (i == b) {
+			if (applyChange(*b, std::move(parsed))) {
+				changed = true;
+			}
+		} else {
+			std::swap(*i, *b);
+			applyChange(*b, std::move(parsed));
+			changed = true;
+		}
+		++position;
+	}
+	while (position < _list.size()) {
+		applyRemove(position);
+		changed = true;
+	}
+	if (changed || !_loaded) {
+		_loaded = true;
+		_listChanged.fire({});
+	}
 }
 
 void ChatFilters::apply(const MTPUpdate &update) {
@@ -559,12 +563,9 @@ bool ChatFilters::loadNextExceptions(bool chatsListLoaded) {
 }
 
 void ChatFilters::refreshHistory(not_null<History*> history) {
-	_refreshHistoryRequests.fire_copy(history);
-}
-
-auto ChatFilters::refreshHistoryRequests() const
--> rpl::producer<not_null<History*>> {
-	return _refreshHistoryRequests.events();
+	if (history->inChatList() && !list().empty()) {
+		_owner->refreshChatListEntry(history);
+	}
 }
 
 void ChatFilters::requestSuggested() {

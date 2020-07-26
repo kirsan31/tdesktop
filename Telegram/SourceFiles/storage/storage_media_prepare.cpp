@@ -190,7 +190,7 @@ MimeDataState ComputeMimeDataState(const QMimeData *data) {
 		}
 
 		const auto filesize = info.size();
-		if (filesize > App::kFileSizeLimit) {
+		if (filesize > kFileSizeLimit) {
 			return MimeDataState::None;
 		} else if (allAreSmallImages) {
 			if (filesize > App::kImageSizeLimit) {
@@ -237,7 +237,7 @@ PreparedList PrepareMediaList(const QStringList &files, int previewWidth) {
 				PreparedList::Error::EmptyFile,
 				file
 			};
-		} else if (filesize > App::kFileSizeLimit) {
+		} else if (filesize > kFileSizeLimit) {
 			return {
 				PreparedList::Error::TooLargeFile,
 				file
@@ -286,32 +286,27 @@ std::optional<PreparedList> PreparedList::PreparedFileFromFilesDialog(
 	}
 
 	if (!result.remoteContent.isEmpty()) {
-
 		auto list = Storage::PrepareMediaFromImage(
 			QImage(),
 			std::move(result.remoteContent),
 			previewWidth);
 
-		if (Core::IsMimeSticker(list.files.front().mime)) {
+		const auto mimeFile = list.files.front().mime;
+		if (Core::IsMimeSticker(mimeFile)) {
 			errorCallback(tr::lng_edit_media_invalid_file);
 			return std::nullopt;
 		}
 
 		if (isAlbum) {
-			const auto albumMimes = {
-				"image/jpeg",
-				"image/png",
-				"video/mp4",
-			};
 			const auto file = &list.files.front();
-			if (!ranges::contains(albumMimes, file->mime)
+			if (!Core::IsMimeAcceptedForAlbum(mimeFile)
 				|| file->type == Storage::PreparedFile::AlbumType::None) {
 				errorCallback(tr::lng_edit_media_album_error);
 				return std::nullopt;
 			}
 		}
 		Expects(list.files.size() == 1);
-		return std::move(list);
+		return list;
 	} else if (!result.paths.isEmpty()) {
 		const auto isSingleFile = (result.paths.size() == 1);
 		auto temp = Storage::PrepareMediaList(result.paths, previewWidth);
@@ -366,7 +361,7 @@ std::optional<PreparedList> PreparedList::PreparedFileFromFilesDialog(
 		list.allFilesForCompress = temp.allFilesForCompress;
 		list.files = std::move(filteredFiles);
 
-		return std::move(list);
+		return list;
 	}
 	return std::nullopt;
 }

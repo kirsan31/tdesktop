@@ -7,30 +7,53 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "platform/win/windows_dlls.h"
 
+#include "base/platform/win/base_windows_safe_library.h"
+
 #include <VersionHelpers.h>
 #include <QtCore/QSysInfo>
 
 namespace Platform {
 namespace Dlls {
 
-f_SetDllDirectory SetDllDirectory;
-
-HINSTANCE LibKernel32;
+using base::Platform::SafeLoadLibrary;
+using base::Platform::LoadMethod;
 
 void init() {
 	static bool inited = false;
 	if (inited) return;
 	inited = true;
 
-	LibKernel32 = LoadLibrary(L"KERNEL32.DLL");
-	load(LibKernel32, "SetDllDirectoryW", SetDllDirectory);
-	if (SetDllDirectory) {
-		// Remove the current directory from the DLL search order.
-		SetDllDirectory(L"");
+	// Remove the current directory from the DLL search order.
+	::SetDllDirectory(L"");
+
+	const auto list = {
+		u"dbghelp.dll"_q,
+		u"dbgcore.dll"_q,
+		u"propsys.dll"_q,
+		u"winsta.dll"_q,
+		u"textinputframework.dll"_q,
+		u"uxtheme.dll"_q,
+		u"igdumdim32.dll"_q,
+		u"amdhdl32.dll"_q,
+		u"wtsapi32.dll"_q,
+		u"propsys.dll"_q,
+		u"combase.dll"_q,
+		u"dwmapi.dll"_q,
+		u"rstrtmgr.dll"_q,
+		u"psapi.dll"_q,
+		u"user32.dll"_q,
+	};
+	for (const auto &lib : list) {
+		SafeLoadLibrary(lib);
 	}
 }
 
 f_SetWindowTheme SetWindowTheme;
+//f_RefreshImmersiveColorPolicyState RefreshImmersiveColorPolicyState;
+//f_AllowDarkModeForApp AllowDarkModeForApp;
+//f_SetPreferredAppMode SetPreferredAppMode;
+//f_AllowDarkModeForWindow AllowDarkModeForWindow;
+//f_FlushMenuThemes FlushMenuThemes;
 f_OpenAs_RunDLL OpenAs_RunDLL;
 f_SHOpenWithDialog SHOpenWithDialog;
 f_SHAssocEnumHandlers SHAssocEnumHandlers;
@@ -46,66 +69,78 @@ f_WindowsDeleteString WindowsDeleteString;
 f_PropVariantToString PropVariantToString;
 f_PSStringFromPropertyKey PSStringFromPropertyKey;
 f_DwmIsCompositionEnabled DwmIsCompositionEnabled;
+f_DwmSetWindowAttribute DwmSetWindowAttribute;
 f_RmStartSession RmStartSession;
 f_RmRegisterResources RmRegisterResources;
 f_RmGetList RmGetList;
 f_RmShutdown RmShutdown;
 f_RmEndSession RmEndSession;
 f_GetProcessMemoryInfo GetProcessMemoryInfo;
-
-HINSTANCE LibUxTheme;
-HINSTANCE LibShell32;
-HINSTANCE LibWtsApi32;
-HINSTANCE LibPropSys;
-HINSTANCE LibComBase;
-HINSTANCE LibDwmApi;
-HINSTANCE LibRstrtMgr;
-HINSTANCE LibPsApi;
+f_SetWindowCompositionAttribute SetWindowCompositionAttribute;
 
 void start() {
 	init();
 
-	LibShell32 = LoadLibrary(L"SHELL32.DLL");
-	load(LibShell32, "SHAssocEnumHandlers", SHAssocEnumHandlers);
-	load(LibShell32, "SHCreateItemFromParsingName", SHCreateItemFromParsingName);
-	load(LibShell32, "SHOpenWithDialog", SHOpenWithDialog);
-	load(LibShell32, "OpenAs_RunDLLW", OpenAs_RunDLL);
-	load(LibShell32, "SHQueryUserNotificationState", SHQueryUserNotificationState);
-	load(LibShell32, "SHChangeNotify", SHChangeNotify);
-	load(LibShell32, "SetCurrentProcessExplicitAppUserModelID", SetCurrentProcessExplicitAppUserModelID);
+	const auto LibShell32 = SafeLoadLibrary(u"shell32.dll"_q);
+	LoadMethod(LibShell32, "SHAssocEnumHandlers", SHAssocEnumHandlers);
+	LoadMethod(LibShell32, "SHCreateItemFromParsingName", SHCreateItemFromParsingName);
+	LoadMethod(LibShell32, "SHOpenWithDialog", SHOpenWithDialog);
+	LoadMethod(LibShell32, "OpenAs_RunDLLW", OpenAs_RunDLL);
+	LoadMethod(LibShell32, "SHQueryUserNotificationState", SHQueryUserNotificationState);
+	LoadMethod(LibShell32, "SHChangeNotify", SHChangeNotify);
+	LoadMethod(LibShell32, "SetCurrentProcessExplicitAppUserModelID", SetCurrentProcessExplicitAppUserModelID);
 
-	LibUxTheme = LoadLibrary(L"UXTHEME.DLL");
-	load(LibUxTheme, "SetWindowTheme", SetWindowTheme);
+	const auto LibUxTheme = SafeLoadLibrary(u"uxtheme.dll"_q);
+	LoadMethod(LibUxTheme, "SetWindowTheme", SetWindowTheme);
+	//if (IsWindows10OrGreater()) {
+	//	static const auto kSystemVersion = QOperatingSystemVersion::current();
+	//	static const auto kMinor = kSystemVersion.minorVersion();
+	//	static const auto kBuild = kSystemVersion.microVersion();
+	//	if (kMinor > 0 || (kMinor == 0 && kBuild >= 17763)) {
+	//		if (kBuild < 18362) {
+	//			LoadMethod(LibUxTheme, "AllowDarkModeForApp", AllowDarkModeForApp, 135);
+	//		} else {
+	//			LoadMethod(LibUxTheme, "SetPreferredAppMode", SetPreferredAppMode, 135);
+	//		}
+	//		LoadMethod(LibUxTheme, "AllowDarkModeForWindow", AllowDarkModeForWindow, 133);
+	//		LoadMethod(LibUxTheme, "RefreshImmersiveColorPolicyState", RefreshImmersiveColorPolicyState, 104);
+	//		LoadMethod(LibUxTheme, "FlushMenuThemes", FlushMenuThemes, 136);
+	//	}
+	//}
 
 	if (IsWindowsVistaOrGreater()) {
-		LibWtsApi32 = LoadLibrary(L"WTSAPI32.DLL");
-		load(LibWtsApi32, "WTSRegisterSessionNotification", WTSRegisterSessionNotification);
-		load(LibWtsApi32, "WTSUnRegisterSessionNotification", WTSUnRegisterSessionNotification);
+		const auto LibWtsApi32 = SafeLoadLibrary(u"wtsapi32.dll"_q);
+		LoadMethod(LibWtsApi32, "WTSRegisterSessionNotification", WTSRegisterSessionNotification);
+		LoadMethod(LibWtsApi32, "WTSUnRegisterSessionNotification", WTSUnRegisterSessionNotification);
 
-		LibPropSys = LoadLibrary(L"PROPSYS.DLL");
-		load(LibPropSys, "PropVariantToString", PropVariantToString);
-		load(LibPropSys, "PSStringFromPropertyKey", PSStringFromPropertyKey);
+		const auto LibPropSys = SafeLoadLibrary(u"propsys.dll"_q);
+		LoadMethod(LibPropSys, "PropVariantToString", PropVariantToString);
+		LoadMethod(LibPropSys, "PSStringFromPropertyKey", PSStringFromPropertyKey);
 
 		if (IsWindows8OrGreater()) {
-			LibComBase = LoadLibrary(L"COMBASE.DLL");
-			load(LibComBase, "RoGetActivationFactory", RoGetActivationFactory);
-			load(LibComBase, "WindowsCreateStringReference", WindowsCreateStringReference);
-			load(LibComBase, "WindowsDeleteString", WindowsDeleteString);
+			const auto LibComBase = SafeLoadLibrary(u"combase.dll"_q);
+			LoadMethod(LibComBase, "RoGetActivationFactory", RoGetActivationFactory);
+			LoadMethod(LibComBase, "WindowsCreateStringReference", WindowsCreateStringReference);
+			LoadMethod(LibComBase, "WindowsDeleteString", WindowsDeleteString);
 		}
 
-		LibDwmApi = LoadLibrary(L"DWMAPI.DLL");
-		load(LibDwmApi, "DwmIsCompositionEnabled", DwmIsCompositionEnabled);
+		const auto LibDwmApi = SafeLoadLibrary(u"dwmapi.dll"_q);
+		LoadMethod(LibDwmApi, "DwmIsCompositionEnabled", DwmIsCompositionEnabled);
+		LoadMethod(LibDwmApi, "DwmSetWindowAttribute", DwmSetWindowAttribute);
 
-		LibRstrtMgr = LoadLibrary(L"RSTRTMGR.DLL");
-		load(LibRstrtMgr, "RmStartSession", RmStartSession);
-		load(LibRstrtMgr, "RmRegisterResources", RmRegisterResources);
-		load(LibRstrtMgr, "RmGetList", RmGetList);
-		load(LibRstrtMgr, "RmShutdown", RmShutdown);
-		load(LibRstrtMgr, "RmEndSession", RmEndSession);
+		const auto LibRstrtMgr = SafeLoadLibrary(u"rstrtmgr.dll"_q);
+		LoadMethod(LibRstrtMgr, "RmStartSession", RmStartSession);
+		LoadMethod(LibRstrtMgr, "RmRegisterResources", RmRegisterResources);
+		LoadMethod(LibRstrtMgr, "RmGetList", RmGetList);
+		LoadMethod(LibRstrtMgr, "RmShutdown", RmShutdown);
+		LoadMethod(LibRstrtMgr, "RmEndSession", RmEndSession);
 	}
 
-	LibPsApi = LoadLibrary(L"PSAPI.DLL");
-	load(LibPsApi, "GetProcessMemoryInfo", GetProcessMemoryInfo);
+	const auto LibPsApi = SafeLoadLibrary(u"psapi.dll"_q);
+	LoadMethod(LibPsApi, "GetProcessMemoryInfo", GetProcessMemoryInfo);
+
+	const auto LibUser32 = SafeLoadLibrary(u"user32.dll"_q);
+	LoadMethod(LibUser32, "SetWindowCompositionAttribute", SetWindowCompositionAttribute);
 }
 
 } // namespace Dlls

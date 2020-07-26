@@ -11,6 +11,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_session.h"
 #include "data/data_folder.h"
 #include "data/data_channel.h"
+#include "data/data_changes.h"
 #include "data/data_user.h"
 #include "ui/wrap/vertical_layout.h"
 #include "ui/wrap/padding_wrap.h"
@@ -276,12 +277,12 @@ object_ptr<Ui::RpWidget> DetailsFiller::setupInfo() {
 			UsernameValue(user),
 			tr::lng_context_copy_mention(tr::now));
 
-		const auto window = &_controller->parentController()->window();
+		const auto controller = _controller->parentController();
 		AddMainButton(
 			result,
 			tr::lng_info_add_as_contact(),
 			CanAddContactValue(user),
-			[=] { window->show(Box(EditContactBox, window, user)); },
+			[=] { controller->window().show(Box(EditContactBox, controller, user)); },
 			tracker);
 	} else {
 		auto linkText = LinkValue(
@@ -300,7 +301,7 @@ object_ptr<Ui::RpWidget> DetailsFiller::setupInfo() {
 			std::move(linkText),
 			QString());
 		link->setClickHandlerFilter([peer = _peer](auto&&...) {
-			const auto link = Core::App().createInternalLinkFull(
+			const auto link = peer->session().createInternalLinkFull(
 				peer->userName());
 			if (!link.isEmpty()) {
 				QGuiApplication::clipboard()->setText(link);
@@ -506,12 +507,12 @@ void ActionsFiller::addShareContactAction(not_null<UserData*> user) {
 }
 
 void ActionsFiller::addEditContactAction(not_null<UserData*> user) {
-	const auto window = &_controller->parentController()->window();
+	const auto controller = _controller->parentController();
 	AddActionButton(
 		_wrap,
 		tr::lng_info_edit_contact(),
 		IsContactValue(user),
-		[=] { window->show(Box(EditContactBox, window, user)); });
+		[=] { controller->window().show(Box(EditContactBox, controller, user)); });
 }
 
 void ActionsFiller::addDeleteContactAction(
@@ -528,7 +529,7 @@ void ActionsFiller::addClearHistoryAction(not_null<UserData*> user) {
 		_wrap,
 		tr::lng_profile_clear_history(),
 		rpl::single(true),
-		 Window::ClearHistoryHandler(user));
+		Window::ClearHistoryHandler(user));
 }
 
 void ActionsFiller::addDeleteConversationAction(
@@ -556,9 +557,9 @@ void ActionsFiller::addBotCommandActions(not_null<UserData*> user) {
 		return QString();
 	};
 	auto hasBotCommandValue = [=](const QString &command) {
-		return Notify::PeerUpdateValue(
+		return user->session().changes().peerFlagsValue(
 			user,
-			Notify::PeerUpdate::Flag::BotCommandsChanged
+			Data::PeerUpdate::Flag::BotCommands
 		) | rpl::map([=] {
 			return !findBotCommand(command).isEmpty();
 		});
@@ -597,10 +598,10 @@ void ActionsFiller::addReportAction() {
 void ActionsFiller::addBlockAction(not_null<UserData*> user) {
 	const auto window = &_controller->parentController()->window();
 
-	auto text = Notify::PeerUpdateValue(
+	auto text = user->session().changes().peerFlagsValue(
 		user,
-		Notify::PeerUpdate::Flag::UserIsBlocked
-	) | rpl::map([user] {
+		Data::PeerUpdate::Flag::IsBlocked
+	) | rpl::map([=] {
 		switch (user->blockStatus()) {
 		case UserData::BlockStatus::Blocked:
 			return ((user->isBot() && !user->isSupport())
@@ -840,7 +841,7 @@ object_ptr<Ui::RpWidget> SetupChannelMembers(
 		MembersCountValue(channel) | tr::to_count());
 	auto membersCallback = [=] {
 		controller->showSection(Info::Memento(
-			channel->id,
+			channel,
 			Section::Type::Members));
 	};
 

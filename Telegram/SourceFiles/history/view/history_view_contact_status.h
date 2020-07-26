@@ -12,7 +12,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/widgets/shadow.h"
 
 namespace Window {
-class Controller;
+class SessionController;
 } // namespace Window
 
 namespace Ui {
@@ -25,7 +25,7 @@ namespace HistoryView {
 class ContactStatus final {
 public:
 	ContactStatus(
-		not_null<Window::Controller*> window,
+		not_null<Window::SessionController*> controller,
 		not_null<Ui::RpWidget*> parent,
 		not_null<PeerData*> peer);
 
@@ -46,6 +46,8 @@ private:
 		ReportSpam,
 		Add,
 		AddOrBlock,
+		UnarchiveOrBlock,
+		UnarchiveOrReport,
 		SharePhoneNumber,
 	};
 
@@ -55,6 +57,7 @@ private:
 
 		void showState(State state);
 
+		rpl::producer<> unarchiveClicks() const;
 		rpl::producer<> addClicks() const;
 		rpl::producer<> blockClicks() const;
 		rpl::producer<> shareClicks() const;
@@ -69,6 +72,7 @@ private:
 
 		QString _name;
 		object_ptr<Ui::FlatButton> _add;
+		object_ptr<Ui::FlatButton> _unarchive;
 		object_ptr<Ui::FlatButton> _block;
 		object_ptr<Ui::FlatButton> _share;
 		object_ptr<Ui::FlatButton> _report;
@@ -82,12 +86,13 @@ private:
 	void setupAddHandler(not_null<UserData*> user);
 	void setupBlockHandler(not_null<UserData*> user);
 	void setupShareHandler(not_null<UserData*> user);
+	void setupUnarchiveHandler(not_null<PeerData*> peer);
 	void setupReportHandler(not_null<PeerData*> peer);
 	void setupCloseHandler(not_null<PeerData*> peer);
 
 	static rpl::producer<State> PeerState(not_null<PeerData*> peer);
 
-	not_null<Window::Controller*> _window;
+	const not_null<Window::SessionController*> _controller;
 	State _state = State::None;
 	Ui::SlideWrap<Bar> _bar;
 	Ui::PlainShadow _shadow;

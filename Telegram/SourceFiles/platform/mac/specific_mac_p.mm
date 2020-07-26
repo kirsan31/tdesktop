@@ -11,16 +11,15 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "mainwidget.h"
 #include "core/sandbox.h"
 #include "core/application.h"
+#include "core/core_settings.h"
 #include "core/crash_reports.h"
 #include "storage/localstorage.h"
 #include "media/audio/media_audio.h"
 #include "media/player/media_player_instance.h"
-#include "platform/mac/mac_touchbar.h"
 #include "base/platform/mac/base_utilities_mac.h"
 #include "base/platform/base_platform_info.h"
 #include "lang/lang_keys.h"
 #include "base/timer.h"
-#include "facades.h"
 #include "styles/style_window.h"
 
 #include <QtGui/QWindow>
@@ -219,19 +218,6 @@ void SetApplicationIcon(const QIcon &icon) {
 
 } // namespace Platform
 
-bool objc_darkMode() {
-	bool result = false;
-	@autoreleasepool {
-
-	NSDictionary *dict = [[NSUserDefaults standardUserDefaults] persistentDomainForName:NSGlobalDomain];
-	id style = [dict objectForKey:Q2NSString(strStyleOfInterface())];
-	BOOL darkModeOn = (style && [style isKindOfClass:[NSString class]] && NSOrderedSame == [style caseInsensitiveCompare:@"dark"]);
-	result = darkModeOn ? true : false;
-
-	}
-	return result;
-}
-
 bool objc_handleMediaKeyEvent(void *ev) {
 	auto e = reinterpret_cast<NSEvent*>(ev);
 
@@ -423,12 +409,12 @@ void objc_downloadPathEnableAccess(const QByteArray &bookmark) {
 		}
 		_downloadPathUrl = [url retain];
 
-		Global::SetDownloadPath(NS2QString([_downloadPathUrl path]) + '/');
+		Core::App().settings().setDownloadPath(NS2QString([_downloadPathUrl path]) + '/');
 		if (isStale) {
 			NSData *data = [_downloadPathUrl bookmarkDataWithOptions:NSURLBookmarkCreationWithSecurityScope includingResourceValuesForKeys:nil relativeToURL:nil error:&error];
 			if (data) {
-				Global::SetDownloadPathBookmark(QByteArray::fromNSData(data));
-				Local::writeUserSettings();
+				Core::App().settings().setDownloadPathBookmark(QByteArray::fromNSData(data));
+				Local::writeSettings();
 			}
 		}
 	}

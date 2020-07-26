@@ -11,9 +11,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/flags.h"
 #include "base/observer.h"
 #include "base/object_ptr.h"
+#include "base/weak_ptr.h"
+#include "base/timer.h"
 #include "dialogs/dialogs_key.h"
 #include "ui/effects/animation_value.h"
 
+class PhotoData;
 class MainWidget;
 class MainWindow;
 class HistoryMessage;
@@ -34,13 +37,6 @@ class Session;
 namespace Settings {
 enum class Type;
 } // namespace Settings
-
-namespace Media {
-namespace Player {
-class FloatController;
-class FloatDelegate;
-} // namespace Player
-} // namespace Media
 
 namespace Passport {
 struct FormRequest;
@@ -121,7 +117,7 @@ struct SectionShow {
 
 class SessionController;
 
-class SessionNavigation {
+class SessionNavigation : public base::has_weak_ptr {
 public:
 	explicit SessionNavigation(not_null<Main::Session*> session);
 
@@ -161,9 +157,7 @@ private:
 
 };
 
-class SessionController
-	: public SessionNavigation
-	, private base::Subscriber {
+class SessionController : public SessionNavigation, private base::Subscriber {
 public:
 	SessionController(
 		not_null<Main::Session*> session,
@@ -173,6 +167,16 @@ public:
 		return *_window;
 	}
 	[[nodiscard]] not_null<::MainWindow*> widget() const;
+	[[nodiscard]] not_null<MainWidget*> content() const;
+
+	// We need access to this from MainWidget::MainWidget, where
+	// we can't call content() yet.
+	void setSelectingPeer(bool selecting) {
+		_selectingPeer = selecting;
+	}
+	[[nodiscard]] bool selectingPeer() const {
+		return _selectingPeer;
+	}
 
 	[[nodiscard]] auto tabbedSelector() const
 	-> not_null<ChatHelpers::TabbedSelector*>;
@@ -204,9 +208,7 @@ public:
 		return _gifPauseLevelChanged;
 	}
 	bool isGifPausedAtLeastFor(GifPauseReason reason) const;
-	base::Observable<void> &floatPlayerAreaUpdated() {
-		return _floatPlayerAreaUpdated;
-	}
+	void floatPlayerAreaUpdated();
 
 	struct ColumnLayout {
 		int bodyWidth;
@@ -285,14 +287,6 @@ public:
 		return this;
 	}
 
-	void setDefaultFloatPlayerDelegate(
-		not_null<Media::Player::FloatDelegate*> delegate);
-	void replaceFloatPlayerDelegate(
-		not_null<Media::Player::FloatDelegate*> replacement);
-	void restoreFloatPlayerDelegate(
-		not_null<Media::Player::FloatDelegate*> replacement);
-	rpl::producer<FullMsgId> floatPlayerClosed() const;
-
 	[[nodiscard]] int filtersWidth() const;
 	[[nodiscard]] rpl::producer<FilterId> activeChatsFilter() const;
 	[[nodiscard]] FilterId activeChatsFilterCurrent() const;
@@ -300,6 +294,8 @@ public:
 
 	void toggleFiltersMenu(bool enabled);
 	[[nodiscard]] rpl::producer<> filtersMenuChanged() const;
+
+	void requestAttachedStickerSets(not_null<PhotoData*> photo);
 
 	rpl::lifetime &lifetime() {
 		return _lifetime;
@@ -312,9 +308,9 @@ private:
 	void initSupportMode();
 	void refreshFiltersMenu();
 	void checkOpenedFilter();
+	void suggestArchiveAndMute();
 
 	int minimalThreeColumnWidth() const;
-	not_null<MainWidget*> chats() const;
 	int countDialogsWidthFromRatio(int bodyWidth) const;
 	int countThirdColumnWidthFromRatio(int bodyWidth) const;
 	struct ShrinkResult {
@@ -330,6 +326,8 @@ private:
 	bool chatEntryHistoryMove(int steps);
 	void resetFakeUnreadWhileOpened();
 
+	void checkInvitePeek();
+
 	const not_null<Controller*> _window;
 
 	std::unique_ptr<Passport::FormController> _passportForm;
@@ -337,7 +335,6 @@ private:
 
 	GifPauseReasons _gifPauseReasons = 0;
 	base::Observable<void> _gifPauseLevelChanged;
-	base::Observable<void> _floatPlayerAreaUpdated;
 
 	// Depends on _gifPause*.
 	const std::unique_ptr<ChatHelpers::TabbedSelector> _tabbedSelector;
@@ -347,20 +344,23 @@ private:
 	base::Variable<bool> _dialogsListDisplayForced = { false };
 	std::deque<Dialogs::RowDescriptor> _chatEntryHistory;
 	int _chatEntryHistoryPosition = -1;
+	bool _selectingPeer = false;
+
+	base::Timer _invitePeekTimer;
 
 	rpl::variable<FilterId> _activeChatsFilter;
-
-	std::unique_ptr<Media::Player::FloatController> _floatPlayers;
-	Media::Player::FloatDelegate *_defaultFloatPlayerDelegate = nullptr;
-	Media::Player::FloatDelegate *_replacementFloatPlayerDelegate = nullptr;
 
 	PeerData *_showEditPeer = nullptr;
 	rpl::variable<Data::Folder*> _openedFolder;
 
 	rpl::event_stream<> _filtersMenuChanged;
 
+	mtpRequestId _attachedStickerSetsRequestId = 0;
+
 	rpl::lifetime _lifetime;
 
 };
+
+void ActivateWindow(not_null<SessionController*> controller);
 
 } // namespace Window

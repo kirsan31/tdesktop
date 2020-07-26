@@ -21,8 +21,6 @@ constexpr auto kDocumentCacheTag = 0x0000000000000100ULL;
 constexpr auto kDocumentCacheMask = 0x00000000000000FFULL;
 constexpr auto kDocumentThumbCacheTag = 0x0000000000000200ULL;
 constexpr auto kDocumentThumbCacheMask = 0x00000000000000FFULL;
-constexpr auto kStorageCacheTag = 0x0000010000000000ULL;
-constexpr auto kStorageCacheMask = 0x000000FFFFFFFFFFULL;
 constexpr auto kWebDocumentCacheTag = 0x0000020000000000ULL;
 constexpr auto kWebDocumentCacheMask = 0x000000FFFFFFFFFFULL;
 constexpr auto kUrlCacheTag = 0x0000030000000000ULL;
@@ -48,7 +46,7 @@ Storage::Cache::Key DocumentThumbCacheKey(int32 dcId, uint64 id) {
 }
 
 Storage::Cache::Key WebDocumentCacheKey(const WebFileLocation &location) {
-	const auto CacheDcId = cTestMode() ? 2 : 4;
+	const auto CacheDcId = 4; // The default production value. Doesn't matter.
 	const auto dcId = uint64(CacheDcId) & 0xFFULL;
 	const auto &url = location.url();
 	const auto hash = openssl::Sha256(bytes::make_span(url));
@@ -136,7 +134,7 @@ void MessageCursor::applyTo(not_null<Ui::InputField*> field) {
 }
 
 HistoryItem *FileClickHandler::getActionItem() const {
-	return Auth().data().message(context());
+	return _session->data().message(context());
 }
 
 PeerId PeerFromMessage(const MTPmessage &message) {

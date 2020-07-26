@@ -7,7 +7,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "boxes/calendar_box.h"
 
-#include "mtproto/mtproto_rpc_sender.h"
 #include "ui/widgets/buttons.h"
 #include "lang/lang_keys.h"
 #include "ui/effects/ripple_animation.h"
@@ -123,8 +122,6 @@ void CalendarBox::Context::applyMonth(const QDate &month, bool forced) {
 	_daysCount = month.daysInMonth();
 	_daysShift = daysShiftForMonth(month);
 	_rowsCount = rowsCountForMonth(month);
-	auto yearIndex = month.year();
-	auto monthIndex = month.month();
 	_highlightedIndex = month.daysTo(_highlighted);
 	_minDayIndex = _min.isNull() ? INT_MIN : month.daysTo(_min);
 	_maxDayIndex = _max.isNull() ? INT_MAX : month.daysTo(_max);
@@ -199,7 +196,7 @@ QString CalendarBox::Context::labelFromIndex(int index) const {
 	return QString::number(day());
 }
 
-class CalendarBox::Inner : public TWidget, public RPCSender, private base::Subscriber {
+class CalendarBox::Inner : public TWidget, private base::Subscriber {
 public:
 	Inner(
 		QWidget *parent,
@@ -303,7 +300,6 @@ int CalendarBox::Inner::rowsTop() const {
 
 void CalendarBox::Inner::paintRows(Painter &p, QRect clip) {
 	p.setFont(st::calendarDaysFont);
-	auto ms = crl::now();
 	auto y = rowsTop();
 	auto index = -_context->daysShift();
 	auto highlightedIndex = _context->highlightedIndex();

@@ -25,7 +25,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_file_origin.h"
 #include "app.h"
 #include "styles/style_history.h"
-#include "facades.h"
+#include "core/application.h"
 
 namespace HistoryView {
 namespace {
@@ -191,7 +191,7 @@ QSize Document::countOptimalSize() {
 
 	if (auto named = Get<HistoryDocumentNamed>()) {
 		accumulate_max(maxWidth, tleft + named->_namew + tright);
-		if (Adaptive::ChatWide() && captioned) {
+		if (Core::App().settings().chatWide() && captioned) {
 			accumulate_max(maxWidth, captioned->_caption.maxWidth());
 		}
 		else {

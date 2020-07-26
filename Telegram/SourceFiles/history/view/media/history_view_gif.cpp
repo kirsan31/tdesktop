@@ -11,6 +11,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "layout.h"
 #include "mainwindow.h"
 #include "main/main_session.h"
+#include "main/main_session_settings.h"
 #include "media/audio/media_audio.h"
 #include "media/clip/media_clip_reader.h"
 #include "media/player/media_player_instance.h"
@@ -47,11 +48,6 @@ int gifMaxStatusWidth(DocumentData *document) {
 	auto result = st::normalFont->width(formatDownloadText(document->size, document->size));
 	accumulate_max(result, st::normalFont->width(formatGifAndSizeText(document->size)));
 	return result;
-}
-
-[[nodiscard]] bool CanPlayInline(not_null<DocumentData*> document) {
-	const auto dimensions = document->dimensions;
-	return dimensions.width() * dimensions.height() <= kMaxInlineArea;
 }
 
 } // namespace
@@ -103,9 +99,14 @@ Gif::~Gif() {
 		}
 		if (_dataMedia) {
 			_data->owner().keepAlive(base::take(_dataMedia));
+			_parent->checkHeavyPart();
 		}
-		_parent->checkHeavyPart();
 	}
+}
+
+bool Gif::CanPlayInline(not_null<DocumentData*> document) {
+	const auto dimensions = document->dimensions;
+	return dimensions.width() * dimensions.height() <= kMaxInlineArea;
 }
 
 QSize Gif::sizeForAspectRatio() const {
@@ -281,7 +282,7 @@ void Gif::draw(Painter &p, const QRect &r, TextSelection selection, crl::time ms
 	const auto loaded = dataLoaded();
 	const auto displayLoading = item->isSending() || _data->displayLoading();
 	const auto selected = (selection == FullSelection);
-	const auto autoPaused = App::wnd()->sessionController()->isGifPausedAtLeastFor(Window::GifPauseReason::Any);
+	const auto autoPaused = _parent->delegate()->elementIsGifPaused();
 	const auto cornerDownload = downloadInCorner();
 	const auto canBePlayed = _dataMedia->canBePlayed();
 	const auto autoplay = autoplayEnabled()
@@ -901,7 +902,7 @@ void Gif::drawGrouped(
 	const auto loaded = dataLoaded();
 	const auto displayLoading = (item->id < 0) || _data->displayLoading();
 	const auto selected = (selection == FullSelection);
-	const auto autoPaused = App::wnd()->sessionController()->isGifPausedAtLeastFor(Window::GifPauseReason::Any);
+	const auto autoPaused = _parent->delegate()->elementIsGifPaused();
 	const auto fullFeatured = fullFeaturedGrouped(sides);
 	const auto cornerDownload = fullFeatured && downloadInCorner();
 	const auto canBePlayed = _dataMedia->canBePlayed();
@@ -1463,8 +1464,7 @@ void Gif::repaintStreamedContent() {
 	const auto own = activeOwnStreamed();
 	if (own && !own->frozenFrame.isNull()) {
 		return;
-	}
-	if (App::wnd()->sessionController()->isGifPausedAtLeastFor(Window::GifPauseReason::Any)
+	} else if (_parent->delegate()->elementIsGifPaused()
 		&& !activeRoundStreamed()) {
 		return;
 	}

@@ -12,7 +12,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 namespace Data {
 namespace AutoDownload {
 
-constexpr auto kMaxBytesLimit = 3000 * 512 * 1024;
+constexpr auto kMaxBytesLimit = 4000 * 512 * 1024;
 
 enum class Source {
 	User    = 0x00,
@@ -120,6 +120,10 @@ private:
 	const Full &data,
 	not_null<PeerData*> peer,
 	not_null<DocumentData*> document);
+[[nodiscard]] bool ShouldAutoPlay(
+	const Full &data,
+	not_null<PeerData*> peer,
+	not_null<PhotoData*> photo);
 
 [[nodiscard]] Full WithDisabledAutoPlay(const Full &data);
 

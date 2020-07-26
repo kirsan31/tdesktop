@@ -17,7 +17,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_file_origin.h"
 #include "data/data_session.h"
 #include "data/data_media_rotation.h"
+#include "main/main_account.h"
+#include "main/main_session.h"
 #include "core/application.h"
+#include "platform/platform_specific.h"
 #include "base/platform/base_platform_info.h"
 #include "ui/platform/ui_platform_utility.h"
 #include "ui/widgets/buttons.h"
@@ -311,6 +314,29 @@ Streaming::FrameRequest UnrotateRequest(
 	return result;
 }
 
+Qt::Edges RectPartToQtEdges(RectPart rectPart) {
+	switch (rectPart) {
+	case RectPart::TopLeft:
+		return Qt::TopEdge | Qt::LeftEdge;
+	case RectPart::TopRight:
+		return Qt::TopEdge | Qt::RightEdge;
+	case RectPart::BottomRight:
+		return Qt::BottomEdge | Qt::RightEdge;
+	case RectPart::BottomLeft:
+		return Qt::BottomEdge | Qt::LeftEdge;
+	case RectPart::Left:
+		return Qt::LeftEdge;
+	case RectPart::Top:
+		return Qt::TopEdge;
+	case RectPart::Right:
+		return Qt::RightEdge;
+	case RectPart::Bottom:
+		return Qt::BottomEdge;
+	}
+
+	return 0;
+}
+
 } // namespace
 
 QRect RotatedRect(QRect rect, int rotation) {
@@ -438,7 +464,8 @@ PipPanel::Position PipPanel::countPosition() const {
 	const auto right = left + result.geometry.width();
 	const auto top = result.geometry.y();
 	const auto bottom = top + result.geometry.height();
-	if (!_dragState || *_dragState != RectPart::Center) {
+	if ((!_dragState || *_dragState != RectPart::Center)
+		&& !Platform::IsWayland()) {
 		if (left == available.x()) {
 			result.attached |= RectPart::Left;
 		} else if (right == available.x() + available.width()) {
@@ -514,6 +541,11 @@ void PipPanel::setPositionOnScreen(Position position, QRect available) {
 		std::max(normalized.width(), minimalSize.width()),
 		std::max(normalized.height(), minimalSize.height()));
 
+	// Apply maximal size.
+	const auto maximalSize = (_ratio.width() > _ratio.height())
+		? QSize(fit.width(), fit.width() * _ratio.height() / _ratio.width())
+		: QSize(fit.height() * _ratio.width() / _ratio.height(), fit.height());
+
 	// Apply left-right screen borders.
 	const auto skip = st::pipBorderSkip;
 	const auto inner = screen.marginsRemoved({ skip, skip, skip, skip });
@@ -547,8 +579,10 @@ void PipPanel::setPositionOnScreen(Position position, QRect available) {
 	geometry += _padding;
 
 	setGeometry(geometry);
-	setMinimumSize(geometry.size());
-	setMaximumSize(geometry.size());
+	setMinimumSize(minimalSize);
+	setMaximumSize(
+		std::max(minimalSize.width(), maximalSize.width()),
+		std::max(minimalSize.height(), maximalSize.height()));
 	updateDecorations();
 	update();
 }
@@ -588,6 +622,7 @@ void PipPanel::mousePressEvent(QMouseEvent *e) {
 	if (e->button() != Qt::LeftButton) {
 		return;
 	}
+	updateOverState(e->pos());
 	_pressState = _overState;
 	_pressPoint = e->globalPos();
 }
@@ -671,6 +706,23 @@ void PipPanel::mouseMoveEvent(QMouseEvent *e) {
 	if (!_dragState
 		&& (point - _pressPoint).manhattanLength() > distance
 		&& !_dragDisabled) {
+		if (Platform::IsWayland()) {
+			const auto stateEdges = RectPartToQtEdges(*_pressState);
+			if (stateEdges) {
+				if (!Platform::StartSystemResize(windowHandle(), stateEdges)) {
+#if QT_VERSION >= QT_VERSION_CHECK(5, 15, 0) || defined DESKTOP_APP_QT_PATCHED
+					windowHandle()->startSystemResize(stateEdges);
+#endif // Qt >= 5.15 || DESKTOP_APP_QT_PATCHED
+				}
+			} else {
+				if (!Platform::StartSystemMove(windowHandle())) {
+#if QT_VERSION >= QT_VERSION_CHECK(5, 15, 0) || defined DESKTOP_APP_QT_PATCHED
+					windowHandle()->startSystemMove();
+#endif // Qt >= 5.15 || DESKTOP_APP_QT_PATCHED
+				}
+			}
+			return;
+		}
 		_dragState = _pressState;
 		updateDecorations();
 		_dragStartGeometry = geometry().marginsRemoved(_padding);
@@ -722,8 +774,6 @@ void PipPanel::processDrag(QPoint point) {
 		const auto newGeometry = valid.marginsAdded(_padding);
 		_positionAnimation.stop();
 		setGeometry(newGeometry);
-		setMinimumSize(newGeometry.size());
-		setMaximumSize(newGeometry.size());
 	}
 }
 
@@ -810,8 +860,6 @@ void PipPanel::updateDecorations() {
 	_useTransparency = use;
 	setAttribute(Qt::WA_OpaquePaintEvent, !_useTransparency);
 	setGeometry(newGeometry);
-	setMinimumSize(newGeometry.size());
-	setMaximumSize(newGeometry.size());
 	update();
 }
 
@@ -837,6 +885,11 @@ Pip::Pip(
 	setupPanel();
 	setupButtons();
 	setupStreaming();
+
+	_data->session().account().sessionChanges(
+	) | rpl::start_with_next([=] {
+		_destroy();
+	}, _panel.lifetime());
 }
 
 Pip::~Pip() = default;

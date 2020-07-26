@@ -33,9 +33,6 @@ bool IsXDGDesktopPortalPresent();
 bool UseXDGDesktopPortal();
 bool CanOpenDirectoryWithPortal();
 
-QString ProcessNameByPID(const QString &pid);
-QString RealExecutablePath(int argc, char *argv[]);
-
 QString AppRuntimeDirectory();
 
 QString GetLauncherBasename();
@@ -48,6 +45,9 @@ inline void IgnoreApplicationActivationRightNow() {
 
 void FallbackFontConfigCheckBegin();
 void FallbackFontConfigCheckEnd();
+
+bool GtkClipboardSupported();
+void SetTrayIconSupported(bool supported);
 
 } // namespace Platform
 

@@ -16,7 +16,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/update_checker.h"
 #include "core/sandbox.h"
 #include "base/concurrent_timer.h"
-#include "facades.h"
 
 namespace Core {
 namespace {
@@ -94,12 +93,6 @@ void ComputeDebugMode() {
 	auto file = QFile(debugModeSettingPath);
 	if (file.exists() && file.open(QIODevice::ReadOnly)) {
 		Logs::SetDebugEnabled(file.read(1) != "0");
-	}
-}
-
-void ComputeTestMode() {
-	if (QFile::exists(cWorkingDir() + qsl("tdata/withtestmode"))) {
-		cSetTestMode(true);
 	}
 }
 
@@ -289,6 +282,19 @@ void Launcher::init() {
 
 	prepareSettings();
 
+	static QtMessageHandler originalMessageHandler = nullptr;
+	originalMessageHandler = qInstallMessageHandler([](
+		QtMsgType type,
+		const QMessageLogContext &context,
+		const QString &msg) {
+		if (originalMessageHandler) {
+			originalMessageHandler(type, context, msg);
+		}
+		if (Logs::DebugEnabled() || !Logs::started()) {
+			LOG((msg));
+		}
+	});
+
 	QApplication::setApplicationName(qsl("TelegramDesktop"));
 
 #if defined Q_OS_UNIX && !defined Q_OS_MAC && QT_VERSION >= QT_VERSION_CHECK(5, 7, 0)
@@ -350,7 +356,6 @@ int Launcher::exec() {
 void Launcher::workingFolderReady() {
 	srand((unsigned int)time(nullptr));
 
-	ComputeTestMode();
 	ComputeDebugMode();
 	ComputeExternalUpdater();
 	ComputeFreeType();
@@ -476,7 +481,6 @@ void Launcher::processArguments() {
 	if (parseResult.contains("-externalupdater")) {
 		SetUpdaterDisabledAtStartup();
 	}
-	gTestMode = parseResult.contains("-testmode");
 	gUseFreeType = parseResult.contains("-freetype");
 	Logs::SetDebugEnabled(parseResult.contains("-debug"));
 	gManyInstance = parseResult.contains("-many");
