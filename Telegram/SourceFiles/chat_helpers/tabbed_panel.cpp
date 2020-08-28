@@ -81,6 +81,7 @@ TabbedPanel::TabbedPanel(
 	_selector->move(innerRect().topLeft());
 
 	_hideTimer.setCallback([this] { hideByTimerOrLeave(); });
+	_showTimer.setCallback([this] { otherEnter(); });
 
 	_selector->checkForHide(
 	) | rpl::start_with_next([=] {
@@ -236,6 +237,7 @@ void TabbedPanel::otherEnter() {
 }
 
 void TabbedPanel::otherLeave() {
+	_showTimer.cancel();
 	if (preventAutoHide()) {
 		return;
 	}
@@ -389,6 +391,7 @@ void TabbedPanel::hideFinished() {
 }
 
 void TabbedPanel::showAnimated() {
+	_showTimer.cancel();
 	_hideTimer.cancel();
 	_hideAfterSlide = false;
 	showStarted();
@@ -411,7 +414,7 @@ void TabbedPanel::showStarted() {
 
 bool TabbedPanel::eventFilter(QObject *obj, QEvent *e) {
 	if (e->type() == QEvent::Enter) {
-		otherEnter();
+		_showTimer.callOnce(250);
 	} else if (e->type() == QEvent::Leave) {
 		otherLeave();
 	}

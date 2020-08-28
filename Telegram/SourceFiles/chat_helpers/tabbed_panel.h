@@ -117,6 +117,7 @@ private:
 	QPixmap _cache;
 	Ui::Animations::Simple _a_opacity;
 	base::Timer _hideTimer;
+	base::Timer _showTimer;
 
 };
 

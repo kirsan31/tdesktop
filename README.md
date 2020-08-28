@@ -1,8 +1,9 @@
-# [Telegram Desktop][telegram_desktop] – Mod
+﻿# [Telegram Desktop][telegram_desktop] – Mod
 
 Attempt to address this TDesktop issues:  
 [Change the Always on Top behavior of the Call Popup]  
 [Auto resizing message block]  
+[250ms delay added to show emoji panel on mouseover]  
 [removed -- to −, >> to », << to «]  
 Workaround for [Automatically Syntax-Highlight]. More [here](docs/html-code-processing.md).  
 Ability to open downloaded video in external video player by CTRL + Click.
@@ -76,6 +77,8 @@ Version **1.8.15** was the last that supports older systems
 [Change the Always on Top behavior of the Call Popup]: https://github.com/telegramdesktop/tdesktop/issues/3382
 [Auto resizing message block]: https://github.com/telegramdesktop/tdesktop/issues/2060
 [removed -- to −, >> to », << to «]: https://github.com/telegramdesktop/tdesktop/issues/522
+[250ms delay added to show emoji panel on mouseover]:  
+https://github.com/telegramdesktop/tdesktop/issues/1333
 [Automatically Syntax-Highlight]: https://github.com/telegramdesktop/tdesktop/issues/250
 [telegram]: https://telegram.org
 [telegram_desktop]: https://desktop.telegram.org
