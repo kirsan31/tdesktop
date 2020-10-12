@@ -16,13 +16,15 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtCore/QTemporaryFile>
 #include <QtDBus/QDBusObjectPath>
 #include <dbusmenuexporter.h>
-#endif
+
+typedef char gchar;
+typedef struct _GVariant GVariant;
+typedef struct _GDBusProxy GDBusProxy;
+#endif // !DESKTOP_APP_DISABLE_DBUS_INTEGRATION
 
 namespace Platform {
 
 class MainWindow : public Window::MainWindow {
-	Q_OBJECT
-
 public:
 	explicit MainWindow(not_null<Window::Controller*> controller);
 
@@ -33,47 +35,25 @@ public:
 		style::color fg,
 		bool smallIcon) = 0;
 
+	void psShowTrayMenu();
+
+	bool trayAvailable() {
+		return _sniAvailable || QSystemTrayIcon::isSystemTrayAvailable();
+	}
+
+#ifndef DESKTOP_APP_DISABLE_DBUS_INTEGRATION
+	void handleSNIHostRegistered();
+#endif // !DESKTOP_APP_DISABLE_DBUS_INTEGRATION
+
 	static void LibsLoaded();
 
 	~MainWindow();
-
-public slots:
-	void psShowTrayMenu();
-
-#ifndef DESKTOP_APP_DISABLE_DBUS_INTEGRATION
-	void onSNIOwnerChanged(
-		const QString &service,
-		const QString &oldOwner,
-		const QString &newOwner);
-
-	void onAppMenuOwnerChanged(
-		const QString &service,
-		const QString &oldOwner,
-		const QString &newOwner);
-
-	void psLinuxUndo();
-	void psLinuxRedo();
-	void psLinuxCut();
-	void psLinuxCopy();
-	void psLinuxPaste();
-	void psLinuxDelete();
-	void psLinuxSelectAll();
-
-	void psLinuxBold();
-	void psLinuxItalic();
-	void psLinuxUnderline();
-	void psLinuxStrikeOut();
-	void psLinuxMonospace();
-	void psLinuxClearFormat();
-
-	void onVisibleChanged(bool visible);
-
-#endif // !DESKTOP_APP_DISABLE_DBUS_INTEGRATION
 
 protected:
 	void initHook() override;
 	void unreadCounterChangedHook() override;
 	void updateGlobalMenuHook() override;
+	void handleVisibleChangedHook(bool visible) override;
 
 	void initTrayMenuHook() override;
 	bool hasTrayIcon() const override;
@@ -96,6 +76,7 @@ protected:
 		style::color color) = 0;
 
 private:
+	bool _sniAvailable = false;
 	Ui::PopupMenu *_trayIconMenuXEmbed = nullptr;
 
 	void updateIconCounters();
@@ -103,8 +84,10 @@ private:
 
 #ifndef DESKTOP_APP_DISABLE_DBUS_INTEGRATION
 	StatusNotifierItem *_sniTrayIcon = nullptr;
+	GDBusProxy *_sniDBusProxy = nullptr;
 	std::unique_ptr<QTemporaryFile> _trayIconFile = nullptr;
 
+	bool _appMenuSupported = false;
 	DBusMenuExporter *_mainMenuExporter = nullptr;
 	QDBusObjectPath _mainMenuPath;
 
@@ -131,6 +114,38 @@ private:
 
 	void setSNITrayIcon(int counter, bool muted);
 	void attachToSNITrayIcon();
+
+	void handleSNIOwnerChanged(
+		const QString &service,
+		const QString &oldOwner,
+		const QString &newOwner);
+
+	void handleAppMenuOwnerChanged(
+		const QString &service,
+		const QString &oldOwner,
+		const QString &newOwner);
+
+	void psLinuxUndo();
+	void psLinuxRedo();
+	void psLinuxCut();
+	void psLinuxCopy();
+	void psLinuxPaste();
+	void psLinuxDelete();
+	void psLinuxSelectAll();
+
+	void psLinuxBold();
+	void psLinuxItalic();
+	void psLinuxUnderline();
+	void psLinuxStrikeOut();
+	void psLinuxMonospace();
+	void psLinuxClearFormat();
+
+	static void sniSignalEmitted(
+		GDBusProxy *proxy,
+		gchar *sender_name,
+		gchar *signal_name,
+		GVariant *parameters,
+		MainWindow *window);
 #endif // !DESKTOP_APP_DISABLE_DBUS_INTEGRATION
 
 };

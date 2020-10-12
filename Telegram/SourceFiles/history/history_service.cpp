@@ -28,6 +28,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "window/notifications_manager.h"
 #include "window/window_session_controller.h"
 #include "storage/storage_shared_media.h"
+#include "ui/text/format_values.h"
 #include "ui/text_options.h"
 
 namespace {
@@ -508,7 +509,7 @@ HistoryService::HistoryService(
 		data.vflags().v,
 		clientFlags,
 		data.vdate().v,
-		data.vfrom_id().value_or_empty()) {
+		data.vfrom_id() ? peerFromMTP(*data.vfrom_id()) : PeerId(0)) {
 	createFromMtp(data);
 }
 
@@ -522,7 +523,7 @@ HistoryService::HistoryService(
 		mtpCastFlags(data.vflags().v),
 		clientFlags,
 		data.vdate().v,
-		data.vfrom_id().value_or_empty()) {
+		data.vfrom_id() ? peerFromMTP(*data.vfrom_id()) : PeerId(0)) {
 	createFromMtp(data);
 }
 
@@ -533,7 +534,7 @@ HistoryService::HistoryService(
 	TimeId date,
 	const PreparedText &message,
 	MTPDmessage::Flags flags,
-	UserId from,
+	PeerId from,
 	PhotoData *photo)
 : HistoryItem(history, id, flags, clientFlags, date, from) {
 	setServiceText(message);
@@ -678,21 +679,28 @@ void HistoryService::createFromMtp(const MTPDmessageService &message) {
 		UpdateComponents(HistoryServicePayment::Bit());
 		auto amount = message.vaction().c_messageActionPaymentSent().vtotal_amount().v;
 		auto currency = qs(message.vaction().c_messageActionPaymentSent().vcurrency());
-		Get<HistoryServicePayment>()->amount = HistoryView::FillAmountAndCurrency(amount, currency);
+		Get<HistoryServicePayment>()->amount = Ui::FillAmountAndCurrency(amount, currency);
 	}
-	if (const auto replyToMsgId = message.vreply_to_msg_id()) {
-		if (message.vaction().type() == mtpc_messageActionPinMessage) {
-			UpdateComponents(HistoryServicePinned::Bit());
-		}
-		if (const auto dependent = GetDependentData()) {
-			dependent->msgId = replyToMsgId->v;
-			if (!updateDependent()) {
-				history()->session().api().requestMessageData(
-					history()->peer->asChannel(),
-					dependent->msgId,
-					HistoryDependentItemCallback(this));
+	if (const auto replyTo = message.vreply_to()) {
+		replyTo->match([&](const MTPDmessageReplyHeader &data) {
+			const auto peer = data.vreply_to_peer_id()
+				? peerFromMTP(*data.vreply_to_peer_id())
+				: history()->peer->id;
+			if (!peer || peer == history()->peer->id) {
+				if (message.vaction().type() == mtpc_messageActionPinMessage) {
+					UpdateComponents(HistoryServicePinned::Bit());
+				}
+				if (const auto dependent = GetDependentData()) {
+					dependent->msgId = data.vreply_to_msg_id().v;
+					if (!updateDependent()) {
+						history()->session().api().requestMessageData(
+							history()->peer->asChannel(),
+							dependent->msgId,
+							HistoryDependentItemCallback(this));
+					}
+				}
 			}
-		}
+		});
 	}
 	setMessageByAction(message.vaction());
 }
