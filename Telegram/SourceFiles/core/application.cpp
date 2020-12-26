@@ -13,6 +13,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_user.h"
 #include "base/timer.h"
 #include "base/concurrent_timer.h"
+#include "base/qt_signal_producer.h"
 #include "base/unixtime.h"
 #include "core/update_checker.h"
 #include "core/shortcuts.h"
@@ -84,6 +85,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtWidgets/QVBoxLayout>
 #include <QtWidgets/QScrollArea>
 #include <QtWidgets/QStyle>
+#include <QtGui/QScreen>
 
 namespace Core {
 namespace {
@@ -249,11 +251,15 @@ void Application::run() {
 	}, _window->widget()->lifetime());
 
 	QCoreApplication::instance()->installEventFilter(this);
-	connect(
-		static_cast<QGuiApplication*>(QCoreApplication::instance()),
-		&QGuiApplication::applicationStateChanged,
-		this,
-		&Application::stateChanged);
+
+	appDeactivatedValue(
+	) | rpl::start_with_next([=](bool deactivated) {
+		if (deactivated) {
+			handleAppDeactivated();
+		} else {
+			handleAppActivated();
+		}
+	}, _lifetime);
 
 	DEBUG_LOG(("Application Info: window created..."));
 
@@ -687,14 +693,6 @@ void Application::checkLocalTime() {
 	}
 }
 
-void Application::stateChanged(Qt::ApplicationState state) {
-	if (state == Qt::ApplicationActive) {
-		handleAppActivated();
-	} else {
-		handleAppDeactivated();
-	}
-}
-
 void Application::handleAppActivated() {
 	checkLocalTime();
 	if (_window) {
@@ -707,6 +705,20 @@ void Application::handleAppDeactivated() {
 		_window->updateIsActiveBlur();
 	}
 	Ui::Tooltip::Hide();
+}
+
+rpl::producer<bool> Application::appDeactivatedValue() const {
+	const auto &app =
+		static_cast<QGuiApplication*>(QCoreApplication::instance());
+	return rpl::single(
+		app->applicationState()
+	) | rpl::then(
+		base::qt_signal_producer(
+			app,
+			&QGuiApplication::applicationStateChanged
+	)) | rpl::map([=](Qt::ApplicationState state) {
+		return (state != Qt::ApplicationActive);
+	});
 }
 
 void Application::call_handleObservables() {
@@ -832,9 +844,17 @@ bool Application::openCustomUrl(
 
 }
 
+void Application::preventOrInvoke(Fn<void()> &&callback) {
+	_window->preventOrInvoke(std::move(callback));
+}
+
 void Application::lockByPasscode() {
-	_passcodeLock = true;
-	_window->setupPasscodeLock();
+	preventOrInvoke([=] {
+		if (_window) {
+			_passcodeLock = true;
+			_window->setupPasscodeLock();
+		}
+	});
 }
 
 void Application::unlockPasscode() {
@@ -923,9 +943,12 @@ void Application::localPasscodeChanged() {
 bool Application::hasActiveWindow(not_null<Main::Session*> session) const {
 	if (App::quitting() || !_window) {
 		return false;
+	} else if (_calls->hasActivePanel(session)) {
+		return true;
 	} else if (const auto controller = _window->sessionController()) {
-		if (&controller->session() == session) {
-			return _window->widget()->isActive();
+		if (&controller->session() == session
+			&& _window->widget()->isActive()) {
+			return true;
 		}
 	}
 	return false;
@@ -947,18 +970,25 @@ bool Application::closeActiveWindow() {
 	if (hideMediaView()) {
 		return true;
 	}
-	if (const auto window = activeWindow()) {
-		window->close();
-		return true;
+	if (!calls().closeCurrentActiveCall()) {
+		if (const auto window = activeWindow()) {
+			if (window->widget()->isVisible()
+				&& window->widget()->isActive()) {
+				window->close();
+				return true;
+			}
+		}
 	}
 	return false;
 }
 
 bool Application::minimizeActiveWindow() {
 	hideMediaView();
-	if (const auto window = activeWindow()) {
-		window->minimize();
-		return true;
+	if (!calls().minimizeCurrentActiveCall()) {
+		if (const auto window = activeWindow()) {
+			window->minimize();
+			return true;
+		}
 	}
 	return false;
 }
@@ -996,7 +1026,7 @@ QPoint Application::getPointForCallPanelCenter() const {
 	if (const auto window = activeWindow()) {
 		return window->getPointForCallPanelCenter();
 	}
-	return QApplication::desktop()->screenGeometry().center();
+	return QGuiApplication::primaryScreen()->geometry().center();
 }
 
 // macOS Qt bug workaround, sometimes no leaveEvent() gets to the nested widgets.

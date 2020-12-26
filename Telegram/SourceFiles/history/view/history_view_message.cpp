@@ -12,6 +12,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/history_message.h"
 #include "history/view/media/history_view_media.h"
 #include "history/view/media/history_view_web_page.h"
+#include "history/view/history_view_group_call_tracker.h" // UserpicInRow.
 #include "history/history.h"
 #include "ui/effects/ripple_animation.h"
 #include "core/application.h"
@@ -266,13 +267,8 @@ style::color FromNameFg(PeerId peerId, bool selected) {
 } // namespace
 
 struct Message::CommentsButton {
-	struct Userpic {
-		not_null<PeerData*> peer;
-		std::shared_ptr<Data::CloudImageView> view;
-		InMemoryKey uniqueKey;
-	};
 	std::unique_ptr<Ui::RippleAnimation> ripple;
-	std::vector<Userpic> userpics;
+	std::vector<UserpicInRow> userpics;
 	QImage cachedUserpics;
 	ClickHandlerPtr link;
 	QPoint lastPoint;
@@ -799,8 +795,8 @@ void Message::paintCommentsButton(
 		auto &list = _comments->userpics;
 		const auto limit = HistoryMessageViews::kMaxRecentRepliers;
 		const auto count = std::min(int(views->recentRepliers.size()), limit);
-		const auto single = st::historyCommentsUserpicSize;
-		const auto shift = st::historyCommentsUserpicOverlap;
+		const auto single = st::historyCommentsUserpics.size;
+		const auto shift = st::historyCommentsUserpics.shift;
 		const auto regenerate = [&] {
 			if (list.size() != count) {
 				return true;
@@ -822,7 +818,7 @@ void Message::paintCommentsButton(
 			for (auto i = 0; i != count; ++i) {
 				const auto peerId = views->recentRepliers[i];
 				if (i == list.size()) {
-					list.push_back(CommentsButton::Userpic{
+					list.push_back(UserpicInRow{
 						history()->owner().peer(peerId)
 					});
 				} else if (list[i].peer->id != peerId) {
@@ -832,31 +828,11 @@ void Message::paintCommentsButton(
 			while (list.size() > count) {
 				list.pop_back();
 			}
-			const auto width = single + (limit - 1) * (single - shift);
-			if (_comments->cachedUserpics.isNull()) {
-				_comments->cachedUserpics = QImage(
-					QSize(width, single) * cIntRetinaFactor(),
-					QImage::Format_ARGB32_Premultiplied);
-			}
-			_comments->cachedUserpics.fill(Qt::transparent);
-			_comments->cachedUserpics.setDevicePixelRatio(cRetinaFactor());
-
-			auto q = Painter(&_comments->cachedUserpics);
-			auto hq = PainterHighQualityEnabler(q);
-			auto pen = QPen(Qt::transparent);
-			pen.setWidth(st::historyCommentsUserpicStroke);
-			auto x = (count - 1) * (single - shift);
-			for (auto i = count; i != 0;) {
-				auto &entry = list[--i];
-				q.setCompositionMode(QPainter::CompositionMode_SourceOver);
-				entry.peer->paintUserpic(q, entry.view, x, 0, single);
-				entry.uniqueKey = entry.peer->userpicUniqueKey(entry.view);
-				q.setCompositionMode(QPainter::CompositionMode_Source);
-				q.setBrush(Qt::NoBrush);
-				q.setPen(pen);
-				q.drawEllipse(x, 0, single, single);
-				x -= single - shift;
-			}
+			GenerateUserpicsInRow(
+				_comments->cachedUserpics,
+				list,
+				st::historyCommentsUserpics,
+				limit);
 		}
 		p.drawImage(
 			left,
@@ -2158,8 +2134,8 @@ int Message::minWidthForMedia() const {
 	const auto views = data()->Get<HistoryMessageViews>();
 	if (data()->repliesAreComments() && !views->replies.text.isEmpty()) {
 		const auto limit = HistoryMessageViews::kMaxRecentRepliers;
-		const auto single = st::historyCommentsUserpicSize;
-		const auto shift = st::historyCommentsUserpicOverlap;
+		const auto single = st::historyCommentsUserpics.size;
+		const auto shift = st::historyCommentsUserpics.shift;
 		const auto added = single
 			+ (limit - 1) * (single - shift)
 			+ st::historyCommentsSkipLeft
