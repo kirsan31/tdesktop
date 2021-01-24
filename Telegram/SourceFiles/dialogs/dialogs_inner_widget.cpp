@@ -1841,7 +1841,7 @@ void InnerWidget::contextMenuEvent(QContextMenuEvent *e) {
 			selectByMouse(globalPosition);
 		}
 	});
-	if (_menu->actions().empty()) {
+	if (_menu->empty()) {
 		_menu = nullptr;
 	} else {
 		_menu->popup(e->globalPos());
@@ -2281,7 +2281,7 @@ void InnerWidget::refreshEmptyLabel() {
 	resizeEmptyLabel();
 	_empty->setClickHandlerFilter([=](const auto &...) {
 		if (_emptyState == EmptyState::NoContacts) {
-			App::wnd()->onShowAddContact();
+			App::wnd()->showAddContact();
 		} else if (_emptyState == EmptyState::EmptyFolder) {
 			editOpenedFilter();
 		}

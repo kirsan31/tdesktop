@@ -5,12 +5,9 @@ the official desktop application for the Telegram messaging service.
 For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
-#ifndef TDESKTOP_DISABLE_GTK_INTEGRATION
 #include "platform/linux/linux_gdk_helper.h"
 
-#include "platform/linux/linux_libs.h"
-#include "base/platform/base_platform_info.h"
-#include "base/platform/linux/base_xcb_utilities_linux.h"
+#include "platform/linux/linux_gtk_integration_p.h"
 
 extern "C" {
 #undef signals
@@ -20,6 +17,8 @@ extern "C" {
 
 namespace Platform {
 namespace internal {
+
+using namespace Platform::Gtk;
 
 enum class GtkLoaded {
 	GtkNone,
@@ -33,6 +32,9 @@ GtkLoaded gdk_helper_loaded = GtkLoaded::GtkNone;
 #define GdkDrawable GdkWindow
 
 // Gtk 2
+using f_gdk_x11_drawable_get_xdisplay = Display*(*)(GdkDrawable*);
+f_gdk_x11_drawable_get_xdisplay gdk_x11_drawable_get_xdisplay = nullptr;
+
 using f_gdk_x11_drawable_get_xid = XID(*)(GdkDrawable*);
 f_gdk_x11_drawable_get_xid gdk_x11_drawable_get_xid = nullptr;
 
@@ -43,24 +45,33 @@ f_gdk_x11_window_get_type gdk_x11_window_get_type = nullptr;
 // To be able to compile with gtk-2.0 headers as well
 template <typename Object>
 inline bool gdk_is_x11_window_check(Object *obj) {
-	return Libs::g_type_cit_helper(obj, gdk_x11_window_get_type());
+	return g_type_cit_helper(obj, gdk_x11_window_get_type());
 }
+
+using f_gdk_window_get_display = GdkDisplay*(*)(GdkWindow *window);
+f_gdk_window_get_display gdk_window_get_display = nullptr;
+
+using f_gdk_x11_display_get_xdisplay = Display*(*)(GdkDisplay *display);
+f_gdk_x11_display_get_xdisplay gdk_x11_display_get_xdisplay = nullptr;
 
 using f_gdk_x11_window_get_xid = Window(*)(GdkWindow *window);
 f_gdk_x11_window_get_xid gdk_x11_window_get_xid = nullptr;
 
 bool GdkHelperLoadGtk2(QLibrary &lib) {
-#if defined DESKTOP_APP_USE_PACKAGED && !defined DESKTOP_APP_USE_PACKAGED_LAZY
+#ifdef LINK_TO_GTK
 	return false;
-#else // DESKTOP_APP_USE_PACKAGED && !DESKTOP_APP_USE_PACKAGED_LAZY
-	if (!LOAD_SYMBOL(lib, "gdk_x11_drawable_get_xid", gdk_x11_drawable_get_xid)) return false;
+#else // LINK_TO_GTK
+	if (!LOAD_GTK_SYMBOL(lib, "gdk_x11_drawable_get_xdisplay", gdk_x11_drawable_get_xdisplay)) return false;
+	if (!LOAD_GTK_SYMBOL(lib, "gdk_x11_drawable_get_xid", gdk_x11_drawable_get_xid)) return false;
 	return true;
-#endif // !DESKTOP_APP_USE_PACKAGED || DESKTOP_APP_USE_PACKAGED_LAZY
+#endif // !LINK_TO_GTK
 }
 
 bool GdkHelperLoadGtk3(QLibrary &lib) {
-	if (!LOAD_SYMBOL(lib, "gdk_x11_window_get_type", gdk_x11_window_get_type)) return false;
-	if (!LOAD_SYMBOL(lib, "gdk_x11_window_get_xid", gdk_x11_window_get_xid)) return false;
+	if (!LOAD_GTK_SYMBOL(lib, "gdk_x11_window_get_type", gdk_x11_window_get_type)) return false;
+	if (!LOAD_GTK_SYMBOL(lib, "gdk_window_get_display", gdk_window_get_display)) return false;
+	if (!LOAD_GTK_SYMBOL(lib, "gdk_x11_display_get_xdisplay", gdk_x11_display_get_xdisplay)) return false;
+	if (!LOAD_GTK_SYMBOL(lib, "gdk_x11_window_get_xid", gdk_x11_window_get_xid)) return false;
 	return true;
 }
 
@@ -79,32 +90,17 @@ bool GdkHelperLoaded() {
 
 void XSetTransientForHint(GdkWindow *window, quintptr winId) {
 	if (gdk_helper_loaded == GtkLoaded::Gtk2) {
-		if (!IsWayland()) {
-			xcb_change_property(
-				base::Platform::XCB::GetConnectionFromQt(),
-				XCB_PROP_MODE_REPLACE,
-				gdk_x11_drawable_get_xid(window),
-				XCB_ATOM_WM_TRANSIENT_FOR,
-				XCB_ATOM_WINDOW,
-				32,
-				1,
-				&winId);
-		}
+		::XSetTransientForHint(gdk_x11_drawable_get_xdisplay(window),
+							   gdk_x11_drawable_get_xid(window),
+							   winId);
 	} else if (gdk_helper_loaded == GtkLoaded::Gtk3) {
-		if (!IsWayland() && gdk_is_x11_window_check(window)) {
-			xcb_change_property(
-				base::Platform::XCB::GetConnectionFromQt(),
-				XCB_PROP_MODE_REPLACE,
-				gdk_x11_window_get_xid(window),
-				XCB_ATOM_WM_TRANSIENT_FOR,
-				XCB_ATOM_WINDOW,
-				32,
-				1,
-				&winId);
+		if (gdk_is_x11_window_check(window)) {
+			::XSetTransientForHint(gdk_x11_display_get_xdisplay(gdk_window_get_display(window)),
+								   gdk_x11_window_get_xid(window),
+								   winId);
 		}
 	}
 }
 
 } // namespace internal
 } // namespace Platform
-#endif // !TDESKTOP_DISABLE_GTK_INTEGRATION

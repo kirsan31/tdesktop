@@ -16,6 +16,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/view/media/history_view_sticker.h"
 #include "history/view/media/history_view_large_emoji.h"
 #include "history/history.h"
+#include "base/unixtime.h"
 #include "core/application.h"
 #include "core/core_settings.h"
 #include "main/main_session.h"
@@ -79,7 +80,7 @@ bool SimpleElementDelegate::elementUnderCursor(
 }
 
 crl::time SimpleElementDelegate::elementHighlightTime(
-	not_null<const Element*> element) {
+		not_null<const HistoryItem*> item) {
 	return crl::time(0);
 }
 
@@ -155,6 +156,40 @@ TextSelection ShiftItemSelection(
 		TextSelection selection,
 		const Ui::Text::String &byText) {
 	return ShiftItemSelection(selection, byText.length());
+}
+
+QString DateTooltipText(not_null<Element*> view) {
+	const auto format = QLocale::system().dateTimeFormat(QLocale::LongFormat);
+	auto dateText = view->dateTime().toString(format);
+	if (const auto editedDate = view->displayedEditDate()) {
+		dateText += '\n' + tr::lng_edited_date(
+			tr::now,
+			lt_date,
+			base::unixtime::parse(editedDate).toString(format));
+	}
+	if (const auto forwarded = view->data()->Get<HistoryMessageForwarded>()) {
+		dateText += '\n' + tr::lng_forwarded_date(
+			tr::now,
+			lt_date,
+			base::unixtime::parse(forwarded->originalDate).toString(format));
+		if (const auto media = view->media()) {
+			if (media->hidesForwardedInfo()) {
+				dateText += '\n' + tr::lng_forwarded(
+					tr::now,
+					lt_user,
+					(forwarded->originalSender
+						? forwarded->originalSender->shortName()
+						: forwarded->hiddenSenderInfo->firstName));
+			}
+		}
+	}
+	if (const auto msgsigned = view->data()->Get<HistoryMessageSigned>()) {
+		if (msgsigned->isElided && !msgsigned->isAnonymousRank) {
+			dateText += '\n'
+				+ tr::lng_signed_author(tr::now, lt_user, msgsigned->author);
+		}
+	}
+	return dateText;
 }
 
 void UnreadBar::init(const QString &string) {
@@ -280,29 +315,44 @@ void Element::refreshDataIdHook() {
 void Element::paintHighlight(
 		Painter &p,
 		int geometryHeight) const {
-	const auto animms = delegate()->elementHighlightTime(this);
-	if (!animms
-		|| animms >= st::activeFadeInDuration + st::activeFadeOutDuration) {
-		return;
-	}
-
 	const auto top = marginTop();
 	const auto bottom = marginBottom();
 	const auto fill = qMin(top, bottom);
 	const auto skiptop = top - fill;
 	const auto fillheight = fill + geometryHeight + fill;
 
-	const auto dt = (animms > st::activeFadeInDuration)
+	paintCustomHighlight(p, skiptop, fillheight, data());
+}
+
+float64 Element::highlightOpacity(not_null<const HistoryItem*> item) const {
+	const auto animms = delegate()->elementHighlightTime(item);
+	if (!animms
+		|| animms >= st::activeFadeInDuration + st::activeFadeOutDuration) {
+		return 0.;
+	}
+
+	return (animms > st::activeFadeInDuration)
 		? (1. - (animms - st::activeFadeInDuration)
 			/ float64(st::activeFadeOutDuration))
 		: (animms / float64(st::activeFadeInDuration));
+}
+
+void Element::paintCustomHighlight(
+		Painter &p,
+		int y,
+		int height,
+		not_null<const HistoryItem*> item) const {
+	const auto opacity = highlightOpacity(item);
+	if (opacity == 0.) {
+		return;
+	}
 	const auto o = p.opacity();
-	p.setOpacity(o * dt);
+	p.setOpacity(o * opacity);
 	p.fillRect(
 		0,
-		skiptop,
+		y,
 		width(),
-		fillheight,
+		height,
 		st::defaultTextPalette.selectOverlay);
 	p.setOpacity(o);
 }

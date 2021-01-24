@@ -74,6 +74,7 @@ parts:
       - libasound2-dev
       - libglib2.0-dev
       - libgtk-3-dev
+      - libkf5wayland-dev
       - liblzma-dev
       - libopus-dev
       - libpulse-dev
@@ -90,6 +91,7 @@ parts:
       - libasound2
       - libglib2.0-0
       - libgtk-3-0
+      - libkf5waylandclient5
       - liblzma5
       - libopus0
       - libpulse0
@@ -212,9 +214,9 @@ parts:
       - -./usr/share
 
   openal:
-    source: https://github.com/kcat/openal-soft.git
+    source: https://github.com/telegramdesktop/openal-soft.git
     source-depth: 1
-    source-tag: openal-soft-1.21.0
+    source-branch: fix_pulse_default
     plugin: cmake
     build-packages:
       - libasound2-dev
@@ -251,7 +253,7 @@ parts:
   webrtc:
     source: https://github.com/desktop-app/tg_owt.git
     source-depth: 1
-    source-commit: 75ac66937341d8a9207375aaee79b4bdc500146c
+    source-commit: ace538a7dfe0fe5fc735f258ba49e7420a5d10b0
     plugin: cmake
     build-packages:
       - yasm

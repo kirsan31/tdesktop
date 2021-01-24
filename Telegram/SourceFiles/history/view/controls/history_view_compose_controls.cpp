@@ -1410,7 +1410,10 @@ void ComposeControls::initTabbedSelector() {
 	selector->inlineResultChosen(
 	) | rpl::start_to_stream(_inlineResultChosen, wrap->lifetime());
 
-	selector->setSendMenuType([=] { return sendMenuType(); });
+	selector->contextMenuRequested(
+	) | rpl::start_with_next([=] {
+		selector->showMenuWithType(sendMenuType());
+	}, wrap->lifetime());
 }
 
 void ComposeControls::initSendButton() {
@@ -1814,7 +1817,7 @@ void ComposeControls::editMessage(not_null<HistoryItem*> item) {
 	Expects(_history != nullptr);
 	Expects(draftKeyCurrent() != Data::DraftKey::None());
 
-	if (_voiceRecordBar && _voiceRecordBar->isListenState()) {
+	if (_voiceRecordBar->isActive()) {
 		Ui::show(Box<InformBox>(tr::lng_edit_caption_voice(tr::now)));
 		return;
 	}

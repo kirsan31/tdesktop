@@ -8,14 +8,16 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #pragma once
 
 #include "platform/platform_main_window.h"
+#include "base/unique_qptr.h"
 
-#include "ui/widgets/popup_menu.h"
+namespace Ui {
+class PopupMenu;
+} // namespace Ui
 
 #ifndef DESKTOP_APP_DISABLE_DBUS_INTEGRATION
-#include "statusnotifieritem.h"
-#include <QtCore/QTemporaryFile>
-#include <QtDBus/QDBusObjectPath>
-#include <dbusmenuexporter.h>
+class QTemporaryFile;
+class DBusMenuExporter;
+class StatusNotifierItem;
 
 typedef void* gpointer;
 typedef char gchar;
@@ -42,7 +44,7 @@ public:
 		return _sniAvailable || QSystemTrayIcon::isSystemTrayAvailable();
 	}
 
-	static void LibsLoaded();
+	bool isActiveForTrayMenu() override;
 
 	~MainWindow();
 
@@ -74,7 +76,7 @@ protected:
 
 private:
 	bool _sniAvailable = false;
-	Ui::PopupMenu *_trayIconMenuXEmbed = nullptr;
+	base::unique_qptr<Ui::PopupMenu> _trayIconMenuXEmbed;
 
 	void updateIconCounters();
 	void updateWaylandDecorationColors();
@@ -82,11 +84,10 @@ private:
 #ifndef DESKTOP_APP_DISABLE_DBUS_INTEGRATION
 	StatusNotifierItem *_sniTrayIcon = nullptr;
 	GDBusProxy *_sniDBusProxy = nullptr;
-	std::unique_ptr<QTemporaryFile> _trayIconFile = nullptr;
+	std::unique_ptr<QTemporaryFile> _trayIconFile;
 
 	bool _appMenuSupported = false;
 	DBusMenuExporter *_mainMenuExporter = nullptr;
-	QDBusObjectPath _mainMenuPath;
 
 	QMenu *psMainMenu = nullptr;
 	QAction *psLogout = nullptr;

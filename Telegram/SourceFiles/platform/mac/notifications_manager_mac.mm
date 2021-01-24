@@ -162,11 +162,16 @@ bool Supported() {
 	return Platform::IsMac10_8OrGreater();
 }
 
-std::unique_ptr<Window::Notifications::Manager> Create(Window::Notifications::System *system) {
+bool Enforced() {
+	return Supported();
+}
+
+void Create(Window::Notifications::System *system) {
 	if (Supported()) {
-		return std::make_unique<Manager>(system);
+		system->setManager(std::make_unique<Manager>(system));
+	} else {
+		system->setManager(nullptr);
 	}
-	return nullptr;
 }
 
 class Manager::Private : public QObject, private base::Subscriber {

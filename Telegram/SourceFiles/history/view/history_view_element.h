@@ -51,7 +51,7 @@ public:
 		Element *replacing = nullptr) = 0;
 	virtual bool elementUnderCursor(not_null<const Element*> view) = 0;
 	virtual crl::time elementHighlightTime(
-		not_null<const Element*> element) = 0;
+		not_null<const HistoryItem*> item) = 0;
 	virtual bool elementInSelectionMode() = 0;
 	virtual bool elementIntersectsRange(
 		not_null<const Element*> view,
@@ -87,7 +87,7 @@ public:
 		Element *replacing = nullptr) override;
 	bool elementUnderCursor(not_null<const Element*> view) override;
 	crl::time elementHighlightTime(
-		not_null<const Element*> element) override;
+		not_null<const HistoryItem*> item) override;
 	bool elementInSelectionMode() override;
 	bool elementIntersectsRange(
 		not_null<const Element*> view,
@@ -125,6 +125,8 @@ TextSelection UnshiftItemSelection(
 TextSelection ShiftItemSelection(
 	TextSelection selection,
 	const Ui::Text::String &byText);
+
+QString DateTooltipText(not_null<Element*> view);
 
 // Any HistoryView::Element can have this Component for
 // displaying the unread messages bar above the message.
@@ -300,6 +302,13 @@ public:
 	virtual bool hasHeavyPart() const;
 	virtual void unloadHeavyPart();
 	void checkHeavyPart();
+
+	void paintCustomHighlight(
+		Painter &p,
+		int y,
+		int height,
+		not_null<const HistoryItem*> item) const;
+	float64 highlightOpacity(not_null<const HistoryItem*> item) const;
 
 	// Legacy blocks structure.
 	HistoryBlock *block();
