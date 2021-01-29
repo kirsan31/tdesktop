@@ -979,7 +979,7 @@ void HistoryWidget::animatedScrollToItem(MsgId msgId) {
 		return;
 	}
 
-	auto scrollTo = snap(
+	auto scrollTo = std::clamp(
 		itemTopForHighlight(to->mainView()),
 		0,
 		_scroll->scrollTopMax());
@@ -1330,7 +1330,7 @@ void HistoryWidget::fieldChanged() {
 	}
 
 	updateSendButtonType();
-	if (showRecordButton()) {
+	if (!HasSendText(_field)) {
 		_previewCancelled = false;
 	}
 	if (updateCmdStartShown()) {
@@ -5756,19 +5756,23 @@ void HistoryWidget::editMessage(not_null<HistoryItem*> item) {
 		editData.text.size(),
 		QFIXED_MAX
 	};
+	const auto previewPage = [&]() -> WebPageData* {
+		if (const auto media = item->media()) {
+			return media->webpage();
+		}
+		return nullptr;
+	}();
+	const auto previewCancelled = !previewPage;
 	_history->setLocalEditDraft(std::make_unique<Data::Draft>(
 		editData,
 		item->id,
 		cursor,
-		false));
+		previewCancelled));
 	applyDraft();
 
-	_previewData = nullptr;
-	if (const auto media = item->media()) {
-		if (const auto page = media->webpage()) {
-			_previewData = page;
-			updatePreview();
-		}
+	_previewData = previewPage;
+	if (_previewData) {
+		updatePreview();
 	}
 
 	updateBotKeyboard();
@@ -6699,7 +6703,8 @@ void HistoryWidget::noSelectingScroll() {
 }
 
 bool HistoryWidget::touchScroll(const QPoint &delta) {
-	int32 scTop = _scroll->scrollTop(), scMax = _scroll->scrollTopMax(), scNew = snap(scTop - delta.y(), 0, scMax);
+	int32 scTop = _scroll->scrollTop(), scMax = _scroll->scrollTopMax();
+	const auto scNew = std::clamp(scTop - delta.y(), 0, scMax);
 	if (scNew == scTop) return false;
 
 	_scroll->scrollToY(scNew);

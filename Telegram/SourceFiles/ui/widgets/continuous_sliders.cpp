@@ -50,6 +50,10 @@ QRect ContinuousSlider::getSeekRect() const {
 		: QRect(0, decrease.height() / 2, width(), height() - decrease.width());
 }
 
+float64 ContinuousSlider::value() const {
+	return getCurrentValue();
+}
+
 void ContinuousSlider::setValue(float64 value) {
 	setValue(value, -1);
 }
@@ -78,7 +82,7 @@ float64 ContinuousSlider::computeValue(const QPoint &pos) const {
 	const auto result = isHorizontal() ?
 		(pos.x() - seekRect.x()) / float64(seekRect.width()) :
 		(1. - (pos.y() - seekRect.y()) / float64(seekRect.height()));
-	const auto snapped = snap(result, 0., 1.);
+	const auto snapped = std::clamp(result, 0., 1.);
 	return _adjustCallback ? _adjustCallback(snapped) : snapped;
 }
 
@@ -120,7 +124,7 @@ void ContinuousSlider::wheelEvent(QWheelEvent *e) {
 		deltaX *= -1;
 	}
 	auto delta = (qAbs(deltaX) > qAbs(deltaY)) ? deltaX : deltaY;
-	auto finalValue = snap(_value + delta * coef, 0., 1.);
+	auto finalValue = std::clamp(_value + delta * coef, 0., 1.);
 	setValue(finalValue);
 	if (_changeProgressCallback) {
 		_changeProgressCallback(finalValue);

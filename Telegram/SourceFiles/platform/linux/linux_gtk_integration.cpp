@@ -207,12 +207,28 @@ bool CursorSizeShouldBeSet() {
 	return Result;
 }
 
+void SetScaleFactor() {
+	Core::Sandbox::Instance().customEnterFromEventLoop([] {
+		const auto integration = GtkIntegration::Instance();
+		const auto ratio = Core::Sandbox::Instance().devicePixelRatio();
+		if (!integration || ratio > 1.) {
+			return;
+		}
+
+		const auto scaleFactor = integration->scaleFactor().value_or(1);
+		if (scaleFactor == 1) {
+			return;
+		}
+
+		LOG(("GTK scale factor: %1").arg(scaleFactor));
+		cSetScreenScale(style::CheckScale(scaleFactor * 100));
+	});
+}
+
 void SetIconTheme() {
 	Core::Sandbox::Instance().customEnterFromEventLoop([] {
 		const auto integration = GtkIntegration::Instance();
-
-		if (!integration
-			|| !IconThemeShouldBeSet()) {
+		if (!integration || !IconThemeShouldBeSet()) {
 			return;
 		}
 
@@ -247,9 +263,7 @@ void SetIconTheme() {
 void SetCursorSize() {
 	Core::Sandbox::Instance().customEnterFromEventLoop([] {
 		const auto integration = GtkIntegration::Instance();
-
-		if (!integration
-			|| !CursorSizeShouldBeSet()) {
+		if (!integration || !CursorSizeShouldBeSet()) {
 			return;
 		}
 
@@ -297,6 +311,7 @@ GtkIntegration *GtkIntegration::Instance() {
 }
 
 void GtkIntegration::load() {
+	Expects(!GtkLoaded);
 	DEBUG_LOG(("Loading GTK"));
 
 	QLibrary lib_gtk;
@@ -312,6 +327,11 @@ void GtkIntegration::load() {
 	}
 
 	if (GtkLoaded) {
+		LOAD_GTK_SYMBOL(lib_gtk, "gdk_display_get_default", gdk_display_get_default);
+		LOAD_GTK_SYMBOL(lib_gtk, "gdk_display_get_monitor", gdk_display_get_monitor);
+		LOAD_GTK_SYMBOL(lib_gtk, "gdk_display_get_primary_monitor", gdk_display_get_primary_monitor);
+		LOAD_GTK_SYMBOL(lib_gtk, "gdk_monitor_get_scale_factor", gdk_monitor_get_scale_factor);
+
 		LOAD_GTK_SYMBOL(lib_gtk, "gdk_pixbuf_new_from_file_at_size", gdk_pixbuf_new_from_file_at_size);
 		LOAD_GTK_SYMBOL(lib_gtk, "gdk_pixbuf_get_has_alpha", gdk_pixbuf_get_has_alpha);
 		LOAD_GTK_SYMBOL(lib_gtk, "gdk_pixbuf_get_pixels", gdk_pixbuf_get_pixels);
@@ -329,6 +349,7 @@ void GtkIntegration::load() {
 		LOAD_GTK_SYMBOL(lib_gtk, "gtk_app_chooser_get_app_info", gtk_app_chooser_get_app_info);
 		LOAD_GTK_SYMBOL(lib_gtk, "gtk_app_chooser_get_type", gtk_app_chooser_get_type);
 
+		SetScaleFactor();
 		SetIconTheme();
 		SetCursorSize();
 
@@ -415,6 +436,34 @@ std::optional<QString> GtkIntegration::getStringSetting(
 	g_free(*value);
 	DEBUG_LOG(("Getting GTK setting, %1: '%2'").arg(propertyName).arg(str));
 	return str;
+}
+
+std::optional<int> GtkIntegration::scaleFactor() const {
+	if (!loaded()
+		|| (gdk_display_get_default == nullptr)
+		|| (gdk_display_get_monitor == nullptr)
+		|| (gdk_display_get_primary_monitor == nullptr)
+		|| (gdk_monitor_get_scale_factor == nullptr)) {
+		return std::nullopt;
+	}
+
+	const auto display = gdk_display_get_default();
+	if (!display) {
+		return std::nullopt;
+	}
+
+	const auto monitor = [&] {
+		if (const auto primary = gdk_display_get_primary_monitor(display)) {
+			return primary;
+		}
+		return gdk_display_get_monitor(display, 0);
+	}();
+
+	if (!monitor) {
+		return std::nullopt;
+	}
+
+	return gdk_monitor_get_scale_factor(monitor);
 }
 
 bool GtkIntegration::fileDialogSupported() const {

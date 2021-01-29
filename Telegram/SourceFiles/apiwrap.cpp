@@ -10,6 +10,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "api/api_authorizations.h"
 #include "api/api_attached_stickers.h"
 #include "api/api_hash.h"
+#include "api/api_invite_links.h"
 #include "api/api_media.h"
 #include "api/api_sending.h"
 #include "api/api_text_entities.h"
@@ -194,7 +195,8 @@ ApiWrap::ApiWrap(not_null<Main::Session*> session)
 , _attachedStickers(std::make_unique<Api::AttachedStickers>(this))
 , _selfDestruct(std::make_unique<Api::SelfDestruct>(this))
 , _sensitiveContent(std::make_unique<Api::SensitiveContent>(this))
-, _globalPrivacy(std::make_unique<Api::GlobalPrivacy>(this)) {
+, _globalPrivacy(std::make_unique<Api::GlobalPrivacy>(this))
+, _inviteLinks(std::make_unique<Api::InviteLinks>(this)) {
 	crl::on_main(session, [=] {
 		// You can't use _session->lifetime() in the constructor,
 		// only queued, because it is not constructed yet.
@@ -354,7 +356,7 @@ void ApiWrap::requestTermsUpdate() {
 
 		const auto requestNext = [&](auto &&data) {
 			const auto timeout = (data.vexpires().v - base::unixtime::now());
-			_termsUpdateSendAt = crl::now() + snap(
+			_termsUpdateSendAt = crl::now() + std::clamp(
 				timeout * crl::time(1000),
 				kTermsUpdateTimeoutMin,
 				kTermsUpdateTimeoutMax);
@@ -1712,6 +1714,7 @@ void ApiWrap::kickParticipant(
 		not_null<ChatData*> chat,
 		not_null<UserData*> user) {
 	request(MTPmessages_DeleteChatUser(
+		MTP_flags(0),
 		chat->inputChat,
 		user->inputUser
 	)).done([=](const MTPUpdates &result) {
@@ -2120,33 +2123,6 @@ void ApiWrap::unblockPeer(not_null<PeerData*> peer, Fn<void()> onDone) {
 	_blockRequests.emplace(peer, requestId);
 }
 
-void ApiWrap::exportInviteLink(not_null<PeerData*> peer) {
-	if (_exportInviteRequests.find(peer) != end(_exportInviteRequests)) {
-		return;
-	}
-
-	const auto requestId = [&] {
-		return request(MTPmessages_ExportChatInvite(
-			peer->input
-		)).done([=](const MTPExportedChatInvite &result) {
-			_exportInviteRequests.erase(peer);
-			const auto link = (result.type() == mtpc_chatInviteExported)
-				? qs(result.c_chatInviteExported().vlink())
-				: QString();
-			if (const auto chat = peer->asChat()) {
-				chat->setInviteLink(link);
-			} else if (const auto channel = peer->asChannel()) {
-				channel->setInviteLink(link);
-			} else {
-				Unexpected("Peer in ApiWrap::exportInviteLink.");
-			}
-		}).fail([=](const RPCError &error) {
-			_exportInviteRequests.erase(peer);
-		}).send();
-	}();
-	_exportInviteRequests.emplace(peer, requestId);
-}
-
 void ApiWrap::requestNotifySettings(const MTPInputNotifyPeer &peer) {
 	const auto key = [&] {
 		switch (peer.type()) {
@@ -2329,6 +2305,7 @@ void ApiWrap::clearHistory(not_null<PeerData*> peer, bool revoke) {
 void ApiWrap::deleteConversation(not_null<PeerData*> peer, bool revoke) {
 	if (const auto chat = peer->asChat()) {
 		request(MTPmessages_DeleteChatUser(
+			MTP_flags(0),
 			chat->inputChat,
 			_session->user()->inputUser
 		)).done([=](const MTPUpdates &result) {
@@ -2373,14 +2350,14 @@ void ApiWrap::deleteHistory(
 		deleteTillId = history->lastMessage()->id;
 	}
 	if (const auto channel = peer->asChannel()) {
-		if (!justClear) {
+		if (!justClear && !revoke) {
 			channel->ptsWaitingForShortPoll(-1);
 			leaveChannel(channel);
 		} else {
 			if (const auto migrated = peer->migrateFrom()) {
 				deleteHistory(migrated, justClear, revoke);
 			}
-			if (IsServerMsgId(deleteTillId)) {
+			if (IsServerMsgId(deleteTillId) || (!justClear && revoke)) {
 				history->owner().histories().deleteAllMessages(
 					history,
 					deleteTillId,
@@ -2409,10 +2386,10 @@ void ApiWrap::applyUpdates(
 }
 
 int ApiWrap::applyAffectedHistory(
-		not_null<PeerData*> peer,
+		PeerData *peer,
 		const MTPmessages_AffectedHistory &result) {
 	const auto &data = result.c_messages_affectedHistory();
-	if (const auto channel = peer->asChannel()) {
+	if (const auto channel = peer ? peer->asChannel() : nullptr) {
 		channel->ptsUpdateAndApply(data.vpts().v, data.vpts_count().v);
 	} else {
 		updates().updateAndApply(data.vpts().v, data.vpts_count().v);
@@ -4025,7 +4002,7 @@ void ApiWrap::forwardMessages(
 	ids.reserve(count);
 	randomIds.reserve(count);
 	for (const auto item : items) {
-		const auto randomId = rand_value<uint64>();
+		const auto randomId = openssl::RandomValue<uint64>();
 		if (genClientSideMessage) {
 			if (const auto message = item->toHistoryMessage()) {
 				const auto newId = FullMsgId(
@@ -4364,7 +4341,7 @@ void ApiWrap::sendMessage(MessageToSend &&message) {
 		auto newId = FullMsgId(
 			peerToChannel(peer->id),
 			_session->data().nextLocalMessageId());
-		auto randomId = rand_value<uint64>();
+		auto randomId = openssl::RandomValue<uint64>();
 
 		TextUtilities::Trim(sending);
 
@@ -4497,7 +4474,7 @@ void ApiWrap::sendBotStart(not_null<UserData*> bot, PeerData *chat) {
 		sendMessage(std::move(message));
 		return;
 	}
-	const auto randomId = rand_value<uint64>();
+	const auto randomId = openssl::RandomValue<uint64>();
 	request(MTPmessages_StartBot(
 		bot->inputUser,
 		chat ? chat->input : MTP_inputPeerEmpty(),
@@ -4523,7 +4500,7 @@ void ApiWrap::sendInlineResult(
 	const auto newId = FullMsgId(
 		peerToChannel(peer->id),
 		_session->data().nextLocalMessageId());
-	const auto randomId = rand_value<uint64>();
+	const auto randomId = openssl::RandomValue<uint64>();
 
 	auto flags = NewMessageFlags(peer) | MTPDmessage::Flag::f_media;
 	auto clientFlags = NewMessageClientFlags();
@@ -4675,7 +4652,7 @@ void ApiWrap::sendMedia(
 		not_null<HistoryItem*> item,
 		const MTPInputMedia &media,
 		Api::SendOptions options) {
-	const auto randomId = rand_value<uint64>();
+	const auto randomId = openssl::RandomValue<uint64>();
 	_session->data().registerMessageRandomId(randomId, item->fullId());
 
 	sendMediaWithRandomId(item, media, options, randomId);
@@ -4743,7 +4720,7 @@ void ApiWrap::sendAlbumWithUploaded(
 		const MessageGroupId &groupId,
 		const MTPInputMedia &media) {
 	const auto localId = item->fullId();
-	const auto randomId = rand_value<uint64>();
+	const auto randomId = openssl::RandomValue<uint64>();
 	_session->data().registerMessageRandomId(randomId, localId);
 
 	const auto albumIt = _sendingAlbums.find(groupId.raw());
@@ -5256,6 +5233,10 @@ Api::GlobalPrivacy &ApiWrap::globalPrivacy() {
 	return *_globalPrivacy;
 }
 
+Api::InviteLinks &ApiWrap::inviteLinks() {
+	return *_inviteLinks;
+}
+
 void ApiWrap::createPoll(
 		const PollData &data,
 		const SendAction &action,
@@ -5291,7 +5272,7 @@ void ApiWrap::createPoll(
 			MTP_int(replyTo),
 			PollDataToInputMedia(&data),
 			MTP_string(),
-			MTP_long(rand_value<uint64>()),
+			MTP_long(openssl::RandomValue<uint64>()),
 			MTPReplyMarkup(),
 			MTPVector<MTPMessageEntity>(),
 			MTP_int(action.options.scheduled)

@@ -149,10 +149,16 @@ void GetInhibitionSupported(Fn<void(bool)> callback) {
 	const auto async = QDBusConnection::sessionBus().asyncCall(message);
 	auto watcher = new QDBusPendingCallWatcher(async);
 
+	static const auto DontLogErrors = {
+		QDBusError::NoError,
+		QDBusError::InvalidArgs,
+		QDBusError::UnknownProperty,
+	};
+
 	const auto finished = [=](QDBusPendingCallWatcher *call) {
 		const auto error = QDBusPendingReply<QVariant>(*call).error();
 
-		if (error.isValid() && error.type() != QDBusError::InvalidArgs) {
+		if (!ranges::contains(DontLogErrors, error.type())) {
 			LOG(("Native Notification Error: %1: %2")
 				.arg(error.name())
 				.arg(error.message()));
@@ -692,7 +698,11 @@ bool Supported() {
 bool Enforced() {
 	// Wayland doesn't support positioning
 	// and custom notifications don't work here
-	return IsQualifiedDaemon() || IsWayland();
+	return IsWayland();
+}
+
+bool ByDefault() {
+	return IsQualifiedDaemon();
 }
 
 void Create(Window::Notifications::System *system) {
@@ -712,39 +722,42 @@ void Create(Window::Notifications::System *system) {
 		}
 	};
 
+	if (!ServiceRegistered) {
+		CurrentServerInformation = std::nullopt;
+		CurrentCapabilities = QStringList{};
+		InhibitionSupported = false;
+		managerSetter();
+		return;
+	}
+
+	// There are some asserts that manager is not nullptr,
+	// avoid crashes until some real manager is created
 	if (!system->managerType().has_value()) {
 		using DummyManager = Window::Notifications::DummyManager;
 		system->setManager(std::make_unique<DummyManager>(system));
 	}
 
-	if (ServiceRegistered) {
-		const auto counter = std::make_shared<int>(3);
-		const auto oneReady = [=] {
-			if (!--*counter) {
-				managerSetter();
-			}
-		};
+	const auto counter = std::make_shared<int>(3);
+	const auto oneReady = [=] {
+		if (!--*counter) {
+			managerSetter();
+		}
+	};
 
-		GetServerInformation([=](std::optional<ServerInformation> result) {
-			CurrentServerInformation = result;
-			oneReady();
-		});
+	GetServerInformation([=](std::optional<ServerInformation> result) {
+		CurrentServerInformation = result;
+		oneReady();
+	});
 
-		GetCapabilities([=](QStringList result) {
-			CurrentCapabilities = result;
-			oneReady();
-		});
+	GetCapabilities([=](QStringList result) {
+		CurrentCapabilities = result;
+		oneReady();
+	});
 
-		GetInhibitionSupported([=](bool result) {
-			InhibitionSupported = result;
-			oneReady();
-		});
-	} else {
-		CurrentServerInformation = std::nullopt;
-		CurrentCapabilities = QStringList{};
-		InhibitionSupported = false;
-		managerSetter();
-	}
+	GetInhibitionSupported([=](bool result) {
+		InhibitionSupported = result;
+		oneReady();
+	});
 }
 
 class Manager::Private {
