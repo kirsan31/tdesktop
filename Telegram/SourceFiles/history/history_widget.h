@@ -25,6 +25,10 @@ struct SendingAlbum;
 enum class SendMediaType;
 class MessageLinksParser;
 
+namespace Data {
+enum class PreviewState : char;
+} // namespace Data
+
 namespace SendMenu {
 enum class Type;
 } // namespace SendMenu
@@ -620,7 +624,7 @@ private:
 	Ui::Text::String _previewTitle;
 	Ui::Text::String _previewDescription;
 	base::Timer _previewTimer;
-	bool _previewCancelled = false;
+	Data::PreviewState _previewState = Data::PreviewState();
 
 	bool _replyForwardPressed = false;
 
