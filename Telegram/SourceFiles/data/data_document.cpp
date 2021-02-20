@@ -48,6 +48,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QGuiApplication>
 #include "app.h"
 
+#include <QtCore/QBuffer>
+
 namespace {
 
 const auto kAnimatedStickerDimensions = QSize(
@@ -321,25 +323,33 @@ void DocumentOpenClickHandler::Open(
 		return;
 	}
 
-	const auto openFile = [&] {
+	const auto media = data->createMediaView();
+	const auto openImageInApp = [&] {
+		if (data->size >= App::kImageSizeLimit) {
+			return false;
+		}
 		const auto &location = data->location(true);
-		if (data->size < App::kImageSizeLimit && location.accessEnable()) {
+		if (!location.isEmpty() && location.accessEnable()) {
 			const auto guard = gsl::finally([&] {
 				location.accessDisable();
 			});
-			if (data->isHtmlFile() && !QGuiApplication::keyboardModifiers().testFlag(Qt::ControlModifier)) { // if Ctrl+Clicked - use system app
-				Core::App().showHtmlDocument(location.name());
-				return;
-			}
 			const auto path = location.name();
-			if (Core::MimeTypeForFile(path).name().startsWith("image/") && QImageReader(path).canRead()) {
+			if (Core::MimeTypeForFile(path).name().startsWith("image/")
+				&& QImageReader(path).canRead()) {
 				Core::App().showDocument(data, context);
-				return;
+				return true;
+			}
+		} else if (data->mimeString().startsWith("image/")
+			&& !media->bytes().isEmpty()) {
+			auto bytes = media->bytes();
+			auto buffer = QBuffer(&bytes);
+			if (QImageReader(&buffer).canRead()) {
+				Core::App().showDocument(data, context);
+				return true;
 			}
 		}
-		LaunchWithWarning(&data->session(), location.name(), context);
+		return false;
 	};
-	const auto media = data->createMediaView();
 	const auto &location = data->location(true);
 	if (data->isTheme() && media->loaded(true)) {
 		Core::App().showDocument(data, context);
@@ -357,11 +367,18 @@ void DocumentOpenClickHandler::Open(
 		} else {
 			Core::App().showDocument(data, context, QGuiApplication::keyboardModifiers().testFlag(Qt::ControlModifier));
 		}
-	} else if (data->saveFromDataSilent()) {
-		openFile();
-	} else if (data->status == FileReady
-		|| data->status == FileDownloadFailed) {
-		DocumentSaveClickHandler::Save(origin, data);
+	} else {
+		data->saveFromDataSilent();
+		if (!openImageInApp()) {
+			if (data->isHtmlFile() && !QGuiApplication::keyboardModifiers().testFlag(Qt::ControlModifier)) { // if Ctrl+Clicked - use system app
+				Core::App().showHtmlDocument(location.name());
+			} else if (!data->filepath(true).isEmpty()) {
+				LaunchWithWarning(&data->session(), location.name(), context);
+			} else if (data->status == FileReady
+				|| data->status == FileDownloadFailed) {
+				DocumentSaveClickHandler::Save(origin, data);
+			}
+		}
 	}
 }
 

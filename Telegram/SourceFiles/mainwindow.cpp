@@ -32,7 +32,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_domain.h"
 #include "mainwidget.h"
 #include "boxes/confirm_box.h"
-#include "boxes/add_contact_box.h"
 #include "boxes/connection_box.h"
 #include "storage/storage_account.h"
 #include "storage/localstorage.h"
@@ -171,7 +170,7 @@ void MainWindow::createTrayIconMenu() {
 void MainWindow::applyInitialWorkMode() {
 	Global::RefWorkMode().setForced(Global::WorkMode().value(), true);
 
-	if (cWindowPos().maximized) {
+	if (Core::App().settings().windowPosition().maximized) {
 		DEBUG_LOG(("Window Pos: First show, setting maximized."));
 		setWindowState(Qt::WindowMaximized);
 	}
@@ -290,6 +289,11 @@ void MainWindow::setupIntro(Intro::EnterPoint point) {
 
 	destroyLayer();
 	auto created = object_ptr<Intro::Widget>(bodyWidget(), &account(), point);
+	created->showSettingsRequested(
+	) | rpl::start_with_next([=] {
+		showSettings();
+	}, created->lifetime());
+
 	clearWidgets();
 	_intro = std::move(created);
 	if (_passcodeLock) {
@@ -343,9 +347,6 @@ void MainWindow::setupMain() {
 }
 
 void MainWindow::showSettings() {
-	if (isHidden()) {
-		showFromTray();
-	}
 	if (_passcodeLock) {
 		return;
 	}
@@ -667,75 +668,6 @@ void MainWindow::updateTrayMenu(bool force) {
 	notificationAction->setText(notificationActionText);
 
 	psTrayMenuUpdated();
-}
-
-void MainWindow::showAddContact() {
-	if (isHidden()) {
-		showFromTray();
-	}
-
-	if (const auto controller = sessionController()) {
-		Ui::show(
-			Box<AddContactBox>(&controller->session()),
-			Ui::LayerOption::KeepOther);
-	}
-}
-
-void MainWindow::showNewGroup() {
-	if (isHidden()) {
-		showFromTray();
-	}
-
-	if (const auto controller = sessionController()) {
-		Ui::show(
-			Box<GroupInfoBox>(controller, GroupInfoBox::Type::Group),
-			Ui::LayerOption::KeepOther);
-	}
-}
-
-void MainWindow::showNewChannel() {
-	if (isHidden()) {
-		showFromTray();
-	}
-
-	if (const auto controller = sessionController()) {
-		Ui::show(
-			Box<GroupInfoBox>(controller, GroupInfoBox::Type::Channel),
-			Ui::LayerOption::KeepOther);
-	}
-}
-
-void MainWindow::showLogoutConfirmation() {
-	if (isHidden()) {
-		showFromTray();
-	}
-
-	const auto account = Core::App().passcodeLocked()
-		? nullptr
-		: sessionController()
-		? &sessionController()->session().account()
-		: nullptr;
-	const auto weak = base::make_weak(account);
-	const auto callback = [=] {
-		if (account && !weak) {
-			return;
-		}
-		if (account
-			&& account->sessionExists()
-			&& Core::App().exportManager().inProgress(&account->session())) {
-			Ui::hideLayer();
-			Core::App().exportManager().stopWithConfirmation([=] {
-				Core::App().logout(account);
-			});
-		} else {
-			Core::App().logout(account);
-		}
-	};
-	Ui::show(Box<ConfirmBox>(
-		tr::lng_sure_logout(tr::now),
-		tr::lng_settings_logout(tr::now),
-		st::attentionBoxButton,
-		callback));
 }
 
 bool MainWindow::takeThirdSectionFromLayer() {

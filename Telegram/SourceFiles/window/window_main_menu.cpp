@@ -616,7 +616,7 @@ MainMenu::MainMenu(
 		qsl("https://github.com/kirsan31/tdesktop")));
 	_telegram->setLinksTrusted();
 	_version->setRichText(textcmdLink(1, tr::lng_settings_current_version(tr::now, lt_version, currentVersionText())) + QChar(' ') + QChar(8211) + QChar(' ') + textcmdLink(2, tr::lng_menu_about(tr::now)));
-	_version->setLink(1, std::make_shared<UrlClickHandler>(qsl("https://desktop.telegram.org/changelog")));
+	_version->setLink(1, std::make_shared<UrlClickHandler>(Core::App().changelogLink()));
 	_version->setLink(2, std::make_shared<LambdaClickHandler>([] { Ui::show(Box<AboutBox>()); }));
 
 	_controller->session().downloaderTaskFinished(
@@ -894,13 +894,13 @@ void MainMenu::parentResized() {
 
 void MainMenu::refreshMenu() {
 	_menu->clearActions();
+	const auto controller = _controller;
 	if (!_controller->session().supportMode()) {
-		const auto controller = _controller;
-		_menu->addAction(tr::lng_create_group_title(tr::now), [] {
-			App::wnd()->showNewGroup();
+		_menu->addAction(tr::lng_create_group_title(tr::now), [=] {
+			controller->showNewGroup();
 		}, &st::mainMenuNewGroup, &st::mainMenuNewGroupOver);
-		_menu->addAction(tr::lng_create_channel_title(tr::now), [] {
-			App::wnd()->showNewChannel();
+		_menu->addAction(tr::lng_create_channel_title(tr::now), [=] {
+			controller->showNewChannel();
 		}, &st::mainMenuNewChannel, &st::mainMenuNewChannelOver);
 		_menu->addAction(tr::lng_menu_contacts(tr::now), [=] {
 			Ui::show(PrepareContactsBox(controller));
@@ -911,8 +911,8 @@ void MainMenu::refreshMenu() {
 			}, &st::mainMenuCalls, &st::mainMenuCallsOver);
 		}
 	} else {
-		_menu->addAction(tr::lng_profile_add_contact(tr::now), [] {
-			App::wnd()->showAddContact();
+		_menu->addAction(tr::lng_profile_add_contact(tr::now), [=] {
+			controller->showAddContact();
 		}, &st::mainMenuContacts, &st::mainMenuContactsOver);
 
 		const auto fix = std::make_shared<QPointer<QAction>>();
@@ -930,8 +930,8 @@ void MainMenu::refreshMenu() {
 			_controller->session().supportTemplates().reload();
 		}, &st::mainMenuReload, &st::mainMenuReloadOver);
 	}
-	_menu->addAction(tr::lng_menu_settings(tr::now), [] {
-		App::wnd()->showSettings();
+	_menu->addAction(tr::lng_menu_settings(tr::now), [=] {
+		controller->showSettings();
 	}, &st::mainMenuSettings, &st::mainMenuSettingsOver);
 
 	_nightThemeAction = std::make_shared<QPointer<QAction>>();

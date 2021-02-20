@@ -53,9 +53,6 @@ public:
 	void setupMain();
 
 	void showSettings();
-	void showAddContact();
-	void showNewGroup();
-	void showNewChannel();
 
 	void setInnerFocus();
 
@@ -105,8 +102,6 @@ public:
 		Data::FileOrigin origin,
 		not_null<PhotoData*> photo);
 	void hideMediaPreview();
-
-	void showLogoutConfirmation();
 
 	void updateControlsGeometry() override;
 
