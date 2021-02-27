@@ -8,7 +8,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "platform/linux/specific_linux.h"
 
 #include "base/platform/base_platform_info.h"
-#include "base/platform/linux/base_xcb_utilities_linux.h"
+#include "base/platform/linux/base_linux_gtk_integration.h"
+#include "ui/platform/ui_platform_utility.h"
 #include "platform/linux/linux_desktop_environment.h"
 #include "platform/linux/linux_gtk_integration.h"
 #include "platform/linux/linux_wayland_integration.h"
@@ -16,9 +17,15 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "lang/lang_keys.h"
 #include "mainwindow.h"
 #include "storage/localstorage.h"
+#include "core/sandbox.h"
+#include "core/application.h"
+#include "core/core_settings.h"
 #include "core/update_checker.h"
 #include "window/window_controller.h"
-#include "core/application.h"
+
+#ifndef DESKTOP_APP_DISABLE_X11_INTEGRATION
+#include "base/platform/linux/base_linux_xcb_utilities.h"
+#endif // !DESKTOP_APP_DISABLE_X11_INTEGRATION
 
 #ifndef DESKTOP_APP_DISABLE_DBUS_INTEGRATION
 #include "platform/linux/linux_notification_service_watcher.h"
@@ -40,8 +47,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtDBus/QDBusError>
 #endif // !DESKTOP_APP_DISABLE_DBUS_INTEGRATION
 
-#include <xcb/xcb.h>
-
 #include <glib.h>
 
 extern "C" {
@@ -60,15 +65,12 @@ extern "C" {
 #include <iostream>
 
 using namespace Platform;
+using BaseGtkIntegration = base::Platform::GtkIntegration;
 using Platform::internal::WaylandIntegration;
 using Platform::internal::GtkIntegration;
 
-Q_DECLARE_METATYPE(QMargins);
-
 namespace Platform {
 namespace {
-
-constexpr auto kIgnoreGtkIncompatibility = "TDESKTOP_I_KNOW_ABOUT_GTK_INCOMPATIBILITY"_cs;
 
 constexpr auto kDesktopFile = ":/misc/telegramdesktop.desktop"_cs;
 constexpr auto kIconName = "telegram"_cs;
@@ -77,10 +79,6 @@ constexpr auto kHandlerTypeName = "x-scheme-handler/tg"_cs;
 constexpr auto kXDGDesktopPortalService = "org.freedesktop.portal.Desktop"_cs;
 constexpr auto kXDGDesktopPortalObjectPath = "/org/freedesktop/portal/desktop"_cs;
 constexpr auto kPropertiesInterface = "org.freedesktop.DBus.Properties"_cs;
-
-constexpr auto kXCBFrameExtentsAtomName = "_GTK_FRAME_EXTENTS"_cs;
-
-QStringList PlatformThemes;
 
 #ifndef DESKTOP_APP_DISABLE_DBUS_INTEGRATION
 std::unique_ptr<internal::NotificationServiceWatcher> NSWInstance;
@@ -110,14 +108,14 @@ QStringList ListDBusActivatableNames() {
 	return Result;
 }
 
-void PortalAutostart(bool autostart, bool silent = false) {
+void PortalAutostart(bool start, bool silent = false) {
 	if (cExeName().isEmpty()) {
 		return;
 	}
 
 	QVariantMap options;
 	options["reason"] = tr::lng_settings_auto_start(tr::now);
-	options["autostart"] = autostart;
+	options["autostart"] = start;
 	options["commandline"] = QStringList{
 		cExeName(),
 		qsl("-workdir"),
@@ -134,7 +132,7 @@ void PortalAutostart(bool autostart, bool silent = false) {
 
 	const auto parentWindowId = [&] {
 		if (const auto activeWindow = Core::App().activeWindow()) {
-			if (!IsWayland()) {
+			if (IsX11()) {
 				return qsl("x11:%1").arg(QString::number(
 					activeWindow->widget().get()->windowHandle()->winId(),
 					16));
@@ -259,7 +257,7 @@ QString EscapeShellInLauncher(const QString &content) {
 QString FlatpakID() {
 	static const auto Result = [] {
 		if (!qEnvironmentVariableIsEmpty("FLATPAK_ID")) {
-			return QString::fromLatin1(qgetenv("FLATPAK_ID"));
+			return qEnvironmentVariable("FLATPAK_ID");
 		} else {
 			return GetLauncherBasename();
 		}
@@ -353,185 +351,26 @@ bool GenerateDesktopFile(
 	}
 }
 
-uint XCBMoveResizeFromEdges(Qt::Edges edges) {
-	if (edges == (Qt::TopEdge | Qt::LeftEdge))
-		return 0;
-	if (edges == Qt::TopEdge)
-		return 1;
-	if (edges == (Qt::TopEdge | Qt::RightEdge))
-		return 2;
-	if (edges == Qt::RightEdge)
-		return 3;
-	if (edges == (Qt::RightEdge | Qt::BottomEdge))
-		return 4;
-	if (edges == Qt::BottomEdge)
-		return 5;
-	if (edges == (Qt::BottomEdge | Qt::LeftEdge))
-		return 6;
-	if (edges == Qt::LeftEdge)
-		return 7;
+void SetGtkScaleFactor() {
+	const auto integration = GtkIntegration::Instance();
+	const auto ratio = Core::Sandbox::Instance().devicePixelRatio();
+	if (!integration || ratio > 1.) {
+		return;
+	}
 
-	return 0;
+	const auto scaleFactor = integration->scaleFactor().value_or(1);
+	if (scaleFactor == 1) {
+		return;
+	}
+
+	LOG(("GTK scale factor: %1").arg(scaleFactor));
+	cSetScreenScale(style::CheckScale(scaleFactor * 100));
 }
 
-bool StartXCBMoveResize(QWindow *window, int edges) {
-	const auto connection = base::Platform::XCB::GetConnectionFromQt();
-	if (!connection) {
-		return false;
-	}
-
-	const auto root = base::Platform::XCB::GetRootWindowFromQt();
-	if (!root.has_value()) {
-		return false;
-	}
-
-	const auto moveResizeAtom = base::Platform::XCB::GetAtom(
-		connection,
-		"_NET_WM_MOVERESIZE");
-
-	if (!moveResizeAtom.has_value()) {
-		return false;
-	}
-
-	const auto globalPos = QCursor::pos();
-
-	xcb_client_message_event_t xev;
-	xev.response_type = XCB_CLIENT_MESSAGE;
-	xev.type = *moveResizeAtom;
-	xev.sequence = 0;
-	xev.window = window->winId();
-	xev.format = 32;
-	xev.data.data32[0] = globalPos.x();
-	xev.data.data32[1] = globalPos.y();
-	xev.data.data32[2] = (edges == 16)
-		? 8 // move
-		: XCBMoveResizeFromEdges(Qt::Edges(edges));
-	xev.data.data32[3] = XCB_BUTTON_INDEX_1;
-	xev.data.data32[4] = 0;
-
-	xcb_ungrab_pointer(connection, XCB_CURRENT_TIME);
-	xcb_send_event(
-		connection,
-		false,
-		*root,
-		XCB_EVENT_MASK_SUBSTRUCTURE_REDIRECT
-			| XCB_EVENT_MASK_SUBSTRUCTURE_NOTIFY,
-		reinterpret_cast<const char*>(&xev));
-
-	return true;
-}
-
-bool ShowXCBWindowMenu(QWindow *window) {
-	const auto connection = base::Platform::XCB::GetConnectionFromQt();
-	if (!connection) {
-		return false;
-	}
-
-	const auto root = base::Platform::XCB::GetRootWindowFromQt();
-	if (!root.has_value()) {
-		return false;
-	}
-
-	const auto showWindowMenuAtom = base::Platform::XCB::GetAtom(
-		connection,
-		"_GTK_SHOW_WINDOW_MENU");
-
-	if (!showWindowMenuAtom.has_value()) {
-		return false;
-	}
-
-	const auto globalPos = QCursor::pos();
-
-	xcb_client_message_event_t xev;
-	xev.response_type = XCB_CLIENT_MESSAGE;
-	xev.type = *showWindowMenuAtom;
-	xev.sequence = 0;
-	xev.window = window->winId();
-	xev.format = 32;
-	xev.data.data32[0] = 0;
-	xev.data.data32[1] = globalPos.x();
-	xev.data.data32[2] = globalPos.y();
-	xev.data.data32[3] = 0;
-	xev.data.data32[4] = 0;
-
-	xcb_ungrab_pointer(connection, XCB_CURRENT_TIME);
-	xcb_send_event(
-		connection,
-		false,
-		*root,
-		XCB_EVENT_MASK_SUBSTRUCTURE_REDIRECT
-			| XCB_EVENT_MASK_SUBSTRUCTURE_NOTIFY,
-		reinterpret_cast<const char*>(&xev));
-
-	return true;
-}
-
-bool SetXCBFrameExtents(QWindow *window, const QMargins &extents) {
-	const auto connection = base::Platform::XCB::GetConnectionFromQt();
-	if (!connection) {
-		return false;
-	}
-
-	const auto frameExtentsAtom = base::Platform::XCB::GetAtom(
-		connection,
-		kXCBFrameExtentsAtomName.utf16());
-
-	if (!frameExtentsAtom.has_value()) {
-		return false;
-	}
-
-	const auto extentsVector = std::vector<uint>{
-		uint(extents.left()),
-		uint(extents.right()),
-		uint(extents.top()),
-		uint(extents.bottom()),
-	};
-
-	xcb_change_property(
-		connection,
-		XCB_PROP_MODE_REPLACE,
-		window->winId(),
-		*frameExtentsAtom,
-		XCB_ATOM_CARDINAL,
-		32,
-		extentsVector.size(),
-		extentsVector.data());
-
-	return true;
-}
-
-bool UnsetXCBFrameExtents(QWindow *window) {
-	const auto connection = base::Platform::XCB::GetConnectionFromQt();
-	if (!connection) {
-		return false;
-	}
-
-	const auto frameExtentsAtom = base::Platform::XCB::GetAtom(
-		connection,
-		kXCBFrameExtentsAtomName.utf16());
-
-	if (!frameExtentsAtom.has_value()) {
-		return false;
-	}
-
-	xcb_delete_property(
-		connection,
-		window->winId(),
-		*frameExtentsAtom);
-
-	return true;
-}
-
-Window::Control GtkKeywordToWindowControl(const QString &keyword) {
-	if (keyword == qstr("minimize")) {
-		return Window::Control::Minimize;
-	} else if (keyword == qstr("maximize")) {
-		return Window::Control::Maximize;
-	} else if (keyword == qstr("close")) {
-		return Window::Control::Close;
-	}
-
-	return Window::Control::Unknown;
+void DarkModeChanged() {
+	Core::Sandbox::Instance().customEnterFromEventLoop([] {
+		Core::App().settings().setSystemDarkMode(IsDarkMode());
+	});
 }
 
 } // namespace
@@ -559,27 +398,6 @@ bool InFlatpak() {
 
 bool InSnap() {
 	static const auto Result = qEnvironmentVariableIsSet("SNAP");
-	return Result;
-}
-
-bool IsStaticBinary() {
-#ifdef DESKTOP_APP_USE_PACKAGED
-		return false;
-#else // DESKTOP_APP_USE_PACKAGED
-		return true;
-#endif // !DESKTOP_APP_USE_PACKAGED
-}
-
-bool IsGtkIntegrationForced() {
-	static const auto Result = [&] {
-		if (!GtkIntegration::Instance()) {
-			return false;
-		}
-
-		return PlatformThemes.contains(qstr("gtk3"), Qt::CaseInsensitive)
-			|| PlatformThemes.contains(qstr("gtk2"), Qt::CaseInsensitive);
-	}();
-
 	return Result;
 }
 
@@ -719,7 +537,7 @@ QImage GetImageFromClipboard() {
 }
 
 std::optional<bool> IsDarkMode() {
-	const auto integration = GtkIntegration::Instance();
+	const auto integration = BaseGtkIntegration::Instance();
 	if (!integration) {
 		return std::nullopt;
 	}
@@ -760,131 +578,12 @@ bool TrayIconSupported() {
 }
 
 bool SkipTaskbarSupported() {
-	return !IsWayland()
+#ifndef DESKTOP_APP_DISABLE_X11_INTEGRATION
+	return IsX11()
 		&& base::Platform::XCB::IsSupportedByWM("_NET_WM_STATE_SKIP_TASKBAR");
-}
-
-bool StartSystemMove(QWindow *window) {
-	if (const auto integration = WaylandIntegration::Instance()) {
-		return integration->startMove(window);
-	} else {
-		return StartXCBMoveResize(window, 16);
-	}
-}
-
-bool StartSystemResize(QWindow *window, Qt::Edges edges) {
-	if (const auto integration = WaylandIntegration::Instance()) {
-		return integration->startResize(window, edges);
-	} else {
-		return StartXCBMoveResize(window, edges);
-	}
-}
-
-bool ShowWindowMenu(QWindow *window) {
-	if (const auto integration = WaylandIntegration::Instance()) {
-		return integration->showWindowMenu(window);
-	} else {
-		return ShowXCBWindowMenu(window);
-	}
-}
-
-bool SetWindowExtents(QWindow *window, const QMargins &extents) {
-	if (IsWayland()) {
-#ifdef DESKTOP_APP_QT_PATCHED
-		window->setProperty("WaylandCustomMargins", QVariant::fromValue<QMargins>(extents));
-		return true;
-#else // DESKTOP_APP_QT_PATCHED
-		return false;
-#endif // !DESKTOP_APP_QT_PATCHED
-	} else {
-		return SetXCBFrameExtents(window, extents);
-	}
-}
-
-bool UnsetWindowExtents(QWindow *window) {
-	if (IsWayland()) {
-#ifdef DESKTOP_APP_QT_PATCHED
-		window->setProperty("WaylandCustomMargins", QVariant());
-		return true;
-#else // DESKTOP_APP_QT_PATCHED
-		return false;
-#endif // !DESKTOP_APP_QT_PATCHED
-	} else {
-		return UnsetXCBFrameExtents(window);
-	}
-}
-
-bool WindowsNeedShadow() {
-#ifdef DESKTOP_APP_QT_PATCHED
-	if (IsWayland()) {
-		return true;
-	}
-#endif // DESKTOP_APP_QT_PATCHED
-
-	namespace XCB = base::Platform::XCB;
-	if (!IsWayland()
-		&& XCB::IsSupportedByWM(kXCBFrameExtentsAtomName.utf16())) {
-		return true;
-	}
+#endif // !DESKTOP_APP_DISABLE_X11_INTEGRATION
 
 	return false;
-}
-
-Window::ControlsLayout WindowControlsLayout() {
-	const auto gtkResult = []() -> std::optional<Window::ControlsLayout> {
-		const auto integration = GtkIntegration::Instance();
-		if (!integration || !integration->checkVersion(3, 12, 0)) {
-			return std::nullopt;
-		}
-
-		const auto decorationLayoutSetting = integration->getStringSetting(
-			qsl("gtk-decoration-layout"));
-		
-		if (!decorationLayoutSetting.has_value()) {
-			return std::nullopt;
-		}
-
-		const auto decorationLayout = decorationLayoutSetting->split(':');
-
-		std::vector<Window::Control> controlsLeft;
-		ranges::transform(
-			decorationLayout[0].split(','),
-			ranges::back_inserter(controlsLeft),
-			GtkKeywordToWindowControl);
-
-		std::vector<Window::Control> controlsRight;
-		if (decorationLayout.size() > 1) {
-			ranges::transform(
-				decorationLayout[1].split(','),
-				ranges::back_inserter(controlsRight),
-				GtkKeywordToWindowControl);
-		}
-
-		return Window::ControlsLayout{
-			.left = controlsLeft,
-			.right = controlsRight
-		};
-	}();
-
-	if (gtkResult.has_value()) {
-		return *gtkResult;
-	} else if (DesktopEnvironment::IsUnity()) {
-		return Window::ControlsLayout{
-			.left = {
-				Window::Control::Close,
-				Window::Control::Minimize,
-				Window::Control::Maximize,
-			}
-		};
-	} else {
-		return Window::ControlsLayout{
-			.right = {
-				Window::Control::Minimize,
-				Window::Control::Maximize,
-				Window::Control::Close,
-			}
-		};
-	}
 }
 
 } // namespace Platform
@@ -909,7 +608,7 @@ void psActivateProcess(uint64 pid) {
 
 namespace {
 
-QString getHomeDir() {
+QString GetHomeDir() {
 	const auto home = QString(g_get_home_dir());
 
 	if (!home.isEmpty() && !home.endsWith('/')) {
@@ -919,12 +618,39 @@ QString getHomeDir() {
 	return home;
 }
 
+#ifdef __HAIKU__
+void HaikuAutostart(bool start) {
+	const auto home = GetHomeDir();
+	if (home.isEmpty()) {
+		return;
+	}
+
+	QFile file(home + "config/settings/boot/launch/telegram-desktop");
+	if (start) {
+		if (file.open(QIODevice::WriteOnly | QIODevice::Text)) {
+			QTextStream out(&file);
+			out
+				<< "#!/bin/bash" << Qt::endl
+				<< "cd /system/apps" << Qt::endl
+				<< "./Telegram -autostart" << " &" << Qt::endl;
+			file.close();
+			file.setPermissions(file.permissions()
+				| QFileDevice::ExeOwner
+				| QFileDevice::ExeGroup
+				| QFileDevice::ExeOther);
+		}
+	} else {
+		file.remove();
+	}
+}
+#endif // __HAIKU__
+
 } // namespace
 
 QString psAppDataPath() {
 	// Previously we used ~/.TelegramDesktop, so look there first.
 	// If we find data there, we should still use it.
-	auto home = getHomeDir();
+	auto home = GetHomeDir();
 	if (!home.isEmpty()) {
 		auto oldPath = home + qsl(".TelegramDesktop/");
 		auto oldSettingsBase = oldPath + qsl("tdata/settings");
@@ -962,53 +688,15 @@ int psFixPrevious() {
 namespace Platform {
 
 void start() {
-	PlatformThemes = QString::fromUtf8(qgetenv("QT_QPA_PLATFORMTHEME"))
-		.split(':', base::QStringSkipEmptyParts);
-
 	LOG(("Launcher filename: %1").arg(GetLauncherFilename()));
 
 	qputenv("PULSE_PROP_application.name", AppName.utf8());
 	qputenv("PULSE_PROP_application.icon_name", GetIconName().toLatin1());
 
-	// if gtk integration and qgtk3/qgtk2 platformtheme (or qgtk2 style)
-	// is used at the same time, the app will crash
-	if (GtkIntegration::Instance()
-		&& !IsStaticBinary()
-		&& !qEnvironmentVariableIsSet(
-			kIgnoreGtkIncompatibility.utf8())) {
-		g_warning(
-			"Unfortunately, GTK integration "
-			"conflicts with qgtk2 platformtheme and style. "
-			"Therefore, QT_QPA_PLATFORMTHEME "
-			"and QT_STYLE_OVERRIDE will be unset.");
-
-		g_message(
-			"This can be ignored by setting %s environment variable "
-			"to any value, however, if qgtk2 theme or style is used, "
-			"this will lead to a crash.",
-			kIgnoreGtkIncompatibility.utf8().constData());
-
-		g_message(
-			"GTK integration can be disabled by setting %s to any value. "
-			"Keep in mind that this will lead to clipboard issues "
-			"and tdesktop will be unable to get settings from GTK "
-			"(such as decoration layout, dark mode & more).",
-			internal::kDisableGtkIntegration.utf8().constData());
-
-		qunsetenv("QT_QPA_PLATFORMTHEME");
-		qunsetenv("QT_STYLE_OVERRIDE");
-
-		// Don't allow qgtk3 to init gtk earlier than us
-		if (DesktopEnvironment::IsGtkBased()) {
-			QApplication::setDesktopSettingsAware(false);
-		}
-	}
-
-	if (!GtkIntegration::Instance()) {
-		g_warning(
-			"GTK integration was disabled on build or in runtime. "
-			"This will lead to clipboard issues and a lack of some features "
-			"(like Auto-Night Mode or system window controls layout).");
+	if (const auto integration = BaseGtkIntegration::Instance()) {
+		integration->prepareEnvironment();
+	} else {
+		g_warning("GTK integration is disabled, some feature unavailable. ");
 	}
 
 #ifdef DESKTOP_APP_USE_PACKAGED_RLOTTIE
@@ -1022,10 +710,6 @@ void start() {
 		"Application was built without embedded fonts, "
 		"this may lead to font issues.");
 #endif // DESKTOP_APP_USE_PACKAGED_FONTS
-
-	if (AreQtPluginsBundled()) {
-		qputenv("QT_WAYLAND_DECORATION", "material");
-	}
 
 #ifndef DESKTOP_APP_DISABLE_DBUS_INTEGRATION
 	// Tell the user when XDP file dialog is used
@@ -1116,7 +800,7 @@ void RegisterCustomScheme(bool force) {
 		.arg(neededCommandlineBuilder);
 
 	auto currentAppInfo = g_app_info_get_default_for_type(
-		kHandlerTypeName.utf8(),
+		kHandlerTypeName.utf8().constData(),
 		true);
 
 	if (currentAppInfo) {
@@ -1131,7 +815,7 @@ void RegisterCustomScheme(bool force) {
 	}
 
 	auto registeredAppInfoList = g_app_info_get_recommended_for_type(
-		kHandlerTypeName.utf8());
+		kHandlerTypeName.utf8().constData());
 
 	for (auto l = registeredAppInfoList; l != nullptr; l = l->next) {
 		const auto currentRegisteredAppInfo = reinterpret_cast<GAppInfo*>(
@@ -1154,15 +838,15 @@ void RegisterCustomScheme(bool force) {
 	}
 
 	auto newAppInfo = g_app_info_create_from_commandline(
-		neededCommandlineBuilder.toUtf8(),
-		AppName.utf8(),
+		neededCommandlineBuilder.toUtf8().constData(),
+		AppName.utf8().constData(),
 		G_APP_INFO_CREATE_SUPPORTS_URIS,
 		&error);
 
 	if (newAppInfo) {
 		g_app_info_set_as_default_for_type(
 			newAppInfo,
-			kHandlerTypeName.utf8(),
+			kHandlerTypeName.utf8().constData(),
 			&error);
 
 		g_object_unref(newAppInfo);
@@ -1211,6 +895,9 @@ bool OpenSystemSettings(SystemSettingsType type) {
 		} else if (DesktopEnvironment::IsMATE()) {
 			add("mate-volume-control");
 		}
+#ifdef __HAIKU__
+		add("Media");
+#endif // __ HAIKU__
 		add("pavucontrol-qt");
 		add("pavucontrol");
 		add("alsamixergui");
@@ -1224,16 +911,35 @@ bool OpenSystemSettings(SystemSettingsType type) {
 namespace ThirdParty {
 
 void start() {
-	DEBUG_LOG(("Icon theme: %1").arg(QIcon::themeName()));
-	DEBUG_LOG(("Fallback icon theme: %1").arg(QIcon::fallbackThemeName()));
+	if (const auto integration = BaseGtkIntegration::Instance()) {
+		integration->load();
+	}
 
 	if (const auto integration = GtkIntegration::Instance()) {
 		integration->load();
 	}
 
+	SetGtkScaleFactor();
+
+	BaseGtkIntegration::Instance()->connectToSetting(
+		"gtk-theme-name",
+		DarkModeChanged);
+
+	if (BaseGtkIntegration::Instance()->checkVersion(3, 0, 0)) {
+		BaseGtkIntegration::Instance()->connectToSetting(
+			"gtk-application-prefer-dark-theme",
+			DarkModeChanged);
+	}
+
+	if (BaseGtkIntegration::Instance()->checkVersion(3, 12, 0)) {
+		BaseGtkIntegration::Instance()->connectToSetting(
+			"gtk-decoration-layout",
+			Ui::Platform::NotifyTitleControlsLayoutChanged);
+	}
+
 	// wait for interface announce to know if native window frame is supported
-	if (const auto waylandIntegration = WaylandIntegration::Instance()) {
-		waylandIntegration->waitForInterfaceAnnounce();
+	if (const auto integration = WaylandIntegration::Instance()) {
+		integration->waitForInterfaceAnnounce();
 	}
 
 #ifndef DESKTOP_APP_DISABLE_DBUS_INTEGRATION
@@ -1252,11 +958,18 @@ void finish() {
 } // namespace Platform
 
 void psNewVersion() {
+#ifndef __HAIKU__
 	Platform::InstallLauncher();
+#endif // __HAIKU__
 	Platform::RegisterCustomScheme();
 }
 
 void psAutoStart(bool start, bool silent) {
+#ifdef __HAIKU__
+	HaikuAutostart(start);
+	return;
+#endif // __HAIKU__
+
 	if (InFlatpak()) {
 #ifndef DESKTOP_APP_DISABLE_DBUS_INTEGRATION
 		PortalAutostart(start, silent);

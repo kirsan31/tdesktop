@@ -997,7 +997,8 @@ void Updates::applyUpdatesNoPtsCheck(const MTPUpdates &updates) {
 				MTPstring(),
 				MTPlong(),
 				//MTPMessageReactions(),
-				MTPVector<MTPRestrictionReason>()),
+				MTPVector<MTPRestrictionReason>(),
+				MTP_int(d.vttl_period().value_or_empty())),
 			MTPDmessage_ClientFlags(),
 			NewMessageType::Unread);
 	} break;
@@ -1027,7 +1028,8 @@ void Updates::applyUpdatesNoPtsCheck(const MTPUpdates &updates) {
 				MTPstring(),
 				MTPlong(),
 				//MTPMessageReactions(),
-				MTPVector<MTPRestrictionReason>()),
+				MTPVector<MTPRestrictionReason>(),
+				MTP_int(d.vttl_period().value_or_empty())),
 			MTPDmessage_ClientFlags(),
 			NewMessageType::Unread);
 	} break;
@@ -1329,14 +1331,7 @@ void Updates::applyUpdates(
 						item->id,
 						ApiWrap::RequestMessageDataCallback());
 				}
-				item->updateSentContent({
-					sent.text,
-					Api::EntitiesFromMTP(&session(), list.value_or_empty())
-				}, d.vmedia());
-				item->contributeToSlowmode(d.vdate().v);
-				if (!wasAlready) {
-					item->indexAsNewItem();
-				}
+				item->applySentMessage(sent.text, d, wasAlready);
 			}
 		}
 
@@ -1543,22 +1538,6 @@ void Updates::feedUpdate(const MTPUpdate &update) {
 			}
 		}
 	} break;
-
-	//case mtpc_updateReadFeed: { // #feed
-	//	const auto &d = update.c_updateReadFeed();
-	//	const auto feedId = d.vfeed_id().v;
-	//	if (const auto feed = session().data().feedLoaded(feedId)) {
-	//		feed->setUnreadPosition(
-	//			Data::FeedPositionFromMTP(d.vmax_position()));
-	//		if (d.vunread_count() && d.vunread_muted_count()) {
-	//			feed->setUnreadCounts(
-	//				d.vunread_count()->v,
-	//				d.vunread_muted_count()->v);
-	//		} else {
-	//			session().data().histories().requestDialogEntry(feed);
-	//		}
-	//	}
-	//} break;
 
 	case mtpc_updateDialogUnreadMark: {
 		const auto &data = update.c_updateDialogUnreadMark();
@@ -1825,6 +1804,14 @@ void Updates::feedUpdate(const MTPUpdate &update) {
 		}
 	} break;
 
+	case mtpc_updatePeerHistoryTTL: {
+		const auto &d = update.c_updatePeerHistoryTTL();
+		const auto peerId = peerFromMTP(d.vpeer());
+		if (const auto peer = session().data().peerLoaded(peerId)) {
+			peer->setMessagesTTL(d.vttl_period().value_or_empty());
+		}
+	} break;
+
 	case mtpc_updateNewEncryptedMessage: {
 		auto &d = update.c_updateNewEncryptedMessage();
 	} break;
@@ -2000,17 +1987,10 @@ void Updates::feedUpdate(const MTPUpdate &update) {
 					channel->updateFullForced();
 				}
 				const auto history = channel->owner().history(channel);
-				//if (const auto feed = channel->feed()) { // #feed
-				//	feed->requestChatListMessage();
-				//	if (!feed->unreadCountKnown()) {
-				//		feed->owner().histories().requestDialogEntry(feed);
-				//	}
-				//} else {
-					history->requestChatListMessage();
-					if (!history->unreadCountKnown()) {
-						history->owner().histories().requestDialogEntry(history);
-					}
-				//}
+				history->requestChatListMessage();
+				if (!history->unreadCountKnown()) {
+					history->owner().histories().requestDialogEntry(history);
+				}
 				if (!channel->amCreator()) {
 					session().api().requestSelfParticipant(channel);
 				}

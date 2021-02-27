@@ -1196,7 +1196,6 @@ bool Message::hasFromPhoto() const {
 	}
 	switch (context()) {
 	case Context::AdminLog:
-	//case Context::Feed: // #feed
 		return true;
 	case Context::History:
 	case Context::Pinned:
@@ -2059,6 +2058,18 @@ HistoryMessageReply *Message::displayedReply() const {
 	return nullptr;
 }
 
+bool Message::toggleSelectionByHandlerClick(
+		const ClickHandlerPtr &handler) const {
+	if (_comments && _comments->link == handler) {
+		return true;
+	} else if (const auto media = this->media()) {
+		if (media->toggleSelectionByHandlerClick(handler)) {
+			return true;
+		}
+	}
+	return false;
+}
+
 bool Message::displayPinIcon() const {
 	return data()->isPinned() && !isPinnedContext();
 }
@@ -2066,7 +2077,6 @@ bool Message::displayPinIcon() const {
 bool Message::hasFromName() const {
 	switch (context()) {
 	case Context::AdminLog:
-	//case Context::Feed: // #feed
 		return true;
 	case Context::History:
 	case Context::Pinned:

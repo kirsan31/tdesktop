@@ -63,7 +63,6 @@ void PeerMenuShareContactBox(
 void PeerMenuAddChannelMembers(
 	not_null<Window::SessionNavigation*> navigation,
 	not_null<ChannelData*> channel);
-//void PeerMenuUngroupFeed(not_null<Data::Feed*> feed); // #feed
 void PeerMenuCreatePoll(
 	not_null<Window::SessionController*> controller,
 	not_null<PeerData*> peer,
@@ -85,6 +84,11 @@ void PeerMenuBlockUserBox(
 	std::variant<v::null_t, bool> suggestReport,
 	std::variant<v::null_t, ClearChat, ClearReply> suggestClear);
 void PeerMenuUnblockUserWithBotRestart(not_null<UserData*> user);
+
+void BlockSenderFromRepliesBox(
+	not_null<Ui::GenericBox*> box,
+	not_null<Window::SessionController*> controller,
+	FullMsgId id);
 
 void ToggleHistoryArchived(not_null<History*> history, bool archived);
 Fn<void()> ClearHistoryHandler(not_null<PeerData*> peer);

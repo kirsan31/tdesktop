@@ -7,8 +7,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #pragma once
 
-class QWindow;
-
 namespace Platform {
 namespace internal {
 
@@ -17,9 +15,6 @@ public:
 	static WaylandIntegration *Instance();
 	void waitForInterfaceAnnounce();
 	bool supportsXdgDecoration();
-	bool startMove(QWindow *window);
-	bool startResize(QWindow *window, Qt::Edges edges);
-	bool showWindowMenu(QWindow *window);
 
 private:
 	WaylandIntegration();

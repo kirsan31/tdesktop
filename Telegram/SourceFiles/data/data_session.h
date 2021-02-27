@@ -78,6 +78,8 @@ public:
 		return *_session;
 	}
 
+	[[nodiscard]] QString nameSortKey(const QString &name) const;
+
 	[[nodiscard]] Groups &groups() {
 		return _groups;
 	}
@@ -325,8 +327,15 @@ public:
 		const Dialogs::Key &key1,
 		const Dialogs::Key &key2);
 
+	void setSuggestToGigagroup(not_null<ChannelData*> group, bool suggest);
+	[[nodiscard]] bool suggestToGigagroup(
+		not_null<ChannelData*> group) const;
+
 	void registerMessage(not_null<HistoryItem*> item);
 	void unregisterMessage(not_null<HistoryItem*> item);
+
+	void registerMessageTTL(TimeId when, not_null<HistoryItem*> item);
+	void unregisterMessageTTL(TimeId when, not_null<HistoryItem*> item);
 
 	// Returns true if item found and it is not detached.
 	bool checkEntitiesAndViewsUpdate(const MTPDmessage &data);
@@ -600,9 +609,6 @@ public:
 	[[nodiscard]] Folder *folderLoaded(FolderId id) const;
 	not_null<Folder*> processFolder(const MTPFolder &data);
 	not_null<Folder*> processFolder(const MTPDfolder &data);
-	//void setDefaultFeedId(FeedId id); // #feed
-	//FeedId defaultFeedId() const;
-	//rpl::producer<FeedId> defaultFeedIdValue() const;
 
 	[[nodiscard]] not_null<Dialogs::MainList*> chatsList(
 		Data::Folder *folder = nullptr);
@@ -685,6 +691,9 @@ private:
 	void setupUserIsContactViewer();
 
 	void checkSelfDestructItems();
+
+	void scheduleNextTTLs();
+	void checkTTLs();
 
 	int computeUnreadBadge(const Dialogs::UnreadState &state) const;
 	bool computeUnreadBadgeMuted(const Dialogs::UnreadState &state) const;
@@ -857,6 +866,8 @@ private:
 	std::map<
 		not_null<HistoryItem*>,
 		base::flat_set<not_null<HistoryItem*>>> _dependentMessages;
+	std::map<TimeId, base::flat_set<not_null<HistoryItem*>>> _ttlMessages;
+	base::Timer _ttlCheckTimer;
 
 	base::flat_map<uint64, FullMsgId> _messageByRandomId;
 	base::flat_map<uint64, SentData> _sentMessagesData;
@@ -920,12 +931,12 @@ private:
 
 	rpl::event_stream<not_null<WebPageData*>> _webpageUpdates;
 	rpl::event_stream<not_null<ChannelData*>> _channelDifferenceTooLong;
+	base::flat_set<not_null<ChannelData*>> _suggestToGigagroup;
 
 	base::flat_multi_map<TimeId, not_null<PollData*>> _pollsClosings;
 	base::Timer _pollsClosingTimer;
 
 	base::flat_map<FolderId, std::unique_ptr<Folder>> _folders;
-	//rpl::variable<FeedId> _defaultFeedId = FeedId(); // #feed
 
 	std::unordered_map<
 		not_null<const HistoryItem*>,

@@ -38,9 +38,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "apiwrap.h"
 #include "api/api_updates.h"
 #include "settings/settings_intro.h"
-#include "platform/platform_specific.h"
 #include "platform/platform_notifications_manager.h"
 #include "base/platform/base_platform_info.h"
+#include "ui/platform/ui_platform_utility.h"
 #include "base/call_delayed.h"
 #include "window/notifications_manager.h"
 #include "window/themes/window_theme.h"
@@ -111,7 +111,7 @@ MainWindow::MainWindow(not_null<Window::Controller*> controller)
 
 	setAttribute(Qt::WA_NoSystemBackground);
 
-	if (Platform::WindowsNeedShadow()) {
+	if (Ui::Platform::WindowExtentsSupported()) {
 		setAttribute(Qt::WA_TranslucentBackground);
 	} else {
 		setAttribute(Qt::WA_OpaquePaintEvent);
@@ -138,18 +138,17 @@ void MainWindow::createTrayIconMenu() {
 	trayIconMenu->deleteOnHide(false);
 #else // Q_OS_WIN
 	trayIconMenu = new QMenu(this);
+
+	connect(trayIconMenu, &QMenu::aboutToShow, [=] {
+		updateIsActive();
+		updateTrayMenu();
+	});
 #endif // else for Q_OS_WIN
 
 	auto notificationActionText = Core::App().settings().desktopNotify()
 		? tr::lng_disable_notifications_from_tray(tr::now)
 		: tr::lng_enable_notifications_from_tray(tr::now);
 
-	if (Platform::IsLinux() && !Platform::IsWayland()) {
-		trayIconMenu->addAction(tr::lng_open_from_tray(tr::now), [=] {
-			showFromTray();
-		});
-	}
-	const auto showLifetime = std::make_shared<rpl::lifetime>();
 	trayIconMenu->addAction(tr::lng_minimize_to_tray(tr::now), [=] {
 		if (_activeForTrayIconAction) {
 			minimizeToTray();
@@ -205,7 +204,6 @@ void MainWindow::finishFirstShow() {
 	applyInitialWorkMode();
 	createGlobalMenu();
 	firstShadowsUpdate();
-	updateTrayMenu();
 
 	windowDeactivateEvents(
 	) | rpl::start_with_next([=] {
@@ -644,24 +642,19 @@ bool MainWindow::eventFilter(QObject *object, QEvent *e) {
 	return Platform::MainWindow::eventFilter(object, e);
 }
 
-void MainWindow::updateTrayMenu(bool force) {
-	if (!trayIconMenu || (Platform::IsWindows() && !force)) return;
+void MainWindow::updateTrayMenu() {
+	if (!trayIconMenu) return;
 
 	auto actions = trayIconMenu->actions();
-	if (Platform::IsLinux() && !Platform::IsWayland()) {
-		const auto minimizeAction = actions.at(1);
-		minimizeAction->setEnabled(isVisible());
-	} else {
-		const auto active = isActiveForTrayMenu();
-		if (_activeForTrayIconAction != active) {
-			_activeForTrayIconAction = active;
-			const auto toggleAction = actions.at(0);
-			toggleAction->setText(_activeForTrayIconAction
-				? tr::lng_minimize_to_tray(tr::now)
-				: tr::lng_open_from_tray(tr::now));
-		}
+	const auto active = isActiveForTrayMenu();
+	if (_activeForTrayIconAction != active) {
+		_activeForTrayIconAction = active;
+		const auto toggleAction = actions.at(0);
+		toggleAction->setText(_activeForTrayIconAction
+			? tr::lng_minimize_to_tray(tr::now)
+			: tr::lng_open_from_tray(tr::now));
 	}
-	auto notificationAction = actions.at(Platform::IsLinux() && !Platform::IsWayland() ? 2 : 1);
+	auto notificationAction = actions.at(1);
 	auto notificationActionText = Core::App().settings().desktopNotify()
 		? tr::lng_disable_notifications_from_tray(tr::now)
 		: tr::lng_enable_notifications_from_tray(tr::now);
@@ -691,7 +684,7 @@ void MainWindow::handleTrayIconActication(
 		return;
 	}
 	if (reason == QSystemTrayIcon::Context) {
-		updateTrayMenu(true);
+		updateTrayMenu();
 		base::call_delayed(1, this, [=] {
 			psShowTrayMenu();
 		});

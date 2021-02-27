@@ -110,9 +110,9 @@ void PeerClickHandler::onClick(ClickContext context) const {
 			&& (!currentPeer->isChannel()
 				|| currentPeer->asChannel()->linkedChat() != clickedChannel)) {
 			Ui::ShowMultilineToast({
-				.text = (_peer->isMegagroup()
+				.text = { _peer->isMegagroup()
 					? tr::lng_group_not_accessible(tr::now)
-					: tr::lng_channel_not_accessible(tr::now)),
+					: tr::lng_channel_not_accessible(tr::now) },
 			});
 		} else {
 			window->showPeerHistory(
@@ -407,13 +407,6 @@ void PeerData::setUserpicChecked(
 	if (_userpicPhotoId != photoId || _userpic.location() != location) {
 		setUserpic(photoId, location);
 		session().changes().peerUpdated(this, UpdateFlag::Photo);
-		//if (const auto channel = asChannel()) { // #feed
-		//	if (const auto feed = channel->feed()) {
-		//		owner().notifyFeedUpdated(
-		//			feed,
-		//			Data::FeedUpdateFlag::ChannelPhoto);
-		//	}
-		//}
 	}
 }
 
@@ -757,11 +750,15 @@ bool PeerData::isFake() const {
 }
 
 bool PeerData::isMegagroup() const {
-	return isChannel() ? asChannel()->isMegagroup() : false;
+	return isChannel() && asChannel()->isMegagroup();
 }
 
 bool PeerData::isBroadcast() const {
-	return isChannel() ? asChannel()->isBroadcast() : false;
+	return isChannel() && asChannel()->isBroadcast();
+}
+
+bool PeerData::isGigagroup() const {
+	return isChannel() && asChannel()->isGigagroup();
 }
 
 bool PeerData::isRepliesChat() const {
@@ -943,6 +940,19 @@ void PeerData::setIsBlocked(bool is) {
 
 void PeerData::setLoadedStatus(LoadedStatus status) {
 	_loadedStatus = status;
+}
+
+TimeId PeerData::messagesTTL() const {
+	return _ttlPeriod;
+}
+
+void PeerData::setMessagesTTL(TimeId period) {
+	if (_ttlPeriod != period) {
+		_ttlPeriod = period;
+		session().changes().peerUpdated(
+			this,
+			Data::PeerUpdate::Flag::MessagesTTL);
+	}
 }
 
 namespace Data {

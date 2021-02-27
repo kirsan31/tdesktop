@@ -23,11 +23,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/widgets/popup_menu.h"
 #include "ui/image/image.h"
 #include "ui/toast/toast.h"
+#include "ui/controls/delete_message_context_action.h"
+#include "ui/boxes/report_box.h"
 #include "ui/ui_utility.h"
 #include "chat_helpers/send_context_menu.h"
 #include "boxes/confirm_box.h"
 #include "boxes/sticker_set_box.h"
-#include "boxes/report_box.h"
 #include "data/data_photo.h"
 #include "data/data_photo_media.h"
 #include "data/data_document.h"
@@ -40,6 +41,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/file_utilities.h"
 #include "base/platform/base_platform_info.h"
 #include "window/window_peer_menu.h"
+#include "window/window_controller.h"
 #include "window/window_session_controller.h"
 #include "lang/lang_keys.h"
 #include "core/application.h"
@@ -58,17 +60,6 @@ namespace {
 // If we can't cloud-export link for such time we export it locally.
 constexpr auto kExportLocalTimeout = crl::time(1000);
 constexpr auto kRescheduleLimit = 20;
-
-//void AddToggleGroupingAction( // #feed
-//		not_null<Ui::PopupMenu*> menu,
-//		not_null<PeerData*> peer) {
-//	if (const auto channel = peer->asChannel()) {
-//		const auto grouped = (channel->feed() != nullptr);
-//		menu->addAction( // #feed
-//			grouped ? tr::lng_feed_ungroup(tr::now) : tr::lng_feed_group(tr::now),
-//			[=] { Window::ToggleChannelGrouping(channel, !grouped); });
-//	}
-//}
 
 MsgId ItemIdAcrossData(not_null<HistoryItem*> item) {
 	if (!item->isScheduled() || item->isSending() || item->hasFailed()) {
@@ -740,15 +731,19 @@ bool AddDeleteMessageAction(
 			Ui::show(Box<DeleteMessagesBox>(item, suggestModerateActions));
 		}
 	});
-	const auto text = [&] {
-		if (const auto message = item->toHistoryMessage()) {
-			if (message->uploading()) {
-				return tr::lng_context_cancel_upload;
-			}
+	if (const auto message = item->toHistoryMessage()) {
+		if (message->uploading()) {
+			menu->addAction(
+				tr::lng_context_cancel_upload(tr::now),
+				callback);
+			return true;
 		}
-		return tr::lng_context_delete_msg;
-	}()(tr::now);
-	menu->addAction(text, callback);
+	}
+	menu->addAction(Ui::DeleteMessageContextAction(
+		menu->menu(),
+		callback,
+		item->ttlDestroyAt(),
+		[=] { delete menu; }));
 	return true;
 }
 
@@ -777,13 +772,12 @@ void AddReportAction(
 	const auto itemId = item->fullId();
 	const auto callback = crl::guard(controller, [=] {
 		if (const auto item = owner->message(itemId)) {
-			const auto peer = item->history()->peer;
 			const auto group = owner->groups().find(item);
-			Ui::show(Box<ReportBox>(
-				peer,
+			ShowReportItemsBox(
+				item->history()->peer,
 				(group
 					? owner->itemsToIds(group->items)
-					: MessageIdsList(1, itemId))));
+					: MessageIdsList{ 1, itemId }));
 		}
 	});
 	menu->addAction(tr::lng_context_report_msg(tr::now), callback);
@@ -924,18 +918,6 @@ base::unique_qptr<Ui::PopupMenu> FillContextMenu(
 		AddPhotoActions(result, photo, list);
 	} else if (linkDocument) {
 		AddDocumentActions(result, document, itemId, list);
-	//} else if (linkPeer) { // #feed
-	//	const auto peer = linkPeer->peer();
-	//	if (peer->isChannel()
-	//		&& peer->asChannel()->feed() != nullptr
-	//		&& (list->delegate()->listContext() == Context::Feed)) {
-	//		Window::PeerMenuAddMuteAction(peer, [&](
-	//				const QString &text,
-	//				Fn<void()> handler) {
-	//			return result->addAction(text, handler);
-	//		});
-	//		AddToggleGroupingAction(result, linkPeer->peer());
-	//	}
 	} else if (poll) {
 		AddPollActions(result, poll, item, list->elementContext());
 	} else if (!request.overSelection && view && !hasSelection) {
@@ -1043,6 +1025,107 @@ void AddPollActions(
 		menu->addAction(tr::lng_polls_stop(tr::now), [=] {
 			StopPoll(&poll->session(), itemId);
 		});
+	}
+}
+
+void ShowReportItemsBox(not_null<PeerData*> peer, MessageIdsList ids) {
+	const auto chosen = [=](Ui::ReportReason reason) {
+		Ui::show(Box(Ui::ReportDetailsBox, [=](const QString &text) {
+			SendReport(peer, reason, text, ids);
+			Ui::hideLayer();
+		}));
+	};
+	Ui::show(Box(
+		Ui::ReportReasonBox,
+		Ui::ReportSource::Message,
+		chosen));
+}
+
+void ShowReportPeerBox(
+		not_null<Window::SessionController*> window,
+		not_null<PeerData*> peer) {
+	struct State {
+		QPointer<Ui::GenericBox> reasonBox;
+		QPointer<Ui::GenericBox> detailsBox;
+		MessageIdsList ids;
+	};
+	const auto state = std::make_shared<State>();
+	const auto chosen = [=](Ui::ReportReason reason) {
+		const auto send = [=](const QString &text) {
+			window->clearChooseReportMessages();
+			SendReport(peer, reason, text, std::move(state->ids));
+			if (const auto strong = state->reasonBox.data()) {
+				strong->closeBox();
+			}
+			if (const auto strong = state->detailsBox.data()) {
+				strong->closeBox();
+			}
+		};
+		if (reason == Ui::ReportReason::Fake
+			|| reason == Ui::ReportReason::Other) {
+			state->ids = {};
+			state->detailsBox = window->window().show(
+				Box(Ui::ReportDetailsBox, send));
+			return;
+		}
+		window->showChooseReportMessages(peer, reason, [=](
+				MessageIdsList ids) {
+			state->ids = std::move(ids);
+			state->detailsBox = window->window().show(
+				Box(Ui::ReportDetailsBox, send));
+		});
+	};
+	state->reasonBox = window->window().show(Box(
+		Ui::ReportReasonBox,
+		(peer->isBroadcast()
+			? Ui::ReportSource::Channel
+			: peer->isUser()
+			? Ui::ReportSource::Bot
+			: Ui::ReportSource::Group),
+		chosen));
+}
+
+void SendReport(
+		not_null<PeerData*> peer,
+		Ui::ReportReason reason,
+		const QString &comment,
+		MessageIdsList ids) {
+	const auto apiReason = [&] {
+		using Reason = Ui::ReportReason;
+		switch (reason) {
+		case Reason::Spam: return MTP_inputReportReasonSpam();
+		case Reason::Fake: return MTP_inputReportReasonFake();
+		case Reason::Violence: return MTP_inputReportReasonViolence();
+		case Reason::ChildAbuse: return MTP_inputReportReasonChildAbuse();
+		case Reason::Pornography: return MTP_inputReportReasonPornography();
+		case Reason::Other: return MTP_inputReportReasonOther();
+		}
+		Unexpected("Bad reason group value.");
+	}();
+	if (ids.empty()) {
+		peer->session().api().request(MTPaccount_ReportPeer(
+			peer->input,
+			apiReason,
+			MTP_string(comment)
+		)).done([=](const MTPBool &result) {
+			Ui::Toast::Show(tr::lng_report_thanks(tr::now));
+		}).fail([=](const RPCError &error) {
+		}).send();
+	} else {
+		auto apiIds = QVector<MTPint>();
+		apiIds.reserve(ids.size());
+		for (const auto &fullId : ids) {
+			apiIds.push_back(MTP_int(fullId.msg));
+		}
+		peer->session().api().request(MTPmessages_Report(
+			peer->input,
+			MTP_vector<MTPint>(apiIds),
+			apiReason,
+			MTP_string(comment)
+		)).done([=](const MTPBool &result) {
+			Ui::Toast::Show(tr::lng_report_thanks(tr::now));
+		}).fail([=](const RPCError &error) {
+		}).send();
 	}
 }
 

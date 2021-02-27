@@ -1414,6 +1414,21 @@ void MainWidget::ctrlEnterSubmitUpdated() {
 	_history->updateFieldSubmitSettings();
 }
 
+void MainWidget::showChooseReportMessages(
+		not_null<PeerData*> peer,
+		Ui::ReportReason reason,
+		Fn<void(MessageIdsList)> done) {
+	_history->setChooseReportMessagesDetails(reason, std::move(done));
+	ui_showPeerHistory(
+		peer->id,
+		SectionShow::Way::Forward,
+		ShowForChooseMessagesMsgId);
+}
+
+void MainWidget::clearChooseReportMessages() {
+	_history->setChooseReportMessagesDetails({}, nullptr);
+}
+
 void MainWidget::ui_showPeerHistory(
 		PeerId peerId,
 		const SectionShow &params,
@@ -2468,10 +2483,6 @@ auto MainWidget::thirdSectionForCurrentMainSection(
 		return std::make_shared<Info::Memento>(
 			peer,
 			Info::Memento::DefaultSection(peer));
-	//} else if (const auto feed = key.feed()) { // #feed
-	//	return std::make_shared<Info::Memento>(
-	//		feed,
-	//		Info::Memento::DefaultSection(key));
 	}
 	Unexpected("Key in MainWidget::thirdSectionForCurrentMainSection().");
 }

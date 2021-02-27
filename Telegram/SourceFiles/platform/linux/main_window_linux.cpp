@@ -24,18 +24,21 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "window/window_controller.h"
 #include "window/window_session_controller.h"
 #include "base/platform/base_platform_info.h"
-#include "base/platform/linux/base_xcb_utilities_linux.h"
 #include "base/call_delayed.h"
 #include "ui/widgets/popup_menu.h"
 #include "ui/widgets/input_fields.h"
 #include "facades.h"
 #include "app.h"
 
+#ifndef DESKTOP_APP_DISABLE_X11_INTEGRATION
+#include "base/platform/linux/base_linux_xcb_utilities.h"
+#endif // !DESKTOP_APP_DISABLE_X11_INTEGRATION
+
 #include <QtCore/QSize>
+#include <QtCore/QTemporaryFile>
 #include <QtGui/QWindow>
 
 #ifndef DESKTOP_APP_DISABLE_DBUS_INTEGRATION
-#include <QtCore/QTemporaryFile>
 #include <QtDBus/QDBusInterface>
 #include <QtDBus/QDBusConnection>
 #include <QtDBus/QDBusConnectionInterface>
@@ -82,6 +85,7 @@ base::flat_map<int, QImage> TrayIconImageBack;
 QIcon TrayIcon;
 QString TrayIconThemeName, TrayIconName;
 
+#ifndef DESKTOP_APP_DISABLE_X11_INTEGRATION
 bool XCBSkipTaskbar(QWindow *window, bool set) {
 	const auto connection = base::Platform::XCB::GetConnectionFromQt();
 	if (!connection) {
@@ -131,11 +135,14 @@ bool XCBSkipTaskbar(QWindow *window, bool set) {
 
 	return true;
 }
+#endif // !DESKTOP_APP_DISABLE_X11_INTEGRATION
 
 bool SkipTaskbar(QWindow *window, bool set) {
-	if (!IsWayland()) {
+#ifndef DESKTOP_APP_DISABLE_X11_INTEGRATION
+	if (IsX11()) {
 		return XCBSkipTaskbar(window, set);
 	}
+#endif // !DESKTOP_APP_DISABLE_X11_INTEGRATION
 
 	return false;
 }
@@ -537,9 +544,9 @@ void MainWindow::initHook() {
 		G_BUS_TYPE_SESSION,
 		G_DBUS_PROXY_FLAGS_NONE,
 		nullptr,
-		kSNIWatcherService.utf8(),
-		kSNIWatcherObjectPath.utf8(),
-		kSNIWatcherInterface.utf8(),
+		kSNIWatcherService.utf8().constData(),
+		kSNIWatcherObjectPath.utf8().constData(),
+		kSNIWatcherInterface.utf8().constData(),
 		nullptr,
 		nullptr);
 
@@ -601,12 +608,6 @@ void MainWindow::initHook() {
 #endif // !DESKTOP_APP_DISABLE_DBUS_INTEGRATION
 
 	LOG(("System tray available: %1").arg(Logs::b(trayAvailable())));
-
-	updateWaylandDecorationColors();
-	style::PaletteChanged(
-	) | rpl::start_with_next([=] {
-		updateWaylandDecorationColors();
-	}, lifetime());
 }
 
 bool MainWindow::hasTrayIcon() const {
@@ -627,11 +628,6 @@ void MainWindow::psShowTrayMenu() {
 }
 
 void MainWindow::psTrayMenuUpdated() {
-#ifndef DESKTOP_APP_DISABLE_DBUS_INTEGRATION
-	if (_sniTrayIcon && trayIconMenu) {
-		_sniTrayIcon->setContextMenu(trayIconMenu);
-	}
-#endif // !DESKTOP_APP_DISABLE_DBUS_INTEGRATION
 }
 
 #ifndef DESKTOP_APP_DISABLE_DBUS_INTEGRATION
@@ -691,7 +687,6 @@ void MainWindow::attachToSNITrayIcon() {
 				handleTrayIconActication(QSystemTrayIcon::MiddleClick);
 			});
 	});
-	updateTrayMenu();
 }
 
 void MainWindow::sniSignalEmitted(
@@ -803,6 +798,7 @@ void MainWindow::psSetupTrayIcon() {
 				this);
 
 			_sniTrayIcon->setTitle(AppName.utf16());
+			_sniTrayIcon->setContextMenu(trayIconMenu);
 			setSNITrayIcon(counter, muted);
 
 			attachToSNITrayIcon();
@@ -894,26 +890,6 @@ void MainWindow::updateIconCounters() {
 	if (trayIcon && IsIconRegenerationNeeded(counter, muted)) {
 		trayIcon->setIcon(TrayIconGen(counter, muted));
 	}
-}
-
-void MainWindow::updateWaylandDecorationColors() {
-	windowHandle()->setProperty(
-		"__material_decoration_backgroundColor",
-		st::titleBgActive->c);
-
-	windowHandle()->setProperty(
-		"__material_decoration_foregroundColor",
-		st::titleFgActive->c);
-
-	windowHandle()->setProperty(
-		"__material_decoration_backgroundInactiveColor",
-		st::titleBg->c);
-	windowHandle()->setProperty(
-		"__material_decoration_foregroundInactiveColor",
-		st::titleFg->c);
-
-	// Trigger a QtWayland client-side decoration update
-	windowHandle()->resize(windowHandle()->size());
 }
 
 void MainWindow::initTrayMenuHook() {
