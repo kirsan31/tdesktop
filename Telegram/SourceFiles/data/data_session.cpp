@@ -114,9 +114,9 @@ void CheckForSwitchInlineButton(not_null<HistoryItem*> item) {
 // need to find an "-all" tag in {full}, otherwise ignore this restriction.
 std::vector<UnavailableReason> ExtractUnavailableReasons(
 		const QVector<MTPRestrictionReason> &restrictions) {
-	return ranges::view::all(
+	return ranges::views::all(
 		restrictions
-	) | ranges::view::filter([](const MTPRestrictionReason &restriction) {
+	) | ranges::views::filter([](const MTPRestrictionReason &restriction) {
 		return restriction.match([&](const MTPDrestrictionReason &data) {
 			const auto platform = qs(data.vplatform());
 			return false
@@ -127,7 +127,7 @@ std::vector<UnavailableReason> ExtractUnavailableReasons(
 #endif // OS_MAC_STORE || OS_WIN_STORE
 				|| (platform == qstr("all"));
 		});
-	}) | ranges::view::transform([](const MTPRestrictionReason &restriction) {
+	}) | ranges::views::transform([](const MTPRestrictionReason &restriction) {
 		return restriction.match([&](const MTPDrestrictionReason &data) {
 			return UnavailableReason{ qs(data.vreason()), qs(data.vtext()) };
 		});
@@ -488,10 +488,12 @@ not_null<UserData*> Session::processUser(const MTPUser &data) {
 				: result->nameOrPhone;
 
 			result->setName(fname, lname, pname, uname);
-			if (const auto photo = data.vphoto()) {
-				result->setPhoto(*photo);
-			} else {
-				result->setPhoto(MTP_userProfilePhotoEmpty());
+			if (!minimal || data.is_apply_min_photo()) {
+				if (const auto photo = data.vphoto()) {
+					result->setPhoto(*photo);
+				} else {
+					result->setPhoto(MTP_userProfilePhotoEmpty());
+				}
 			}
 			if (const auto accessHash = data.vaccess_hash()) {
 				result->setAccessHash(accessHash->v);
@@ -832,7 +834,7 @@ void Session::registerInvitedToCallUser(
 		const auto inCall = ranges::contains(
 			call->participants(),
 			user,
-			&Data::GroupCall::Participant::user);
+			&Data::GroupCall::Participant::peer);
 		if (inCall) {
 			return;
 		}
@@ -1667,22 +1669,22 @@ rpl::producer<not_null<UserData*>> Session::megagroupParticipantAdded(
 
 HistoryItemsList Session::idsToItems(
 		const MessageIdsList &ids) const {
-	return ranges::view::all(
+	return ranges::views::all(
 		ids
-	) | ranges::view::transform([&](const FullMsgId &fullId) {
+	) | ranges::views::transform([&](const FullMsgId &fullId) {
 		return message(fullId);
-	}) | ranges::view::filter([](HistoryItem *item) {
+	}) | ranges::views::filter([](HistoryItem *item) {
 		return item != nullptr;
-	}) | ranges::view::transform([](HistoryItem *item) {
+	}) | ranges::views::transform([](HistoryItem *item) {
 		return not_null<HistoryItem*>(item);
 	}) | ranges::to_vector;
 }
 
 MessageIdsList Session::itemsToIds(
 		const HistoryItemsList &items) const {
-	return ranges::view::all(
+	return ranges::views::all(
 		items
-	) | ranges::view::transform([](not_null<HistoryItem*> item) {
+	) | ranges::views::transform([](not_null<HistoryItem*> item) {
 		return item->fullId();
 	}) | ranges::to_vector;
 }
@@ -1896,7 +1898,7 @@ void Session::processMessages(
 		const auto id = IdFromMessage(message);
 		indices.emplace((uint64(uint32(id)) << 32) | uint64(i), i);
 	}
-	for (const auto [position, index] : indices) {
+	for (const auto &[position, index] : indices) {
 		addNewMessage(
 			data[index],
 			MTPDmessage_ClientFlags(),

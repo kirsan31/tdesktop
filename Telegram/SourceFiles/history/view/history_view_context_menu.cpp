@@ -285,9 +285,9 @@ void AddPostLinkAction(
 }
 
 MessageIdsList ExtractIdsList(const SelectedItems &items) {
-	return ranges::view::all(
+	return ranges::views::all(
 		items
-	) | ranges::view::transform(
+	) | ranges::views::transform(
 		&SelectedItem::msgId
 	) | ranges::to_vector;
 }
@@ -370,13 +370,13 @@ bool AddSendNowSelectedAction(
 	}
 
 	const auto session = &request.navigation->session();
-	auto histories = ranges::view::all(
+	auto histories = ranges::views::all(
 		request.selectedItems
-	) | ranges::view::transform([&](const SelectedItem &item) {
+	) | ranges::views::transform([&](const SelectedItem &item) {
 		return session->data().message(item.msgId);
-	}) | ranges::view::filter([](HistoryItem *item) {
+	}) | ranges::views::filter([](HistoryItem *item) {
 		return item != nullptr;
-	}) | ranges::view::transform(
+	}) | ranges::views::transform(
 		&HistoryItem::history
 	);
 	if (histories.begin() == histories.end()) {
@@ -1109,7 +1109,7 @@ void SendReport(
 			MTP_string(comment)
 		)).done([=](const MTPBool &result) {
 			Ui::Toast::Show(tr::lng_report_thanks(tr::now));
-		}).fail([=](const RPCError &error) {
+		}).fail([=](const MTP::Error &error) {
 		}).send();
 	} else {
 		auto apiIds = QVector<MTPint>();
@@ -1124,7 +1124,7 @@ void SendReport(
 			MTP_string(comment)
 		)).done([=](const MTPBool &result) {
 			Ui::Toast::Show(tr::lng_report_thanks(tr::now));
-		}).fail([=](const RPCError &error) {
+		}).fail([=](const MTP::Error &error) {
 		}).send();
 	}
 }

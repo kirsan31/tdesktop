@@ -1923,18 +1923,24 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_group_call_title" = "Voice Chat";
 "lng_group_call_active" = "speaking";
 "lng_group_call_inactive" = "listening";
+"lng_group_call_raised_hand_status" = "wants to speak";
 "lng_group_call_settings" = "Settings";
 "lng_group_call_unmute" = "Unmute";
 "lng_group_call_unmute_sub" = "or hold spacebar to talk";
 "lng_group_call_you_are_live" = "You are Live";
 "lng_group_call_force_muted" = "Muted by admin";
 "lng_group_call_force_muted_sub" = "You are in Listen Only mode";
+"lng_group_call_raise_hand_tip" = "Click if you want to speak";
+"lng_group_call_raised_hand" = "You asked to speak";
+"lng_group_call_raised_hand_sub" = "We let the speakers know";
 "lng_group_call_connecting" = "Connecting...";
 "lng_group_call_leave" = "Leave";
 "lng_group_call_leave_title" = "Leave voice chat";
 "lng_group_call_leave_sure" = "Are you sure you want to leave this voice chat?";
 "lng_group_call_leave_to_other_sure" = "Do you want to leave your active voice chat and join a voice chat in this group?";
 "lng_group_call_create_sure" = "Do you really want to start a voice chat in this group?";
+"lng_group_call_create_sure_channel" = "Are you sure you want to start a voice chat in this channel as your personal account?";
+"lng_group_call_join_sure_personal" = "Are you sure you want to join this voice chat as your personal account?";
 "lng_group_call_also_end" = "End voice chat";
 "lng_group_call_settings_title" = "Settings";
 "lng_group_call_invite" = "Invite Member";
@@ -1947,7 +1953,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_group_call_add_to_group_all" = "Those users aren't members of «{group}» yet. Add them to the group?";
 "lng_group_call_invite_members" = "Group members";
 "lng_group_call_invite_search_results" = "Search results";
-"lng_group_call_new_muted" = "Mute new members";
+"lng_group_call_new_muted" = "Mute new participants";
 "lng_group_call_speakers" = "Speakers";
 "lng_group_call_microphone" = "Microphone";
 "lng_group_call_push_to_talk" = "Push to Talk Shortcut";
@@ -1957,8 +1963,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_group_call_ptt_delay_s" = "{amount}s";
 "lng_group_call_ptt_delay" = "Push to Talk release delay: {delay}";
 "lng_group_call_share" = "Share Invite Link";
+"lng_group_call_share_speaker" = "Users with this link can speak";
+"lng_group_call_copy_speaker_link" = "Copy Speaker Link";
+"lng_group_call_copy_listener_link" = "Copy Listener Link";
 "lng_group_call_end" = "End Voice Chat";
 "lng_group_call_join" = "Join";
+"lng_group_call_join_confirm" = "Do you want to join the voice chat {chat}?";
 "lng_group_call_invite_done_user" = "You invited {user} to the voice chat.";
 "lng_group_call_invite_done_many#one" = "You invited **{count} member** to the voice chat.";
 "lng_group_call_invite_done_many#other" = "You invited **{count} members** to the voice chat.";
@@ -1969,6 +1979,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_group_call_too_many" = "Sorry, there are too many members in this voice chat. Please try again later.";
 "lng_group_call_context_mute" = "Mute";
 "lng_group_call_context_unmute" = "Allow to speak";
+"lng_group_call_context_remove_hand" = "Cancel request to speak";
 "lng_group_call_context_mute_for_me" = "Mute for me";
 "lng_group_call_context_unmute_for_me" = "Unmute for me";
 "lng_group_call_duration_days#one" = "{count} day";
@@ -1983,6 +1994,29 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_group_call_mac_input" = "Please allow **Input Monitoring** for Telegram in Privacy Settings.";
 "lng_group_call_mac_accessibility" = "Please allow **Accessibility** for Telegram in Privacy Settings.\n\nApp restart may be required.";
 "lng_group_call_mac_settings" = "Open Settings";
+
+"lng_group_call_start_as_header" = "Start Voice Chat as...";
+"lng_group_call_join_as_header" = "Join Voice Chat as...";
+"lng_group_call_display_as_header" = "Display me as...";
+"lng_group_call_join_as_about" = "Choose whether you want to be displayed as your personal account or as your channel.";
+"lng_group_call_join_as_personal" = "personal account";
+"lng_group_call_edit_title" = "Edit voice chat title";
+"lng_group_call_switch_done" = "Members of this voice chat will now see you as **{user}**";
+"lng_group_call_edit_title_header" = "Voice chat title";
+"lng_group_call_recording_start" = "Start recording";
+"lng_group_call_recording_stop" = "Stop recording";
+"lng_group_call_recording_started" = "Voice chat recording started.";
+"lng_group_call_recording_stopped" = "Voice chat recording stopped.";
+"lng_group_call_recording_saved" = "Audio saved to Saved Messages.";
+"lng_group_call_recording_start_sure" = "Do you want to start recording this chat and save the result into an audio file?\n\nOther members will see the chat is being recorded.";
+"lng_group_call_recording_stop_sure" = "Do you want to stop recording this chat?";
+"lng_group_call_recording_start_field" = "Recording Title";
+"lng_group_call_recording_start_button" = "Start";
+"lng_group_call_is_recorded" = "Voice chat is being recorded.";
+"lng_group_call_can_speak_here" = "You can now speak.";
+"lng_group_call_can_speak" = "You can now speak in {chat}.";
+"lng_group_call_title_changed" = "Voice chat title changed to {title}";
+"lng_group_call_join_as_changed" = "Members of this voice chat will now see you as {name}";
 
 "lng_no_mic_permission" = "Telegram needs access to your microphone so that you can make calls and record voice messages.";
 

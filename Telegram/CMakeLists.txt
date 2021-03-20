@@ -73,6 +73,7 @@ PRIVATE
 if (LINUX)
     target_link_libraries(Telegram
     PRIVATE
+        desktop-app::external_glibmm
         desktop-app::external_glib
     )
 
@@ -262,11 +263,15 @@ PRIVATE
     calls/calls_box_controller.h
     calls/calls_call.cpp
     calls/calls_call.h
+    calls/calls_choose_join_as.cpp
+    calls/calls_choose_join_as.h
     calls/calls_group_call.cpp
     calls/calls_group_call.h
     calls/calls_group_common.h
     calls/calls_group_members.cpp
     calls/calls_group_members.h
+    calls/calls_group_menu.cpp
+    calls/calls_group_menu.h
     calls/calls_group_panel.cpp
     calls/calls_group_panel.h
     calls/calls_group_settings.cpp
@@ -814,14 +819,18 @@ PRIVATE
     platform/linux/linux_gtk_integration_p.h
     platform/linux/linux_gtk_integration.cpp
     platform/linux/linux_gtk_integration.h
+    platform/linux/linux_gtk_open_with_dialog.cpp
+    platform/linux/linux_gtk_open_with_dialog.h
+    platform/linux/linux_mpris_support.cpp
+    platform/linux/linux_mpris_support.h
     platform/linux/linux_notification_service_watcher.cpp
     platform/linux/linux_notification_service_watcher.h
-    platform/linux/linux_open_with_dialog.cpp
-    platform/linux/linux_open_with_dialog.h
     platform/linux/linux_wayland_integration.cpp
     platform/linux/linux_wayland_integration.h
     platform/linux/linux_xdp_file_dialog.cpp
     platform/linux/linux_xdp_file_dialog.h
+    platform/linux/linux_xdp_open_with_dialog.cpp
+    platform/linux/linux_xdp_open_with_dialog.h
     platform/linux/file_utilities_linux.cpp
     platform/linux/file_utilities_linux.h
     platform/linux/launcher_linux.cpp
@@ -1106,10 +1115,14 @@ if (DESKTOP_APP_DISABLE_DBUS_INTEGRATION)
     remove_target_sources(Telegram ${src_loc}
         platform/linux/linux_gsd_media_keys.cpp
         platform/linux/linux_gsd_media_keys.h
+        platform/linux/linux_mpris_support.cpp
+        platform/linux/linux_mpris_support.h
         platform/linux/linux_notification_service_watcher.cpp
         platform/linux/linux_notification_service_watcher.h
         platform/linux/linux_xdp_file_dialog.cpp
         platform/linux/linux_xdp_file_dialog.h
+        platform/linux/linux_xdp_open_with_dialog.cpp
+        platform/linux/linux_xdp_open_with_dialog.h
         platform/linux/notifications_manager_linux.cpp
     )
 
@@ -1132,8 +1145,8 @@ if (DESKTOP_APP_DISABLE_GTK_INTEGRATION)
         platform/linux/linux_gtk_file_dialog.h
         platform/linux/linux_gtk_integration_p.h
         platform/linux/linux_gtk_integration.cpp
-        platform/linux/linux_open_with_dialog.cpp
-        platform/linux/linux_open_with_dialog.h
+        platform/linux/linux_gtk_open_with_dialog.cpp
+        platform/linux/linux_gtk_open_with_dialog.h
     )
 
     nice_target_sources(Telegram ${src_loc}

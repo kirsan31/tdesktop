@@ -713,6 +713,14 @@ void ChannelData::clearGroupCall() {
 		| MTPDchannel::Flag::f_call_not_empty);
 }
 
+void ChannelData::setGroupCallDefaultJoinAs(PeerId peerId) {
+	_callDefaultJoinAs = peerId;
+}
+
+PeerId ChannelData::groupCallDefaultJoinAs() const {
+	return _callDefaultJoinAs;
+}
+
 namespace Data {
 
 void ApplyMigration(
@@ -758,6 +766,11 @@ void ApplyChannelUpdate(
 		channel->setGroupCall(*call);
 	} else {
 		channel->clearGroupCall();
+	}
+	if (const auto as = update.vgroupcall_default_join_as()) {
+		channel->setGroupCallDefaultJoinAs(peerFromMTP(*as));
+	} else {
+		channel->setGroupCallDefaultJoinAs(0);
 	}
 
 	channel->setMessagesTTL(update.vttl_period().value_or_empty());
@@ -889,7 +902,7 @@ void ApplyMegagroupAdmins(
 	auto adding = base::flat_map<UserId, QString>();
 	auto admins = ranges::make_subrange(
 		list.begin(), list.end()
-	) | ranges::view::transform([](const MTPChannelParticipant &p) {
+	) | ranges::views::transform([](const MTPChannelParticipant &p) {
 		const auto userId = p.match([](const auto &data) {
 			return data.vuser_id().v;
 		});

@@ -782,7 +782,7 @@ void InnerWidget::paintPeerSearchResult(
 	QRect tr(nameleft, st::dialogsPadding.y() + st::msgNameFont->height + st::dialogsSkip, namewidth, st::dialogsTextFont->height);
 	p.setFont(st::dialogsTextFont);
 	QString username = peer->userName();
-	if (!active && username.toLower().startsWith(_peerSearchQuery)) {
+	if (!active && username.startsWith(_peerSearchQuery, Qt::CaseInsensitive)) {
 		auto first = '@' + username.mid(0, _peerSearchQuery.size());
 		auto second = username.mid(_peerSearchQuery.size());
 		auto w = st::dialogsTextFont->width(first);
@@ -1163,7 +1163,7 @@ void InnerWidget::finishReorderPinned() {
 		_aboveIndex = -1;
 	}
 	if (wasDragging) {
-		emit draggingScrollDelta(0);
+		draggingScrollDelta(0);
 	}
 }
 
@@ -1253,7 +1253,7 @@ bool InnerWidget::updateReorderPinned(QPoint localPosition) {
 		return 0;
 	}();
 
-	emit draggingScrollDelta(delta);
+	draggingScrollDelta(delta);
 	return true;
 }
 
@@ -1466,7 +1466,7 @@ void InnerWidget::handleChatListEntryRefreshes() {
 			&& (from != to)
 			&& (entry->folder() == _openedFolder)
 			&& (_state == WidgetState::Default)) {
-			emit dialogMoved(from, to);
+			dialogMoved(from, to);
 		}
 
 		if (event.existenceChanged) {
@@ -1878,7 +1878,7 @@ void InnerWidget::applyFilterUpdate(QString newFilter, bool force) {
 		clearMouseSelection(true);
 	}
 	if (_state != WidgetState::Default) {
-		emit searchMessages();
+		searchMessages();
 	}
 }
 
@@ -2214,7 +2214,7 @@ void InnerWidget::refresh(bool toTop) {
 	resize(width(), h);
 	if (toTop) {
 		stopReorderPinned();
-		emit mustScrollTo(0, 0);
+		mustScrollTo(0, 0);
 		loadPeerPhotos();
 	}
 	_controller->dialogsListDisplayForced().set(
@@ -2438,7 +2438,7 @@ void InnerWidget::selectSkip(int32 direction) {
 			const auto fromY = (_collapsedSelected >= 0)
 				? (_collapsedSelected * st::dialogsImportantBarHeight)
 				: (dialogsOffset() + _selected->pos() * st::dialogsRowHeight);
-			emit mustScrollTo(fromY, fromY + st::dialogsRowHeight);
+			mustScrollTo(fromY, fromY + st::dialogsRowHeight);
 		}
 	} else if (_state == WidgetState::Filtered) {
 		if (_hashtagResults.empty() && _filterResults.empty() && _peerSearchResults.empty() && _searchResults.empty()) {
@@ -2487,13 +2487,13 @@ void InnerWidget::selectSkip(int32 direction) {
 			}
 		}
 		if (base::in_range(_hashtagSelected, 0, _hashtagResults.size())) {
-			emit mustScrollTo(_hashtagSelected * st::mentionHeight, (_hashtagSelected + 1) * st::mentionHeight);
+			mustScrollTo(_hashtagSelected * st::mentionHeight, (_hashtagSelected + 1) * st::mentionHeight);
 		} else if (base::in_range(_filteredSelected, 0, _filterResults.size())) {
-			emit mustScrollTo(filteredOffset() + _filteredSelected * st::dialogsRowHeight, filteredOffset() + (_filteredSelected + 1) * st::dialogsRowHeight);
+			mustScrollTo(filteredOffset() + _filteredSelected * st::dialogsRowHeight, filteredOffset() + (_filteredSelected + 1) * st::dialogsRowHeight);
 		} else if (base::in_range(_peerSearchSelected, 0, _peerSearchResults.size())) {
-			emit mustScrollTo(peerSearchOffset() + _peerSearchSelected * st::dialogsRowHeight + (_peerSearchSelected ? 0 : -st::searchedBarHeight), peerSearchOffset() + (_peerSearchSelected + 1) * st::dialogsRowHeight);
+			mustScrollTo(peerSearchOffset() + _peerSearchSelected * st::dialogsRowHeight + (_peerSearchSelected ? 0 : -st::searchedBarHeight), peerSearchOffset() + (_peerSearchSelected + 1) * st::dialogsRowHeight);
 		} else {
-			emit mustScrollTo(searchedOffset() + _searchedSelected * st::dialogsRowHeight + (_searchedSelected ? 0 : -st::searchedBarHeight), searchedOffset() + (_searchedSelected + 1) * st::dialogsRowHeight);
+			mustScrollTo(searchedOffset() + _searchedSelected * st::dialogsRowHeight + (_searchedSelected ? 0 : -st::searchedBarHeight), searchedOffset() + (_searchedSelected + 1) * st::dialogsRowHeight);
 		}
 	}
 	update();
@@ -2522,7 +2522,7 @@ void InnerWidget::scrollToEntry(const RowDescriptor &entry) {
 		}
 	}
 	if (fromY >= 0) {
-		emit mustScrollTo(fromY, fromY + st::dialogsRowHeight);
+		mustScrollTo(fromY, fromY + st::dialogsRowHeight);
 	}
 }
 
@@ -2556,7 +2556,7 @@ void InnerWidget::selectSkipPage(int32 pixels, int32 direction) {
 			const auto fromY = (_collapsedSelected >= 0)
 				? (_collapsedSelected * st::dialogsImportantBarHeight)
 				: (dialogsOffset() + _selected->pos() * st::dialogsRowHeight);
-			emit mustScrollTo(fromY, fromY + st::dialogsRowHeight);
+			mustScrollTo(fromY, fromY + st::dialogsRowHeight);
 		}
 	} else {
 		return selectSkip(direction * toSkip);
@@ -2641,7 +2641,7 @@ void InnerWidget::switchToFilter(FilterId filterId) {
 		filterId = 0;
 	}
 	if (_filterId == filterId) {
-		emit mustScrollTo(0, 0);
+		mustScrollTo(0, 0);
 		return;
 	}
 	if (_openedFolder) {
@@ -2674,11 +2674,11 @@ bool InnerWidget::chooseHashtag() {
 		}
 		cSetRecentSearchHashtags(recent);
 		session().local().writeRecentHashtagsAndBots();
-		emit refreshHashtags();
+		refreshHashtags();
 		selectByMouse(QCursor::pos());
 	} else {
 		session().local().saveRecentSearchHashtags('#' + hashtag->tag);
-		emit completeHashtag(hashtag->tag);
+		completeHashtag(hashtag->tag);
 	}
 	return true;
 }
@@ -3108,9 +3108,9 @@ void InnerWidget::setupShortcuts() {
 
 		const auto filters = &session().data().chatsFilters().list();
 		if (const auto filtersCount = int(filters->size())) {
-			auto &&folders = ranges::view::zip(
+			auto &&folders = ranges::views::zip(
 				Shortcuts::kShowFolder,
-				ranges::view::ints(0, ranges::unreachable));
+				ranges::views::ints(0, ranges::unreachable));
 
 			for (const auto [command, index] : folders) {
 				const auto select = (command == Command::ShowFolderLast)
@@ -3134,9 +3134,9 @@ void InnerWidget::setupShortcuts() {
 			Command::ChatPinned4,
 			Command::ChatPinned5,
 		};
-		auto &&pinned = ranges::view::zip(
+		auto &&pinned = ranges::views::zip(
 			kPinned,
-			ranges::view::ints(0, ranges::unreachable));
+			ranges::views::ints(0, ranges::unreachable));
 		for (const auto [command, index] : pinned) {
 			request->check(command) && request->handle([=, index = index] {
 				const auto list = (_filterId

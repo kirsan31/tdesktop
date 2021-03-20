@@ -431,7 +431,7 @@ void InnerWidget::requestAdmins() {
 				const QVector<MTPChannelParticipant> &list) {
 			auto filtered = (
 				list
-			) | ranges::view::transform([&](const MTPChannelParticipant &p) {
+			) | ranges::views::transform([&](const MTPChannelParticipant &p) {
 				const auto userId = p.match([](const auto &data) {
 					return data.vuser_id().v;
 				});
@@ -442,11 +442,11 @@ void InnerWidget::requestAdmins() {
 					return false;
 				});
 				return std::make_pair(userId, canEdit);
-			}) | ranges::view::transform([&](auto &&pair) {
+			}) | ranges::views::transform([&](auto &&pair) {
 				return std::make_pair(
 					session().data().userLoaded(pair.first),
 					pair.second);
-			}) | ranges::view::filter([&](auto &&pair) {
+			}) | ranges::views::filter([&](auto &&pair) {
 				return (pair.first != nullptr);
 			});
 
@@ -697,7 +697,7 @@ void InnerWidget::preloadMore(Direction direction) {
 		if (!loadedFlag) {
 			addEvents(direction, results.vevents().v);
 		}
-	}).fail([this, &requestId, &loadedFlag](const RPCError &error) {
+	}).fail([this, &requestId, &loadedFlag](const MTP::Error &error) {
 		requestId = 0;
 		loadedFlag = true;
 		update();
@@ -818,7 +818,7 @@ int InnerWidget::resizeGetHeight(int newWidth) {
 
 	const auto resizeAllItems = (_itemsWidth != newWidth);
 	auto newHeight = 0;
-	for (const auto &item : ranges::view::reverse(_items)) {
+	for (const auto &item : ranges::views::reverse(_items)) {
 		item->setY(newHeight);
 		if (item->pendingResize() || resizeAllItems) {
 			newHeight += item->resizeGetHeight(newWidth);
@@ -1326,7 +1326,7 @@ void InnerWidget::suggestRestrictUser(not_null<UserData*> user) {
 						MTP_int(0));
 					editRestrictions(hasAdminRights, bannedRights);
 				}
-			}).fail([=](const RPCError &error) {
+			}).fail([=](const MTP::Error &error) {
 				auto bannedRights = MTP_chatBannedRights(
 					MTP_flags(0),
 					MTP_int(0));

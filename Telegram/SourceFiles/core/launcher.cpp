@@ -183,16 +183,14 @@ bool MoveLegacyAlphaFolder(const QString &folder, const QString &file) {
 		const auto newFile = was + "/tdata/alpha";
 		if (QFile::exists(oldFile) && !QFile::exists(newFile)) {
 			if (!QFile(oldFile).copy(newFile)) {
-				LOG(("FATAL: Could not copy '%1' to '%2'"
-					).arg(oldFile
-					).arg(newFile));
+				LOG(("FATAL: Could not copy '%1' to '%2'").arg(
+					oldFile,
+					newFile));
 				return false;
 			}
 		}
 		if (!QDir().rename(was, now)) {
-			LOG(("FATAL: Could not rename '%1' to '%2'"
-				).arg(was
-				).arg(now));
+			LOG(("FATAL: Could not rename '%1' to '%2'").arg(was, now));
 			return false;
 		}
 	}
@@ -463,7 +461,7 @@ void Launcher::processArguments() {
 	auto parseResult = QMap<QByteArray, QStringList>();
 	auto parsingKey = QByteArray();
 	auto parsingFormat = KeyFormat::NoValues;
-	for (const auto &argument : _arguments) {
+	for (const auto &argument : std::as_const(_arguments)) {
 		switch (parsingFormat) {
 		case KeyFormat::OneValue: {
 			parseResult[parsingKey] = QStringList(argument.mid(0, 8192));
