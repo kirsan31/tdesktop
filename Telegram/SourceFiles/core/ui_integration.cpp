@@ -21,6 +21,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_session.h"
 #include "main/main_app_config.h"
 #include "mainwindow.h"
+#include "facades.h" // Global::ScreenIsLocked.
 
 namespace Core {
 namespace {
@@ -98,10 +99,6 @@ void UiIntegration::unregisterLeaveSubscription(not_null<QWidget*> widget) {
 	Core::App().unregisterLeaveSubscription(widget);
 }
 
-void UiIntegration::writeLogEntry(const QString &entry) {
-	Logs::writeMain(entry);
-}
-
 QString UiIntegration::emojiCacheFolder() {
 	return cWorkingDir() + "tdata/emoji";
 }
@@ -116,10 +113,8 @@ void UiIntegration::activationFromTopPanel() {
 	Platform::IgnoreApplicationActivationRightNow();
 }
 
-void UiIntegration::startFontsBegin() {
-}
-
-void UiIntegration::startFontsEnd() {
+bool UiIntegration::screenIsLocked() {
+	return Global::ScreenIsLocked();
 }
 
 QString UiIntegration::timeFormat() {
@@ -232,7 +227,7 @@ rpl::producer<> UiIntegration::forcePopupMenuHideRequests() {
 QString UiIntegration::convertTagToMimeTag(const QString &tagId) {
 	if (TextUtilities::IsMentionLink(tagId)) {
 		if (const auto session = Core::App().activeAccount().maybeSession()) {
-			return tagId + ':' + QString::number(session->userId());
+			return tagId + ':' + QString::number(session->userId().bare);
 		}
 	}
 	return tagId;
@@ -244,11 +239,12 @@ const Ui::Emoji::One *UiIntegration::defaultEmojiVariant(
 		return emoji;
 	}
 	const auto nonColored = emoji->nonColoredId();
-	const auto it = cEmojiVariants().constFind(nonColored);
-	const auto result = (it != cEmojiVariants().cend())
-		? emoji->variant(it.value())
+	const auto &variants = Core::App().settings().emojiVariants();
+	const auto i = variants.find(nonColored);
+	const auto result = (i != end(variants))
+		? emoji->variant(i->second)
 		: emoji;
-	AddRecentEmoji(result);
+	Core::App().settings().incrementRecentEmoji(result);
 	return result;
 }
 

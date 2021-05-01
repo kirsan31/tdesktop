@@ -19,6 +19,7 @@ add_subdirectory(lib_storage)
 add_subdirectory(lib_lottie)
 add_subdirectory(lib_qr)
 add_subdirectory(lib_webrtc)
+add_subdirectory(lib_webview)
 add_subdirectory(codegen)
 
 get_filename_component(src_loc SourceFiles REALPATH)
@@ -26,6 +27,7 @@ get_filename_component(res_loc Resources REALPATH)
 
 include(cmake/telegram_options.cmake)
 include(cmake/lib_ffmpeg.cmake)
+include(cmake/lib_stripe.cmake)
 include(cmake/lib_tgvoip.cmake)
 include(cmake/lib_tgcalls.cmake)
 include(cmake/td_export.cmake)
@@ -34,6 +36,11 @@ include(cmake/td_lang.cmake)
 include(cmake/td_scheme.cmake)
 include(cmake/td_ui.cmake)
 include(cmake/generate_appdata_changelog.cmake)
+
+if (WIN32)
+    include(cmake/generate_midl.cmake)
+    generate_midl(Telegram ${src_loc}/platform/win/windows_quiethours.idl)
+endif()
 
 set_target_properties(Telegram PROPERTIES AUTOMOC ON AUTORCC ON)
 
@@ -55,7 +62,9 @@ PRIVATE
     desktop-app::lib_storage
     desktop-app::lib_lottie
     desktop-app::lib_qr
+    desktop-app::lib_webview
     desktop-app::lib_ffmpeg
+    desktop-app::lib_stripe
     desktop-app::external_lz4
     desktop-app::external_rlottie
     desktop-app::external_zlib
@@ -70,7 +79,12 @@ PRIVATE
     desktop-app::external_xxhash
 )
 
-if (LINUX)
+if (WIN32)
+    target_link_libraries(Telegram
+    PRIVATE
+        desktop-app::lib_webview_winrt
+    )
+elseif (LINUX)
     target_link_libraries(Telegram
     PRIVATE
         desktop-app::external_glibmm
@@ -249,8 +263,6 @@ PRIVATE
     boxes/sessions_box.h
     boxes/share_box.cpp
     boxes/share_box.h
-    boxes/single_choice_box.cpp
-    boxes/single_choice_box.h
     boxes/sticker_set_box.cpp
     boxes/sticker_set_box.h
     boxes/stickers_box.cpp
@@ -383,8 +395,6 @@ PRIVATE
     data/data_cloud_file.h
     data/data_cloud_themes.cpp
     data/data_cloud_themes.h
-    data/data_countries.cpp
-    data/data_countries.h
     data/data_document.cpp
     data/data_document.h
     data/data_document_media.cpp
@@ -415,6 +425,8 @@ PRIVATE
     data/data_notify_settings.h
     data/data_peer.cpp
     data/data_peer.h
+    data/data_peer_id.cpp
+    data/data_peer_id.h
     data/data_peer_values.cpp
     data/data_peer_values.h
     data/data_photo.cpp
@@ -796,8 +808,6 @@ PRIVATE
     passport/passport_panel.h
     passport/passport_panel_controller.cpp
     passport/passport_panel_controller.h
-    passport/passport_panel_details_row.cpp
-    passport/passport_panel_details_row.h
     passport/passport_panel_edit_contact.cpp
     passport/passport_panel_edit_contact.h
     passport/passport_panel_edit_document.cpp
@@ -808,6 +818,10 @@ PRIVATE
     passport/passport_panel_form.h
     passport/passport_panel_password.cpp
     passport/passport_panel_password.h
+    payments/payments_checkout_process.cpp
+    payments/payments_checkout_process.h
+    payments/payments_form.cpp
+    payments/payments_form.h
     platform/linux/linux_desktop_environment.cpp
     platform/linux/linux_desktop_environment.h
     platform/linux/linux_gdk_helper.cpp
@@ -816,6 +830,7 @@ PRIVATE
     platform/linux/linux_gsd_media_keys.h
     platform/linux/linux_gtk_file_dialog.cpp
     platform/linux/linux_gtk_file_dialog.h
+    platform/linux/linux_gtk_integration_dummy.cpp
     platform/linux/linux_gtk_integration_p.h
     platform/linux/linux_gtk_integration.cpp
     platform/linux/linux_gtk_integration.h
@@ -825,6 +840,7 @@ PRIVATE
     platform/linux/linux_mpris_support.h
     platform/linux/linux_notification_service_watcher.cpp
     platform/linux/linux_notification_service_watcher.h
+    platform/linux/linux_wayland_integration_dummy.cpp
     platform/linux/linux_wayland_integration.cpp
     platform/linux/linux_wayland_integration.h
     platform/linux/linux_xdp_file_dialog.cpp
@@ -837,6 +853,7 @@ PRIVATE
     platform/linux/launcher_linux.h
     platform/linux/main_window_linux.cpp
     platform/linux/main_window_linux.h
+    platform/linux/notifications_manager_linux_dummy.cpp
     platform/linux/notifications_manager_linux.cpp
     platform/linux/notifications_manager_linux.h
     platform/linux/specific_linux.cpp
@@ -846,6 +863,7 @@ PRIVATE
     platform/mac/file_utilities_mac.h
     platform/mac/launcher_mac.mm
     platform/mac/launcher_mac.h
+    platform/mac/mac_iconv_helper.c
     platform/mac/main_window_mac.mm
     platform/mac/main_window_mac.h
     platform/mac/notifications_manager_mac.mm
@@ -1007,8 +1025,6 @@ PRIVATE
     ui/widgets/level_meter.h
     ui/widgets/multi_select.cpp
     ui/widgets/multi_select.h
-    ui/widgets/separate_panel.cpp
-    ui/widgets/separate_panel.h
     ui/countryinput.cpp
     ui/countryinput.h
     ui/empty_userpic.cpp
@@ -1024,8 +1040,6 @@ PRIVATE
     ui/search_field_controller.h
     ui/special_buttons.cpp
     ui/special_buttons.h
-    ui/special_fields.cpp
-    ui/special_fields.h
     ui/unread_badge.cpp
     ui/unread_badge.h
     window/main_window.cpp
@@ -1125,16 +1139,20 @@ if (DESKTOP_APP_DISABLE_DBUS_INTEGRATION)
         platform/linux/linux_xdp_open_with_dialog.h
         platform/linux/notifications_manager_linux.cpp
     )
-
-    nice_target_sources(Telegram ${src_loc}
-    PRIVATE
+else()
+    remove_target_sources(Telegram ${src_loc}
         platform/linux/notifications_manager_linux_dummy.cpp
     )
 endif()
 
 if (DESKTOP_APP_DISABLE_WAYLAND_INTEGRATION)
-    remove_target_sources(Telegram ${src_loc} platform/linux/linux_wayland_integration.cpp)
-    nice_target_sources(Telegram ${src_loc} PRIVATE platform/linux/linux_wayland_integration_dummy.cpp)
+    remove_target_sources(Telegram ${src_loc}
+        platform/linux/linux_wayland_integration.cpp
+    )
+else()
+    remove_target_sources(Telegram ${src_loc}
+        platform/linux/linux_wayland_integration_dummy.cpp
+    )
 endif()
 
 if (DESKTOP_APP_DISABLE_GTK_INTEGRATION)
@@ -1148,15 +1166,16 @@ if (DESKTOP_APP_DISABLE_GTK_INTEGRATION)
         platform/linux/linux_gtk_open_with_dialog.cpp
         platform/linux/linux_gtk_open_with_dialog.h
     )
-
-    nice_target_sources(Telegram ${src_loc}
-    PRIVATE
+else()
+    remove_target_sources(Telegram ${src_loc}
         platform/linux/linux_gtk_integration_dummy.cpp
     )
 endif()
 
-if (NOT DESKTOP_APP_USE_PACKAGED)
-    nice_target_sources(Telegram ${src_loc} PRIVATE platform/mac/mac_iconv_helper.c)
+if (DESKTOP_APP_USE_PACKAGED)
+    remove_target_sources(Telegram ${src_loc}
+        platform/mac/mac_iconv_helper.c
+    )
 endif()
 
 nice_target_sources(Telegram ${res_loc}

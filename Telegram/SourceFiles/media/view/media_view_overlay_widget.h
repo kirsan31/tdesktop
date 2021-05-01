@@ -210,6 +210,9 @@ private:
 	void playbackPauseMusic();
 	void switchToPip();
 
+	void clearBeforeHide();
+	void clearAfterHide();
+
 	void assignMediaPointer(DocumentData *document);
 	void assignMediaPointer(not_null<PhotoData*> photo);
 
@@ -443,6 +446,7 @@ private:
 
 	std::unique_ptr<Streamed> _streamed;
 	std::unique_ptr<PipWrap> _pip;
+	bool _showAsPip = false;
 
 	const style::icon *_docIcon = nullptr;
 	style::color _docIconColor;

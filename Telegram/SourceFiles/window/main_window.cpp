@@ -119,7 +119,43 @@ QIcon CreateOfficialIcon(Main::Session *session) {
 QIcon CreateIcon(Main::Session *session) {
 	auto result = CreateOfficialIcon(session);
 #if defined Q_OS_UNIX && !defined Q_OS_MAC
-	return QIcon::fromTheme(Platform::GetIconName(), result);
+	const auto iconFromTheme = QIcon::fromTheme(
+		Platform::GetIconName(),
+		result);
+
+	result = QIcon();
+
+	static const auto iconSizes = {
+		16,
+		22,
+		32,
+		48,
+		64,
+		128,
+		256,
+	};
+
+	// Qt's standard QIconLoaderEngine sets availableSizes
+	// to XDG directories sizes, since svg icons are scalable,
+	// they could be only in one XDG folder (like 48x48)
+	// and Qt will set only a 48px icon to the window
+	// even though the icon could be scaled to other sizes.
+	// Thus, scale it manually to the most widespread sizes.
+	for (const auto iconSize : iconSizes) {
+		// We can't use QIcon::actualSize here
+		// since it works incorrectly with svg icon themes
+		const auto iconPixmap = iconFromTheme.pixmap(iconSize);
+
+		const auto iconPixmapSize = iconPixmap.size()
+			/ iconPixmap.devicePixelRatio();
+
+		// Not a svg icon, don't scale it
+		if (iconPixmapSize.width() != iconSize) {
+			return iconFromTheme;
+		}
+
+		result.addPixmap(iconPixmap);
+	}
 #endif
 	return result;
 }
@@ -425,6 +461,7 @@ void MainWindow::recountGeometryConstraints() {
 }
 
 void MainWindow::initSize() {
+	updateShadowSize();
 	updateMinimumSize();
 
 	if (initSizeFromSystem()) {
@@ -526,6 +563,7 @@ void MainWindow::initSize() {
 		}
 		maximized = position.maximized;
 	}
+	geometry += _padding;
 	DEBUG_LOG(("Window Pos: Setting first %1, %2, %3, %4").arg(geometry.x()).arg(geometry.y()).arg(geometry.width()).arg(geometry.height()));
 	setGeometry(geometry);
 }
@@ -643,7 +681,7 @@ void MainWindow::savePosition(Qt::WindowState state) {
 		realPosition.maximized = 1;
 		DEBUG_LOG(("Window Pos: Saving maximized position."));
 	} else {
-		auto r = geometry();
+		auto r = geometry().marginsRemoved(_padding);
 		realPosition.x = r.x();
 		realPosition.y = r.y();
 		realPosition.w = r.width() - (_rightColumn ? _rightColumn->width() : 0);

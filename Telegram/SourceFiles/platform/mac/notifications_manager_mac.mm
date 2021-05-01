@@ -111,7 +111,7 @@ using Manager = Platform::Notifications::Manager;
 	const auto my = Window::Notifications::Manager::NotificationId{
 		.full = Manager::FullPeer{
 			.sessionId = notificationSessionId,
-			.peerId = notificationPeerId
+			.peerId = PeerId(notificationPeerId)
 		},
 		.msgId = notificationMsgId
 	};
@@ -140,23 +140,16 @@ using Manager = Platform::Notifications::Manager;
 namespace Platform {
 namespace Notifications {
 
-bool SkipAudio() {
-	queryDoNotDisturbState();
-	return DoNotDisturbEnabled;
+bool SkipAudioForCustom() {
+	return false;
 }
 
-bool SkipToast() {
-	if (Supported()) {
-		// Do not skip native notifications because of Do not disturb.
-		// They respect this setting anyway.
-		return false;
-	}
-	queryDoNotDisturbState();
-	return DoNotDisturbEnabled;
+bool SkipToastForCustom() {
+	return false;
 }
 
-bool SkipFlashBounce() {
-	return SkipAudio();
+bool SkipFlashBounceForCustom() {
+	return false;
 }
 
 bool Supported() {
@@ -260,11 +253,11 @@ void Manager::Private::showNotification(
 
 	NSUserNotification *notification = [[[NSUserNotification alloc] init] autorelease];
 	if ([notification respondsToSelector:@selector(setIdentifier:)]) {
-		auto identifier = _managerIdString + '_' + QString::number(peer->id) + '_' + QString::number(msgId);
+		auto identifier = _managerIdString + '_' + QString::number(peer->id.value) + '_' + QString::number(msgId);
 		auto identifierValue = Q2NSString(identifier);
 		[notification setIdentifier:identifierValue];
 	}
-	[notification setUserInfo:[NSDictionary dictionaryWithObjectsAndKeys:[NSNumber numberWithUnsignedLongLong:peer->session().uniqueId()],@"session",[NSNumber numberWithUnsignedLongLong:peer->id],@"peer",[NSNumber numberWithInt:msgId],@"msgid",[NSNumber numberWithUnsignedLongLong:_managerId],@"manager",nil]];
+	[notification setUserInfo:[NSDictionary dictionaryWithObjectsAndKeys:[NSNumber numberWithUnsignedLongLong:peer->session().uniqueId()],@"session",[NSNumber numberWithUnsignedLongLong:peer->id.value],@"peer",[NSNumber numberWithInt:msgId],@"msgid",[NSNumber numberWithUnsignedLongLong:_managerId],@"manager",nil]];
 
 	[notification setTitle:Q2NSString(title)];
 	[notification setSubtitle:Q2NSString(subtitle)];
@@ -331,7 +324,7 @@ void Manager::Private::clearingThreadLoop() {
 					return clearFromSessions.contains(notificationSessionId)
 						|| clearFromPeers.contains(FullPeer{
 							.sessionId = notificationSessionId,
-							.peerId = notificationPeerId
+							.peerId = PeerId(notificationPeerId)
 						});
 				}
 			}
@@ -436,6 +429,19 @@ void Manager::doClearFromSession(not_null<Main::Session*> session) {
 
 QString Manager::accountNameSeparator() {
 	return QString::fromUtf8(" \xE2\x86\x92 ");
+}
+
+bool Manager::doSkipAudio() const {
+	queryDoNotDisturbState();
+	return DoNotDisturbEnabled;
+}
+
+bool Manager::doSkipToast() const {
+	return false;
+}
+
+bool Manager::doSkipFlashBounce() const {
+	return doSkipAudio();
 }
 
 } // namespace Notifications

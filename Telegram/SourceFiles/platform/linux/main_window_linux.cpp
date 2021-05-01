@@ -430,8 +430,18 @@ bool UseUnityCounter() {
 
 bool IsSNIAvailable() {
 	try {
-		const auto connection = Gio::DBus::Connection::get_sync(
-			Gio::DBus::BusType::BUS_TYPE_SESSION);
+		const auto connection = [] {
+			try {
+				return Gio::DBus::Connection::get_sync(
+					Gio::DBus::BusType::BUS_TYPE_SESSION);
+			} catch (...) {
+				return Glib::RefPtr<Gio::DBus::Connection>();
+			}
+		}();
+
+		if (!connection) {
+			return false;
+		}
 
 		auto reply = connection->call_sync(
 			std::string(kSNIWatcherObjectPath),
@@ -448,7 +458,6 @@ bool IsSNIAvailable() {
 				reply.get_child(0)));
 	} catch (const Glib::Error &e) {
 		static const auto NotSupportedErrors = {
-			"org.freedesktop.DBus.Error.Disconnected",
 			"org.freedesktop.DBus.Error.ServiceUnknown",
 		};
 
@@ -880,9 +889,9 @@ void MainWindow::updateIconCounters() {
 
 		if (counterSlice > 0) {
 			// According to the spec, it should be of 'x' D-Bus signature,
-			// which corresponds to gint64 (signed long) type with glib
+			// which corresponds to gint64 type with glib
 			// https://wiki.ubuntu.com/Unity/LauncherAPI#Low_level_DBus_API:_com.canonical.Unity.LauncherEntry
-			dbusUnityProperties["count"] = Glib::Variant<long>::create(
+			dbusUnityProperties["count"] = Glib::Variant<gint64>::create(
 				counterSlice);
 			dbusUnityProperties["count-visible"] =
 				Glib::Variant<bool>::create(true);

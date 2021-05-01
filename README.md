@@ -26,7 +26,8 @@ The source code is published under GPLv3 with OpenSSL exception, the license is 
 
 The latest version is available for
 
-* [Windows 7 and above](https://telegram.org/dl/desktop/win) ([portable](https://telegram.org/dl/desktop/win_portable))
+* [Windows 7 and above (64 bit)](https://telegram.org/dl/desktop/win64) ([portable](https://telegram.org/dl/desktop/win64_portable))
+* [Windows 7 and above (32 bit)](https://telegram.org/dl/desktop/win) ([portable](https://telegram.org/dl/desktop/win_portable))
 * [macOS 10.12 and above](https://telegram.org/dl/desktop/mac)
 * [Linux static build for 64 bit](https://telegram.org/dl/desktop/linux)
 * [Snap](https://snapcraft.io/telegram-desktop)
@@ -73,7 +74,7 @@ Version **1.8.15** was the last that supports older systems
 
 ## Build instructions
 
-* [Visual Studio 2019][msvc]
+* Visual Studio 2019 [(32 bits)][msvc32] [(64 bits)][msvc64]
 * [Xcode 12][xcode]
 * [CMake on GNU/Linux][cmake]
 
@@ -89,7 +90,8 @@ https://github.com/telegramdesktop/tdesktop/issues/1333
 [telegram_api]: https://core.telegram.org
 [telegram_proto]: https://core.telegram.org/mtproto
 [license]: LICENSE
-[msvc]: docs/building-msvc.md
+[msvc32]: docs/building-msvc.md
+[msvc64]: docs/building-msvc-x64.md
 [xcode]: docs/building-xcode.md
 [xcode_old]: docs/building-xcode-old.md
 [cmake]: docs/building-cmake.md

@@ -8,16 +8,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "platform/linux/linux_xdp_file_dialog.h"
 
 #include "platform/platform_file_utilities.h"
-#include "platform/linux/linux_desktop_environment.h"
-#include "platform/linux/specific_linux.h"
 #include "base/platform/base_platform_info.h"
 #include "base/platform/linux/base_linux_glibmm_helper.h"
 #include "storage/localstorage.h"
 #include "base/openssl_help.h"
 #include "base/qt_adapters.h"
 
-#include <QtCore/QMimeType>
-#include <QtCore/QMimeDatabase>
 #include <QtGui/QWindow>
 #include <QtWidgets/QFileDialog>
 
@@ -36,6 +32,8 @@ constexpr auto kPropertiesInterface = "org.freedesktop.DBus.Properties"_cs;
 
 const char *filterRegExp =
 "^(.*)\\(([a-zA-Z0-9_.,*? +;#\\-\\[\\]@\\{\\}/!<>\\$%&=^~:\\|]*)\\)$";
+
+std::optional<uint> FileChooserPortalVersion;
 
 auto QStringListToStd(const QStringList &list) {
 	std::vector<Glib::ustring> result;
@@ -73,44 +71,55 @@ auto MakeFilterList(const QString &filter) {
 	return result;
 }
 
-std::optional<uint> FileChooserPortalVersion() {
-	try {
-		const auto connection = Gio::DBus::Connection::get_sync(
-			Gio::DBus::BusType::BUS_TYPE_SESSION);
-
-		auto reply = connection->call_sync(
-			std::string(kXDGDesktopPortalObjectPath),
-			std::string(kPropertiesInterface),
-			"Get",
-			base::Platform::MakeGlibVariant(std::tuple{
-				Glib::ustring(
-					std::string(kXDGDesktopPortalFileChooserInterface)),
-				Glib::ustring("version"),
-			}),
-			std::string(kXDGDesktopPortalService));
-
-		return base::Platform::GlibVariantCast<uint>(
-			base::Platform::GlibVariantCast<Glib::VariantBase>(
-				reply.get_child(0)));
-	} catch (const Glib::Error &e) {
-		static const auto NotSupportedErrors = {
-			"org.freedesktop.DBus.Error.Disconnected",
-			"org.freedesktop.DBus.Error.ServiceUnknown",
-		};
-
-		const auto errorName = Gio::DBus::ErrorUtils::get_remote_error(e);
-		if (ranges::contains(NotSupportedErrors, errorName)) {
-			return std::nullopt;
+void ComputeFileChooserPortalVersion() {
+	const auto connection = [] {
+		try {
+			return Gio::DBus::Connection::get_sync(
+				Gio::DBus::BusType::BUS_TYPE_SESSION);
+		} catch (...) {
+			return Glib::RefPtr<Gio::DBus::Connection>();
 		}
+	}();
 
-		LOG(("XDP File Dialog Error: %1").arg(
-			QString::fromStdString(e.what())));
-	} catch (const std::exception &e) {
-		LOG(("XDP File Dialog Error: %1").arg(
-			QString::fromStdString(e.what())));
+	if (!connection) {
+		return;
 	}
 
-	return std::nullopt;
+	connection->call(
+		std::string(kXDGDesktopPortalObjectPath),
+		std::string(kPropertiesInterface),
+		"Get",
+		base::Platform::MakeGlibVariant(std::tuple{
+			Glib::ustring(
+				std::string(kXDGDesktopPortalFileChooserInterface)),
+			Glib::ustring("version"),
+		}),
+		[=](const Glib::RefPtr<Gio::AsyncResult> &result) {
+			try {
+				auto reply = connection->call_finish(result);
+
+				FileChooserPortalVersion =
+					base::Platform::GlibVariantCast<uint>(
+						base::Platform::GlibVariantCast<Glib::VariantBase>(
+							reply.get_child(0)));
+			} catch (const Glib::Error &e) {
+				static const auto NotSupportedErrors = {
+					"org.freedesktop.DBus.Error.ServiceUnknown",
+				};
+
+				const auto errorName =
+					Gio::DBus::ErrorUtils::get_remote_error(e);
+
+				if (!ranges::contains(NotSupportedErrors, errorName)) {
+					LOG(("XDP File Dialog Error: %1").arg(
+						QString::fromStdString(e.what())));
+				}
+			} catch (const std::exception &e) {
+				LOG(("XDP File Dialog Error: %1").arg(
+					QString::fromStdString(e.what())));
+			}
+		},
+		std::string(kXDGDesktopPortalService));
 }
 
 // This is a patched copy of file dialog from qxdgdesktopportal theme plugin.
@@ -175,6 +184,10 @@ public:
 
 	int exec() override;
 
+	bool failedToOpen() {
+		return _failedToOpen;
+	}
+
 private:
 	void openPortal();
 	void gotResponse(
@@ -214,6 +227,7 @@ private:
 	Glib::ustring _selectedMimeTypeFilter;
 	Glib::ustring _selectedNameFilter;
 	std::vector<Glib::ustring> _selectedFiles;
+	bool _failedToOpen = false;
 
 	rpl::event_stream<> _accept;
 	rpl::event_stream<> _reject;
@@ -282,7 +296,7 @@ void XDPFileDialog::openPortal() {
 	if (_acceptMode == QFileDialog::AcceptSave) {
 		if (!_directory.empty()) {
 			options["current_folder"] = Glib::Variant<std::string>::create(
-				_directory +'\0');
+				_directory + '\0');
 		}
 
 		if (!_selectedFiles.empty()) {
@@ -302,8 +316,12 @@ void XDPFileDialog::openPortal() {
 
 	if (!_mimeTypesFilters.empty()) {
 		for (const auto &mimeTypeFilter : _mimeTypesFilters) {
-			const auto mimeType = QMimeDatabase().mimeTypeForName(
-				QString::fromStdString(mimeTypeFilter));
+			auto mimeTypeUncertain = false;
+			const auto mimeType = Gio::content_type_guess(
+				mimeTypeFilter,
+				nullptr,
+				0,
+				mimeTypeUncertain);
 
 			// Creates e.g. (1, "image/png")
 			const auto filterCondition = FilterCondition{
@@ -313,7 +331,7 @@ void XDPFileDialog::openPortal() {
 
 			// Creates e.g. [("Images", [((1, "image/png"))])]
 			filterList.push_back({
-				mimeType.comment().toStdString(),
+				Gio::content_type_get_description(mimeType),
 				FilterConditionList{filterCondition},
 			});
 
@@ -326,18 +344,16 @@ void XDPFileDialog::openPortal() {
 		for (const auto &nameFilter : _nameFilters) {
 			// Do parsing:
 			// Supported format is ("Images (*.png *.jpg)")
-			const QRegularExpression regexp(
-				QString::fromLatin1(filterRegExp));
+			const auto regexp = Glib::Regex::create(filterRegExp);
 
-			const QRegularExpressionMatch match = regexp.match(
-				QString::fromStdString(nameFilter));
+			Glib::MatchInfo match;
+			regexp->match(nameFilter, match);
 
-			if (match.hasMatch()) {
-				const auto userVisibleName = match.captured(1).toStdString();
-				const auto filterStrings = QStringListToStd(
-					match.captured(2).split(
-						QLatin1Char(' '),
-						base::QStringSkipEmptyParts));
+			if (match.matches()) {
+				const auto userVisibleName = match.fetch(1);
+				const auto filterStrings = Glib::Regex::create(" ")->split(
+					match.fetch(2),
+					Glib::RegexMatchFlags::REGEX_MATCH_NOTEMPTY);
 
 				if (filterStrings.empty()) {
 					LOG((
@@ -425,22 +441,48 @@ void XDPFileDialog::openPortal() {
 			}),
 			[=](const Glib::RefPtr<Gio::AsyncResult> &result) {
 				try {
-					_dbusConnection->call_finish(result);
+					auto reply = _dbusConnection->call_finish(result);
+
+					const auto handle = base::Platform::GlibVariantCast<
+						Glib::ustring>(reply.get_child(0));
+
+					if (handle != requestPath) {
+						crl::on_main([=] {
+							_failedToOpen = true;
+							_reject.fire({});
+						});
+					}
 				} catch (const Glib::Error &e) {
+					static const auto NotSupportedErrors = {
+						"org.freedesktop.DBus.Error.ServiceUnknown",
+					};
+
+					const auto errorName =
+						Gio::DBus::ErrorUtils::get_remote_error(e);
+
+					if (!ranges::contains(NotSupportedErrors, errorName)) {
+						LOG(("XDP File Dialog Error: %1").arg(
+							QString::fromStdString(e.what())));
+					}
+
+					crl::on_main([=] {
+						_failedToOpen = true;
+						_reject.fire({});
+					});
+				} catch (const std::exception &e) {
 					LOG(("XDP File Dialog Error: %1").arg(
 						QString::fromStdString(e.what())));
 
 					crl::on_main([=] {
+						_failedToOpen = true;
 						_reject.fire({});
 					});
 				}
 			},
 			_cancellable,
 			std::string(kXDGDesktopPortalService));
-	} catch (const Glib::Error &e) {
-		LOG(("XDP File Dialog Error: %1").arg(
-			QString::fromStdString(e.what())));
-
+	} catch (...) {
+		_failedToOpen = true;
 		_reject.fire({});
 	}
 }
@@ -498,6 +540,9 @@ int XDPFileDialog::exec() {
 	setResult(0);
 
 	show();
+	if (failedToOpen()) {
+		return result();
+	}
 
 	QPointer<QDialog> guard = this;
 
@@ -641,23 +686,16 @@ rpl::producer<> XDPFileDialog::rejected() {
 
 } // namespace
 
-bool Use(Type type) {
-	static const auto ShouldUse = [&] {
-		const auto envVar = qEnvironmentVariableIsSet("TDESKTOP_USE_PORTAL");
-		const auto confined = InFlatpak() || InSnap();
-		const auto notGtkBased = !DesktopEnvironment::IsGtkBased();
-
-		return confined || notGtkBased || envVar;
-	}();
-
-	static const auto Version = FileChooserPortalVersion();
-
-	return ShouldUse
-		&& Version.has_value()
-		&& (type != Type::ReadFolder || *Version >= 3);
+void Start() {
+	ComputeFileChooserPortalVersion();
 }
 
-bool Get(
+bool Use(Type type) {
+	return FileChooserPortalVersion.has_value()
+		&& (type != Type::ReadFolder || *FileChooserPortalVersion >= 3);
+}
+
+std::optional<bool> Get(
 		QPointer<QWidget> parent,
 		QStringList &files,
 		QByteArray &remoteContent,
@@ -694,6 +732,9 @@ bool Get(
 	dialog.selectFile(startFile);
 
 	const auto res = dialog.exec();
+	if (dialog.failedToOpen()) {
+		return std::nullopt;
+	}
 
 	if (type != Type::ReadFolder) {
 		// Save last used directory for all queries except directory choosing.
