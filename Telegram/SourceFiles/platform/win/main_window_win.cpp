@@ -228,6 +228,7 @@ void MainWindow::psRefreshTaskbarIcon() {
 	palette.setColor(QPalette::Window, (isActiveWindow() ? st::titleBgActive : st::titleBg)->c);
 	refresher->setPalette(palette);
 	refresher->show();
+	refresher->raise();
 	refresher->activateWindow();
 
 	updateIconCounters();
@@ -267,9 +268,11 @@ void MainWindow::showTrayTooltip() {
 	}
 }
 
-void MainWindow::workmodeUpdated(DBIWorkMode mode) {
+void MainWindow::workmodeUpdated(Core::Settings::WorkMode mode) {
+	using WorkMode = Core::Settings::WorkMode;
+
 	switch (mode) {
-	case dbiwmWindowAndTray: {
+	case WorkMode::WindowAndTray: {
 		psSetupTrayIcon();
 		HWND psOwner = (HWND)GetWindowLongPtr(ps_hWnd, GWLP_HWNDPARENT);
 		if (psOwner) {
@@ -278,7 +281,7 @@ void MainWindow::workmodeUpdated(DBIWorkMode mode) {
 		}
 	} break;
 
-	case dbiwmTrayOnly: {
+	case WorkMode::TrayOnly: {
 		psSetupTrayIcon();
 		HWND psOwner = (HWND)GetWindowLongPtr(ps_hWnd, GWLP_HWNDPARENT);
 		if (!psOwner) {
@@ -286,7 +289,7 @@ void MainWindow::workmodeUpdated(DBIWorkMode mode) {
 		}
 	} break;
 
-	case dbiwmWindowOnly: {
+	case WorkMode::WindowOnly: {
 		if (trayIcon) {
 			trayIcon->setContextMenu(0);
 			trayIcon->deleteLater();

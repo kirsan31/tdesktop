@@ -12,9 +12,12 @@ namespace internal {
 
 class WaylandIntegration {
 public:
-	static WaylandIntegration *Instance();
+	[[nodiscard]] static WaylandIntegration *Instance();
 	void waitForInterfaceAnnounce();
-	bool supportsXdgDecoration();
+	[[nodiscard]] bool supportsXdgDecoration();
+	[[nodiscard]] QString nativeHandle(QWindow *window);
+	[[nodiscard]] bool skipTaskbarSupported();
+	void skipTaskbar(QWindow *window, bool skip);
 
 private:
 	WaylandIntegration();

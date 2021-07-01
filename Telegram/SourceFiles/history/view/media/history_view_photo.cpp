@@ -26,11 +26,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_streaming.h"
 #include "data/data_photo.h"
 #include "data/data_photo_media.h"
+#include "data/data_file_click_handler.h"
 #include "data/data_file_origin.h"
 #include "data/data_auto_download.h"
 #include "core/application.h"
 #include "styles/style_chat.h"
-#include "facades.h"
 
 namespace HistoryView {
 namespace {
@@ -87,9 +87,17 @@ Photo::~Photo() {
 
 void Photo::create(FullMsgId contextId, PeerData *chat) {
 	setLinks(
-		std::make_shared<PhotoOpenClickHandler>(_data, contextId, chat),
+		std::make_shared<PhotoOpenClickHandler>(
+			_data,
+			crl::guard(this, [=](FullMsgId id) { showPhoto(id); }),
+			contextId),
 		std::make_shared<PhotoSaveClickHandler>(_data, contextId, chat),
-		std::make_shared<PhotoCancelClickHandler>(_data, contextId, chat));
+		std::make_shared<PhotoCancelClickHandler>(
+			_data,
+			crl::guard(this, [=](FullMsgId id) {
+				_parent->delegate()->elementCancelUpload(id);
+			}),
+			contextId));
 	if ((_dataMedia = _data->activeMediaView())) {
 		dataMediaCreated();
 	} else if (_data->inlineThumbnailBytes().isEmpty()
@@ -144,10 +152,6 @@ QSize Photo::countOptimalSize() {
 	if (!tw || !th) {
 		tw = th = 1;
 	}
-	if (!Core::App().settings().chatWide() && tw > st::maxMediaSize) {
-		th = (st::maxMediaSize * th) / tw;
-		tw = st::maxMediaSize;
-	}
 	if (th > st::maxMediaSize) {
 		tw = (st::maxMediaSize * tw) / th;
 		th = st::maxMediaSize;
@@ -175,10 +179,6 @@ QSize Photo::countOptimalSize() {
 QSize Photo::countCurrentSize(int newWidth) {
 	auto tw = style::ConvertScale(_data->width());
 	auto th = style::ConvertScale(_data->height());
-	if (!Core::App().settings().chatWide() && tw > st::maxMediaSize) {
-		th = (st::maxMediaSize * th) / tw;
-		tw = st::maxMediaSize;
-	}
 	if (th > st::maxMediaSize) {
 		tw = (st::maxMediaSize * tw) / th;
 		th = st::maxMediaSize;
@@ -772,7 +772,7 @@ void Photo::playAnimation(bool autoplay) {
 	if (_streamed && autoplay) {
 		return;
 	} else if (_streamed && videoAutoplayEnabled()) {
-		Core::App().showPhoto(_data, _parent->data());
+		showPhoto(_parent->data()->fullId());
 		return;
 	}
 	if (_streamed) {
@@ -843,6 +843,10 @@ void Photo::parentTextUpdated() {
 		? createCaption(_parent->data())
 		: Ui::Text::String();
 	history()->owner().requestViewResize(_parent);
+}
+
+void Photo::showPhoto(FullMsgId id) {
+	_parent->delegate()->elementOpenPhoto(_data, id);
 }
 
 } // namespace HistoryView

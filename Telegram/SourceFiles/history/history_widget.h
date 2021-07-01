@@ -260,8 +260,6 @@ public:
 
 	void updateNotifyControls();
 
-	bool SandHtmlAsFile(const QString &Html, Api::SendOptions options);
-
 	bool contentOverlapped(const QRect &globalRect);
 
 	QPixmap grabForShowAnimation(const Window::SectionSlideParams &params);
@@ -449,7 +447,6 @@ private:
 		bool ctrlShiftEnter);
 
 	void uploadFile(const QByteArray &fileContent, SendMediaType type);
-    void uploadFile(const QByteArray &fileContent, SendMediaType type, const QString &filepath, const QString &caption, Api::SendOptions options);
 	void itemRemoved(not_null<const HistoryItem*> item);
 
 	// Updates position of controls around the message field,

@@ -400,11 +400,6 @@ public:
 		const QByteArray &fileContent,
 		SendMediaType type,
 		const SendAction &action);
-	void sendFile(
-		const QString &filepath,
-		const QByteArray &fileContent,
-		SendMediaType type,
-		const SendAction &action, const QString &caption = QString());
 
 	void editMedia(
 		Ui::PreparedList &&list,

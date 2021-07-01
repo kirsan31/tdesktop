@@ -29,7 +29,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/platform/linux/base_linux_xdp_utilities.h"
 #include "platform/linux/linux_notification_service_watcher.h"
 #include "platform/linux/linux_xdp_file_dialog.h"
-#include "platform/linux/linux_mpris_support.h"
 #include "platform/linux/linux_gsd_media_keys.h"
 #endif // !DESKTOP_APP_DISABLE_DBUS_INTEGRATION
 
@@ -52,6 +51,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include <sys/stat.h>
 #include <sys/types.h>
+#ifdef Q_OS_LINUX
+#include <sys/sendfile.h>
+#endif // Q_OS_LINUX
 #include <cstdlib>
 #include <unistd.h>
 #include <dirent.h>
@@ -83,12 +85,7 @@ constexpr auto kSnapcraftSettingsInterface = kSnapcraftSettingsService;
 #ifndef DESKTOP_APP_DISABLE_DBUS_INTEGRATION
 std::unique_ptr<internal::NotificationServiceWatcher> NSWInstance;
 
-class PortalAutostart : public QWindow {
-public:
-	PortalAutostart(bool start, bool silent = false);
-};
-
-PortalAutostart::PortalAutostart(bool start, bool silent) {
+void PortalAutostart(bool start, bool silent) {
 	if (cExeName().isEmpty()) {
 		return;
 	}
@@ -99,18 +96,22 @@ PortalAutostart::PortalAutostart(bool start, bool silent) {
 
 		const auto parentWindowId = [&]() -> Glib::ustring {
 			std::stringstream result;
-			if (const auto activeWindow = Core::App().activeWindow()) {
-				if (IsX11()) {
-					result
-						<< "x11:"
-						<< std::hex
-						<< activeWindow
-							->widget()
-							.get()
-							->windowHandle()
-							->winId();
-				}
+
+			const auto activeWindow = Core::App().activeWindow();
+			if (!activeWindow) {
+				return result.str();
 			}
+
+			const auto window = activeWindow->widget()->windowHandle();
+			if (const auto integration = WaylandIntegration::Instance()) {
+				if (const auto handle = integration->nativeHandle(window)
+					; !handle.isEmpty()) {
+					result << "wayland:" << handle.toStdString();
+				}
+			} else if (IsX11()) {
+				result << "x11:" << std::hex << window->winId();
+			}
+
 			return result.str();
 		}();
 
@@ -143,7 +144,9 @@ PortalAutostart::PortalAutostart(bool start, bool silent) {
 			+ '/'
 			+ handleToken;
 
-		QEventLoop loop;
+		const auto context = Glib::MainContext::create();
+		const auto loop = Glib::MainLoop::create(context);
+		g_main_context_push_thread_default(context->gobj());
 
 		const auto signalId = connection->signal_subscribe(
 			[&](
@@ -169,7 +172,7 @@ PortalAutostart::PortalAutostart(bool start, bool silent) {
 					}
 				}
 
-				loop.quit();
+				loop->quit();
 			},
 			std::string(kXDGDesktopPortalService),
 			"org.freedesktop.portal.Request",
@@ -193,9 +196,11 @@ PortalAutostart::PortalAutostart(bool start, bool silent) {
 			std::string(kXDGDesktopPortalService));
 
 		if (signalId != 0) {
-			QGuiApplicationPrivate::showModalWindow(this);
-			loop.exec();
-			QGuiApplicationPrivate::hideModalWindow(this);
+			QWindow window;
+			QGuiApplicationPrivate::showModalWindow(&window);
+			loop->run();
+			g_main_context_pop_thread_default(context->gobj());
+			QGuiApplicationPrivate::hideModalWindow(&window);
 		}
 	} catch (const Glib::Error &e) {
 		if (!silent) {
@@ -205,12 +210,7 @@ PortalAutostart::PortalAutostart(bool start, bool silent) {
 	}
 }
 
-class SnapDefaultHandler : public QWindow {
-public:
-	SnapDefaultHandler(const QString &protocol);
-};
-
-SnapDefaultHandler::SnapDefaultHandler(const QString &protocol) {
+void SnapDefaultHandler(const QString &protocol) {
 	try {
 		const auto connection = Gio::DBus::Connection::get_sync(
 			Gio::DBus::BusType::BUS_TYPE_SESSION);
@@ -235,7 +235,9 @@ SnapDefaultHandler::SnapDefaultHandler(const QString &protocol) {
 			return;
 		}
 
-		QEventLoop loop;
+		const auto context = Glib::MainContext::create();
+		const auto loop = Glib::MainLoop::create(context);
+		g_main_context_push_thread_default(context->gobj());
 
 		connection->call(
 			std::string(kSnapcraftSettingsObjectPath),
@@ -254,13 +256,15 @@ SnapDefaultHandler::SnapDefaultHandler(const QString &protocol) {
 						QString::fromStdString(e.what())));
 				}
 
-				loop.quit();
+				loop->quit();
 			},
 			std::string(kSnapcraftSettingsService));
 
-		QGuiApplicationPrivate::showModalWindow(this);
-		loop.exec();
-		QGuiApplicationPrivate::hideModalWindow(this);
+		QWindow window;
+		QGuiApplicationPrivate::showModalWindow(&window);
+		loop->run();
+		g_main_context_pop_thread_default(context->gobj());
+		QGuiApplicationPrivate::hideModalWindow(&window);
 	} catch (const Glib::Error &e) {
 		LOG(("Snap Default Handler Error: %1").arg(
 			QString::fromStdString(e.what())));
@@ -414,26 +418,136 @@ void SetGtkScaleFactor() {
 	cSetScreenScale(style::CheckScale(scaleFactor * 100));
 }
 
+void SetDarkMode() {
+	static const auto Inited = [] {
+		QObject::connect(
+			qGuiApp,
+			&QGuiApplication::paletteChanged,
+			SetDarkMode);
+
+#ifndef DESKTOP_APP_DISABLE_DBUS_INTEGRATION
+		using XDPSettingWatcher = base::Platform::XDP::SettingWatcher;
+		static const XDPSettingWatcher KdeColorSchemeWatcher(
+			[=](
+				const Glib::ustring &group,
+				const Glib::ustring &key,
+				const Glib::VariantBase &value) {
+				if (group == "org.kde.kdeglobals.General"
+					&& key == "ColorScheme") {
+					SetDarkMode();
+				}
+			});
+#endif // !DESKTOP_APP_DISABLE_DBUS_INTEGRATION
+
+		const auto integration = BaseGtkIntegration::Instance();
+		if (integration) {
+			integration->connectToSetting(
+				"gtk-theme-name",
+				SetDarkMode);
+
+			if (integration->checkVersion(3, 0, 0)) {
+				integration->connectToSetting(
+					"gtk-application-prefer-dark-theme",
+					SetDarkMode);
+			}
+		}
+
+		return true;
+	}();
+
+	std::optional<bool> result;
+	const auto setter = gsl::finally([&] {
+		crl::on_main([=] {
+			Core::App().settings().setSystemDarkMode(result);
+		});
+	});
+
+	const auto styleName = QApplication::style()->metaObject()->className();
+	if (styleName != qstr("QFusionStyle")
+		&& styleName != qstr("QWindowsStyle")) {
+		result = false;
+
+		const auto paletteBackgroundGray = qGray(
+			QPalette().color(QPalette::Window).rgb());
+
+		if (paletteBackgroundGray < kDarkColorLimit) {
+			result = true;
+			return;
+		}
+	}
+
+#ifndef DESKTOP_APP_DISABLE_DBUS_INTEGRATION
+	try {
+		using namespace base::Platform::XDP;
+
+		const auto kdeBackgroundColorOptional = ReadSetting(
+			"org.kde.kdeglobals.Colors:Window",
+			"BackgroundNormal");
+
+		if (kdeBackgroundColorOptional.has_value()) {
+			const auto kdeBackgroundColorList = QString::fromStdString(
+				base::Platform::GlibVariantCast<Glib::ustring>(
+					*kdeBackgroundColorOptional)).split(',');
+
+			if (kdeBackgroundColorList.size() >= 3) {
+				result = false;
+
+				const auto kdeBackgroundGray = qGray(
+					kdeBackgroundColorList[0].toInt(),
+					kdeBackgroundColorList[1].toInt(),
+					kdeBackgroundColorList[2].toInt());
+
+				if (kdeBackgroundGray < kDarkColorLimit) {
+					result = true;
+					return;
+				}
+			}
+		}
+	} catch (...) {
+	}
+#endif // !DESKTOP_APP_DISABLE_DBUS_INTEGRATION
+
+	const auto integration = BaseGtkIntegration::Instance();
+	if (integration) {
+		if (integration->checkVersion(3, 0, 0)) {
+			const auto preferDarkTheme = integration->getBoolSetting(
+				qsl("gtk-application-prefer-dark-theme"));
+
+			if (preferDarkTheme.has_value()) {
+				result = false;
+
+				if (*preferDarkTheme) {
+					result = true;
+					return;
+				}
+			}
+		}
+
+		const auto themeName = integration->getStringSetting(
+			qsl("gtk-theme-name"));
+
+		if (themeName.has_value()) {
+			result = false;
+
+			if (themeName->contains(qsl("-dark"), Qt::CaseInsensitive)) {
+				result = true;
+				return;
+			}
+		}
+	}
+}
+
 } // namespace
 
 void SetWatchingMediaKeys(bool watching) {
 #ifndef DESKTOP_APP_DISABLE_DBUS_INTEGRATION
-	static std::unique_ptr<internal::MPRISSupport> MPRISInstance;
 	static std::unique_ptr<internal::GSDMediaKeys> GSDInstance;
 
 	if (watching) {
-		if (!MPRISInstance) {
-			MPRISInstance = std::make_unique<internal::MPRISSupport>();
-		}
-
 		if (!GSDInstance) {
 			GSDInstance = std::make_unique<internal::GSDMediaKeys>();
 		}
 	} else {
-		if (MPRISInstance) {
-			MPRISInstance = nullptr;
-		}
-
 		if (GSDInstance) {
 			GSDInstance = nullptr;
 		}
@@ -507,119 +621,7 @@ QImage GetImageFromClipboard() {
 }
 
 std::optional<bool> IsDarkMode() {
-	std::optional<bool> failResult;
-
-	if (static auto Once = false; !std::exchange(Once, true)) {
-		const auto onChanged = [] {
-			Core::Sandbox::Instance().customEnterFromEventLoop([] {
-				Core::App().settings().setSystemDarkMode(IsDarkMode());
-			});
-		};
-
-		QObject::connect(
-			qGuiApp,
-			&QGuiApplication::paletteChanged,
-			onChanged);
-
-#ifndef DESKTOP_APP_DISABLE_DBUS_INTEGRATION
-		using XDPSettingWatcher = base::Platform::XDP::SettingWatcher;
-		static const XDPSettingWatcher KdeColorSchemeWatcher(
-			[=](
-				const Glib::ustring &group,
-				const Glib::ustring &key,
-				const Glib::VariantBase &value) {
-				if (group == "org.kde.kdeglobals.General"
-					&& key == "ColorScheme") {
-					onChanged();
-				}
-			});
-#endif // !DESKTOP_APP_DISABLE_DBUS_INTEGRATION
-
-		const auto integration = BaseGtkIntegration::Instance();
-		if (integration) {
-			integration->connectToSetting(
-				"gtk-theme-name",
-				onChanged);
-
-			if (integration->checkVersion(3, 0, 0)) {
-				integration->connectToSetting(
-					"gtk-application-prefer-dark-theme",
-					onChanged);
-			}
-		}
-	}
-
-	const auto styleName = QApplication::style()->metaObject()->className();
-	if (styleName != qstr("QFusionStyle")
-		&& styleName != qstr("QWindowsStyle")) {
-		failResult = false;
-
-		const auto paletteBackgroundGray = qGray(
-			QPalette().color(QPalette::Window).rgb());
-
-		if (paletteBackgroundGray < kDarkColorLimit) {
-			return true;
-		}
-	}
-
-#ifndef DESKTOP_APP_DISABLE_DBUS_INTEGRATION
-	try {
-		using namespace base::Platform::XDP;
-
-		const auto kdeBackgroundColorOptional = ReadSetting(
-			"org.kde.kdeglobals.Colors:Window",
-			"BackgroundNormal");
-
-		if (kdeBackgroundColorOptional.has_value()) {
-			const auto kdeBackgroundColorList = QString::fromStdString(
-				base::Platform::GlibVariantCast<Glib::ustring>(
-					*kdeBackgroundColorOptional)).split(',');
-
-			if (kdeBackgroundColorList.size() >= 3) {
-				failResult = false;
-
-				const auto kdeBackgroundGray = qGray(
-					kdeBackgroundColorList[0].toInt(),
-					kdeBackgroundColorList[1].toInt(),
-					kdeBackgroundColorList[2].toInt());
-
-				if (kdeBackgroundGray < kDarkColorLimit) {
-					return true;
-				}
-			}
-		}
-	} catch (...) {
-	}
-#endif // !DESKTOP_APP_DISABLE_DBUS_INTEGRATION
-
-	const auto integration = BaseGtkIntegration::Instance();
-	if (integration) {
-		if (integration->checkVersion(3, 0, 0)) {
-			const auto preferDarkTheme = integration->getBoolSetting(
-				qsl("gtk-application-prefer-dark-theme"));
-
-			if (preferDarkTheme.has_value()) {
-				failResult = false;
-
-				if (*preferDarkTheme) {
-					return true;
-				}
-			}
-		}
-
-		const auto themeName = integration->getStringSetting(
-			qsl("gtk-theme-name"));
-
-		if (themeName.has_value()) {
-			failResult = false;
-
-			if (themeName->contains(qsl("-dark"), Qt::CaseInsensitive)) {
-				return true;
-			}
-		}
-	}
-
-	return failResult;
+	return Core::App().settings().systemDarkMode();
 }
 
 bool AutostartSupported() {
@@ -637,18 +639,21 @@ bool TrayIconSupported() {
 }
 
 bool SkipTaskbarSupported() {
+	if (const auto integration = WaylandIntegration::Instance()) {
+		return integration->skipTaskbarSupported();
+	}
+
 #ifndef DESKTOP_APP_DISABLE_X11_INTEGRATION
-	return IsX11()
-		&& base::Platform::XCB::IsSupportedByWM("_NET_WM_STATE_SKIP_TASKBAR");
+	if (IsX11()) {
+		return base::Platform::XCB::IsSupportedByWM(
+			"_NET_WM_STATE_SKIP_TASKBAR");
+	}
 #endif // !DESKTOP_APP_DISABLE_X11_INTEGRATION
 
 	return false;
 }
 
 } // namespace Platform
-
-void psWriteDump() {
-}
 
 void psActivateProcess(uint64 pid) {
 //	objc_activateProgram();
@@ -736,6 +741,10 @@ namespace Platform {
 
 void start() {
 	LOG(("Launcher filename: %1").arg(QGuiApplication::desktopFileName()));
+
+#ifndef DESKTOP_APP_DISABLE_WAYLAND_INTEGRATION
+	qputenv("QT_WAYLAND_SHELL_INTEGRATION", "desktop-app-xdg-shell;xdg-shell;wl-shell");
+#endif // !DESKTOP_APP_DISABLE_WAYLAND_INTEGRATION
 
 	qputenv("PULSE_PROP_application.name", AppName.utf8());
 	qputenv("PULSE_PROP_application.icon_name", GetIconName().toLatin1());
@@ -956,12 +965,13 @@ void start() {
 		integration->load();
 	}
 
-	SetGtkScaleFactor();
-
 	// wait for interface announce to know if native window frame is supported
 	if (const auto integration = WaylandIntegration::Instance()) {
 		integration->waitForInterfaceAnnounce();
 	}
+
+	SetGtkScaleFactor();
+	crl::async(SetDarkMode);
 
 #ifndef DESKTOP_APP_DISABLE_DBUS_INTEGRATION
 	NSWInstance = std::make_unique<internal::NotificationServiceWatcher>();
@@ -1012,6 +1022,14 @@ void psAutoStart(bool start, bool silent) {
 void psSendToMenu(bool send, bool silent) {
 }
 
+void sendfileFallback(FILE *out, FILE *in) {
+	static const int BufSize = 65536;
+	char buf[BufSize];
+	while (size_t size = fread(buf, 1, BufSize, in)) {
+		fwrite(buf, 1, size, out);
+	}
+}
+
 bool linuxMoveFile(const char *from, const char *to) {
 	FILE *ffrom = fopen(from, "rb"), *fto = fopen(to, "wb");
 	if (!ffrom) {
@@ -1022,11 +1040,6 @@ bool linuxMoveFile(const char *from, const char *to) {
 		fclose(ffrom);
 		return false;
 	}
-	static const int BufSize = 65536;
-	char buf[BufSize];
-	while (size_t size = fread(buf, 1, BufSize, ffrom)) {
-		fwrite(buf, 1, size, fto);
-	}
 
 	struct stat fst; // from http://stackoverflow.com/questions/5486774/keeping-fileowner-and-permissions-after-copying-file-in-c
 	//let's say this wont fail since you already worked OK on that fp
@@ -1035,6 +1048,32 @@ bool linuxMoveFile(const char *from, const char *to) {
 		fclose(fto);
 		return false;
 	}
+
+#ifdef Q_OS_LINUX
+	ssize_t copied = sendfile(
+		fileno(fto),
+		fileno(ffrom),
+		nullptr,
+		fst.st_size);
+	if (copied == -1) {
+		DEBUG_LOG(("Update Error: "
+			"Copy by sendfile '%1' to '%2' failed, error: %3, fallback now."
+			).arg(from
+			).arg(to
+			).arg(errno));
+		sendfileFallback(fto, ffrom);
+	} else {
+		DEBUG_LOG(("Update Info: "
+			"Copy by sendfile '%1' to '%2' done, size: %3, result: %4."
+			).arg(from
+			).arg(to
+			).arg(fst.st_size
+			).arg(copied));
+	}
+#else // Q_OS_LINUX
+	sendfileFallback(fto, ffrom);
+#endif // Q_OS_LINUX
+
 	//update to the same uid/gid
 	if (fchown(fileno(fto), fst.st_uid, fst.st_gid) != 0) {
 		fclose(ffrom);

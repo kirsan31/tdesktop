@@ -32,6 +32,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/special_buttons.h"
 #include "ui/unread_badge.h"
 #include "ui/ui_utility.h"
+#include "window/window_adaptive.h"
 #include "window/window_session_controller.h"
 #include "window/window_peer_menu.h"
 #include "calls/calls_instance.h"
@@ -46,7 +47,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/unixtime.h"
 #include "support/support_helper.h"
 #include "apiwrap.h"
-#include "facades.h"
 #include "styles/style_window.h"
 #include "styles/style_dialogs.h"
 #include "styles/style_chat.h"
@@ -117,7 +117,11 @@ TopBarWidget::TopBarWidget(
 		_search->setForceRippled(searchInActiveChat, animated);
 	}, lifetime());
 
-	subscribe(Adaptive::Changed(), [=] { updateAdaptiveLayout(); });
+	controller->adaptive().changes(
+	) | rpl::start_with_next([=] {
+		updateAdaptiveLayout();
+	}, lifetime());
+
 	refreshUnreadBadge();
 	{
 		using AnimationUpdate = Data::Session::SendActionAnimationUpdate;
@@ -167,8 +171,7 @@ TopBarWidget::TopBarWidget(
 		updateInfoToggleActive();
 	}, lifetime());
 
-	rpl::single(rpl::empty_value()) | rpl::then(
-		base::ObservableViewer(Global::RefConnectionTypeChanged())
+	Core::App().settings().proxy().connectionTypeValue(
 	) | rpl::start_with_next([=] {
 		updateConnectingState();
 	}, lifetime());
@@ -297,7 +300,8 @@ void TopBarWidget::showMenu() {
 }
 
 void TopBarWidget::toggleInfoSection() {
-	if (Adaptive::ThreeColumn()
+	const auto isThreeColumn = _controller->adaptive().isThreeColumn();
+	if (isThreeColumn
 		&& (Core::App().settings().thirdSectionInfoEnabled()
 			|| Core::App().settings().tabbedReplacedWithInfo())) {
 		_controller->closeThirdSection();
@@ -305,7 +309,7 @@ void TopBarWidget::toggleInfoSection() {
 		if (_controller->canShowThirdSection()) {
 			Core::App().settings().setThirdSectionInfoEnabled(true);
 			Core::App().saveSettingsDelayed();
-			if (Adaptive::ThreeColumn()) {
+			if (isThreeColumn) {
 				_controller->showSection(
 					Info::Memento::Default(_activeChat.key.peer()),
 					Window::SectionShow().withThirdColumn());
@@ -672,7 +676,8 @@ void TopBarWidget::updateControlsGeometry() {
 	auto hasSelected = showSelectedActions();
 	auto selectedButtonsTop = countSelectedButtonsTop(_selectedShown.value(hasSelected ? 1. : 0.));
 	auto otherButtonsTop = selectedButtonsTop + st::topBarHeight;
-	auto buttonsLeft = st::topBarActionSkip + (Adaptive::OneColumn() ? 0 : st::lineWidth);
+	auto buttonsLeft = st::topBarActionSkip
+		+ (_controller->adaptive().isOneColumn() ? 0 : st::lineWidth);
 	auto buttonsWidth = (_forward->isHidden() ? 0 : _forward->contentWidth())
 		+ (_sendNow->isHidden() ? 0 : _sendNow->contentWidth())
 		+ (_delete->isHidden() ? 0 : _delete->contentWidth())
@@ -767,13 +772,14 @@ void TopBarWidget::updateControlsVisibility() {
 	_forward->setVisible(_canForward);
 	_sendNow->setVisible(_canSendNow);
 
-	auto backVisible = Adaptive::OneColumn()
+	const auto isOneColumn = _controller->adaptive().isOneColumn();
+	auto backVisible = isOneColumn
 		|| !_controller->content()->stackIsEmpty()
 		|| _activeChat.key.folder();
 	_back->setVisible(backVisible && !_chooseForReportReason);
 	_cancelChoose->setVisible(_chooseForReportReason.has_value());
 	if (_info) {
-		_info->setVisible(Adaptive::OneColumn() && !_chooseForReportReason);
+		_info->setVisible(isOneColumn && !_chooseForReportReason);
 	}
 	if (_unreadBadge) {
 		_unreadBadge->setVisible(!_chooseForReportReason);
@@ -790,7 +796,7 @@ void TopBarWidget::updateControlsVisibility() {
 	_menuToggle->setVisible(hasMenu && !_chooseForReportReason);
 	_infoToggle->setVisible(historyMode
 		&& !_activeChat.key.folder()
-		&& !Adaptive::OneColumn()
+		&& !isOneColumn
 		&& _controller->canShowThirdSection()
 		&& !_chooseForReportReason);
 	const auto callsEnabled = [&] {
@@ -921,7 +927,7 @@ void TopBarWidget::updateAdaptiveLayout() {
 }
 
 void TopBarWidget::refreshUnreadBadge() {
-	if (!Adaptive::OneColumn() && !_activeChat.key.folder()) {
+	if (!_controller->adaptive().isOneColumn() && !_activeChat.key.folder()) {
 		_unreadBadge.destroy();
 		return;
 	} else if (_unreadBadge) {
@@ -965,7 +971,7 @@ void TopBarWidget::updateUnreadBadge() {
 }
 
 void TopBarWidget::updateInfoToggleActive() {
-	auto infoThirdActive = Adaptive::ThreeColumn()
+	auto infoThirdActive = _controller->adaptive().isThreeColumn()
 		&& (Core::App().settings().thirdSectionInfoEnabled()
 			|| Core::App().settings().tabbedReplacedWithInfo());
 	auto iconOverride = infoThirdActive

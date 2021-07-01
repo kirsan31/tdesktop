@@ -5,10 +5,7 @@ Attempt to address this TDesktop issues:
 [Auto resizing message block]  
 [250ms delay added to show emoji panel on mouseover]  
 [removed -- to −, >> to », << to «]  
-Workaround for [Automatically Syntax-Highlight]. More [here](docs/html-code-processing.md).  
-Ability to open downloaded video in external video player by CTRL + Click.
 
-Due to lack of time to deeply understand the TDesktop code, some of my corrections are _quick fixes_ for achievement desire result.  
 
 ### Original text:
 This is the complete source code and the build instructions for the alpha version of the official desktop client for the [Telegram][telegram] messenger, based on the [Telegram API][telegram_api] and the [MTProto][telegram_proto] secure protocol.
@@ -64,13 +61,13 @@ Version **1.8.15** was the last that supports older systems
 * Guideline Support Library ([MIT License](https://github.com/Microsoft/GSL/blob/master/LICENSE))
 * Range-v3 ([Boost License](https://github.com/ericniebler/range-v3/blob/master/LICENSE.txt))
 * Open Sans font ([Apache License 2.0](http://www.apache.org/licenses/LICENSE-2.0.html))
-* Vazir font ([License](https://github.com/rastikerdar/vazir-font/blob/master/LICENSE))
+* Vazir font ([SIL Open Font License 1.1](https://github.com/rastikerdar/vazir-font/blob/master/OFL.txt))
 * Emoji alpha codes ([MIT License](https://github.com/emojione/emojione/blob/master/extras/alpha-codes/LICENSE.md))
 * Catch test framework ([Boost License](https://github.com/philsquared/Catch/blob/master/LICENSE.txt))
 * xxHash ([BSD License](https://github.com/Cyan4973/xxHash/blob/dev/LICENSE))
 * QR Code generator ([MIT License](https://github.com/nayuki/QR-Code-generator#license))
 * CMake ([New BSD License](https://github.com/Kitware/CMake/blob/master/Copyright.txt))
-* Hunspell ([GPL](https://github.com/hunspell/hunspell/blob/master/COPYING))
+* Hunspell ([LGPL](https://github.com/hunspell/hunspell/blob/master/COPYING.LESSER))
 
 ## Build instructions
 
@@ -84,7 +81,6 @@ Version **1.8.15** was the last that supports older systems
 [removed -- to −, >> to », << to «]: https://github.com/telegramdesktop/tdesktop/issues/522
 [250ms delay added to show emoji panel on mouseover]:  
 https://github.com/telegramdesktop/tdesktop/issues/1333
-[Automatically Syntax-Highlight]: https://github.com/telegramdesktop/tdesktop/issues/250
 [telegram]: https://telegram.org
 [telegram_desktop]: https://desktop.telegram.org
 [telegram_api]: https://core.telegram.org

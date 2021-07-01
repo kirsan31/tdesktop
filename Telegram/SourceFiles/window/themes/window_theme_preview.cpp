@@ -19,7 +19,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_chat.h"
 #include "styles/style_dialogs.h"
 #include "styles/style_info.h"
-#include "core/application.h"
 
 namespace Window {
 namespace Theme {
@@ -250,8 +249,6 @@ void Generator::addAudioBubble(QVector<int> waveform, int waveactive, QString wa
 	tleft = st.padding.left() + st.thumbSize + st.padding.right();
 	tright = st.padding.left();
 	accumulate_max(width, tleft + st::normalFont->width(wavestatus) + skipBlock.width() + st::msgPadding.right());
-	if (!Core::App().settings().chatWide())
-		accumulate_min(width, st::msgMaxWidth);
 
 	auto height = st.padding.top() + st.thumbSize + st.padding.bottom();
 	addBubble(std::move(bubble), width, height, date, status);
@@ -279,8 +276,6 @@ void Generator::addTextBubble(QString text, QString date, Status status) {
 
 	auto width = _history.width() - st::msgMargin.left() - st::msgMargin.right();
 	accumulate_min(width, st::msgPadding.left() + bubble.text.maxWidth() + st::msgPadding.right());
-	if (!Core::App().settings().chatWide())
-		accumulate_min(width, st::msgMaxWidth);
 
 	auto textWidth = qMax(width - st::msgPadding.left() - st::msgPadding.right(), 1);
 	auto textHeight = bubble.text.countHeight(textWidth);
@@ -304,8 +299,6 @@ void Generator::addPhotoBubble(QString image, QString caption, QString date, Sta
 
 	auto width = _history.width() - st::msgMargin.left() - st::msgMargin.right();
 	accumulate_min(width, bubble.photoWidth);
-	if (!Core::App().settings().chatWide())
-		accumulate_min(width, st::msgMaxWidth);
 
 	auto textWidth = qMax(width - st::msgPadding.left() - st::msgPadding.right(), 1);
 	auto textHeight = bubble.text.countHeight(textWidth);

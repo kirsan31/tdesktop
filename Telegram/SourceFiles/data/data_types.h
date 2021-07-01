@@ -193,16 +193,6 @@ struct GameData;
 struct PollData;
 
 class AudioMsgId;
-class PhotoClickHandler;
-class PhotoOpenClickHandler;
-class PhotoSaveClickHandler;
-class PhotoCancelClickHandler;
-class DocumentClickHandler;
-class DocumentSaveClickHandler;
-class DocumentOpenClickHandler;
-class DocumentCancelClickHandler;
-class DocumentWrappedClickHandler;
-class VoiceSeekClickHandler;
 
 using PhotoId = uint64;
 using VideoId = uint64;
@@ -247,9 +237,8 @@ enum DocumentType {
 	StickerDocument = 3,
 	AnimatedDocument = 4,
 	VoiceDocument = 5,
-	RoundVideoDocument = 6,	
+	RoundVideoDocument = 6,
 	WallPaperDocument = 7,
-        HtmlDocument = 88,
 };
 
 inline constexpr auto kStickerSideSize = 512;
@@ -362,33 +351,3 @@ inline bool operator!=(
 		const MessageCursor &b) {
 	return !(a == b);
 }
-
-class FileClickHandler : public LeftButtonClickHandler {
-public:
-	FileClickHandler(
-		not_null<Main::Session*> session,
-		FullMsgId context)
-	: _session(session)
-	, _context(context) {
-	}
-
-	[[nodiscard]] Main::Session &session() const {
-		return *_session;
-	}
-
-	void setMessageId(FullMsgId context) {
-		_context = context;
-	}
-
-	[[nodiscard]] FullMsgId context() const {
-		return _context;
-	}
-
-protected:
-	HistoryItem *getActionItem() const;
-
-private:
-	const not_null<Main::Session*> _session;
-	FullMsgId _context;
-
-};

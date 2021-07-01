@@ -29,7 +29,7 @@ Go to ***BuildPath*** and run
 
     git clone https://github.com/desktop-app/patches.git
     cd patches
-    git checkout f22ccc5
+    git checkout 8764c08
     cd ../
     git clone https://chromium.googlesource.com/external/gyp
     git clone https://chromium.googlesource.com/chromium/tools/depot_tools.git
@@ -58,7 +58,7 @@ Go to ***BuildPath*** and run
 
     git clone https://github.com/desktop-app/patches.git
     cd patches
-    git checkout f22ccc5
+    git checkout 8764c08
     cd ..
 
     git clone https://git.tukaani.org/xz.git
@@ -93,11 +93,11 @@ Go to ***BuildPath*** and run
     git clone https://github.com/openssl/openssl openssl_1_1_1
     cd openssl_1_1_1
     git checkout OpenSSL_1_1_1-stable
-    ./Configure --prefix=/usr/local/macos no-tests darwin64-x86_64-cc -static $MIN_VER
+    ./Configure --prefix=/usr/local/macos no-shared no-tests darwin64-x86_64-cc $MIN_VER
     make build_libs $MAKE_THREADS_CNT
     cd ..
 
-    git clone https://github.com/xiph/opus
+    git clone https://github.com/xiph/opus.git
     cd opus
     git checkout v1.3
     ./autogen.sh
@@ -105,6 +105,21 @@ Go to ***BuildPath*** and run
     make $MAKE_THREADS_CNT
     sudo make install
     cd ..
+
+    git clone https://github.com/desktop-app/rnnoise.git
+    cd rnnoise
+    mkdir out
+    cd out
+    mkdir Debug
+    cd Debug
+    cmake -G Ninja -DCMAKE_BUILD_TYPE=Debug ../..
+    ninja
+    cd ..
+    mkdir Release
+    cd Release
+    cmake -G Ninja -DCMAKE_BUILD_TYPE=Release ../..
+    ninja
+    cd ../../..
 
     libiconv_ver=1.16
     wget https://ftp.gnu.org/pub/gnu/libiconv/libiconv-$libiconv_ver.tar.gz
@@ -118,15 +133,15 @@ Go to ***BuildPath*** and run
 
     git clone https://github.com/FFmpeg/FFmpeg.git ffmpeg
     cd ffmpeg
-    git checkout release/4.2
+    git checkout release/4.4
     CFLAGS=`freetype-config --cflags`
     LDFLAGS=`freetype-config --libs`
     PKG_CONFIG_PATH=$PKG_CONFIG_PATH:/usr/local/lib/pkgconfig:/usr/lib/pkgconfig:/usr/X11/lib/pkgconfig
     cp ../patches/macos_yasm_wrap.sh ./
 
     ./configure --prefix=/usr/local/macos \
-    --extra-cflags="$MIN_VER $UNGUARDED" \
-    --extra-cxxflags="$MIN_VER $UNGUARDED" \
+    --extra-cflags="$MIN_VER $UNGUARDED -DCONFIG_SAFE_BITSTREAM_READER=1" \
+    --extra-cxxflags="$MIN_VER $UNGUARDED -DCONFIG_SAFE_BITSTREAM_READER=1" \
     --extra-ldflags="$MIN_VER" \
     --x86asmexe=`pwd`/macos_yasm_wrap.sh \
     --enable-protocol=file \
@@ -196,7 +211,6 @@ Go to ***BuildPath*** and run
     --enable-decoder=pcm_u32be \
     --enable-decoder=pcm_u32le \
     --enable-decoder=pcm_u8 \
-    --enable-decoder=pcm_zork \
     --enable-decoder=vorbis \
     --enable-decoder=wavpack \
     --enable-decoder=wmalossless \
@@ -254,8 +268,8 @@ Go to ***BuildPath*** and run
     cd ../../..
 
     build/gyp_crashpad.py -Dmac_deployment_target=10.10
-    ninja -C out/Debug
-    ninja -C out/Release
+    ninja -C out/Debug base crashpad_util crashpad_client crashpad_handler
+    ninja -C out/Release base crashpad_util crashpad_client crashpad_handler
     cd ..
 
     git clone git://code.qt.io/qt/qt5.git qt_5_15_2
@@ -287,14 +301,18 @@ Go to ***BuildPath*** and run
     sudo make install
     cd ..
 
-    git clone --recursive https://github.com/desktop-app/tg_owt.git
+    git clone https://github.com/desktop-app/tg_owt.git
     cd tg_owt
+    git checkout f03ef05abf
+    git submodule init
+    git submodule update
     mkdir out
     cd out
     mkdir Debug
     cd Debug
     cmake -G Ninja \
         -DCMAKE_BUILD_TYPE=Debug \
+        -DTG_OWT_BUILD_AUDIO_BACKENDS=OFF \
         -DTG_OWT_SPECIAL_TARGET=mac \
         -DTG_OWT_LIBJPEG_INCLUDE_PATH=/usr/local/macos/include \
         -DTG_OWT_OPENSSL_INCLUDE_PATH=`pwd`/../../../openssl_1_1_1/include \
@@ -306,6 +324,7 @@ Go to ***BuildPath*** and run
     cd Release
     cmake -G Ninja \
         -DCMAKE_BUILD_TYPE=Release \
+        -DTG_OWT_BUILD_AUDIO_BACKENDS=OFF \
         -DTG_OWT_SPECIAL_TARGET=mac \
         -DTG_OWT_LIBJPEG_INCLUDE_PATH=/usr/local/macos/include \
         -DTG_OWT_OPENSSL_INCLUDE_PATH=`pwd`/../../../openssl_1_1_1/include \

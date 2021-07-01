@@ -26,7 +26,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_session.h"
 #include "app.h"
 #include "styles/style_chat.h"
-#include "core/application.h"
 
 namespace HistoryView {
 namespace {
@@ -132,8 +131,6 @@ QSize Contact::countOptimalSize() {
 	}
 
 	accumulate_max(maxWidth, tleft + _name.maxWidth() + tright);
-	if (!Core::App().settings().chatWide())
-	accumulate_min(maxWidth, st::msgMaxWidth);
 	auto minHeight = st.padding.top() + st.thumbSize + st.padding.bottom();
 	if (_userId) {
 		const auto msgsigned = item->Get<HistoryMessageSigned>();
