@@ -13,7 +13,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/platform/base_platform_info.h"
 #include "ui/platform/ui_platform_utility.h"
 #include "history/history.h"
-#include "window/themes/window_theme.h"
 #include "window/window_session_controller.h"
 #include "window/window_lock_widgets.h"
 #include "window/window_outdated_bar.h"
@@ -80,7 +79,6 @@ void ConvertIconToBlack(QImage &image) {
 	constexpr auto igreen = shifter(green);
 	constexpr auto iblue = shifter(blue);
 	constexpr auto threshold = 100;
-	constexpr auto ithreshold = shifter(threshold);
 
 	const auto width = image.width();
 	const auto height = image.height();
@@ -113,7 +111,7 @@ QIcon CreateOfficialIcon(Main::Session *session) {
 	if (session && session->supportMode()) {
 		ConvertIconToBlack(image);
 	}
-	return QIcon(App::pixmapFromImageInPlace(std::move(image)));
+	return QIcon(Ui::PixmapFromImage(std::move(image)));
 }
 
 QIcon CreateIcon(Main::Session *session) {
@@ -166,12 +164,10 @@ MainWindow::MainWindow(not_null<Controller*> controller)
 , _outdated(CreateOutdatedBar(this))
 , _body(this)
 , _titleText(qsl("Telegram")) {
-	subscribe(Theme::Background(), [=](
-			const Theme::BackgroundUpdate &data) {
-		if (data.paletteChanged()) {
-			updatePalette();
-		}
-	});
+	style::PaletteChanged(
+	) | rpl::start_with_next([=] {
+		updatePalette();
+	}, lifetime());
 
 	Core::App().unreadBadgeChanges(
 	) | rpl::start_with_next([=] {
@@ -789,7 +785,6 @@ void MainWindow::showRightColumn(object_ptr<TWidget> widget) {
 		setInnerFocus();
 	}
 	const auto nowRightWidth = _rightColumn ? _rightColumn->width() : 0;
-	const auto wasMaximized = isMaximized();
 	const auto wasMinimumWidth = minimumWidth();
 	const auto nowMinimumWidth = computeMinWidth();
 	const auto firstResize = (nowMinimumWidth < wasMinimumWidth);

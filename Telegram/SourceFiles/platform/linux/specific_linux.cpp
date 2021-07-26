@@ -48,6 +48,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <gio/gio.h>
 #include <glibmm.h>
 #include <giomm.h>
+#include <jemalloc/jemalloc.h>
 
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -147,6 +148,9 @@ void PortalAutostart(bool start, bool silent) {
 		const auto context = Glib::MainContext::create();
 		const auto loop = Glib::MainLoop::create(context);
 		g_main_context_push_thread_default(context->gobj());
+		const auto contextGuard = gsl::finally([&] {
+			g_main_context_pop_thread_default(context->gobj());
+		});
 
 		const auto signalId = connection->signal_subscribe(
 			[&](
@@ -199,7 +203,6 @@ void PortalAutostart(bool start, bool silent) {
 			QWindow window;
 			QGuiApplicationPrivate::showModalWindow(&window);
 			loop->run();
-			g_main_context_pop_thread_default(context->gobj());
 			QGuiApplicationPrivate::hideModalWindow(&window);
 		}
 	} catch (const Glib::Error &e) {
@@ -402,24 +405,8 @@ bool GenerateDesktopFile(
 	}
 }
 
-void SetGtkScaleFactor() {
-	const auto integration = GtkIntegration::Instance();
-	const auto ratio = Core::Sandbox::Instance().devicePixelRatio();
-	if (!integration || ratio > 1.) {
-		return;
-	}
-
-	const auto scaleFactor = integration->scaleFactor().value_or(1);
-	if (scaleFactor == 1) {
-		return;
-	}
-
-	LOG(("GTK scale factor: %1").arg(scaleFactor));
-	cSetScreenScale(style::CheckScale(scaleFactor * 100));
-}
-
 void SetDarkMode() {
-	static const auto Inited = [] {
+	[[maybe_unused]] static const auto Inited = [] {
 		QObject::connect(
 			qGuiApp,
 			&QGuiApplication::paletteChanged,
@@ -740,6 +727,9 @@ int psFixPrevious() {
 namespace Platform {
 
 void start() {
+	auto backgroundThread = true;
+	mallctl("background_thread", nullptr, nullptr, &backgroundThread, sizeof(bool));
+
 	LOG(("Launcher filename: %1").arg(QGuiApplication::desktopFileName()));
 
 #ifndef DESKTOP_APP_DISABLE_WAYLAND_INTEGRATION
@@ -755,11 +745,9 @@ void start() {
 	Glib::set_prgname(cExeName().toStdString());
 	Glib::set_application_name(std::string(AppName));
 
-	if (const auto integration = BaseGtkIntegration::Instance()) {
-		integration->prepareEnvironment();
-	} else {
-		g_warning("GTK integration is disabled, some features unavailable.");
-	}
+	GtkIntegration::Start(GtkIntegration::Type::Base);
+	GtkIntegration::Start(GtkIntegration::Type::Webview);
+	GtkIntegration::Start(GtkIntegration::Type::TDesktop);
 
 #ifdef DESKTOP_APP_USE_PACKAGED_RLOTTIE
 	g_warning(
@@ -956,13 +944,16 @@ bool OpenSystemSettings(SystemSettingsType type) {
 namespace ThirdParty {
 
 void start() {
+	GtkIntegration::Autorestart(GtkIntegration::Type::Base);
+	GtkIntegration::Autorestart(GtkIntegration::Type::TDesktop);
+
 	if (const auto integration = BaseGtkIntegration::Instance()) {
-		integration->load();
+		integration->load(GtkIntegration::AllowedBackends());
 		integration->initializeSettings();
 	}
 
 	if (const auto integration = GtkIntegration::Instance()) {
-		integration->load();
+		integration->load(GtkIntegration::AllowedBackends());
 	}
 
 	// wait for interface announce to know if native window frame is supported
@@ -970,7 +961,6 @@ void start() {
 		integration->waitForInterfaceAnnounce();
 	}
 
-	SetGtkScaleFactor();
 	crl::async(SetDarkMode);
 
 #ifndef DESKTOP_APP_DISABLE_DBUS_INTEGRATION

@@ -80,6 +80,9 @@ Panel::Panel(not_null<Call*> call)
 	initWidget();
 	initControls();
 	initLayout();
+	if (window()->isHidden()) {
+		window()->show();
+	}
 	QApplication::alert(widget());
 }
 
@@ -117,7 +120,7 @@ void Panel::initWindow() {
 	window()->setAttribute(Qt::WA_OpaquePaintEvent);
 	window()->setAttribute(Qt::WA_NoSystemBackground);
 	window()->setAttribute(Qt::WA_ShowWithoutActivating);
-	window()->setWindowFlags(Qt::Window | Qt::FramelessWindowHint | Qt::WindowSystemMenuHint | Qt::NoDropShadowWindowHint);
+	window()->setWindowFlags(Qt::Window | Qt::FramelessWindowHint | Qt::WindowSystemMenuHint);
 	window()->setWindowIcon(
 		QIcon(QPixmap::fromImage(Image::Empty()->original(), Qt::ColorOnly)));
 	window()->setTitle(u" "_q);

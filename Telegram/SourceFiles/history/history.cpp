@@ -54,7 +54,6 @@ namespace {
 
 constexpr auto kNewBlockEachMessage = 50;
 constexpr auto kSkipCloudDraftsFor = TimeId(2);
-constexpr auto kSendingDraftTime = TimeId(-1);
 
 using UpdateFlag = Data::HistoryUpdate::Flag;
 
@@ -980,7 +979,7 @@ void History::applyServiceChanges(
 		}
 	}, [&](const MTPDmessageActionChatMigrateTo &data) {
 		if (const auto chat = peer->asChat()) {
-			chat->addFlags(MTPDchat::Flag::f_deactivated);
+			chat->addFlags(ChatDataFlag::Deactivated);
 			if (const auto channel = owner().channelLoaded(
 					data.vchannel_id().v)) {
 				Data::ApplyMigration(chat, channel);
@@ -988,7 +987,7 @@ void History::applyServiceChanges(
 		}
 	}, [&](const MTPDmessageActionChannelMigrateFrom &data) {
 		if (const auto channel = peer->asChannel()) {
-			channel->addFlags(MTPDchannel::Flag::f_megagroup);
+			channel->addFlags(ChannelDataFlag::Megagroup);
 			if (const auto chat = owner().chatLoaded(data.vchat_id().v)) {
 				Data::ApplyMigration(chat, channel);
 			}
@@ -1223,7 +1222,7 @@ void History::addOlderSlice(const QVector<MTPMessage> &slice) {
 }
 
 void History::addNewerSlice(const QVector<MTPMessage> &slice) {
-	bool wasEmpty = isEmpty(), wasLoadedAtBottom = loadedAtBottom();
+	bool wasLoadedAtBottom = loadedAtBottom();
 
 	if (slice.isEmpty()) {
 		_loadedAtBottom = true;
@@ -1758,7 +1757,6 @@ void History::setFolderPointer(Data::Folder *folder) {
 	if (isPinnedDialog(FilterId())) {
 		owner().setChatPinned(this, FilterId(), false);
 	}
-	auto &filters = owner().chatsFilters();
 	const auto wasKnown = folderKnown();
 	const auto wasInList = inChatList();
 	if (wasInList) {
@@ -2045,7 +2043,6 @@ void History::finishBuildingFrontBlock() {
 	if (const auto block = base::take(_buildingFrontBlock)->block) {
 		if (blocks.size() > 1) {
 			// ... item, item, item, last ], [ first, item, item ...
-			const auto last = block->messages.back().get();
 			const auto first = blocks[1]->messages.front().get();
 
 			// we've added a new front block, so previous item for
@@ -2568,7 +2565,7 @@ bool History::clearUnreadOnClientSide() const {
 		return false;
 	}
 	if (const auto user = peer->asUser()) {
-		if (user->flags() & MTPDuser::Flag::f_deleted) {
+		if (user->isInaccessible()) {
 			return true;
 		}
 	}
