@@ -143,7 +143,6 @@ public:
 	// Media view interface.
 	void checkMediaViewActivation();
 	bool hideMediaView();
-	[[nodiscard]] PeerData *ui_getPeerForMouseAction();
 
 	[[nodiscard]] QPoint getPointForCallPanelCenter() const;
 	[[nodiscard]] QImage logo() const {
@@ -276,6 +275,8 @@ public:
 	// Global runtime variables.
 	void setScreenIsLocked(bool locked);
 	bool screenIsLocked() const;
+
+	static void RegisterUrlScheme();
 
 protected:
 	bool eventFilter(QObject *object, QEvent *event) override;

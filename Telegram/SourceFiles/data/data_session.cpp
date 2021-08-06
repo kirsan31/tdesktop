@@ -18,6 +18,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/crash_reports.h" // CrashReports::SetAnnotation
 #include "ui/image/image.h"
 #include "ui/image/image_location_factory.h" // Images::FromPhotoSize
+#include "ui/text/format_values.h" // Ui::FormatPhone
 #include "export/export_manager.h"
 #include "export/view/export_view_panel_controller.h"
 #include "mtproto/mtproto_config.h"
@@ -506,7 +507,7 @@ not_null<UserData*> Session::processUser(const MTPUser &data) {
 
 			const auto pname = (showPhoneChanged || phoneChanged || nameChanged)
 				? ((showPhone && !phone.isEmpty())
-					? App::formatPhone(phone)
+					? Ui::FormatPhone(phone)
 					: QString())
 				: result->nameOrPhone;
 
@@ -1441,12 +1442,12 @@ rpl::producer<not_null<const ViewElement*>> Session::viewLayoutChanged() const {
 	return _viewLayoutChanges.events();
 }
 
-void Session::notifyUnreadItemAdded(not_null<HistoryItem*> item) {
-	_unreadItemAdded.fire_copy(item);
+void Session::notifyNewItemAdded(not_null<HistoryItem*> item) {
+	_newItemAdded.fire_copy(item);
 }
 
-rpl::producer<not_null<HistoryItem*>> Session::unreadItemAdded() const {
-	return _unreadItemAdded.events();
+rpl::producer<not_null<HistoryItem*>> Session::newItemAdded() const {
+	return _newItemAdded.events();
 }
 
 void Session::changeMessageId(ChannelId channel, MsgId wasId, MsgId nowId) {
@@ -1963,7 +1964,7 @@ void Session::processMessages(
 	for (const auto &[position, index] : indices) {
 		addNewMessage(
 			data[index],
-			MTPDmessage_ClientFlags(),
+			MessageFlags(),
 			type);
 	}
 }
@@ -2019,8 +2020,11 @@ void Session::scheduleNextTTLs() {
 	}
 	const auto nearest = _ttlMessages.begin()->first;
 	const auto now = base::unixtime::now();
-	const auto timeout = (std::max(now, nearest) - now) * crl::time(1000);
-	_ttlCheckTimer.callOnce(timeout);
+
+	// Set timer not more than for 24 hours.
+	const auto maxTimeout = TimeId(86400);
+	const auto timeout = std::min(std::max(now, nearest) - now, maxTimeout);
+	_ttlCheckTimer.callOnce(timeout * crl::time(1000));
 }
 
 void Session::unregisterMessageTTL(
@@ -2280,7 +2284,7 @@ void Session::unmuteByFinished() {
 
 HistoryItem *Session::addNewMessage(
 		const MTPMessage &data,
-		MTPDmessage_ClientFlags clientFlags,
+		MessageFlags localFlags,
 		NewMessageType type) {
 	const auto peerId = PeerFromMessage(data);
 	if (!peerId) {
@@ -2289,7 +2293,7 @@ HistoryItem *Session::addNewMessage(
 
 	const auto result = history(peerId)->addNewMessage(
 		data,
-		clientFlags,
+		localFlags,
 		type);
 	if (result && type == NewMessageType::Unread) {
 		CheckForSwitchInlineButton(result);
@@ -3587,7 +3591,7 @@ QString Session::findContactPhone(not_null<UserData*> contact) const {
 	const auto result = contact->phone();
 	return result.isEmpty()
 		? findContactPhone(peerToUser(contact->id))
-		: App::formatPhone(result);
+		: Ui::FormatPhone(result);
 }
 
 QString Session::findContactPhone(UserId contactId) const {
@@ -4061,8 +4065,8 @@ void Session::insertCheckedServiceNotification(
 	const auto flags = MTPDmessage::Flag::f_entities
 		| MTPDmessage::Flag::f_from_id
 		| MTPDmessage::Flag::f_media;
-	const auto clientFlags = MTPDmessage_ClientFlag::f_clientside_unread
-		| MTPDmessage_ClientFlag::f_local_history_entry;
+	const auto localFlags = MessageFlag::ClientSideUnread
+		| MessageFlag::LocalHistoryEntry;
 	auto sending = TextWithEntities(), left = message;
 	while (TextUtilities::CutPart(sending, left, MaxMessageSize)) {
 		addNewMessage(
@@ -4088,7 +4092,7 @@ void Session::insertCheckedServiceNotification(
 				//MTPMessageReactions(),
 				MTPVector<MTPRestrictionReason>(),
 				MTPint()), // ttl_period
-			clientFlags,
+			localFlags,
 			NewMessageType::Unread);
 	}
 	sendHistoryChangeNotifications();
@@ -4155,10 +4159,19 @@ void Session::setWallpapers(const QVector<MTPWallPaper> &data, int32 hash) {
 			_wallpapers.push_back(*parsed);
 		}
 	}
+
+	// Put the legacy2 (flowers) wallpaper to the front of the list.
+	const auto legacy2 = ranges::find_if(
+		_wallpapers,
+		Data::IsLegacy2DefaultWallPaper);
+	if (legacy2 != end(_wallpapers)) {
+		ranges::rotate(begin(_wallpapers), legacy2, legacy2 + 1);
+	}
+
 	if (ranges::none_of(_wallpapers, Data::IsDefaultWallPaper)) {
 		_wallpapers.push_back(Data::DefaultWallPaper());
 		_wallpapers.back().setLocalImageAsThumbnail(std::make_shared<Image>(
-			u":/gui/arg/bg.jpg"_q));
+			u":/gui/art/background.jpg"_q));
 	}
 }
 

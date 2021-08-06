@@ -24,6 +24,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/ui_integration.h"
 #include "chat_helpers/emoji_keywords.h"
 #include "chat_helpers/stickers_emoji_image_loader.h"
+#include "base/platform/base_platform_url_scheme.h"
 #include "base/platform/base_platform_last_input.h"
 #include "base/platform/base_platform_info.h"
 #include "platform/platform_specific.h"
@@ -197,6 +198,7 @@ void Application::run() {
 	ValidateScale();
 
 	if (Local::oldSettingsVersion() < AppVersion) {
+		RegisterUrlScheme();
 		psNewVersion();
 	}
 
@@ -267,7 +269,7 @@ void Application::run() {
 
 	const auto currentGeometry = _window->widget()->geometry();
 	_mediaView = std::make_unique<Media::View::OverlayWidget>();
-	_window->widget()->setGeometry(currentGeometry);
+	_window->widget()->Ui::RpWidget::setGeometry(currentGeometry);
 
 	DEBUG_LOG(("Application Info: showing."));
 	_window->finishFirstShow();
@@ -388,15 +390,6 @@ bool Application::hideMediaView() {
 		return true;
 	}
 	return false;
-}
-
-PeerData *Application::ui_getPeerForMouseAction() {
-	if (_mediaView && !_mediaView->isHidden()) {
-		return _mediaView->ui_getPeerForMouseAction();
-	} else if (const auto m = App::main()) { // multi good
-		return m->ui_getPeerForMouseAction();
-	}
-	return nullptr;
 }
 
 bool Application::eventFilter(QObject *object, QEvent *e) {
@@ -1128,6 +1121,19 @@ void Application::startShortcuts() {
 			return closeActiveWindow();
 		});
 	}, _lifetime);
+}
+
+void Application::RegisterUrlScheme() {
+	base::Platform::RegisterUrlScheme(base::Platform::UrlSchemeDescriptor{
+		.executable = cExeDir() + cExeName(),
+		.arguments = qsl("-workdir \"%1\"").arg(cWorkingDir()),
+		.protocol = qsl("tg"),
+		.protocolName = qsl("Telegram Link"),
+		.shortAppName = qsl("tdesktop"),
+		.longAppName = QCoreApplication::applicationName(),
+		.displayAppName = AppName.utf16(),
+		.displayAppDescription = AppName.utf16(),
+	});
 }
 
 bool IsAppLaunched() {

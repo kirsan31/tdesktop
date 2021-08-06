@@ -71,9 +71,9 @@ Version **1.8.15** was the last that supports older systems
 
 ## Build instructions
 
-* Visual Studio 2019 [(32 bits)][msvc32] [(64 bits)][msvc64]
-* [Xcode 12][xcode]
-* [CMake on GNU/Linux][cmake]
+* Windows [(32-bit)][win32] [(64-bit)][win64]
+* [macOS][mac]
+* [GNU/Linux using Docker][linux]
 
 [//]: # (LINKS)
 [Change the Always on Top behavior of the Call Popup]: https://github.com/telegramdesktop/tdesktop/issues/3382
@@ -86,10 +86,9 @@ https://github.com/telegramdesktop/tdesktop/issues/1333
 [telegram_api]: https://core.telegram.org
 [telegram_proto]: https://core.telegram.org/mtproto
 [license]: LICENSE
-[msvc32]: docs/building-msvc.md
-[msvc64]: docs/building-msvc-x64.md
-[xcode]: docs/building-xcode.md
-[xcode_old]: docs/building-xcode-old.md
-[cmake]: docs/building-cmake.md
+[win32]: docs/building-win.md
+[win64]: docs/building-win-x64.md
+[mac]: docs/building-mac.md
+[linux]: docs/building-linux.md
 [preview_image]: https://github.com/telegramdesktop/tdesktop/blob/dev/docs/assets/preview.png "Preview of Telegram Desktop"
 [preview_image_url]: https://raw.githubusercontent.com/telegramdesktop/tdesktop/dev/docs/assets/preview.png

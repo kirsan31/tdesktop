@@ -46,7 +46,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/unixtime.h"
 #include "mainwindow.h"
 #include "mainwidget.h"
-#include "layout.h"
+#include "layout/layout_selection.h"
 #include "main/main_session.h"
 #include "main/main_session_settings.h"
 #include "core/application.h"
@@ -2366,9 +2366,22 @@ void HistoryInner::repaintScrollDateCallback() {
 	update(0, updateTop, width(), updateHeight);
 }
 
+void HistoryInner::setItemsRevealHeight(int revealHeight) {
+	_revealHeight = revealHeight;
+}
+
+void HistoryInner::changeItemsRevealHeight(int revealHeight) {
+	if (_revealHeight == revealHeight) {
+		return;
+	}
+	_revealHeight = revealHeight;
+	updateSize();
+}
+
 void HistoryInner::updateSize() {
-	int visibleHeight = _scroll->height();
-	int newHistoryPaddingTop = qMax(visibleHeight - historyHeight() - st::historyPaddingBottom, 0);
+	const auto visibleHeight = _scroll->height();
+	const auto itemsHeight = historyHeight() - _revealHeight;
+	int newHistoryPaddingTop = qMax(visibleHeight - itemsHeight - st::historyPaddingBottom, 0);
 	if (_botAbout && !_botAbout->info->text.isEmpty()) {
 		accumulate_max(newHistoryPaddingTop, st::msgMargin.top() + st::msgMargin.bottom() + st::msgPadding.top() + st::msgPadding.bottom() + st::msgNameFont->height + st::botDescSkip + _botAbout->height);
 	}
@@ -2388,11 +2401,13 @@ void HistoryInner::updateSize() {
 
 	_historyPaddingTop = newHistoryPaddingTop;
 
-	int newHeight = _historyPaddingTop + historyHeight() + st::historyPaddingBottom;
+	int newHeight = _historyPaddingTop + itemsHeight + st::historyPaddingBottom;
 	if (width() != _scroll->width() || height() != newHeight) {
 		resize(_scroll->width(), newHeight);
 
-		mouseActionUpdate(QCursor::pos());
+		if (!_revealHeight) {
+			mouseActionUpdate(QCursor::pos());
+		}
 	} else {
 		update();
 	}
@@ -2600,19 +2615,7 @@ bool HistoryInner::elementIsGifPaused() {
 void HistoryInner::elementSendBotCommand(
 		const QString &command,
 		const FullMsgId &context) {
-	if (auto peer = Ui::getPeerForMouseAction()) { // old way
-		auto bot = peer->isUser() ? peer->asUser() : nullptr;
-		if (!bot) {
-			if (const auto view = App::hoveredLinkItem()) {
-				// may return nullptr
-				bot = view->data()->fromOriginal()->asUser();
-			}
-		}
-		Ui::showPeerHistory(peer, ShowAtTheEndMsgId);
-		App::sendBotCommand(peer, bot, command);
-	} else {
-		App::insertBotCommand(command);
-	}
+	_widget->sendBotCommand({ _history->peer, command, context });
 }
 
 void HistoryInner::elementHandleViaClick(not_null<UserData*> bot) {
@@ -2625,6 +2628,10 @@ bool HistoryInner::elementIsChatWide() {
 
 not_null<Ui::PathShiftGradient*> HistoryInner::elementPathShiftGradient() {
 	return _pathGradient.get();
+}
+
+void HistoryInner::elementReplyTo(const FullMsgId &to) {
+	return _widget->replyToMessage(to);
 }
 
 auto HistoryInner::getSelectionState() const
@@ -2814,7 +2821,7 @@ void HistoryInner::mouseActionUpdate() {
 			_dragStateItem = session().data().message(dragState.itemId);
 			lnkhost = view;
 			if (!dragState.link && m.x() >= st::historyPhotoLeft && m.x() < st::historyPhotoLeft + st::msgPhotoSize) {
-				if (auto msg = item->toHistoryMessage()) {
+				if (item->toHistoryMessage()) {
 					if (view->hasFromPhoto()) {
 						enumerateUserpics([&](not_null<Element*> view, int userpicTop) -> bool {
 							// stop enumeration if the userpic is below our point
@@ -3525,6 +3532,11 @@ not_null<HistoryView::ElementDelegate*> HistoryInner::ElementDelegate() {
 			Expects(Instance != nullptr);
 
 			return Instance->elementPathShiftGradient();
+		}
+		void elementReplyTo(const FullMsgId &to) override {
+			if (Instance) {
+				Instance->elementReplyTo(to);
+			}
 		}
 	};
 

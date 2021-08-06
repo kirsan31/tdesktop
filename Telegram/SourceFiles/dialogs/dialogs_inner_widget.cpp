@@ -1248,14 +1248,12 @@ bool InnerWidget::pinnedShiftAnimationCallback(crl::time now) {
 		now += st::stickersRowDuration;
 	}
 
-	auto wasAnimating = false;
 	auto animating = false;
 	auto updateMin = -1;
 	auto updateMax = 0;
 	for (auto i = 0, l = static_cast<int>(_pinnedRows.size()); i != l; ++i) {
 		auto start = _pinnedRows[i].animStartTime;
 		if (start) {
-			wasAnimating = true;
 			if (updateMin < 0) updateMin = i;
 			updateMax = i;
 			if (start + st::stickersRowDuration > now && now >= start) {
@@ -2049,7 +2047,7 @@ bool InnerWidget::searchReceived(
 			if (lastDate) {
 				const auto item = session().data().addNewMessage(
 					message,
-					MTPDmessage_ClientFlags(),
+					MessageFlags(),
 					NewMessageType::Existing);
 				const auto history = item->history();
 				if (!uniquePeers || !hasHistoryInResults(history)) {
