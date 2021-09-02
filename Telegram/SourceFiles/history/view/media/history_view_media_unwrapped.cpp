@@ -14,6 +14,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/history_item_components.h"
 #include "lottie/lottie_single_player.h"
 #include "ui/cached_round_corners.h"
+#include "ui/chat/chat_theme.h"
 #include "layout/layout_selection.h"
 #include "styles/style_chat.h"
 
@@ -105,15 +106,11 @@ QSize UnwrappedMedia::countCurrentSize(int newWidth) {
 	return { newWidth, newHeight };
 }
 
-void UnwrappedMedia::draw(
-		Painter &p,
-		const QRect &r,
-		TextSelection selection,
-		crl::time ms) const {
+void UnwrappedMedia::draw(Painter &p, const PaintContext &context) const {
 	if (width() < st::msgPadding.left() + st::msgPadding.right() + 1) {
 		return;
 	}
-	bool selected = (selection == FullSelection);
+	bool selected = (context.selection == FullSelection);
 
 	const auto rightAligned = _parent->hasOutLayout()
 		&& !_parent->delegate()->elementIsChatWide();

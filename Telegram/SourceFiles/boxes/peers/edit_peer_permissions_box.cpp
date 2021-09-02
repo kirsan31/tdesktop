@@ -27,7 +27,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_session.h"
 #include "mainwindow.h"
 #include "apiwrap.h"
-#include "app.h"
 #include "styles/style_layers.h"
 #include "styles/style_boxes.h"
 #include "styles/style_info.h"
@@ -151,7 +150,7 @@ std::vector<std::pair<ChatAdminRights, QString>> AdminRightLabels(
 			{ Flag::EditMessages, tr::lng_rights_channel_edit(tr::now) },
 			{ Flag::DeleteMessages, tr::lng_rights_channel_delete(tr::now) },
 			{ Flag::InviteUsers, tr::lng_rights_group_invite(tr::now) },
-			{ Flag::ManageCall, tr::lng_rights_group_manage_calls(tr::now) },
+			{ Flag::ManageCall, tr::lng_rights_channel_manage_calls(tr::now) },
 			{ Flag::AddAdmins, tr::lng_rights_add_admins(tr::now) }
 		};
 	}
