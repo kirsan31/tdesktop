@@ -26,7 +26,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_session_settings.h"
 #include "api/api_updates.h"
 #include "boxes/share_box.h"
-#include "boxes/confirm_box.h"
+#include "ui/boxes/confirm_box.h"
 #include "ui/toast/toast.h"
 #include "ui/text/text_utilities.h"
 #include "ui/text/text_isolated_emoji.h"
@@ -58,7 +58,7 @@ namespace {
 [[nodiscard]] MessageFlags NewForwardedFlags(
 		not_null<PeerData*> peer,
 		PeerId from,
-		not_null<HistoryMessage*> fwd) {
+		not_null<HistoryItem*> fwd) {
 	auto result = NewMessageFlags(peer);
 	if (from) {
 		result |= MessageFlag::HasFromId;
@@ -264,7 +264,7 @@ void FastShareMessage(not_null<HistoryItem*> item) {
 			}
 			text.append(error.first);
 			Ui::show(
-				Box<InformBox>(text),
+				Box<Ui::InformBox>(text),
 				Ui::LayerOption::KeepOther);
 			return;
 		}
@@ -347,15 +347,23 @@ void FastShareMessage(not_null<HistoryItem*> item) {
 		.navigation = App::wnd()->sessionController() }));
 }
 
-Fn<void(ChannelData*, MsgId)> HistoryDependentItemCallback(
-		not_null<HistoryItem*> item) {
-	const auto session = &item->history()->session();
-	const auto dependent = item->fullId();
-	return [=](ChannelData *channel, MsgId msgId) {
-		if (const auto item = session->data().message(dependent)) {
-			item->updateDependencyItem();
-		}
-	};
+void RequestDependentMessageData(
+		not_null<HistoryItem*> item,
+		PeerId peerId,
+		MsgId msgId) {
+	const auto fullId = item->fullId();
+	const auto history = item->history();
+	const auto session = &history->session();
+	history->session().api().requestMessageData(
+		(peerIsChannel(peerId)
+			? history->owner().channel(peerToChannel(peerId)).get()
+			: history->peer->asChannel()),
+		msgId,
+		[=](ChannelData *channel, MsgId msgId) {
+			if (const auto item = session->data().message(fullId)) {
+				item->updateDependencyItem();
+			}
+		});
 }
 
 MessageFlags NewMessageFlags(not_null<PeerData*> peer) {
@@ -458,7 +466,7 @@ HistoryMessage::HistoryMessage(
 : HistoryItem(
 		history,
 		id,
-		FlagsFromMTP(data.vflags().v) | localFlags,
+		FlagsFromMTP(id, data.vflags().v, localFlags),
 		data.vdate().v,
 		data.vfrom_id() ? peerFromMTP(*data.vfrom_id()) : PeerId(0)) {
 	auto config = CreateConfig();
@@ -516,7 +524,7 @@ HistoryMessage::HistoryMessage(
 : HistoryItem(
 		history,
 		id,
-		FlagsFromMTP(data.vflags().v) | localFlags,
+		FlagsFromMTP(id, data.vflags().v, localFlags),
 		data.vdate().v,
 		data.vfrom_id() ? peerFromMTP(*data.vfrom_id()) : PeerId(0)) {
 	auto config = CreateConfig();
@@ -553,11 +561,11 @@ HistoryMessage::HistoryMessage(
 	TimeId date,
 	PeerId from,
 	const QString &postAuthor,
-	not_null<HistoryMessage*> original)
+	not_null<HistoryItem*> original)
 : HistoryItem(
 		history,
 		id,
-		NewForwardedFlags(history->peer, from, original) | flags,
+		(NewForwardedFlags(history->peer, from, original) | flags),
 		date,
 		from) {
 	const auto peer = history->peer;
@@ -1026,10 +1034,7 @@ void HistoryMessage::applySentMessage(
 }
 
 bool HistoryMessage::allowsForward() const {
-	if (id < 0 || !isHistoryEntry()) {
-		return false;
-	}
-	return !_media || _media->allowsForward();
+	return isRegular() && (!_media || _media->allowsForward());
 }
 
 bool HistoryMessage::allowsSendNow() const {
@@ -1048,10 +1053,6 @@ bool HistoryMessage::allowsEdit(TimeId now) const {
 		&& (!_media || _media->allowsEdit())
 		&& !isLegacyMessage()
 		&& !isEditingMedia();
-}
-
-bool HistoryMessage::uploading() const {
-	return _media && _media->uploading();
 }
 
 void HistoryMessage::createComponents(CreateConfig &&config) {
@@ -1101,13 +1102,10 @@ void HistoryMessage::createComponents(CreateConfig &&config) {
 		reply->replyToMsgId = config.replyTo;
 		reply->replyToMsgTop = isScheduled() ? 0 : config.replyToTop;
 		if (!reply->updateData(this)) {
-			history()->session().api().requestMessageData(
-				(peerIsChannel(reply->replyToPeerId)
-					? history()->owner().channel(
-						peerToChannel(reply->replyToPeerId)).get()
-					: history()->peer->asChannel()),
-				reply->replyToMsgId,
-				HistoryDependentItemCallback(this));
+			RequestDependentMessageData(
+				this,
+				reply->replyToPeerId,
+				reply->replyToMsgId);
 		}
 	}
 	if (const auto via = Get<HistoryMessageVia>()) {
@@ -1486,14 +1484,14 @@ void HistoryMessage::updateReplyMarkup(HistoryMessageMarkupData &&markup) {
 
 void HistoryMessage::contributeToSlowmode(TimeId realDate) {
 	if (const auto channel = history()->peer->asChannel()) {
-		if (out() && IsServerMsgId(id)) {
+		if (out() && isRegular()) {
 			channel->growSlowmodeLastMessage(realDate ? realDate : date());
 		}
 	}
 }
 
 void HistoryMessage::addToUnreadMentions(UnreadMentionType type) {
-	if (IsServerMsgId(id) && isUnreadMention()) {
+	if (isRegular() && isUnreadMention()) {
 		if (history()->addToUnreadMentions(id, type)) {
 			history()->session().changes().historyUpdated(
 				history(),
@@ -1921,7 +1919,7 @@ void HistoryMessage::incrementReplyToTopCounter() {
 void HistoryMessage::changeReplyToTopCounter(
 		not_null<HistoryMessageReply*> reply,
 		int delta) {
-	if (!IsServerMsgId(id) || !reply->replyToTop()) {
+	if (!isRegular() || !reply->replyToTop()) {
 		return;
 	}
 	const auto channelId = history()->channelId();

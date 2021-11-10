@@ -135,7 +135,7 @@ public:
 
 	void unpinAllMessages();
 
-	HistoryItem *addNewMessage(
+	not_null<HistoryItem*> addNewMessage(
 		MsgId id,
 		const MTPMessage &msg,
 		MessageFlags localFlags,
@@ -158,7 +158,7 @@ public:
 		TimeId date,
 		PeerId from,
 		const QString &postAuthor,
-		not_null<HistoryMessage*> forwardOriginal);
+		not_null<HistoryItem*> forwardOriginal);
 	not_null<HistoryItem*> addNewLocalMessage(
 		MsgId id,
 		MessageFlags flags,
@@ -193,7 +193,7 @@ public:
 		HistoryMessageMarkupData &&markup);
 
 	// Used only internally and for channel admin log.
-	HistoryItem *createItem(
+	not_null<HistoryItem*> createItem(
 		MsgId id,
 		const MTPMessage &message,
 		MessageFlags localFlags,
@@ -206,9 +206,9 @@ public:
 
 	void newItemAdded(not_null<HistoryItem*> item);
 
-	void registerLocalMessage(not_null<HistoryItem*> item);
-	void unregisterLocalMessage(not_null<HistoryItem*> item);
-	[[nodiscard]] auto localMessages()
+	void registerClientSideMessage(not_null<HistoryItem*> item);
+	void unregisterClientSideMessage(not_null<HistoryItem*> item);
+	[[nodiscard]] auto clientSideMessages()
 		-> const base::flat_set<not_null<HistoryItem*>> &;
 	[[nodiscard]] HistoryItem *latestSendingMessage() const;
 
@@ -277,12 +277,10 @@ public:
 		bool promoted,
 		const QString &type,
 		const QString &message);
-	[[nodiscard]] QStringRef topPromotionType() const;
+	[[nodiscard]] QStringView topPromotionType() const;
 	[[nodiscard]] QString topPromotionMessage() const;
 	[[nodiscard]] bool topPromotionAboutShown() const;
 	void markTopPromotionAboutShown();
-
-	[[nodiscard]] bool canHaveSponsoredMessages() const;
 
 	MsgId minMsgId() const;
 	MsgId maxMsgId() const;
@@ -579,7 +577,7 @@ private:
 	void createLocalDraftFromCloud();
 
 	HistoryService *insertJoinedMessage();
-	void insertLocalMessage(not_null<HistoryItem*> item);
+	void insertMessageToBlocks(not_null<HistoryItem*> item);
 
 	void setFolderPointer(Data::Folder *folder);
 
@@ -602,7 +600,7 @@ private:
 	base::flat_set<MsgId> _unreadMentions;
 	std::optional<HistoryItem*> _lastMessage;
 	std::optional<HistoryItem*> _lastServerMessage;
-	base::flat_set<not_null<HistoryItem*>> _localMessages;
+	base::flat_set<not_null<HistoryItem*>> _clientSideMessages;
 	std::unordered_set<std::unique_ptr<HistoryItem>> _messages;
 
 	// This almost always is equal to _lastMessage. The only difference is

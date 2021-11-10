@@ -100,7 +100,7 @@ void Histories::readInbox(not_null<History*> history) {
 
 void Histories::readInboxTill(not_null<HistoryItem*> item) {
 	const auto history = item->history();
-	if (!IsServerMsgId(item->id)) {
+	if (!item->isRegular()) {
 		readClientSideMessage(item);
 		auto view = item->mainView();
 		if (!view) {
@@ -123,11 +123,11 @@ void Histories::readInboxTill(not_null<HistoryItem*> item) {
 				}
 			}
 			item = view->data();
-			if (IsServerMsgId(item->id)) {
+			if (item->isRegular()) {
 				break;
 			}
 		}
-		if (!IsServerMsgId(item->id)) {
+		if (!item->isRegular()) {
 			LOG(("App Error: "
 				"Can't read history till unknown local message."));
 			return;
@@ -235,7 +235,7 @@ void Histories::readInboxTill(
 }
 
 void Histories::readInboxOnNewMessage(not_null<HistoryItem*> item) {
-	if (!IsServerMsgId(item->id)) {
+	if (!item->isRegular()) {
 		readClientSideMessage(item);
 	} else {
 		readInboxTill(item->history(), item->id, true);
@@ -646,7 +646,7 @@ void Histories::deleteAllMessages(
 				session().api().applyUpdates(result);
 			//}).fail([=](const MTP::Error &error) {
 			//	if (error.type() == qstr("CHANNEL_TOO_LARGE")) {
-			//		Ui::show(Box<InformBox>(tr::lng_cant_delete_channel(tr::now)));
+			//		Ui::show(Box<Ui::InformBox>(tr::lng_cant_delete_channel(tr::now)));
 			//	}
 			}).send();
 		} else if (channel) {
@@ -688,7 +688,9 @@ void Histories::deleteAllMessages(
 			return session().api().request(MTPmessages_DeleteHistory(
 				MTP_flags(flags),
 				peer->input,
-				MTP_int(0)
+				MTP_int(0),
+				MTPint(), // min_date
+				MTPint() // max_date
 			)).done([=](const MTPmessages_AffectedHistory &result) {
 				const auto offset = session().api().applyAffectedHistory(
 					peer,
@@ -726,7 +728,7 @@ void Histories::deleteMessages(const MessageIdsList &ids, bool revoke) {
 				continue;
 			}
 			remove.push_back(item);
-			if (IsServerMsgId(item->id)) {
+			if (item->isRegular()) {
 				idsByPeer[history].push_back(MTP_int(itemId.msg));
 			}
 		}

@@ -111,8 +111,6 @@ void SendExistingMedia(
 	if (message.action.options.scheduled) {
 		flags |= MessageFlag::IsOrWasScheduled;
 		sendFlags |= MTPmessages_SendMedia::Flag::f_schedule_date;
-	} else {
-		flags |= MessageFlag::LocalHistoryEntry;
 	}
 
 	session->data().registerMessageRandomId(randomId, newId);
@@ -212,7 +210,7 @@ void SendExistingPhoto(
 }
 
 bool SendDice(Api::MessageToSend &message) {
-	const auto full = message.textWithTags.text.midRef(0).trimmed();
+	const auto full = QStringView(message.textWithTags.text).trimmed();
 	auto length = 0;
 	if (!Ui::Emoji::Find(full.data(), full.data() + full.size(), &length)
 		|| length != full.size()) {
@@ -271,8 +269,6 @@ bool SendDice(Api::MessageToSend &message) {
 	if (message.action.options.scheduled) {
 		flags |= MessageFlag::IsOrWasScheduled;
 		sendFlags |= MTPmessages_SendMedia::Flag::f_schedule_date;
-	} else {
-		flags |= MessageFlag::LocalHistoryEntry;
 	}
 
 	session->data().registerMessageRandomId(randomId, newId);
@@ -387,8 +383,6 @@ void SendConfirmedFile(
 
 		// Scheduled messages have no the 'edited' badge.
 		flags |= MessageFlag::HideEdited;
-	} else {
-		flags |= MessageFlag::LocalHistoryEntry;
 	}
 	if (file->type == SendMediaType::Audio) {
 		if (!peer->isChannel() || peer->isMegagroup()) {

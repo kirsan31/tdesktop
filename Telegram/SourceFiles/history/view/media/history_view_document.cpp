@@ -89,7 +89,7 @@ void PaintWaveform(
 	const auto active = stm->msgWaveformActive;
 	const auto inactive = stm->msgWaveformInactive;
 	const auto wfSize = wf
-		? wf->size()
+		? int(wf->size())
 		: ::Media::Player::kWaveformSamplesCount;
 	const auto activeWidth = base::SafeRound(availableWidth * progress);
 
@@ -597,7 +597,7 @@ bool Document::downloadInCorner() const {
 	return _data->isAudioFile()
 		&& _data->canBeStreamed()
 		&& !_data->inappPlaybackFailed()
-		&& IsServerMsgId(_realParent->id);
+		&& _realParent->isRegular();
 }
 
 void Document::drawCornerDownload(
