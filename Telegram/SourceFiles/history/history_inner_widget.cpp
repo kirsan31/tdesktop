@@ -25,7 +25,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/chat/chat_style.h"
 #include "ui/widgets/popup_menu.h"
 #include "ui/image/image.h"
-#include "ui/toast/toast.h"
+#include "ui/toasts/common_toasts.h"
 #include "ui/effects/path_shift_gradient.h"
 #include "ui/text/text_options.h"
 #include "ui/boxes/report_box.h"
@@ -66,6 +66,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_poll.h"
 #include "data/data_photo.h"
 #include "data/data_photo_media.h"
+#include "data/data_peer_values.h"
+#include "data/data_chat.h"
 #include "data/data_user.h"
 #include "data/data_file_click_handler.h"
 #include "data/data_file_origin.h"
@@ -258,10 +260,62 @@ HistoryInner::HistoryInner(
 	) | rpl::start_with_next([=](int d) {
 		_scroll->scrollToY(_scroll->scrollTop() + d);
 	}, _scroll->lifetime());
+
+	setupSharingDisallowed();
 }
 
 Main::Session &HistoryInner::session() const {
 	return _controller->session();
+}
+
+void HistoryInner::setupSharingDisallowed() {
+	Expects(_peer != nullptr);
+
+	if (_peer->isUser()) {
+		_sharingDisallowed = false;
+		return;
+	}
+	const auto chat = _peer->asChat();
+	const auto channel = _peer->asChannel();
+	_sharingDisallowed = chat
+		? Data::PeerFlagValue(chat, ChatDataFlag::NoForwards)
+		: Data::PeerFlagValue(
+			channel,
+			ChannelDataFlag::NoForwards
+		) | rpl::type_erased();
+
+	auto rights = chat
+		? chat->adminRightsValue()
+		: channel->adminRightsValue();
+	auto canDelete = std::move(
+		rights
+	) | rpl::map([=] {
+		return chat
+			? chat->canDeleteMessages()
+			: channel->canDeleteMessages();
+	});
+	rpl::combine(
+		_sharingDisallowed.value(),
+		std::move(canDelete)
+	) | rpl::filter([=](bool disallowed, bool canDelete) {
+		return hasSelectRestriction() && !getSelectedItems().empty();
+	}) | rpl::start_with_next([=] {
+		_widget->clearSelected();
+		if (_mouseAction == MouseAction::PrepareSelect) {
+			mouseActionCancel();
+		}
+	}, lifetime());
+}
+
+bool HistoryInner::hasSelectRestriction() const {
+	if (!_sharingDisallowed.current()) {
+		return false;
+	} else if (const auto chat = _peer->asChat()) {
+		return !chat->canDeleteMessages();
+	} else if (const auto channel = _peer->asChannel()) {
+		return !channel->canDeleteMessages();
+	}
+	return true;
 }
 
 void HistoryInner::messagesReceived(
@@ -1216,12 +1270,12 @@ void HistoryInner::mouseActionStart(const QPoint &screenPos, Qt::MouseButton but
 							_selected.emplace(_mouseActionItem, selStatus);
 							_mouseAction = MouseAction::Selecting;
 							repaintItem(_mouseActionItem);
-						} else {
+						} else if (!hasSelectRestriction()) {
 							_mouseAction = MouseAction::PrepareSelect;
 						}
 					}
 				}
-			} else if (!_pressWasInactive) {
+			} else if (!_pressWasInactive && !hasSelectRestriction()) {
 				_mouseAction = MouseAction::PrepareSelect; // start items select
 			}
 		}
@@ -1250,7 +1304,8 @@ std::unique_ptr<QMimeData> HistoryInner::prepareDrag() {
 	}
 
 	const auto pressedHandler = ClickHandler::getPressed();
-	if (dynamic_cast<VoiceSeekClickHandler*>(pressedHandler.get())) {
+	if (dynamic_cast<VoiceSeekClickHandler*>(pressedHandler.get())
+		|| hasCopyRestriction()) {
 		return nullptr;
 	}
 
@@ -1281,7 +1336,6 @@ std::unique_ptr<QMimeData> HistoryInner::prepareDrag() {
 			}
 		}
 	}
-
 	auto urls = QList<QUrl>();
 	const auto selectedText = [&] {
 		if (uponSelected) {
@@ -1494,7 +1548,8 @@ void HistoryInner::mouseActionFinish(
 
 	if (QGuiApplication::clipboard()->supportsSelection()
 		&& !_selected.empty()
-		&& _selected.cbegin()->second != FullSelection) {
+		&& _selected.cbegin()->second != FullSelection
+		&& !hasCopyRestriction(_selected.cbegin()->first)) {
 		const auto [item, selection] = *_selected.cbegin();
 		if (const auto view = item->mainView()) {
 			TextUtilities::SetClipboardText(
@@ -1671,14 +1726,15 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 			}));
 		}
 	};
-	const auto addPhotoActions = [&](not_null<PhotoData*> photo) {
+	const auto addPhotoActions = [&](not_null<PhotoData*> photo, HistoryItem *item) {
 		const auto media = photo->activeMediaView();
-		if (!photo->isNull() && media && media->loaded()) {
+		const auto itemId = item ? item->fullId() : FullMsgId();
+		if (!photo->isNull() && media && media->loaded() && !hasCopyRestriction(item)) {
 			_menu->addAction(tr::lng_context_save_image(tr::now), App::LambdaDelayed(st::defaultDropdownMenu.menu.ripple.hideDuration, this, [=] {
 				savePhotoToFile(photo);
 			}));
 			_menu->addAction(tr::lng_context_copy_image(tr::now), [=] {
-				copyContextImage(photo);
+				copyContextImage(photo, itemId);
 			});
 		}
 		if (photo->hasAttachedStickers()) {
@@ -1689,14 +1745,13 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 			});
 		}
 	};
-	const auto addDocumentActions = [&](not_null<DocumentData*> document) {
+	const auto addDocumentActions = [&](not_null<DocumentData*> document, HistoryItem *item) {
 		if (document->loading()) {
 			_menu->addAction(tr::lng_context_cancel_download(tr::now), [=] {
 				cancelContextDownload(document);
 			});
 			return;
 		}
-		const auto item = _dragStateItem;
 		const auto itemId = item ? item->fullId() : FullMsgId();
 		const auto lnkIsVideo = document->isVideoFile();
 		const auto lnkIsVoice = document->isVoiceMessage();
@@ -1715,23 +1770,50 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 					openContextGif(itemId);
 				});
 			}
-			_menu->addAction(tr::lng_context_save_gif(tr::now), [=] {
-				saveContextGif(itemId);
-			});
+			if (!hasCopyRestriction(item)) {
+				_menu->addAction(tr::lng_context_save_gif(tr::now), [=] {
+					saveContextGif(itemId);
+				});
+			}
 		}
 		if (!document->filepath(true).isEmpty()) {
 			_menu->addAction(Platform::IsMac() ? tr::lng_context_show_in_finder(tr::now) : tr::lng_context_show_in_folder(tr::now), [=] {
 				showContextInFolder(document);
 			});
 		}
-		_menu->addAction(lnkIsVideo ? tr::lng_context_save_video(tr::now) : (lnkIsVoice ? tr::lng_context_save_audio(tr::now) : (lnkIsAudio ? tr::lng_context_save_audio_file(tr::now) : tr::lng_context_save_file(tr::now))), App::LambdaDelayed(st::defaultDropdownMenu.menu.ripple.hideDuration, this, [=] {
-			saveDocumentToFile(itemId, document);
-		}));
+		if (!hasCopyRestriction(item)) {
+			_menu->addAction(lnkIsVideo ? tr::lng_context_save_video(tr::now) : (lnkIsVoice ? tr::lng_context_save_audio(tr::now) : (lnkIsAudio ? tr::lng_context_save_audio_file(tr::now) : tr::lng_context_save_file(tr::now))), App::LambdaDelayed(st::defaultDropdownMenu.menu.ripple.hideDuration, this, [=] {
+				saveDocumentToFile(itemId, document);
+			}));
+		}
 		if (document->hasAttachedStickers()) {
 			_menu->addAction(tr::lng_context_attached_stickers(tr::now), [=] {
 				session->api().attachedStickers().requestAttachedStickerSets(
 					controller,
 					document);
+			});
+		}
+	};
+
+	const auto addSelectMessageAction = [&](
+			not_null<HistoryItem*> item,
+			bool asGroup = true) {
+		if (item->isRegular()
+			&& !item->isService()
+			&& !hasSelectRestriction()) {
+			const auto itemId = item->fullId();
+			_menu->addAction(tr::lng_context_select_msg(tr::now), [=] {
+				if (const auto item = session->data().message(itemId)) {
+					if (const auto view = item->mainView()) {
+						if (asGroup) {
+							changeSelectionAsGroup(&_selected, item, SelectAction::Select);
+						} else {
+							changeSelection(&_selected, item, SelectAction::Select);
+						}
+						repaintItem(item);
+						_widget->updateTopBarSelection();
+					}
+				}
 			});
 		}
 	};
@@ -1753,7 +1835,7 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 	if (lnkPhoto || lnkDocument) {
 		const auto item = _dragStateItem;
 		const auto itemId = item ? item->fullId() : FullMsgId();
-		if (isUponSelected > 0) {
+		if (isUponSelected > 0 && !hasCopyRestrictionForSelected()) {
 			_menu->addAction(
 				(isUponSelected > 1
 					? tr::lng_context_copy_selected_items(tr::now)
@@ -1762,9 +1844,9 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 		}
 		addItemActions(item, item);
 		if (lnkPhoto) {
-			addPhotoActions(lnkPhoto->photo());
+			addPhotoActions(lnkPhoto->photo(), item);
 		} else {
-			addDocumentActions(lnkDocument->document());
+			addDocumentActions(lnkDocument->document(), item);
 		}
 		if (item && item->hasDirectLink() && isUponSelected != 2 && isUponSelected != -2) {
 			_menu->addAction(item->history()->peer->isMegagroup() ? tr::lng_context_copy_message_link(tr::now) : tr::lng_context_copy_post_link(tr::now), [=] {
@@ -1807,17 +1889,7 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 					});
 				}
 			}
-			if (item->isRegular() && !item->isService()) {
-				_menu->addAction(tr::lng_context_select_msg(tr::now), [=] {
-					if (const auto item = session->data().message(itemId)) {
-						if (const auto view = item->mainView()) {
-							changeSelection(&_selected, item, SelectAction::Select);
-							repaintItem(item);
-							_widget->updateTopBarSelection();
-						}
-					}
-				});
-			}
+			addSelectMessageAction(item, false);
 			if (isUponSelected != -2 && blockSender) {
 				_menu->addAction(tr::lng_profile_block_user(tr::now), [=] {
 					blockSenderItem(itemId);
@@ -1844,11 +1916,13 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 		const auto view = item ? item->mainView() : nullptr;
 
 		if (isUponSelected > 0) {
-			_menu->addAction(
-				((isUponSelected > 1)
-					? tr::lng_context_copy_selected_items(tr::now)
-					: tr::lng_context_copy_selected(tr::now)),
-				[=] { copySelectedText(); });
+			if (!hasCopyRestrictionForSelected()) {
+				_menu->addAction(
+					((isUponSelected > 1)
+						? tr::lng_context_copy_selected_items(tr::now)
+						: tr::lng_context_copy_selected(tr::now)),
+					[=] { copySelectedText(); });
+			}
 			addItemActions(item, item);
 		} else {
 			addItemActions(item, albumPartItem);
@@ -1865,9 +1939,11 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 								Api::ToggleFavedSticker(document, itemId);
 							});
 						}
-						_menu->addAction(tr::lng_context_save_image(tr::now), App::LambdaDelayed(st::defaultDropdownMenu.menu.ripple.hideDuration, this, [=] {
-							saveDocumentToFile(itemId, document);
-						}));
+						if (!hasCopyRestriction(item)) {
+							_menu->addAction(tr::lng_context_save_image(tr::now), App::LambdaDelayed(st::defaultDropdownMenu.menu.ripple.hideDuration, this, [=] {
+								saveDocumentToFile(itemId, document);
+							}));
+						}
 					}
 				}
 				if (const auto media = item->media()) {
@@ -1892,6 +1968,7 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 				if (!item->isService()
 					&& view
 					&& !link
+					&& !hasCopyRestriction(item)
 					&& (view->hasVisibleText() || mediaHasTextForCopy)) {
 					_menu->addAction(tr::lng_context_copy_text(tr::now), [=] {
 						copyContextText(itemId);
@@ -1955,37 +2032,14 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 					});
 				}
 			}
-			if (item->isRegular() && !item->isService()) {
-				_menu->addAction(tr::lng_context_select_msg(tr::now), [=] {
-					if (const auto item = session->data().message(itemId)) {
-						if (const auto view = item->mainView()) {
-							changeSelectionAsGroup(&_selected, item, SelectAction::Select);
-							repaintItem(view);
-							_widget->updateTopBarSelection();
-						}
-					}
-				});
-			}
+			addSelectMessageAction(item);
 			if (isUponSelected != -2 && canBlockSender) {
 				_menu->addAction(tr::lng_profile_block_user(tr::now), [=] {
 					blockSenderAsGroup(itemId);
 				});
 			}
-		} else {
-			if (App::mousedItem()
-				&& App::mousedItem()->data()->isRegular()
-				&& !App::mousedItem()->data()->isService()) {
-				const auto itemId = App::mousedItem()->data()->fullId();
-				_menu->addAction(tr::lng_context_select_msg(tr::now), [=] {
-					if (const auto item = session->data().message(itemId)) {
-						if (const auto view = item->mainView()) {
-							changeSelectionAsGroup(&_selected, item, SelectAction::Select);
-							repaintItem(item);
-							_widget->updateTopBarSelection();
-						}
-					}
-				});
-			}
+		} else if (App::mousedItem()) {
+			addSelectMessageAction(App::mousedItem()->data());
 		}
 	}
 
@@ -1997,8 +2051,47 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 	}
 }
 
+bool HistoryInner::hasCopyRestriction(HistoryItem *item) const {
+	return !_peer->allowsForwarding() || (item && item->forbidsForward());
+}
+
+bool HistoryInner::showCopyRestriction(HistoryItem *item) {
+	if (!hasCopyRestriction(item)) {
+		return false;
+	}
+	Ui::ShowMultilineToast({
+		.text = { _peer->isBroadcast()
+			? tr::lng_error_nocopy_channel(tr::now)
+			: tr::lng_error_nocopy_group(tr::now) },
+	});
+	return true;
+}
+
+bool HistoryInner::hasCopyRestrictionForSelected() const {
+	if (hasCopyRestriction()) {
+		return true;
+	}
+	for (const auto &[item, selection] : _selected) {
+		if (item && item->forbidsForward()) {
+			return true;
+		}
+	}
+	return false;
+}
+
+bool HistoryInner::showCopyRestrictionForSelected() {
+	for (const auto &[item, selection] : _selected) {
+		if (showCopyRestriction(item)) {
+			return true;
+		}
+	}
+	return false;
+}
+
 void HistoryInner::copySelectedText() {
-	TextUtilities::SetClipboardText(getSelectedText());
+	if (!showCopyRestrictionForSelected()) {
+		TextUtilities::SetClipboardText(getSelectedText());
+	}
 }
 
 void HistoryInner::savePhotoToFile(not_null<PhotoData*> photo) {
@@ -2023,14 +2116,17 @@ void HistoryInner::savePhotoToFile(not_null<PhotoData*> photo) {
 		}));
 }
 
-void HistoryInner::copyContextImage(not_null<PhotoData*> photo) {
+void HistoryInner::copyContextImage(
+		not_null<PhotoData*> photo,
+		FullMsgId itemId) {
+	const auto item = session().data().message(itemId);
 	const auto media = photo->activeMediaView();
 	if (photo->isNull() || !media || !media->loaded()) {
 		return;
+	} else if (!showCopyRestriction(item)) {
+		const auto image = media->image(Data::PhotoSize::Large)->original();
+		QGuiApplication::clipboard()->setImage(image);
 	}
-
-	const auto image = media->image(Data::PhotoSize::Large)->original();
-	QGuiApplication::clipboard()->setImage(image);
 }
 
 void HistoryInner::showStickerPackInfo(not_null<DocumentData*> document) {
@@ -2069,9 +2165,11 @@ void HistoryInner::openContextGif(FullMsgId itemId) {
 
 void HistoryInner::saveContextGif(FullMsgId itemId) {
 	if (const auto item = session().data().message(itemId)) {
-		if (const auto media = item->media()) {
-			if (const auto document = media->document()) {
-				Api::ToggleSavedGif(document, item->fullId(), true);
+		if (!hasCopyRestriction(item)) {
+			if (const auto media = item->media()) {
+				if (const auto document = media->document()) {
+					Api::ToggleSavedGif(document, item->fullId(), true);
+				}
 			}
 		}
 	}
@@ -2079,10 +2177,12 @@ void HistoryInner::saveContextGif(FullMsgId itemId) {
 
 void HistoryInner::copyContextText(FullMsgId itemId) {
 	if (const auto item = session().data().message(itemId)) {
-		if (const auto group = session().data().groups().find(item)) {
-			TextUtilities::SetClipboardText(HistoryGroupText(group));
-		} else {
-			TextUtilities::SetClipboardText(HistoryItemText(item));
+		if (!showCopyRestriction(item)) {
+			if (const auto group = session().data().groups().find(item)) {
+				TextUtilities::SetClipboardText(HistoryGroupText(group));
+			} else {
+				TextUtilities::SetClipboardText(HistoryItemText(item));
+			}
 		}
 	}
 }
@@ -2174,7 +2274,8 @@ void HistoryInner::keyPressEvent(QKeyEvent *e) {
 		copySelectedText();
 #ifdef Q_OS_MAC
 	} else if (e->key() == Qt::Key_E
-		&& e->modifiers().testFlag(Qt::ControlModifier)) {
+		&& e->modifiers().testFlag(Qt::ControlModifier)
+		&& !showCopyRestrictionForSelected()) {
 		TextUtilities::SetClipboardText(getSelectedText(), QClipboard::FindBuffer);
 #endif // Q_OS_MAC
 	} else if (e == QKeySequence::Delete) {
@@ -2791,18 +2892,6 @@ MessageIdsList HistoryInner::getSelectedItems() const {
 	return result;
 }
 
-void HistoryInner::selectItem(not_null<HistoryItem*> item) {
-	if (!_selected.empty() && _selected.cbegin()->second != FullSelection) {
-		_selected.clear();
-	} else if (_selected.size() == MaxSelectedItems
-		&& _selected.find(item) == _selected.cend()) {
-		return;
-	}
-	_selected.emplace(item, FullSelection);
-	_widget->updateTopBarSelection();
-	_widget->update();
-}
-
 void HistoryInner::onTouchSelect() {
 	_touchSelect = true;
 	mouseActionStart(_touchPos, Qt::LeftButton);
@@ -3085,6 +3174,9 @@ void HistoryInner::mouseActionUpdate() {
 void HistoryInner::updateDragSelection(Element *dragSelFrom, Element *dragSelTo, bool dragSelecting) {
 	if (_dragSelFrom == dragSelFrom && _dragSelTo == dragSelTo && _dragSelecting == dragSelecting) {
 		return;
+	} else if (dragSelFrom && hasSelectRestriction()) {
+		updateDragSelection(nullptr, nullptr, false);
+		return;
 	}
 	_dragSelFrom = dragSelFrom;
 	_dragSelTo = dragSelTo;
@@ -3218,7 +3310,9 @@ void HistoryInner::notifyMigrateUpdated() {
 }
 
 void HistoryInner::applyDragSelection() {
-	applyDragSelection(&_selected);
+	if (!hasSelectRestriction()) {
+		applyDragSelection(&_selected);
+	}
 }
 
 bool HistoryInner::isSelected(

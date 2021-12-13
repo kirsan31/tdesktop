@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "window/window_peer_menu.h"
 
+#include "api/api_chat_participants.h"
 #include "lang/lang_keys.h"
 #include "ui/boxes/confirm_box.h"
 #include "boxes/delete_messages_box.h"
@@ -214,7 +215,7 @@ void TogglePinnedDialog(
 		history->session().api().request(MTPmessages_ToggleDialogPin(
 			MTP_flags(flags),
 			MTP_inputDialogPeer(key.history()->peer->input)
-		)).done([=](const MTPBool &result) {
+		)).done([=] {
 			owner->notifyPinnedDialogsOrderUpdated();
 		}).send();
 	} else if (const auto folder = key.folder()) {
@@ -821,9 +822,10 @@ void PeerMenuCreatePoll(
 		if (std::exchange(*lock, true)) {
 			return;
 		}
-		auto action = Api::SendAction(peer->owner().history(peer));
+		auto action = Api::SendAction(
+			peer->owner().history(peer),
+			result.options);
 		action.clearDraft = false;
-		action.options = result.options;
 		action.replyTo = replyToId;
 		if (const auto localDraft = action.history->localDraft()) {
 			action.clearDraft = localDraft->textWithTags.text.isEmpty();
@@ -1089,35 +1091,25 @@ void PeerMenuAddChannelMembers(
 		return;
 	}
 	const auto api = &channel->session().api();
-	api->requestChannelMembersForAdd(channel, crl::guard(navigation, [=](
-			const MTPchannels_ChannelParticipants &result) {
-		api->parseChannelParticipants(channel, result, [&](
-				int availableCount,
-				const QVector<MTPChannelParticipant> &list) {
-			auto already = (
-				list
-			) | ranges::views::transform([](const MTPChannelParticipant &p) {
-				return p.match([](const MTPDchannelParticipantBanned &data) {
-					return peerFromMTP(data.vpeer());
-				}, [](const MTPDchannelParticipantLeft &data) {
-					return peerFromMTP(data.vpeer());
-				}, [](const auto &data) {
-					return peerFromUser(data.vuser_id());
-				});
-			}) | ranges::views::transform([&](PeerId participantId) {
-				return peerIsUser(participantId)
-					? channel->owner().userLoaded(
-						peerToUser(participantId))
-					: nullptr;
-			}) | ranges::views::filter([](UserData *user) {
-				return (user != nullptr);
-			}) | ranges::to_vector;
+	api->chatParticipants().requestForAdd(channel, crl::guard(navigation, [=](
+			const Api::ChatParticipants::TLMembers &data) {
+		const auto &[availableCount, list] = Api::ChatParticipants::Parse(
+			channel,
+			data);
+		const auto already = (
+			list
+		) | ranges::views::transform([&](const Api::ChatParticipant &p) {
+			return p.isUser()
+				? channel->owner().userLoaded(p.userId())
+				: nullptr;
+		}) | ranges::views::filter([](UserData *user) {
+			return (user != nullptr);
+		}) | ranges::to_vector;
 
-			AddParticipantsBoxController::Start(
-				navigation,
-				channel,
-				{ already.begin(), already.end() });
-		});
+		AddParticipantsBoxController::Start(
+			navigation,
+			channel,
+			{ already.begin(), already.end() });
 	}));
 }
 

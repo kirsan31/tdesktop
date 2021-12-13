@@ -112,6 +112,8 @@ PRIVATE
     api/api_chat_filters.h
     api/api_chat_invite.cpp
     api/api_chat_invite.h
+    api/api_chat_participants.cpp
+    api/api_chat_participants.h
     api/api_cloud_password.cpp
     api/api_cloud_password.h
     api/api_common.h
@@ -400,6 +402,8 @@ PRIVATE
     data/data_chat.h
     data/data_chat_filters.cpp
     data/data_chat_filters.h
+    data/data_chat_participant_status.cpp
+    data/data_chat_participant_status.h
     data/data_changes.cpp
     data/data_changes.h
     data/data_channel.cpp
@@ -785,6 +789,8 @@ PRIVATE
     main/main_session.h
     main/main_session_settings.cpp
     main/main_session_settings.h
+    main/session/send_as_peers.cpp
+    main/session/send_as_peers.h
     media/system_media_controls_manager.h
     media/system_media_controls_manager.cpp
     media/audio/media_audio.cpp
@@ -1083,6 +1089,8 @@ PRIVATE
     ui/chat/attach/attach_item_single_file_preview.h
     ui/chat/attach/attach_item_single_media_preview.cpp
     ui/chat/attach/attach_item_single_media_preview.h
+    ui/chat/choose_send_as.cpp
+    ui/chat/choose_send_as.h
     ui/chat/choose_theme_controller.cpp
     ui/chat/choose_theme_controller.h
     ui/effects/fireworks_animation.cpp
@@ -1399,12 +1407,13 @@ PRIVATE
     G_LOG_DOMAIN="Telegram"
 )
 
-if (APPLE OR NOT CMAKE_EXECUTABLE_SUFFIX STREQUAL "" OR NOT "${output_name}" STREQUAL "Telegram")
+if (APPLE
+    OR "${CMAKE_GENERATOR}" STREQUAL "Ninja Multi-Config"
+    OR NOT CMAKE_EXECUTABLE_SUFFIX STREQUAL ""
+    OR NOT "${output_name}" STREQUAL "Telegram")
     set(output_folder ${CMAKE_BINARY_DIR})
-elseif (DESKTOP_APP_SPECIAL_TARGET STREQUAL "")
-    set(output_folder ${CMAKE_BINARY_DIR}/bin)
 else()
-    set(output_folder ${CMAKE_BINARY_DIR}/$<IF:$<CONFIG:Debug>,Debug,Release>)
+    set(output_folder ${CMAKE_BINARY_DIR}/bin)
 endif()
 
 set_target_properties(Telegram PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${output_folder})
@@ -1517,8 +1526,8 @@ endif()
 
 if (LINUX AND DESKTOP_APP_USE_PACKAGED)
     include(GNUInstallDirs)
-    configure_file("../lib/xdg/telegramdesktop.appdata.xml.in" "${CMAKE_CURRENT_BINARY_DIR}/telegramdesktop.appdata.xml" @ONLY)
-    generate_appdata_changelog(Telegram "${CMAKE_SOURCE_DIR}/changelog.txt" "${CMAKE_CURRENT_BINARY_DIR}/telegramdesktop.appdata.xml")
+    configure_file("../lib/xdg/telegramdesktop.metainfo.xml.in" "${CMAKE_CURRENT_BINARY_DIR}/telegramdesktop.metainfo.xml" @ONLY)
+    generate_appdata_changelog(Telegram "${CMAKE_SOURCE_DIR}/changelog.txt" "${CMAKE_CURRENT_BINARY_DIR}/telegramdesktop.metainfo.xml")
     install(TARGETS Telegram RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}" BUNDLE DESTINATION "${CMAKE_INSTALL_BINDIR}")
     install(FILES "Resources/art/icon16.png" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/16x16/apps" RENAME "telegram.png")
     install(FILES "Resources/art/icon32.png" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/32x32/apps" RENAME "telegram.png")
@@ -1528,5 +1537,5 @@ if (LINUX AND DESKTOP_APP_USE_PACKAGED)
     install(FILES "Resources/art/icon256.png" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/256x256/apps" RENAME "telegram.png")
     install(FILES "Resources/art/icon512.png" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/512x512/apps" RENAME "telegram.png")
     install(FILES "../lib/xdg/telegramdesktop.desktop" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/applications" RENAME "${TDESKTOP_LAUNCHER_BASENAME}.desktop")
-    install(FILES "${CMAKE_CURRENT_BINARY_DIR}/telegramdesktop.appdata.xml" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/metainfo" RENAME "${TDESKTOP_LAUNCHER_BASENAME}.appdata.xml")
+    install(FILES "${CMAKE_CURRENT_BINARY_DIR}/telegramdesktop.metainfo.xml" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/metainfo" RENAME "${TDESKTOP_LAUNCHER_BASENAME}.metainfo.xml")
 endif()
