@@ -78,7 +78,10 @@ void Location::ensureMediaCreated() const {
 QSize Location::countOptimalSize() {
 	auto tw = fullWidth();
 	auto th = fullHeight();
-	auto minWidth = qMax(st::minPhotoSize, _parent->minWidthForMedia());
+	auto minWidth = std::clamp(
+		_parent->minWidthForMedia(),
+		st::minPhotoSize,
+		st::maxMediaSize);
 	auto maxWidth = qMax(tw, minWidth);
 	auto minHeight = qMax(th, st::minPhotoSize);
 
@@ -110,7 +113,10 @@ QSize Location::countCurrentSize(int newWidth) {
 	} else {
 		newWidth = tw;
 	}
-	auto minWidth = qMax(st::minPhotoSize, _parent->minWidthForMedia());
+	auto minWidth = std::clamp(
+		_parent->minWidthForMedia(),
+		st::minPhotoSize,
+		std::min(newWidth, st::maxMediaSize));
 	accumulate_max(newWidth, minWidth);
 	accumulate_max(newHeight, st::minPhotoSize);
 	if (_parent->hasBubble()) {
@@ -273,8 +279,14 @@ TextState Location::textState(QPoint point, StateRequest request) const {
 	if (_parent->media() == this) {
 		auto fullRight = paintx + paintw;
 		auto fullBottom = height();
-		if (_parent->pointInTime(fullRight, fullBottom, point, InfoDisplayType::Image)) {
-			result.cursor = CursorState::Date;
+		const auto bottomInfoResult = _parent->bottomInfoTextState(
+			fullRight,
+			fullBottom,
+			point,
+			InfoDisplayType::Image);
+		if (bottomInfoResult.link
+			|| bottomInfoResult.cursor != CursorState::None) {
+			return bottomInfoResult;
 		}
 		if (const auto size = bubble ? std::nullopt : _parent->rightActionSize()) {
 			auto fastShareLeft = (fullRight + st::historyFastShareLeft);

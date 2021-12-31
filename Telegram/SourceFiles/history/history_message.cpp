@@ -20,6 +20,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/history_service.h"
 #include "history/view/history_view_service_message.h"
 #include "history/view/history_view_context_menu.h" // CopyPostLink.
+#include "history/view/history_view_spoiler_click_handler.h"
 #include "history/view/media/history_view_media.h" // AddTimestampLinks.
 #include "chat_helpers/stickers_emoji_pack.h"
 #include "main/main_session.h"
@@ -63,9 +64,6 @@ namespace {
 	auto result = NewMessageFlags(peer);
 	if (from) {
 		result |= MessageFlag::HasFromId;
-	}
-	if (fwd->Has<HistoryMessageVia>()) {
-		result |= MessageFlag::HasViaBot;
 	}
 	if (const auto media = fwd->media()) {
 		if ((!peer->isChannel() || peer->isMegagroup())
@@ -356,16 +354,15 @@ void RequestDependentMessageData(
 	const auto fullId = item->fullId();
 	const auto history = item->history();
 	const auto session = &history->session();
+	const auto done = [=] {
+		if (const auto item = session->data().message(fullId)) {
+			item->updateDependencyItem();
+		}
+	};
 	history->session().api().requestMessageData(
-		(peerIsChannel(peerId)
-			? history->owner().channel(peerToChannel(peerId)).get()
-			: history->peer->asChannel()),
+		(peerId ? history->owner().peer(peerId) : history->peer),
 		msgId,
-		[=](ChannelData *channel, MsgId msgId) {
-			if (const auto item = session->data().message(fullId)) {
-				item->updateDependencyItem();
-			}
-		});
+		done);
 }
 
 MessageFlags NewMessageFlags(not_null<PeerData*> peer) {
@@ -384,7 +381,7 @@ bool ShouldSendSilent(
 
 MsgId LookupReplyToTop(not_null<History*> history, MsgId replyToId) {
 	const auto &owner = history->owner();
-	if (const auto item = owner.message(history->channelId(), replyToId)) {
+	if (const auto item = owner.message(history->peer, replyToId)) {
 		return item->replyToTop();
 	}
 	return 0;
@@ -434,7 +431,6 @@ struct HistoryMessage::CreateConfig {
 	HistoryMessageMarkupData markup;
 	HistoryMessageRepliesData replies;
 	bool imported = false;
-	bool sponsored = false;
 
 	// For messages created from existing messages (forwarded).
 	const HistoryMessageReplyMarkup *inlineMarkup = nullptr;
@@ -513,6 +509,9 @@ HistoryMessage::HistoryMessage(
 	if (const auto groupedId = data.vgrouped_id()) {
 		setGroupId(
 			MessageGroupId::FromRaw(history->peer->id, groupedId->v));
+	}
+	if (const auto reactions = data.vreactions()) {
+		updateReactions(reactions);
 	}
 
 	applyTTL(data);
@@ -776,7 +775,7 @@ void HistoryMessage::createComponentsHelper(
 		const QString &postAuthor,
 		HistoryMessageMarkupData &&markup) {
 	auto config = CreateConfig();
-	if (flags & MessageFlag::HasViaBot) config.viaBotId = viaBotId;
+	config.viaBotId = viaBotId;
 	if (flags & MessageFlag::HasReplyInfo) {
 		config.replyTo = replyTo;
 		const auto replyToTop = LookupReplyToTop(history(), replyTo);
@@ -785,9 +784,6 @@ void HistoryMessage::createComponentsHelper(
 	config.markup = std::move(markup);
 	if (flags & MessageFlag::HasPostAuthor) config.author = postAuthor;
 	if (flags & MessageFlag::HasViews) config.viewsCount = 1;
-	if (flags & MessageFlag::IsSponsored) {
-		config.sponsored = true;
-	}
 
 	createComponents(std::move(config));
 }
@@ -977,26 +973,33 @@ bool HistoryMessage::areRepliesUnread() const {
 
 FullMsgId HistoryMessage::commentsItemId() const {
 	if (const auto views = Get<HistoryMessageViews>()) {
-		return FullMsgId(views->commentsMegagroupId, views->commentsRootId);
+		return FullMsgId(
+			PeerId(views->commentsMegagroupId),
+			views->commentsRootId);
 	}
 	return FullMsgId();
 }
 
 void HistoryMessage::setCommentsItemId(FullMsgId id) {
-	if (id.channel == _history->channelId()) {
+	if (id.peer == _history->peer->id) {
 		if (id.msg != this->id) {
 			if (const auto reply = Get<HistoryMessageReply>()) {
 				reply->replyToMsgTop = id.msg;
 			}
 		}
-		return;
 	} else if (const auto views = Get<HistoryMessageViews>()) {
-		if (views->commentsMegagroupId != id.channel) {
-			views->commentsMegagroupId = id.channel;
-			history()->owner().requestItemResize(this);
+		if (const auto channelId = peerToChannel(id.peer)) {
+			if (views->commentsMegagroupId != channelId) {
+				views->commentsMegagroupId = channelId;
+				history()->owner().requestItemResize(this);
+			}
+			views->commentsRootId = id.msg;
 		}
-		views->commentsRootId = id.msg;
 	}
+}
+
+void HistoryMessage::hideSpoilers() {
+	HistoryView::HideSpoilers(_text);
 }
 
 bool HistoryMessage::updateDependencyItem() {
@@ -1090,9 +1093,6 @@ void HistoryMessage::createComponents(CreateConfig &&config) {
 	if (config.editDate != TimeId(0)) {
 		mask |= HistoryMessageEdited::Bit();
 	}
-	if (config.sponsored) {
-		mask |= HistoryMessageSponsored::Bit();
-	}
 	if (config.originalDate != 0) {
 		mask |= HistoryMessageForwarded::Bit();
 	}
@@ -1119,7 +1119,7 @@ void HistoryMessage::createComponents(CreateConfig &&config) {
 		via->create(&history()->owner(), config.viaBotId);
 	}
 	if (const auto views = Get<HistoryMessageViews>()) {
-		setViewsCount(config.viewsCount);
+		changeViewsCount(config.viewsCount);
 		if (config.replies.isNull
 			&& isSending()
 			&& config.markup.isNull()) {
@@ -1226,8 +1226,8 @@ void HistoryMessage::returnSavedMedia() {
 		return;
 	}
 	const auto wasGrouped = history()->owner().groups().isGrouped(this);
-	_media = std::move(_savedLocalEditMediaData.media);
-	setText(_savedLocalEditMediaData.text);
+	_media = std::move(_savedLocalEditMediaData->media);
+	setText(_savedLocalEditMediaData->text);
 	clearSavedMedia();
 	if (wasGrouped) {
 		history()->owner().groups().refreshMessage(this, true);
@@ -1418,7 +1418,10 @@ void HistoryMessage::applyEdition(HistoryMessageEdition &&edition) {
 	if (!isLocalUpdateMedia()) {
 		refreshMedia(edition.mtpMedia);
 	}
-	setViewsCount(edition.views);
+	if (!edition.useSameReactions) {
+		updateReactions(edition.mtpReactions);
+	}
+	changeViewsCount(edition.views);
 	setForwardsCount(edition.forwards);
 	setText(_media
 		? edition.textWithEntities
@@ -1444,7 +1447,7 @@ void HistoryMessage::applyEdition(const MTPDmessageService &message) {
 		setReplyMarkup({});
 		refreshMedia(nullptr);
 		setEmptyText();
-		setViewsCount(-1);
+		changeViewsCount(-1);
 		setForwardsCount(-1);
 		if (wasGrouped) {
 			history()->owner().groups().unregisterMessage(this);
@@ -1623,6 +1626,7 @@ void HistoryMessage::setText(const TextWithEntities &textWithEntities) {
 		withLocalEntities(textWithEntities),
 		Ui::ItemTextOptions(this),
 		context);
+	HistoryView::FillTextWithAnimatedSpoilers(_text);
 	if (!textWithEntities.text.isEmpty() && _text.isEmpty()) {
 		// If server has allowed some text that we've trim-ed entirely,
 		// just replace it with something so that UI won't look buggy.
@@ -1739,27 +1743,16 @@ bool HistoryMessage::textHasLinks() const {
 	return emptyText() ? false : _text.hasLinks();
 }
 
-void HistoryMessage::setViewsCount(int count) {
+bool HistoryMessage::changeViewsCount(int count) {
 	const auto views = Get<HistoryMessageViews>();
 	if (!views
 		|| views->views.count == count
 		|| (count >= 0 && views->views.count > count)) {
-		return;
+		return false;
 	}
 
 	views->views.count = count;
-	views->views.text = Lang::FormatCountToShort(
-		std::max(views->views.count, 1)
-	).string;
-	const auto was = views->views.textWidth;
-	views->views.textWidth = views->views.text.isEmpty()
-		? 0
-		: st::msgDateFont->width(views->views.text);
-	if (was == views->views.textWidth) {
-		history()->owner().requestItemRepaint(this);
-	} else {
-		history()->owner().requestItemResize(this);
-	}
+	return true;
 }
 
 void HistoryMessage::setForwardsCount(int count) {
@@ -1847,7 +1840,6 @@ void HistoryMessage::clearReplies() {
 void HistoryMessage::refreshRepliesText(
 		not_null<HistoryMessageViews*> views,
 		bool forceResize) {
-	const auto was = views->replies.textWidth;
 	if (views->commentsMegagroupId) {
 		views->replies.text = (views->replies.count > 0)
 			? tr::lng_comments_open_count(
@@ -1862,15 +1854,8 @@ void HistoryMessage::refreshRepliesText(
 			: QString();
 		views->repliesSmall.textWidth = st::semiboldFont->width(
 			views->repliesSmall.text);
-	} else {
-		views->replies.text = (views->replies.count > 0)
-			? Lang::FormatCountToShort(views->replies.count).string
-			: QString();
-		views->replies.textWidth = views->replies.text.isEmpty()
-			? 0
-			: st::msgDateFont->width(views->replies.text);
 	}
-	if (forceResize || views->replies.textWidth != was) {
+	if (forceResize) {
 		history()->owner().requestItemResize(this);
 	} else {
 		history()->owner().requestItemRepaint(this);
@@ -1914,6 +1899,7 @@ void HistoryMessage::changeRepliesCount(
 		}
 	}
 	refreshRepliesText(views);
+	history()->owner().notifyItemDataChange(this);
 }
 
 void HistoryMessage::setUnreadRepliesCount(
@@ -1966,13 +1952,11 @@ void HistoryMessage::changeReplyToTopCounter(
 	if (!isRegular() || !reply->replyToTop()) {
 		return;
 	}
-	const auto channelId = history()->channelId();
-	if (!channelId) {
+	const auto peerId = _history->peer->id;
+	if (!peerIsChannel(peerId)) {
 		return;
 	}
-	const auto top = history()->owner().message(
-		channelId,
-		reply->replyToTop());
+	const auto top = _history->owner().message(peerId, reply->replyToTop());
 	if (!top) {
 		return;
 	}
