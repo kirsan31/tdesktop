@@ -16,6 +16,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/view/media/history_view_media_grouped.h"
 #include "history/view/media/history_view_sticker.h"
 #include "history/view/media/history_view_large_emoji.h"
+#include "history/view/history_view_react_animation.h"
 #include "history/view/history_view_react_button.h"
 #include "history/view/history_view_cursor_state.h"
 #include "history/history.h"
@@ -330,6 +331,15 @@ void DateBadge::paint(
 	ServiceMessagePainter::PaintDate(p, st, text, width, y, w, chatWide);
 }
 
+SendReactionAnimationArgs SendReactionAnimationArgs::translated(
+		QPoint point) const {
+	return {
+		.emoji = emoji,
+		.flyIcon = flyIcon,
+		.flyFrom = flyFrom.translated(point),
+	};
+}
+
 Element::Element(
 	not_null<ElementDelegate*> delegate,
 	not_null<HistoryItem*> data,
@@ -379,6 +389,10 @@ void Element::setY(int y) {
 }
 
 void Element::refreshDataIdHook() {
+}
+
+void Element::repaint() const {
+	history()->owner().requestViewRepaint(this);
 }
 
 void Element::paintHighlight(
@@ -467,10 +481,6 @@ int Element::skipBlockWidth() const {
 
 int Element::skipBlockHeight() const {
 	return st::msgDateFont->height - st::msgDateDelta.y();
-}
-
-QString Element::skipBlock() const {
-	return textcmdSkipBlock(skipBlockWidth(), skipBlockHeight());
 }
 
 int Element::infoWidth() const {
@@ -1004,6 +1014,10 @@ Reactions::ButtonParameters Element::reactionButtonParameters(
 	return {};
 }
 
+int Element::reactionsOptimalWidth() const {
+	return 0;
+}
+
 void Element::clickHandlerActiveChanged(
 		const ClickHandlerPtr &handler,
 		bool active) {
@@ -1013,7 +1027,7 @@ void Element::clickHandlerActiveChanged(
 		}
 	}
 	App::hoveredLinkItem(active ? this : nullptr);
-	history()->owner().requestViewRepaint(this);
+	repaint();
 	if (const auto media = this->media()) {
 		media->clickHandlerActiveChanged(handler, active);
 	}
@@ -1028,10 +1042,18 @@ void Element::clickHandlerPressedChanged(
 		}
 	}
 	App::pressedLinkItem(pressed ? this : nullptr);
-	history()->owner().requestViewRepaint(this);
+	repaint();
 	if (const auto media = this->media()) {
 		media->clickHandlerPressedChanged(handler, pressed);
 	}
+}
+
+void Element::animateSendReaction(SendReactionAnimationArgs &&args) {
+}
+
+auto Element::takeSendReactionAnimation()
+-> std::unique_ptr<Reactions::SendAnimation> {
+	return nullptr;
 }
 
 Element::~Element() {
