@@ -63,7 +63,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/random.h"
 #include "base/unixtime.h"
 #include "base/qt_signal_producer.h"
-#include "base/qt_adapters.h"
+#include "base/qt/qt_common_adapters.h"
 #include "base/event_filter.h"
 #include "main/main_account.h"
 #include "main/main_domain.h" // Domain::activeSessionValue.
@@ -611,6 +611,7 @@ Streaming::FrameWithInfo OverlayWidget::videoFrameWithInfo() const {
 			.original = _streamed->instance.info().video.cover,
 			.format = Streaming::FrameFormat::ARGB32,
 			.index = -2,
+			.alpha = _streamed->instance.info().video.alpha,
 		};
 }
 
@@ -656,7 +657,9 @@ bool OverlayWidget::opaqueContentShown() const {
 	return contentShown()
 		&& (!_staticContentTransparent
 			|| !_document
-			|| (!_document->isVideoMessage() && !_document->sticker()));
+			|| (!_document->isVideoMessage()
+				&& !_document->sticker()
+				&& (!_streamed || !_streamed->instance.info().video.alpha)));
 }
 
 void OverlayWidget::clearStreaming(bool savePosition) {

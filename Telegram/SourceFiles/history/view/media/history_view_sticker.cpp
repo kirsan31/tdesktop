@@ -123,7 +123,7 @@ bool Sticker::readyToDrawLottie() {
 	ensureDataMediaCreated();
 	_dataMedia->checkStickerLarge();
 	const auto loaded = _dataMedia->loaded();
-	if (sticker->animated && !_lottie && loaded) {
+	if (sticker->isLottie() && !_lottie && loaded) {
 		setupLottie();
 	}
 	return (_lottie && _lottie->ready());
@@ -147,7 +147,7 @@ void Sticker::draw(
 	if (readyToDrawLottie()) {
 		paintLottie(p, context, r);
 	} else if (!_data->sticker()
-		|| (_data->sticker()->animated && _replacements)
+		|| (_data->sticker()->isLottie() && _replacements)
 		|| !paintPixmap(p, context, r)) {
 		paintPath(p, context, r);
 	}
@@ -252,8 +252,6 @@ void Sticker::paintPath(
 }
 
 QPixmap Sticker::paintedPixmap(const PaintContext &context) const {
-	const auto w = _size.width();
-	const auto h = _size.height();
 	const auto colored = context.selected()
 		? &context.st->msgStickerOverlay()
 		: nullptr;
@@ -277,6 +275,15 @@ QPixmap Sticker::paintedPixmap(const PaintContext &context) const {
 	return QPixmap();
 }
 
+ClickHandlerPtr Sticker::ShowSetHandler(not_null<DocumentData*> document) {
+	return std::make_shared<LambdaClickHandler>([=](ClickContext context) {
+		const auto my = context.other.value<ClickHandlerContext>();
+		if (const auto window = my.sessionWindow.get()) {
+			StickerSetBox::Show(window, document);
+		}
+	});
+}
+
 void Sticker::refreshLink() {
 	if (_link) {
 		return;
@@ -290,12 +297,7 @@ void Sticker::refreshLink() {
 			}
 		});
 	} else if (sticker && sticker->set) {
-		_link = std::make_shared<LambdaClickHandler>([document = _data](ClickContext context) {
-			const auto my = context.other.value<ClickHandlerContext>();
-			if (const auto window = my.sessionWindow.get()) {
-				StickerSetBox::Show(window, document);
-			}
-		});
+		_link = ShowSetHandler(_data);
 	} else if (sticker
 		&& (_data->dimensions.width() > kStickerSideSize
 			|| _data->dimensions.height() > kStickerSideSize)

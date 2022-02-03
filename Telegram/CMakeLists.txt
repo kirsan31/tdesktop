@@ -147,6 +147,8 @@ PRIVATE
     api/api_text_entities.h
     api/api_toggling_media.cpp
     api/api_toggling_media.h
+    api/api_unread_things.cpp
+    api/api_unread_things.h
     api/api_updates.cpp
     api/api_updates.h
     api/api_user_privacy.cpp
@@ -686,6 +688,8 @@ PRIVATE
     history/history_message.h
     history/history_service.cpp
     history/history_service.h
+    history/history_unread_things.cpp
+    history/history_unread_things.h
     history/history_widget.cpp
     history/history_widget.h
     info/info_content_widget.cpp
@@ -1027,6 +1031,8 @@ PRIVATE
     settings/settings_codes.h
     settings/settings_common.cpp
     settings/settings_common.h
+    settings/settings_experimental.cpp
+    settings/settings_experimental.h
     settings/settings_folders.cpp
     settings/settings_folders.h
     settings/settings_information.cpp
@@ -1193,8 +1199,6 @@ PRIVATE
     window/themes/window_themes_generate_name.h
     apiwrap.cpp
     apiwrap.h
-    app.cpp
-    app.h
     config.h
     facades.cpp
     facades.h
@@ -1334,8 +1338,6 @@ else()
     if (NOT DESKTOP_APP_DISABLE_DBUS_INTEGRATION)
         target_link_libraries(Telegram
         PRIVATE
-            desktop-app::external_statusnotifieritem
-            desktop-app::external_dbusmenu_qt
             desktop-app::external_glibmm
             desktop-app::external_glib
         )
