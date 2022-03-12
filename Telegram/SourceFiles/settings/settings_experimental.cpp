@@ -17,6 +17,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/application.h"
 #include "chat_helpers/tabbed_panel.h"
 #include "lang/lang_keys.h"
+#include "media/player/media_player_instance.h"
 #include "window/window_peer_menu.h"
 #include "window/window_session_controller.h"
 #include "window/window_controller.h"
@@ -43,7 +44,9 @@ void AddOption(
 	const auto button = AddButton(
 		container,
 		rpl::single(name),
-		option.relevant() ? st::settingsButton : st::settingsOptionDisabled
+		(option.relevant()
+			? st::settingsButtonNoIcon
+			: st::settingsOptionDisabled)
 	)->toggleOn(toggles->events_starting_with(option.value()));
 
 	const auto restarter = (option.relevant() && option.restartRequired())
@@ -51,11 +54,12 @@ void AddOption(
 		: nullptr;
 	if (restarter) {
 		restarter->setCallback([=] {
-			window->show(Box<Ui::ConfirmBox>(
-				tr::lng_settings_need_restart(tr::now),
-				tr::lng_settings_restart_now(tr::now),
-				tr::lng_settings_restart_later(tr::now),
-				[] { Core::Restart(); }));
+			window->show(Ui::MakeConfirmBox({
+				.text = tr::lng_settings_need_restart(),
+				.confirmed = [] { Core::Restart(); },
+				.confirmText = tr::lng_settings_restart_now(),
+				.cancelText = tr::lng_settings_restart_later(),
+			}));
 		});
 	}
 	button->toggledChanges(
@@ -68,7 +72,7 @@ void AddOption(
 		}
 		option.set(toggled);
 		if (restarter) {
-			restarter->callOnce(st::settingsButton.toggle.duration);
+			restarter->callOnce(st::settingsButtonNoIcon.toggle.duration);
 		}
 	}, container->lifetime());
 
@@ -104,7 +108,7 @@ void SetupExperimental(
 		reset = AddButton(
 			inner,
 			tr::lng_settings_experimental_restore(),
-			st::settingsButton);
+			st::settingsButtonNoIcon);
 		reset->addClickHandler([=] {
 			base::options::reset();
 			wrap->hide(anim::type::normal);
@@ -128,6 +132,7 @@ void SetupExperimental(
 	addToggle(ChatHelpers::kOptionTabbedPanelShowOnClick);
 	addToggle(Window::kOptionViewProfileInChatsListContextMenu);
 	addToggle(Ui::GL::kOptionAllowLinuxNvidiaOpenGL);
+	addToggle(Media::Player::kOptionDisableAutoplayNext);
 }
 
 } // namespace

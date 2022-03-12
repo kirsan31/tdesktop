@@ -42,6 +42,8 @@ class PowerSaveBlocker;
 namespace Media {
 namespace Player {
 
+extern const char kOptionDisableAutoplayNext[];
+
 enum class RepeatMode {
 	None,
 	One,
@@ -164,8 +166,6 @@ public:
 		AudioMsgId::Type type) const;
 
 	[[nodiscard]] bool pauseGifByRoundVideo() const;
-
-	void documentLoadProgress(DocumentData *document);
 
 private:
 	using SharedMediaType = Storage::SharedMediaType;
@@ -293,7 +293,10 @@ private:
 	void requestRoundVideoResize() const;
 	void requestRoundVideoRepaint() const;
 
-	void setHistory(not_null<Data*> data, History *history);
+	void setHistory(
+		not_null<Data*> data,
+		History *history,
+		Main::Session *sessionFallback = nullptr);
 	void setSession(not_null<Data*> data, Main::Session *session);
 
 	Data _songData;

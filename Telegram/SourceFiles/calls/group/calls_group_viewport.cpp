@@ -104,13 +104,17 @@ void Viewport::setup() {
 	}, lifetime());
 }
 
-void Viewport::setGeometry(QRect geometry) {
+void Viewport::setGeometry(bool fullscreen, QRect geometry) {
 	Expects(wide());
 
+	const auto changed = (_fullscreen != fullscreen);
+	if (changed) {
+		_fullscreen = fullscreen;
+	}
 	if (widget()->geometry() != geometry) {
 		_geometryStaleAfterModeChange = false;
 		widget()->setGeometry(geometry);
-	} else if (_geometryStaleAfterModeChange) {
+	} else if (_geometryStaleAfterModeChange || changed) {
 		_geometryStaleAfterModeChange = false;
 		updateTilesGeometry();
 	}
@@ -722,7 +726,7 @@ void Viewport::updateTilesGeometryColumn(int outerWidth) {
 	};
 	const auto topPeer = _large ? _large->row()->peer().get() : nullptr;
 	const auto reorderNeeded = [&] {
-		if (!_large) {
+		if (!topPeer) {
 			return false;
 		}
 		for (const auto &tile : _tiles) {
@@ -876,6 +880,9 @@ rpl::producer<QString> MuteButtonTooltip(not_null<GroupCall*> call) {
 	//				: tr::lng_group_call_set_reminder();
 	//		}) | rpl::flatten_latest();
 	//	}
+	if (call->rtmp()) {
+		return nullptr;
+	}
 		return call->mutedValue(
 		) | rpl::map([](MuteState muted) {
 			switch (muted) {

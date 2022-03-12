@@ -35,6 +35,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "webrtc/webrtc_create_adm.h" // Webrtc::Backend.
 #include "tgcalls/VideoCaptureInterface.h"
 #include "facades.h"
+#include "boxes/abstract_box.h" // Ui::hideLayer().
 #include "styles/style_layers.h"
 
 namespace Settings {
@@ -99,7 +100,7 @@ void Calls::setupContent() {
 			) | rpl::then(
 				_cameraNameStream.events()
 			),
-			st::settingsButton
+			st::settingsButtonNoIcon
 		)->addClickHandler([=] {
 			const auto &devices = GetVideoInputList();
 			const auto options = ranges::views::concat(
@@ -143,34 +144,34 @@ void Calls::setupContent() {
 		const auto bubble = content->lifetime().make_state<::Calls::VideoBubble>(
 			bubbleWrap,
 			track);
-		const auto padding = st::settingsButton.padding.left();
+		const auto padding = st::settingsButtonNoIcon.padding.left();
 		const auto top = st::boxRoundShadow.extend.top();
 		const auto bottom = st::boxRoundShadow.extend.bottom();
 
-		bubbleWrap->widthValue(
+		auto frameSize = track->renderNextFrame(
+		) | rpl::map([=] {
+			return track->frameSize();
+		}) | rpl::filter([=](QSize size) {
+			return !size.isEmpty()
+				&& !Core::App().calls().currentCall()
+				&& !Core::App().calls().currentGroupCall();
+		});
+		auto bubbleWidth = bubbleWrap->widthValue(
 		) | rpl::filter([=](int width) {
-			return (width > 2 * padding + 1);
-		}) | rpl::start_with_next([=](int width) {
-			const auto use = (width - 2 * padding);
+			return width > 2 * padding + 1;
+		});
+		rpl::combine(
+			std::move(bubbleWidth),
+			std::move(frameSize)
+		) | rpl::start_with_next([=](int width, QSize frame) {
+			const auto useWidth = (width - 2 * padding);
+			const auto useHeight = std::min(
+				((useWidth * frame.height()) / frame.width()),
+				(useWidth * 480) / 640);
+			bubbleWrap->resize(width, top + useHeight + bottom);
 			bubble->updateGeometry(
 				::Calls::VideoBubble::DragMode::None,
-				QRect(padding, top, use, (use * 480) / 640));
-		}, bubbleWrap->lifetime());
-
-		track->renderNextFrame(
-		) | rpl::start_with_next([=] {
-			const auto size = track->frameSize();
-			if (size.isEmpty()
-				|| Core::App().calls().currentCall()
-				|| Core::App().calls().currentGroupCall()) {
-				return;
-			}
-			const auto width = bubbleWrap->width();
-			const auto use = (width - 2 * padding);
-			const auto height = std::min(
-				((use * size.height()) / size.width()),
-				(use * 480) / 640);
-			bubbleWrap->resize(width, top + height + bottom);
+				QRect(padding, top, useWidth, useHeight));
 			bubbleWrap->update();
 		}, bubbleWrap->lifetime());
 
@@ -216,7 +217,7 @@ void Calls::setupContent() {
 		) | rpl::then(
 			_outputNameStream.events()
 		),
-		st::settingsButton
+		st::settingsButtonNoIcon
 	)->addClickHandler([=] {
 		_controller->show(ChooseAudioOutputBox(crl::guard(this, [=](
 				const QString &id,
@@ -237,7 +238,7 @@ void Calls::setupContent() {
 		) | rpl::then(
 			_inputNameStream.events()
 		),
-		st::settingsButton
+		st::settingsButtonNoIcon
 	)->addClickHandler([=] {
 		_controller->show(ChooseAudioInputBox(crl::guard(this, [=](
 				const QString &id,
@@ -273,7 +274,7 @@ void Calls::setupContent() {
 	AddButton(
 		content,
 		tr::lng_settings_call_accept_calls(),
-		st::settingsButton
+		st::settingsButtonNoIcon
 	)->toggleOn(
 		api->authorizations().callsDisabledHereValue(
 		) | rpl::map(!rpl::mappers::_1)
@@ -287,13 +288,13 @@ void Calls::setupContent() {
 	AddButton(
 		content,
 		tr::lng_settings_call_open_system_prefs(),
-		st::settingsButton
+		st::settingsButtonNoIcon
 	)->addClickHandler([=] {
 		const auto opened = Platform::OpenSystemSettings(
 			Platform::SystemSettingsType::Audio);
 		if (!opened) {
 			_controller->show(
-				Box<Ui::InformBox>(tr::lng_linux_no_audio_prefs(tr::now)));
+				Ui::MakeInformBox(tr::lng_linux_no_audio_prefs()));
 		}
 	});
 
@@ -325,10 +326,11 @@ void Calls::requestPermissionAndStartTestingMicrophone() {
 				Platform::PermissionType::Microphone);
 			Ui::hideLayer();
 		};
-		_controller->show(Box<Ui::ConfirmBox>(
-			tr::lng_no_mic_permission(tr::now),
-			tr::lng_menu_settings(tr::now),
-			showSystemSettings));
+		_controller->show(Ui::MakeConfirmBox({
+			.text = tr::lng_no_mic_permission(),
+			.confirmed = showSystemSettings,
+			.confirmText = tr::lng_menu_settings(),
+		}));
 	}
 }
 

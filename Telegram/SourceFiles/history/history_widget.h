@@ -234,6 +234,7 @@ public:
 		Ui::ReportReason reason,
 		Fn<void(MessageIdsList)> callback);
 	void clearAllLoadRequests();
+	void clearSupportPreloadRequest();
 	void clearDelayedShowAtRequest();
 	void clearDelayedShowAt();
 	void saveFieldToHistoryLocalDraft();
@@ -263,7 +264,8 @@ public:
 	[[nodiscard]] SendMenu::Type sendMenuType() const;
 	bool sendExistingDocument(
 		not_null<DocumentData*> document,
-		Api::SendOptions options);
+		Api::SendOptions options,
+		std::optional<MsgId> localId = std::nullopt);
 	bool sendExistingPhoto(
 		not_null<PhotoData*> photo,
 		Api::SendOptions options);
@@ -552,6 +554,8 @@ private:
 	void startItemRevealAnimations();
 	void revealItemsCallback();
 
+	void startMessageSendingAnimation(not_null<HistoryItem*> item);
+
 	// Does any of the shown histories has this flag set.
 	bool hasPendingResizedItems() const;
 
@@ -598,6 +602,7 @@ private:
 	bool readyToForward() const;
 	bool hasSilentToggle() const;
 
+	void checkSupportPreload(bool force = false);
 	void handleSupportSwitch(not_null<History*> updated);
 
 	void inlineBotResolveDone(const MTPcontacts_ResolvedPeer &result);
@@ -684,6 +689,9 @@ private:
 
 	MsgId _delayedShowAtMsgId = -1;
 	int _delayedShowAtRequest = 0; // Not real mtpRequestId.
+
+	History *_supportPreloadHistory = nullptr;
+	int _supportPreloadRequest = 0; // Not real mtpRequestId.
 
 	object_ptr<HistoryView::TopBarWidget> _topBar;
 	object_ptr<Ui::ContinuousScroll> _scroll;

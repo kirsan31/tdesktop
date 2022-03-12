@@ -31,6 +31,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "settings/settings_common.h"
 #include "api/api_updates.h"
 #include "base/qt/qt_common_adapters.h"
+#include "base/custom_app_icon.h"
+#include "boxes/abstract_box.h" // Ui::show().
 
 #include "zlib.h"
 
@@ -77,9 +79,9 @@ auto GenerateCodes() {
 			? qsl("Do you want to disable DEBUG logs?")
 			: qsl("Do you want to enable DEBUG logs?\n\n"
 				"All network events will be logged.");
-		Ui::show(Box<Ui::ConfirmBox>(text, [] {
+		Ui::show(Ui::MakeConfirmBox({ text, [] {
 			Core::App().switchDebugMode();
-		}));
+		} }));
 	});
 	codes.emplace(qsl("viewlogs"), [](SessionController *window) {
 		File::ShowInFolder(cWorkingDir() + "log.txt");
@@ -97,11 +99,11 @@ auto GenerateCodes() {
 	});
 	codes.emplace(qsl("moderate"), [](SessionController *window) {
 		auto text = Core::App().settings().moderateModeEnabled() ? qsl("Disable moderate mode?") : qsl("Enable moderate mode?");
-		Ui::show(Box<Ui::ConfirmBox>(text, [=] {
+		Ui::show(Ui::MakeConfirmBox({ text, [=] {
 			Core::App().settings().setModerateModeEnabled(!Core::App().settings().moderateModeEnabled());
 			Core::App().saveSettingsDelayed();
 			Ui::hideLayer();
-		}));
+		} }));
 	});
 	codes.emplace(qsl("getdifference"), [](SessionController *window) {
 		if (window) {
@@ -120,11 +122,11 @@ auto GenerateCodes() {
 			return;
 		}
 		auto text = cUseExternalVideoPlayer() ? qsl("Use internal video player?") : qsl("Use external video player?");
-		Ui::show(Box<Ui::ConfirmBox>(text, [=] {
+		Ui::show(Ui::MakeConfirmBox({ text, [=] {
 			cSetUseExternalVideoPlayer(!cUseExternalVideoPlayer());
 			window->session().saveSettingsDelayed();
 			Ui::hideLayer();
-		}));
+		} }));
 	});
 	codes.emplace(qsl("endpoints"), [](SessionController *window) {
 		if (!Core::App().domain().started()) {
@@ -137,7 +139,7 @@ auto GenerateCodes() {
 			if (!result.paths.isEmpty()) {
 				const auto loadFor = [&](not_null<Main::Account*> account) {
 					if (!account->mtp().dcOptions().loadFromFile(result.paths.front())) {
-						Ui::show(Box<Ui::InformBox>("Could not load endpoints"
+						Ui::show(Ui::MakeInformBox("Could not load endpoints"
 							" :( Errors in 'log.txt'."));
 					}
 				};
@@ -187,9 +189,9 @@ auto GenerateCodes() {
 #endif // !Q_OS_WIN
 			: qsl("Switch font engine to FreeType?");
 
-		Ui::show(Box<Ui::ConfirmBox>(text, [] {
+		Ui::show(Ui::MakeConfirmBox({ text, [] {
 			Core::App().switchFreeType();
-		}));
+		} }));
 	});
 #endif // Q_OS_WIN || Q_OS_MAC
 
@@ -216,7 +218,7 @@ auto GenerateCodes() {
 					auto track = Media::Audio::Current().createTrack();
 					track->fillFromFile(result.paths.front());
 					if (track->failed()) {
-						Ui::show(Box<Ui::InformBox>(
+						Ui::show(Ui::MakeInformBox(
 							"Could not audio :( Errors in 'log.txt'."));
 					} else {
 						Core::App().settings().setSoundOverride(
@@ -231,7 +233,7 @@ auto GenerateCodes() {
 	codes.emplace(qsl("sounds_reset"), [](SessionController *window) {
 		Core::App().settings().clearSoundOverrides();
 		Core::App().saveSettingsDelayed();
-		Ui::show(Box<Ui::InformBox>("All sound overrides were reset."));
+		Ui::show(Ui::MakeInformBox("All sound overrides were reset."));
 	});
 	codes.emplace(qsl("unpacklog"), [](SessionController *window) {
 		FileDialog::GetOpenPath(Core::App().getFileDialogParent(), "Open crash log file", "Crash dump (*.txt)", [=](const FileDialog::OpenResult &result) {
@@ -282,6 +284,29 @@ auto GenerateCodes() {
 		Data::CloudThemes::SetTestingColors(now);
 		Ui::Toast::Show(now ? "Testing chat theme colors!" : "Not testing..");
 	});
+
+#ifdef Q_OS_MAC
+	codes.emplace(qsl("customicon"), [](SessionController *window) {
+		const auto iconFilters = qsl("Icon files (*.icns *.png);;") + FileDialog::AllFilesFilter();
+		const auto change = [](const QString &path) {
+			const auto success = path.isEmpty()
+				? base::ClearCustomAppIcon()
+				: base::SetCustomAppIcon(path);
+			Ui::Toast::Show(success
+				? (path.isEmpty()
+					? "Icon cleared. Restarting the Dock."
+					: "Icon updated. Restarting the Dock.")
+				: (path.isEmpty()
+					? "Icon clear failed. See log.txt for details."
+					: "Icon update failed. See log.txt for details."));
+		};
+		FileDialog::GetOpenPath(Core::App().getFileDialogParent(), "Choose custom icon", iconFilters, [=](const FileDialog::OpenResult &result) {
+			change(result.paths.isEmpty() ? QString() : result.paths.front());
+		}, [=] {
+			change(QString());
+		});
+	});
+#endif // Q_OS_MAC
 
 	return codes;
 }

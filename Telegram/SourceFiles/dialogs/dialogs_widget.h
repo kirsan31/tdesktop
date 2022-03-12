@@ -36,6 +36,7 @@ class DropdownMenu;
 class FlatButton;
 class FlatInput;
 class CrossButton;
+class DownloadBar;
 template <typename Widget>
 class FadeWrapScaled;
 } // namespace Ui
@@ -91,6 +92,9 @@ public:
 
 	[[nodiscard]] rpl::producer<> closeForwardBarRequests() const;
 
+	[[nodiscard]] RowDescriptor resolveChatNext(RowDescriptor from = {}) const;
+	[[nodiscard]] RowDescriptor resolveChatPrevious(RowDescriptor from = {}) const;
+
 	// Float player interface.
 	bool floatPlayerHandleWheelEvent(QEvent *e) override;
 	QRect floatPlayerAvailableRect() override;
@@ -145,6 +149,7 @@ private:
 	void setupSupportMode();
 	void setupConnectingWidget();
 	void setupMainMenuToggle();
+	void setupDownloadBar();
 	bool searchForPeersRequired(const QString &query) const;
 	void setSearchInChat(Key chat, PeerData *from = nullptr);
 	void showCalendar();
@@ -201,6 +206,7 @@ private:
 	class BottomButton;
 	object_ptr<BottomButton> _updateTelegram = { nullptr };
 	object_ptr<BottomButton> _loadMoreChats = { nullptr };
+	std::unique_ptr<Ui::DownloadBar> _downloadBar;
 	std::unique_ptr<Window::ConnectionState> _connecting;
 
 	Ui::Animations::Simple _scrollToAnimation;

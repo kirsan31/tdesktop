@@ -125,6 +125,8 @@ parts:
       - -GNinja
       - -DCMAKE_BUILD_TYPE=Release
       - -DCMAKE_INSTALL_PREFIX=/usr
+      - -DJPEG_LIBRARY_RELEASE=$SNAPCRAFT_STAGE/usr/lib/$SNAPCRAFT_ARCH_TRIPLET/libjpeg.so
+      - -DJPEG_INCLUDE_DIR=$SNAPCRAFT_STAGE/usr/include
       - -DTDESKTOP_API_ID=611335
       - -DTDESKTOP_API_HASH=d524b414d21f4d37f08684c1df41ac9c
       - -DDESKTOP_APP_USE_PACKAGED_LAZY=ON
@@ -354,9 +356,9 @@ parts:
       - libxkbcommon-x11-0
       - zlib1g
     override-pull: |
-      QT=6_2_2
+      QT=6_2_3
 
-      git clone -b v6.2.2 --depth=1 git://code.qt.io/qt/qt5.git .
+      git clone -b v6.2.3 --depth=1 git://code.qt.io/qt/qt5.git .
       perl init-repository --module-subset=qtbase,qtwayland,qtimageformats,qtsvg,qt5compat
 
       cd qtbase
@@ -373,6 +375,9 @@ parts:
         -release \
         -opensource \
         -confirm-license \
+        -no-feature-getentropy \
+        -no-feature-renameat2 \
+        -no-feature-statx \
         -no-feature-highdpiscaling \
         -openssl-linked \
         -nomake examples \

@@ -386,6 +386,10 @@ not_null<HistoryService*> Service::message() const {
 	return static_cast<HistoryService*>(data().get());
 }
 
+QRect Service::innerGeometry() const {
+	return countGeometry();
+}
+
 QRect Service::countGeometry() const {
 	auto result = QRect(0, 0, width(), height());
     result.setWidth(result.width() - st::msgServiceMargin.left() - st::msgServiceMargin.left());
