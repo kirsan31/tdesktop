@@ -171,6 +171,7 @@ Widget::Widget(
 	not_null<Window::SessionController*> controller)
 : Window::AbstractSectionWidget(parent, controller, nullptr)
 , _api(&controller->session().mtp())
+, _chooseByDragTimer([=] { _inner->chooseRow(); })
 , _searchControls(this)
 , _mainMenuToggle(_searchControls, st::dialogsMenuToggle)
 , _searchForNarrowFilters(_searchControls, st::dialogsSearchForNarrowFilters)
@@ -185,12 +186,13 @@ Widget::Widget(
 , _lockUnlock(_searchControls, st::dialogsLock)
 , _scroll(this)
 , _scrollToTop(_scroll, st::dialogsToUp)
+, _searchTimer([=] { searchMessages(); })
 , _singleMessageSearch(&controller->session()) {
 	_inner = _scroll->setOwnedWidget(object_ptr<InnerWidget>(this, controller));
 
 	_inner->updated(
 	) | rpl::start_with_next([=] {
-		onListScroll();
+		listScrollUpdated();
 	}, lifetime());
 
 	rpl::combine(
@@ -209,17 +211,44 @@ Widget::Widget(
 	fullSearchRefreshOn(session().settings().skipArchiveInSearchChanges(
 	) | rpl::to_empty);
 
-	connect(_inner, SIGNAL(draggingScrollDelta(int)), this, SLOT(onDraggingScrollDelta(int)));
-	connect(_inner, &InnerWidget::mustScrollTo, [=](int top, int bottom) {
+	_inner->scrollByDeltaRequests(
+	) | rpl::start_with_next([=](int delta) {
 		if (_scroll) {
-			_scroll->scrollToY(top, bottom);
+			_scroll->scrollToY(_scroll->scrollTop() + delta);
 		}
-	});
-	connect(_inner, SIGNAL(dialogMoved(int,int)), this, SLOT(onDialogMoved(int,int)));
-	connect(_inner, SIGNAL(searchMessages()), this, SLOT(onNeedSearchMessages()));
-	connect(_inner, SIGNAL(completeHashtag(QString)), this, SLOT(onCompleteHashtag(QString)));
-	connect(_inner, SIGNAL(refreshHashtags()), this, SLOT(onFilterCursorMoved()));
-	connect(_inner, SIGNAL(cancelSearchInChat()), this, SLOT(onCancelSearchInChat()));
+	}, lifetime());
+
+	_inner->mustScrollTo(
+	) | rpl::start_with_next([=](const Ui::ScrollToRequest &data) {
+		if (_scroll) {
+			_scroll->scrollToY(data.ymin, data.ymax);
+		}
+	}, lifetime());
+	_inner->dialogMoved(
+	) | rpl::start_with_next([=](const Ui::ScrollToRequest &data) {
+		const auto movedFrom = data.ymin;
+		const auto movedTo = data.ymax;
+		const auto st = int32(_scroll->scrollTop());
+		if (st > movedTo && st < movedFrom) {
+			_scroll->scrollToY(st + st::dialogsRowHeight);
+		}
+	}, lifetime());
+	_inner->searchMessages(
+	) | rpl::start_with_next([=] {
+		needSearchMessages();
+	}, lifetime());
+	_inner->cancelSearchInChatRequests(
+	) | rpl::start_with_next([=] {
+		cancelSearchInChat();
+	}, lifetime());
+	_inner->completeHashtagRequests(
+	) | rpl::start_with_next([=](const QString &tag) {
+		completeHashtag(tag);
+	}, lifetime());
+	_inner->refreshHashtagsRequests(
+	) | rpl::start_with_next([=] {
+		filterCursorMoved();
+	}, lifetime());
 	_inner->cancelSearchFromUserRequests(
 	) | rpl::start_with_next([=] {
 		setSearchInChat(_searchInChat, nullptr);
@@ -258,30 +287,30 @@ Widget::Widget(
 
 	_scroll->geometryChanged(
 	) | rpl::start_with_next(crl::guard(_inner, [=] {
-		_inner->onParentGeometryChanged();
+		_inner->parentGeometryChanged();
 	}), lifetime());
 	_scroll->scrolls(
 	) | rpl::start_with_next([=] {
-		onListScroll();
+		listScrollUpdated();
 	}, lifetime());
 
 	session().data().chatsListChanges(
 	) | rpl::filter([=](Data::Folder *folder) {
 		return (folder == _inner->shownFolder());
 	}) | rpl::start_with_next([=] {
-		Ui::PostponeCall(this, [=] { onListScroll(); });
+		Ui::PostponeCall(this, [=] { listScrollUpdated(); });
 	}, lifetime());
 
-	connect(_filter, &Ui::FlatInput::cancelled, [=] {
+	QObject::connect(_filter, &Ui::FlatInput::cancelled, [=] {
 		escape();
 	});
-	connect(_filter, &Ui::FlatInput::changed, [=] {
+	QObject::connect(_filter, &Ui::FlatInput::changed, [=] {
 		applyFilterUpdate();
 	});
-	connect(
+	QObject::connect(
 		_filter,
 		&Ui::FlatInput::cursorPositionChanged,
-		[=](int from, int to) { onFilterCursorMoved(from, to); });
+		[=](int from, int to) { filterCursorMoved(from, to); });
 
 	if (!Core::UpdaterDisabled()) {
 		Core::UpdateChecker checker;
@@ -300,7 +329,7 @@ Widget::Widget(
 		updateForwardBar();
 	}, lifetime());
 
-	_cancelSearch->setClickedCallback([this] { onCancelSearch(); });
+	_cancelSearch->setClickedCallback([this] { cancelSearch(); });
 	_jumpToDate->entity()->setClickedCallback([this] { showCalendar(); });
 	_chooseFromUser->entity()->setClickedCallback([this] { showSearchFrom(); });
 	rpl::single(rpl::empty) | rpl::then(
@@ -318,13 +347,7 @@ Widget::Widget(
 
 	_searchForNarrowFilters->setClickedCallback([=] { Ui::showChatsList(&session()); });
 
-	_chooseByDragTimer.setSingleShot(true);
-	connect(&_chooseByDragTimer, SIGNAL(timeout()), this, SLOT(onChooseByDrag()));
-
 	setAcceptDrops(true);
-
-	_searchTimer.setSingleShot(true);
-	connect(&_searchTimer, SIGNAL(timeout()), this, SLOT(onSearchMessages()));
 
 	_inner->setLoadMoreCallback([=] {
 		const auto state = _inner->state();
@@ -333,7 +356,7 @@ Widget::Widget(
 				|| (_searchInMigrated
 					&& _searchFull
 					&& !_searchFullMigrated))) {
-			onSearchMore();
+			searchMore();
 		} else {
 			const auto folder = _inner->shownFolder();
 			if (!folder || !folder->chatsList()->loaded()) {
@@ -543,7 +566,7 @@ void Widget::fullSearchRefreshOn(rpl::producer<> events) {
 	) | rpl::filter([=] {
 		return !_searchQuery.isEmpty();
 	}) | rpl::start_with_next([=] {
-		_searchTimer.stop();
+		_searchTimer.cancel();
 		_searchCache.clear();
 		_singleMessageSearch.clear();
 		for (const auto &[requestId, query] : base::take(_searchQueries)) {
@@ -552,7 +575,7 @@ void Widget::fullSearchRefreshOn(rpl::producer<> events) {
 		_searchQuery = QString();
 		_scroll->scrollToY(0);
 		cancelSearchRequest();
-		onSearchMessages();
+		searchMessages();
 	}, lifetime());
 }
 
@@ -818,7 +841,7 @@ void Widget::animationCallback() {
 void Widget::escape() {
 	if (controller()->openedFolder().current()) {
 		controller()->closeFolder();
-	} else if (!onCancelSearch()) {
+	} else if (!cancelSearch()) {
 		if (controller()->activeChatEntryCurrent().key) {
 			controller()->content()->dialogsCancelled();
 		} else if (controller()->activeChatsFilterCurrent()) {
@@ -866,28 +889,7 @@ void Widget::loadMoreBlockedByDate() {
 	session().api().requestMoreBlockedByDateDialogs();
 }
 
-void Widget::onDraggingScrollDelta(int delta) {
-	_draggingScrollDelta = _scroll ? delta : 0;
-	if (_draggingScrollDelta) {
-		if (!_draggingScrollTimer) {
-			_draggingScrollTimer.create(this);
-			_draggingScrollTimer->setSingleShot(false);
-			connect(_draggingScrollTimer, SIGNAL(timeout()), this, SLOT(onDraggingScrollTimer()));
-		}
-		_draggingScrollTimer->start(15);
-	} else {
-		_draggingScrollTimer.destroy();
-	}
-}
-
-void Widget::onDraggingScrollTimer() {
-	const auto delta = (_draggingScrollDelta > 0)
-		? qMin(_draggingScrollDelta * 3 / 20 + 1, Ui::kMaxScrollSpeed)
-		: qMax(_draggingScrollDelta * 3 / 20 - 1, -Ui::kMaxScrollSpeed);
-	_scroll->scrollToY(_scroll->scrollTop() + delta);
-}
-
-bool Widget::onSearchMessages(bool searchCache) {
+bool Widget::searchMessages(bool searchCache) {
 	auto result = false;
 	auto q = _filter->getLastText().trimmed();
 	if (q.isEmpty() && !_searchFromAuthor) {
@@ -897,7 +899,7 @@ bool Widget::onSearchMessages(bool searchCache) {
 	}
 	if (searchCache) {
 		const auto success = _singleMessageSearch.lookup(q, [=] {
-			onNeedSearchMessages();
+			needSearchMessages();
 		});
 		if (!success) {
 			return false;
@@ -1030,14 +1032,10 @@ bool Widget::searchForPeersRequired(const QString &query) const {
 	return (query[0] != '#');
 }
 
-void Widget::onNeedSearchMessages() {
-	if (!onSearchMessages(true)) {
-		_searchTimer.start(AutoSearchTimeout);
+void Widget::needSearchMessages() {
+	if (!searchMessages(true)) {
+		_searchTimer.callOnce(AutoSearchTimeout);
 	}
-}
-
-void Widget::onChooseByDrag() {
-	_inner->chooseRow();
 }
 
 void Widget::showMainMenu() {
@@ -1059,20 +1057,20 @@ void Widget::searchMessages(
 	}();
 	if ((_filter->getLastText() != query) || inChatChanged) {
 		if (inChat) {
-			onCancelSearch();
+			cancelSearch();
 			setSearchInChat(inChat);
 		}
 		_filter->setText(query);
 		_filter->updatePlaceholder();
 		applyFilterUpdate(true);
-		_searchTimer.stop();
-		onSearchMessages();
+		_searchTimer.cancel();
+		searchMessages();
 
 		session().local().saveRecentSearchHashtags(query);
 	}
 }
 
-void Widget::onSearchMore() {
+void Widget::searchMore() {
 	if (_searchRequest || _searchInHistoryRequest) {
 		return;
 	}
@@ -1300,7 +1298,7 @@ void Widget::searchReceived(
 	}
 
 	_searchRequest = 0;
-	onListScroll();
+	listScrollUpdated();
 	update();
 }
 
@@ -1327,7 +1325,7 @@ void Widget::peerSearchReceived(
 		}
 
 		_peerSearchRequest = 0;
-		onListScroll();
+		listScrollUpdated();
 	}
 }
 
@@ -1380,7 +1378,7 @@ void Widget::dragEnterEvent(QDragEnterEvent *e) {
 		e->setDropAction(Qt::CopyAction);
 		e->accept();
 	}
-	_chooseByDragTimer.stop();
+	_chooseByDragTimer.cancel();
 }
 
 void Widget::dragMoveEvent(QDragMoveEvent *e) {
@@ -1388,7 +1386,7 @@ void Widget::dragMoveEvent(QDragMoveEvent *e) {
 		if (_dragForward) {
 			updateDragInScroll(true);
 		} else {
-			_chooseByDragTimer.start(ChoosePeerByDragTimeout);
+			_chooseByDragTimer.callOnce(ChoosePeerByDragTimeout);
 		}
 		if (_inner->updateFromParentDrag(mapToGlobal(e->pos()))) {
 			e->setDropAction(Qt::CopyAction);
@@ -1407,7 +1405,7 @@ void Widget::dragLeaveEvent(QDragLeaveEvent *e) {
 	if (_dragForward) {
 		updateDragInScroll(false);
 	} else {
-		_chooseByDragTimer.stop();
+		_chooseByDragTimer.cancel();
 	}
 	_inner->dragLeft();
 	e->accept();
@@ -1425,7 +1423,7 @@ void Widget::updateDragInScroll(bool inScroll) {
 }
 
 void Widget::dropEvent(QDropEvent *e) {
-	_chooseByDragTimer.stop();
+	_chooseByDragTimer.cancel();
 	if (_scroll->geometry().contains(e->pos())) {
 		if (auto peer = _inner->updateFromParentDrag(mapToGlobal(e->pos()))) {
 			e->acceptProposedAction();
@@ -1438,7 +1436,7 @@ void Widget::dropEvent(QDropEvent *e) {
 	}
 }
 
-void Widget::onListScroll() {
+void Widget::listScrollUpdated() {
 	const auto scrollTop = _scroll->scrollTop();
 	_inner->setVisibleTopBottom(scrollTop, scrollTop + _scroll->height());
 	updateScrollUpVisibility();
@@ -1481,7 +1479,7 @@ void Widget::applyFilterUpdate(bool force) {
 }
 
 void Widget::searchInChat(Key chat) {
-	onCancelSearch();
+	cancelSearch();
 	setSearchInChat(chat);
 	applyFilterUpdate(true);
 }
@@ -1514,7 +1512,7 @@ void Widget::setSearchInChat(Key chat, PeerData *from) {
 	}
 	_inner->searchInChat(_searchInChat, _searchFromAuthor);
 	if (_searchFromAuthor && _lastFilterText == SwitchToChooseFromQuery()) {
-		onCancelSearch();
+		cancelSearch();
 	}
 	_filter->setFocus();
 }
@@ -1539,7 +1537,7 @@ void Widget::showCalendar() {
 void Widget::showSearchFrom() {
 	if (const auto peer = _searchInChat.peer()) {
 		const auto chat = _searchInChat;
-		ShowSearchFromBox(
+		auto box = SearchFromBox(
 			peer,
 			crl::guard(this, [=](not_null<PeerData*> from) {
 				Ui::hideLayer();
@@ -1547,10 +1545,13 @@ void Widget::showSearchFrom() {
 				applyFilterUpdate(true);
 			}),
 			crl::guard(this, [=] { _filter->setFocus(); }));
+		if (box) {
+			Window::Show(controller()).showBox(std::move(box));
+		}
 	}
 }
 
-void Widget::onFilterCursorMoved(int from, int to) {
+void Widget::filterCursorMoved(int from, int to) {
 	if (to < 0) to = _filter->cursorPosition();
 	QString t = _filter->getLastText();
 	QStringView r;
@@ -1566,7 +1567,7 @@ void Widget::onFilterCursorMoved(int from, int to) {
 	_inner->onHashtagFilterUpdate(r);
 }
 
-void Widget::onCompleteHashtag(QString tag) {
+void Widget::completeHashtag(QString tag) {
 	QString t = _filter->getLastText(), r;
 	int cur = _filter->cursorPosition();
 	for (int start = cur; start > 0;) {
@@ -1717,7 +1718,7 @@ void Widget::updateControlsGeometry() {
 	if (_topDelta) {
 		_scroll->scrollToY(newScrollTop);
 	} else {
-		onListScroll();
+		listScrollUpdated();
 	}
 	if (_scrollToTopIsShown) {
 		updateScrollUpPosition();
@@ -1772,7 +1773,7 @@ void Widget::keyPressEvent(QKeyEvent *e) {
 				_inner->selectSkip(1);
 				_inner->chooseRow();
 			} else {
-				onSearchMessages();
+				searchMessages();
 			}
 		}
 	} else if (e->key() == Qt::Key_Down) {
@@ -1855,7 +1856,7 @@ void Widget::cancelSearchRequest() {
 		base::take(_searchInHistoryRequest));
 }
 
-bool Widget::onCancelSearch() {
+bool Widget::cancelSearch() {
 	bool clearing = !_filter->getLastText().isEmpty();
 	cancelSearchRequest();
 	if (_searchInChat && !clearing) {
@@ -1863,7 +1864,7 @@ bool Widget::onCancelSearch() {
 			if (const auto peer = _searchInChat.peer()) {
 				Ui::showPeerHistory(peer, ShowAtUnreadMsgId);
 			} else {
-				Unexpected("Empty key in onCancelSearch().");
+				Unexpected("Empty key in cancelSearch().");
 			}
 		}
 		setSearchInChat(Key());
@@ -1876,7 +1877,7 @@ bool Widget::onCancelSearch() {
 	return clearing;
 }
 
-void Widget::onCancelSearchInChat() {
+void Widget::cancelSearchInChat() {
 	cancelSearchRequest();
 	const auto isOneColumn = controller()->adaptive().isOneColumn();
 	if (_searchInChat) {
@@ -1886,7 +1887,7 @@ void Widget::onCancelSearchInChat() {
 			if (const auto peer = _searchInChat.peer()) {
 				Ui::showPeerHistory(peer, ShowAtUnreadMsgId);
 			} else {
-				Unexpected("Empty key in onCancelSearchInPeer().");
+				Unexpected("Empty key in cancelSearchInPeer().");
 			}
 		}
 		setSearchInChat(Key());
@@ -1894,13 +1895,6 @@ void Widget::onCancelSearchInChat() {
 	applyFilterUpdate(true);
 	if (!isOneColumn && !controller()->selectingPeer()) {
 		controller()->content()->dialogsCancelled();
-	}
-}
-
-void Widget::onDialogMoved(int movedFrom, int movedTo) {
-	int32 st = _scroll->scrollTop();
-	if (st > movedTo && st < movedFrom) {
-		_scroll->scrollToY(st + st::dialogsRowHeight);
 	}
 }
 

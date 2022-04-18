@@ -18,7 +18,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_photo_media.h"
 #include "data/data_document_media.h"
 #include "data/stickers/data_stickers.h"
-#include "chat_helpers/send_context_menu.h" // SendMenu::FillSendMenu
+#include "menu/menu_send.h" // SendMenu::FillSendMenu
 #include "core/click_handler_types.h"
 #include "ui/widgets/buttons.h"
 #include "ui/widgets/input_fields.h"
@@ -447,6 +447,7 @@ void GifsListWidget::selectInlineResult(
 		const auto rect = item->innerContentRect().translated(
 			_mosaic.findRect(index).topLeft());
 		return Ui::MessageSendingAnimationFrom{
+			.type = Ui::MessageSendingAnimationFrom::Type::Gif,
 			.localId = controller()->session().data().nextLocalMessageId(),
 			.globalStartGeometry = mapToGlobal(rect),
 			.crop = true,

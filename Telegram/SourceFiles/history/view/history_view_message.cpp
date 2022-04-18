@@ -143,6 +143,8 @@ void KeyboardStyle::paintButtonIcon(
 		case Type::Buy: return &st->msgBotKbPaymentIcon();
 		case Type::SwitchInlineSame:
 		case Type::SwitchInline: return &st->msgBotKbSwitchPmIcon();
+		case Type::WebView:
+		case Type::SimpleWebView: return &st->msgBotKbWebviewIcon();
 		}
 		return nullptr;
 	}();
@@ -174,6 +176,8 @@ int KeyboardStyle::minButtonWidth(
 	case Type::Callback:
 	case Type::CallbackWithPassword:
 	case Type::Game: iconWidth = st::historySendingInvertedIcon.width(); break;
+	case Type::WebView:
+	case Type::SimpleWebView: iconWidth = st::msgBotKbWebviewIcon.width(); break;
 	}
 	if (iconWidth > 0) {
 		result = std::max(result, 2 * iconWidth + 4 * int(st::msgBotKbIconPadding));
@@ -460,7 +464,7 @@ QSize Message::performCountOptimalSize() {
 			forwarded->create(via);
 		}
 		if (reply) {
-			reply->updateName();
+			reply->updateName(item);
 		}
 
 		auto mediaDisplayed = false;
@@ -931,7 +935,7 @@ void Message::draw(Painter &p, const PaintContext &context) const {
 	}
 
 	if (const auto reply = displayedReply()) {
-		if (reply->isNameUpdated()) {
+		if (reply->isNameUpdated(message())) {
 			const_cast<Message*>(this)->setPendingResize();
 		}
 	}

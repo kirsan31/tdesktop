@@ -9,7 +9,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "api/api_common.h"
 #include "chat_helpers/gifs_list_widget.h" // ChatHelpers::AddGifAction
-#include "chat_helpers/send_context_menu.h" // SendMenu::FillSendMenu
+#include "menu/menu_send.h" // SendMenu::FillSendMenu
 #include "core/click_handler_types.h"
 #include "data/data_document.h"
 #include "data/data_file_origin.h"
@@ -276,9 +276,16 @@ void Inner::selectInlineResult(
 			|| (!document->sticker() && !document->isGifv())) {
 			return {};
 		}
+		using Type = Ui::MessageSendingAnimationFrom::Type;
+		const auto type = document->sticker()
+			? Type::Sticker
+			: document->isGifv()
+			? Type::Gif
+			: Type::None;
 		const auto rect = item->innerContentRect().translated(
 			_mosaic.findRect(index).topLeft());
 		return {
+			.type = type,
 			.localId = _controller->session().data().nextLocalMessageId(),
 			.globalStartGeometry = mapToGlobal(rect),
 			.crop = document->isGifv(),

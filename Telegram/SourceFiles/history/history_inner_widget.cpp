@@ -20,6 +20,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/view/history_view_service_message.h"
 #include "history/view/history_view_cursor_state.h"
 #include "history/view/history_view_context_menu.h"
+#include "history/view/history_view_quick_action.h"
 #include "history/view/history_view_react_button.h"
 #include "history/view/history_view_emoji_interactions.h"
 #include "history/history_item_components.h"
@@ -1852,11 +1853,34 @@ void HistoryInner::mouseDoubleClickEvent(QMouseEvent *e) {
 			|| _mouseCursorState == CursorState::Date)
 		&& !inSelectionMode()
 		&& !_emptyPainter) {
-		if (const auto item = _mouseActionItem) {
+		if (const auto view = Element::Moused()) {
 			mouseActionCancel();
-			_widget->replyToMessage(item);
+			switch (HistoryView::CurrentQuickAction()) {
+			case HistoryView::DoubleClickQuickAction::Reply: {
+				_widget->replyToMessage(view->data());
+			} break;
+			case HistoryView::DoubleClickQuickAction::React: {
+				toggleFavoriteReaction(view);
+			} break;
+			default: break;
+			}
 		}
 	}
+}
+
+void HistoryInner::toggleFavoriteReaction(not_null<Element*> view) const {
+	const auto favorite = session().data().reactions().favorite();
+	const auto allowed = _reactionsManager->allowedSublist();
+	if (allowed && !allowed->contains(favorite)) {
+		return;
+	}
+	const auto item = view->data();
+	if (item->chosenReaction() != favorite) {
+		if (const auto top = itemTop(view); top >= 0) {
+			view->animateReaction({ .emoji = favorite });
+		}
+	}
+	item->toggleReaction(favorite);
 }
 
 void HistoryInner::contextMenuEvent(QContextMenuEvent *e) {
@@ -2050,7 +2074,12 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 				showContextInFolder(document);
 			}, &st::menuIconShowInFolder);
 		}
-		if (!hasCopyRestriction(item)) {
+		if (item && !hasCopyRestriction(item)) {
+			HistoryView::AddSaveSoundForNotifications(
+				_menu,
+				item,
+				document,
+				controller);
 			_menu->addAction(lnkIsVideo ? tr::lng_context_save_video(tr::now) : (lnkIsVoice ? tr::lng_context_save_audio(tr::now) : (lnkIsAudio ? tr::lng_context_save_audio_file(tr::now) : tr::lng_context_save_file(tr::now))), App::LambdaDelayed(st::defaultDropdownMenu.menu.ripple.hideDuration, this, [=] {
 				saveDocumentToFile(itemId, document);
 			}), &st::menuIconDownload);
