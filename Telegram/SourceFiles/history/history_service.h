@@ -34,8 +34,11 @@ struct HistoryServiceGameScore
 struct HistoryServicePayment
 : public RuntimeComponent<HistoryServicePayment, HistoryItem>
 , public HistoryServiceDependentData {
+	QString slug;
 	QString amount;
 	ClickHandlerPtr invoiceLink;
+	bool recurringInit = false;
+	bool recurringUsed = false;
 };
 
 struct HistoryServiceSelfDestruct
@@ -54,6 +57,16 @@ struct HistoryServiceOngoingCall
 	CallId id = 0;
 	ClickHandlerPtr link;
 	rpl::lifetime lifetime;
+};
+
+struct HistoryServiceChatThemeChange
+: public RuntimeComponent<HistoryServiceChatThemeChange, HistoryItem> {
+	ClickHandlerPtr link;
+};
+
+struct HistoryServiceTTLChange
+: public RuntimeComponent<HistoryServiceTTLChange, HistoryItem> {
+	ClickHandlerPtr link;
 };
 
 namespace HistoryView {
@@ -152,6 +165,8 @@ private:
 	void updateDependentText();
 	void updateText(PreparedText &&text);
 	void clearDependency();
+	void setupChatThemeChange();
+	void setupTTLChange();
 
 	void createFromMtp(const MTPDmessage &message);
 	void createFromMtp(const MTPDmessageService &message);

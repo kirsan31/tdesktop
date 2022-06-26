@@ -39,6 +39,8 @@ class Session;
 
 namespace InlineBots {
 class AttachWebView;
+enum class PeerType : uint8;
+using PeerTypes = base::flags<PeerType>;
 } // namespace InlineBots
 
 namespace Calls {
@@ -193,8 +195,10 @@ public:
 		ResolveType resolveType = ResolveType::Default;
 		QString startToken;
 		ChatAdminRights startAdminRights;
+		bool startAutoSubmit = false;
 		QString attachBotUsername;
 		std::optional<QString> attachBotToggleCommand;
+		InlineBots::PeerTypes attachBotChooseTypes;
 		std::optional<QString> voicechatHash;
 		FullMsgId clickFromMessageId;
 	};
@@ -376,6 +380,7 @@ public:
 	void resizeForThirdSection();
 	void closeThirdSection();
 
+	[[nodiscard]] bool canShowSeparateWindow(not_null<PeerData*> peer) const;
 	void showPeer(not_null<PeerData*> peer, MsgId msgId = ShowAtUnreadMsgId);
 
 	void startOrJoinGroupCall(
@@ -473,6 +478,7 @@ public:
 	void setChatStyleTheme(const std::shared_ptr<Ui::ChatTheme> &theme);
 	void clearCachedChatThemes();
 	void pushLastUsedChatTheme(const std::shared_ptr<Ui::ChatTheme> &theme);
+	[[nodiscard]] not_null<Ui::ChatTheme*> currentChatTheme() const;
 
 	void overridePeerTheme(
 		not_null<PeerData*> peer,
@@ -501,6 +507,9 @@ public:
 		return *_cachedReactionIconFactory;
 	}
 
+	void setPremiumRef(const QString &ref);
+	[[nodiscard]] QString premiumRef() const;
+
 	rpl::lifetime &lifetime() {
 		return _lifetime;
 	}
@@ -513,6 +522,7 @@ private:
 	void refreshFiltersMenu();
 	void checkOpenedFilter();
 	void suggestArchiveAndMute();
+	void activateFirstChatsFilter();
 
 	int minimalThreeColumnWidth() const;
 	int countDialogsWidthFromRatio(int bodyWidth) const;
@@ -531,6 +541,7 @@ private:
 	void resetFakeUnreadWhileOpened();
 
 	void checkInvitePeek();
+	void setupPremiumToast();
 
 	void pushDefaultChatBackground();
 	void cacheChatTheme(
@@ -544,6 +555,7 @@ private:
 
 	const not_null<Controller*> _window;
 	const std::unique_ptr<ChatHelpers::EmojiInteractions> _emojiInteractions;
+	const bool _isPrimary = false;
 
 	using SendingAnimation = Ui::MessageSendingAnimationController;
 	const std::unique_ptr<SendingAnimation> _sendingAnimation;
@@ -562,6 +574,7 @@ private:
 	base::Variable<bool> _dialogsListDisplayForced = { false };
 	std::deque<Dialogs::RowDescriptor> _chatEntryHistory;
 	int _chatEntryHistoryPosition = -1;
+	bool _filtersActivated = false;
 	bool _selectingPeer = false;
 
 	base::Timer _invitePeekTimer;
@@ -586,6 +599,8 @@ private:
 	using ReactionIconFactory = HistoryView::Reactions::CachedIconFactory;
 	std::unique_ptr<ReactionIconFactory> _cachedReactionIconFactory;
 
+	QString _premiumRef;
+
 	rpl::lifetime _lifetime;
 
 };
@@ -595,7 +610,7 @@ void ActivateWindow(not_null<SessionController*> controller);
 class Show : public Ui::Show {
 public:
 	explicit Show(not_null<SessionNavigation*> navigation);
-	explicit Show(not_null<Controller*> window);
+	explicit Show(Controller *window);
 	~Show();
 	void showBox(
 		object_ptr<Ui::BoxContent> content,
@@ -604,8 +619,10 @@ public:
 	[[nodiscard]] not_null<QWidget*> toastParent() const override;
 	[[nodiscard]] bool valid() const override;
 	operator bool() const override;
+
 private:
 	const base::weak_ptr<Controller> _window;
+
 };
 
 } // namespace Window

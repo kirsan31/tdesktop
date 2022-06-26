@@ -80,7 +80,6 @@ public:
 	}
 
 	void showMainMenu();
-	void updateTrayMenu() override;
 	void fixOrder() override;
 
 	void showLayer(
@@ -115,16 +114,9 @@ protected:
 	void closeEvent(QCloseEvent *e) override;
 
 	void initHook() override;
-	void activeChangedHook() override;
 	void clearWidgetsHook() override;
 
 private:
-	[[nodiscard]] bool skipTrayClick() const;
-
-	void createTrayIconMenu();
-	void handleTrayIconActication(
-		QSystemTrayIcon::ActivationReason reason) override;
-
 	void applyInitialWorkMode();
 	void ensureLayerCreated();
 	void destroyLayer();
@@ -139,15 +131,11 @@ private:
 
 	void themeUpdated(const Window::Theme::BackgroundUpdate &data);
 
-	void toggleDisplayNotifyFromTray();
-
 	QPixmap grabInner();
 
 	std::unique_ptr<Media::SystemMediaControlsManager> _mediaControlsManager;
 
-	crl::time _lastTrayClickTime = 0;
 	QPoint _lastMousePosition;
-	bool _activeForTrayIconAction = true;
 
 	object_ptr<Window::PasscodeLockWidget> _passcodeLock = { nullptr };
 	object_ptr<Intro::Widget> _intro = { nullptr };
@@ -156,8 +144,6 @@ private:
 	object_ptr<Window::MediaPreviewWidget> _mediaPreview = { nullptr };
 
 	object_ptr<Window::Theme::WarningWidget> _testingThemeWarning = { nullptr };
-
-	rpl::event_stream<> _updateTrayMenuTextActions;
 
 };
 

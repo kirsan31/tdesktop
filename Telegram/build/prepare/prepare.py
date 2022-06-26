@@ -399,12 +399,14 @@ if customRunCommand:
 stage('patches', """
     git clone https://github.com/desktop-app/patches.git
     cd patches
-    git checkout 22629a5df5
+    git checkout 38af8ef4c6
 """)
 
 stage('depot_tools', """
 mac:
     git clone https://chromium.googlesource.com/chromium/tools/depot_tools.git
+    cd depot_tools
+    ./update_depot_tools
 """, 'ThirdParty')
 
 if not mac or 'build-stackwalk' in options:
@@ -734,9 +736,11 @@ depends:yasm/yasm
     --enable-decoder=aac_fixed \
     --enable-decoder=aac_latm \
     --enable-decoder=aasc \
+    --enable-decoder=ac3 \
     --enable-decoder=alac \
     --enable-decoder=alac_at \
     --enable-decoder=av1 \
+    --enable-decoder=eac3 \
     --enable-decoder=flac \
     --enable-decoder=gif \
     --enable-decoder=h264 \
@@ -959,26 +963,29 @@ depends:yasm/yasm
 
 stage('openal-soft', """
 version: 2
+win:
     git clone -b wasapi_exact_device_time https://github.com/telegramdesktop/openal-soft.git
     cd openal-soft
-    cd build
-win:
-    cmake .. ^
+    cmake -B build . ^
         -A %WIN32X64% ^
         -D LIBTYPE:STRING=STATIC ^
         -D FORCE_STATIC_VCRT=ON
-    msbuild OpenAL.vcxproj /property:Configuration=Debug /property:Platform="%WIN32X64%"
+    cmake --build build --config Debug --parallel
 release:
-    msbuild OpenAL.vcxproj /property:Configuration=RelWithDebInfo /property:Platform="%WIN32X64%"
+    cmake --build build --config RelWithDebInfo --parallel
 mac:
-    CFLAGS=$UNGUARDED CPPFLAGS=$UNGUARDED cmake .. \\
+    git clone https://github.com/kcat/openal-soft.git
+    cd openal-soft
+    git checkout 1.22.1
+    CFLAGS=$UNGUARDED CPPFLAGS=$UNGUARDED cmake -B build . \\
         -D CMAKE_INSTALL_PREFIX:PATH=$USED_PREFIX \\
         -D ALSOFT_EXAMPLES=OFF \\
+        -D ALSOFT_UTILS=OFF \\
         -D LIBTYPE:STRING=STATIC \\
         -D CMAKE_OSX_DEPLOYMENT_TARGET:STRING=$MACOSX_DEPLOYMENT_TARGET \\
         -D CMAKE_OSX_ARCHITECTURES="x86_64;arm64"
-    make $MAKE_THREADS_CNT
-    make install
+    cmake --build build $MAKE_THREADS_CNT
+    cmake --install build
 """)
 
 if 'build-stackwalk' in options:
@@ -1122,30 +1129,30 @@ release:
 """)
 
 if buildQt5:
-    stage('qt_5_15_3', """
-    git clone https://code.qt.io/qt/qt5.git qt_5_15_3
-    cd qt_5_15_3
+    stage('qt_5_15_4', """
+    git clone https://code.qt.io/qt/qt5.git qt_5_15_4
+    cd qt_5_15_4
     perl init-repository --module-subset=qtbase,qtimageformats,qtsvg
-    git checkout v5.15.3-lts-lgpl
+    git checkout v5.15.4-lts-lgpl
     git submodule update qtbase qtimageformats qtsvg
-depends:patches/qtbase_5_15_3/*.patch
+depends:patches/qtbase_5_15_4/*.patch
     cd qtbase
 win:
-    for /r %%i in (..\\..\\patches\\qtbase_5_15_3\\*) do git apply %%i
+    for /r %%i in (..\\..\\patches\\qtbase_5_15_4\\*) do git apply %%i
     cd ..
 
     SET CONFIGURATIONS=-debug
 release:
     SET CONFIGURATIONS=-debug-and-release
 win:
-    """ + removeDir("\"%LIBS_DIR%\\Qt-5.15.3\"") + """
+    """ + removeDir("\"%LIBS_DIR%\\Qt-5.15.4\"") + """
     SET ANGLE_DIR=%LIBS_DIR%\\tg_angle
     SET ANGLE_LIBS_DIR=%ANGLE_DIR%\\out
     SET MOZJPEG_DIR=%LIBS_DIR%\\mozjpeg
     SET OPENSSL_DIR=%LIBS_DIR%\\openssl
     SET OPENSSL_LIBS_DIR=%OPENSSL_DIR%\\out
     SET ZLIB_LIBS_DIR=%LIBS_DIR%\\zlib\\contrib\\vstudio\\vc14\\%X8664%
-    configure -prefix "%LIBS_DIR%\\Qt-5.15.3" ^
+    configure -prefix "%LIBS_DIR%\\Qt-5.15.4" ^
         %CONFIGURATIONS% ^
         -force-debug-info ^
         -opensource ^
@@ -1176,14 +1183,14 @@ win:
     jom -j16
     jom -j16 install
 mac:
-    find ../../patches/qtbase_5_15_3 -type f -print0 | sort -z | xargs -0 git apply
+    find ../../patches/qtbase_5_15_4 -type f -print0 | sort -z | xargs -0 git apply
     cd ..
 
     CONFIGURATIONS=-debug
 release:
     CONFIGURATIONS=-debug-and-release
 mac:
-    ./configure -prefix "$USED_PREFIX/Qt-5.15.3" \
+    ./configure -prefix "$USED_PREFIX/Qt-5.15.4" \
         $CONFIGURATIONS \
         -force-debug-info \
         -opensource \
@@ -1204,22 +1211,22 @@ mac:
 """)
 
 if buildQt6:
-    stage('qt_6_3_0', """
+    stage('qt_6_3_1', """
 mac:
-    git clone -b v6.3.0 https://code.qt.io/qt/qt5.git qt_6_3_0
-    cd qt_6_3_0
+    git clone -b v6.3.1 https://code.qt.io/qt/qt5.git qt_6_3_1
+    cd qt_6_3_1
     perl init-repository --module-subset=qtbase,qtimageformats,qtsvg,qt5compat
-depends:patches/qtbase_6_3_0/*.patch
+depends:patches/qtbase_6_3_1/*.patch
     cd qtbase
 
-    find ../../patches/qtbase_6_3_0 -type f -print0 | sort -z | xargs -0 git apply
+    find ../../patches/qtbase_6_3_1 -type f -print0 | sort -z | xargs -0 git apply
     cd ..
 
     CONFIGURATIONS=-debug
 release:
     CONFIGURATIONS=-debug-and-release
 mac:
-    ./configure -prefix "$USED_PREFIX/Qt-6.3.0" \
+    ./configure -prefix "$USED_PREFIX/Qt-6.3.1" \
         $CONFIGURATIONS \
         -force-debug-info \
         -opensource \
@@ -1241,9 +1248,9 @@ mac:
 stage('tg_owt', """
     git clone https://github.com/desktop-app/tg_owt.git
     cd tg_owt
-    git checkout 1fe5e68d99
+    git checkout bab760d7bd
     git submodule init
-    git submodule update src/third_party/libyuv
+    git submodule update src/third_party/libyuv src/third_party/crc32c/src
 win:
     SET MOZJPEG_PATH=$LIBS_DIR/mozjpeg
     SET OPUS_PATH=$USED_PREFIX/include/opus
