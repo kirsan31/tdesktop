@@ -328,24 +328,29 @@ void TopBarWidget::showGroupCallMenu(not_null<PeerData*> peer) {
 	const auto callback = [=](Calls::StartGroupCallArgs &&args) {
 		controller->startOrJoinGroupCall(peer, std::move(args));
 	};
+	const auto rtmpCallback = [=] {
+		Core::App().calls().showStartWithRtmp(
+			std::make_shared<Window::Show>(controller),
+			peer);
+	};
 	const auto livestream = !peer->isMegagroup() && peer->isChannel();
 	_menu->addAction(
-		livestream
-			? tr::lng_menu_start_group_call_channel(tr::now)
-			: tr::lng_menu_start_group_call(tr::now),
+		(livestream
+			? tr::lng_menu_start_group_call_channel
+			: tr::lng_menu_start_group_call)(tr::now),
 		[=] { callback({}); },
 		&st::menuIconStartStream);
 	_menu->addAction(
-		livestream
-			? tr::lng_menu_start_group_call_scheduled_channel(tr::now)
-			: tr::lng_menu_start_group_call_scheduled(tr::now),
+		(livestream
+			? tr::lng_menu_start_group_call_scheduled_channel
+			: tr::lng_menu_start_group_call_scheduled)(tr::now),
 		[=] { callback({ .scheduleNeeded = true }); },
 		&st::menuIconReschedule);
 	_menu->addAction(
-		livestream
-			? tr::lng_menu_start_group_call_with_channel(tr::now)
-			: tr::lng_menu_start_group_call_with(tr::now),
-		[=] { callback({ .rtmpNeeded = true }); },
+		(livestream
+			? tr::lng_menu_start_group_call_with_channel
+			: tr::lng_menu_start_group_call_with)(tr::now),
+		rtmpCallback,
 		&st::menuIconStartStreamWith);
 	_menu->setForcedOrigin(Ui::PanelAnimation::Origin::TopRight);
 	_menu->popup(mapToGlobal(QPoint(
@@ -425,7 +430,10 @@ void TopBarWidget::paintTopBar(Painter &p) {
 	auto nameleft = _leftTaken;
 	auto nametop = st::topBarArrowPadding.top();
 	auto statustop = st::topBarHeight - st::topBarArrowPadding.bottom() - st::dialogsTextFont->height;
-	auto availableWidth = width() - _rightTaken - nameleft;
+	auto availableWidth = width()
+		- _rightTaken
+		- nameleft
+		- st::topBarNameRightPadding;
 
 	if (_chooseForReportReason) {
 		const auto text = [&] {
@@ -511,7 +519,13 @@ void TopBarWidget::paintTopBar(Painter &p) {
 		}
 	} else if (const auto history = _activeChat.key.history()) {
 		const auto peer = history->peer;
-		const auto &text = peer->topBarNameText();
+		if (_titleNameVersion < peer->nameVersion()) {
+			_titleNameVersion = peer->nameVersion();
+			_title.setText(
+				st::msgNameStyle,
+				peer->topBarNameText(),
+				Ui::NameTextOptions());
+		}
 		const auto badgeStyle = Ui::PeerBadgeStyle{
 			&st::dialogsVerifiedIcon,
 			&st::dialogsPremiumIcon,
@@ -525,13 +539,13 @@ void TopBarWidget::paintTopBar(Painter &p) {
 				nametop,
 				availableWidth,
 				st::msgNameStyle.font->height),
-			text.maxWidth(),
+			_title.maxWidth(),
 			width(),
 			badgeStyle);
 		const auto namewidth = availableWidth - badgeWidth;
 
 		p.setPen(st::dialogsNameFg);
-		peer->topBarNameText().drawElided(
+		_title.drawElided(
 			p,
 			nameleft,
 			nametop,
@@ -684,6 +698,7 @@ void TopBarWidget::setActiveChat(
 	update();
 
 	if (peerChanged) {
+		_titleNameVersion = 0;
 		_emojiInteractionSeen = nullptr;
 		_activeChatLifetime.destroy();
 		if (const auto history = _activeChat.key.history()) {
