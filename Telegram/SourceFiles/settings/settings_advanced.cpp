@@ -120,6 +120,24 @@ void SetupUpdate(
 		tr::lng_settings_install_beta(),
 		st::settingsButtonNoIcon).get();
 
+	if (showOther) {
+		const auto experimental = inner->add(
+			object_ptr<Ui::SlideWrap<Button>>(
+				inner,
+				CreateButton(
+					inner,
+					tr::lng_settings_experimental(),
+					st::settingsButtonNoIcon)));
+		if (!install) {
+			experimental->toggle(true, anim::type::instant);
+		} else {
+			experimental->toggleOn(install->toggledValue());
+		}
+		experimental->entity()->setClickedCallback([=] {
+			showOther(Experimental::Id());
+		});
+	}
+
 	const auto check = AddButton(
 		inner,
 		tr::lng_settings_check_now(),
@@ -252,28 +270,6 @@ void SetupUpdate(
 		}
 		Core::Restart();
 	});
-}
-
-void SetupExperimental(
-	not_null<Ui::VerticalLayout*> container,
-	Fn<void(Type)> showOther) {
-
-	const auto options = container->add(
-		object_ptr<Ui::SlideWrap<Ui::VerticalLayout>>(
-			container,
-			object_ptr<Ui::VerticalLayout>(container)));
-	const auto inner = options->entity();
-	const auto experimental = inner->add(
-		object_ptr<Ui::SlideWrap<Button>>(
-			inner,
-			CreateButton(
-				inner,
-				tr::lng_settings_experimental(),
-				st::settingsButtonNoIcon)));
-	experimental->toggle(true, anim::type::instant);
-	experimental->entity()->setClickedCallback([=] {
-		showOther(Experimental::Id());
-		});
 }
 
 bool HasSystemSpellchecker() {
@@ -817,14 +813,6 @@ void Advanced::setupContent(not_null<Window::SessionController*> controller) {
 			_showOther.fire_copy(Experimental::Id());
 		});
 	}
-
-	AddSkip(content);
-	AddDivider(content);
-	AddSkip(content);
-
-	SetupExperimental(content, [=](Type type) {
-		_showOther.fire_copy(type);
-		});
 
 	AddSkip(content);
 	AddDivider(content);
