@@ -1,8 +1,8 @@
 {%- set GIT = "https://github.com" -%}
 {%- set GIT_FREEDESKTOP = GIT ~ "/gitlab-freedesktop-mirrors" -%}
-{%- set QT = "6_3_1" -%}
-{%- set QT_TAG = "v6.3.1" -%}
-{%- set QT_PREFIX = "/usr/local/desktop-app/Qt-6.3.1" -%}
+{%- set QT = "6_4_0" -%}
+{%- set QT_TAG = "v6.4.0" -%}
+{%- set QT_PREFIX = "/usr/local/desktop-app/Qt-6.4.0" -%}
 {%- set OPENSSL_VER = "1_1_1" -%}
 {%- set OPENSSL_PREFIX = "/usr/local/desktop-app/openssl-1.1.1" -%}
 {%- set CMAKE_VER = "3.21.3" -%}
@@ -19,15 +19,18 @@ ENV PKG_CONFIG_PATH /usr/local/lib64/pkgconfig:/usr/local/lib/pkgconfig:/usr/loc
 RUN yum -y install https://dl.fedoraproject.org/pub/epel/epel-release-latest-7.noarch.rpm \
 	&& yum -y install https://packages.endpointdev.com/rhel/7/os/x86_64/endpoint-repo.x86_64.rpm \
 	&& yum -y install centos-release-scl \
-	&& yum -y install git meson ninja-build autoconf automake libtool patch \
+	&& yum -y install git python3-pip autoconf automake libtool patch \
 		fontconfig-devel freetype-devel libX11-devel at-spi2-core-devel alsa-lib-devel \
 		pulseaudio-libs-devel mesa-libGL-devel mesa-libEGL-devel mesa-libgbm-devel \
-		libdrm-devel gtk3-devel \
+		libdrm-devel vulkan-devel gtk3-devel \
 		perl-XML-Parser pkgconfig bison yasm file which xorg-x11-util-macros \
 		devtoolset-10-make devtoolset-10-gcc devtoolset-10-gcc-c++ \
 		devtoolset-10-binutils llvm-toolset-7.0 llvm-toolset-7.0-clang-devel \
 		llvm-toolset-7.0-llvm-devel \
 	&& yum clean all
+
+RUN python3 -m pip install meson
+RUN python3 -m pip install ninja
 
 # Fix a bug with argument naming in CentOS 7 glibc
 RUN sed -i 's/char \*__block/char */' /usr/include/unistd.h
@@ -45,8 +48,19 @@ RUN mkdir /opt/cmake \
 FROM builder AS patches
 RUN git clone {{ GIT }}/desktop-app/patches.git \
 	&& cd patches \
-	&& git checkout 4a5c759f8f \
+	&& git checkout 355c563138 \
 	&& rm -rf .git
+
+FROM builder AS nasm
+RUN git clone -b nasm-2.15.05 --depth=1 {{ GIT }}/netwide-assembler/nasm.git \
+	&& cd nasm \
+	&& ./autogen.sh \
+	&& ./configure \
+	&& make -j$(nproc) \
+	&& mkdir -p "{{ LibrariesPath }}/nasm-cache/usr/local/bin" \
+	&& install -c nasm "{{ LibrariesPath }}/nasm-cache/usr/local/bin/nasm" \
+	&& cd .. \
+	&& rm -rf nasm
 
 FROM builder AS libffi
 RUN git clone -b v3.4.2 --depth=1 {{ GIT }}/libffi/libffi.git \
@@ -90,6 +104,41 @@ RUN git clone -b 0.4.17 --depth=1 {{ GIT }}/libproxy/libproxy.git \
 	&& cd .. \
 	&& rm -rf libproxy
 
+FROM builder AS lcms2
+RUN git clone -b lcms2.13.1 --depth=1 {{ GIT }}/mm2/Little-CMS.git \
+	&& cd Little-CMS \
+	&& meson build \
+		--buildtype=release \
+		--default-library=both \
+	&& meson compile -C build \
+	&& DESTDIR="{{ LibrariesPath }}/lcms2-cache" meson install -C build \
+	&& cd .. \
+	&& rm -rf Little-CMS
+
+FROM builder AS brotli
+RUN git clone -b v1.0.9 --depth=1 {{ GIT }}/google/brotli.git \
+	&& cd brotli \
+	&& cmake -GNinja -B build . \
+		-DCMAKE_BUILD_TYPE=Release \
+		-DBROTLI_DISABLE_TESTS=ON \
+	&& cmake --build build --parallel \
+	&& DESTDIR="{{ LibrariesPath }}/brotli-cache" cmake --install build \
+	&& cd .. \
+	&& rm -rf brotli
+
+FROM builder AS highway
+RUN git clone -b 1.0.1 --depth=1 {{ GIT }}/google/highway.git \
+	&& cd highway \
+	&& cmake -GNinja -B build . \
+		-DCMAKE_BUILD_TYPE=Release \
+		-DBUILD_TESTING=OFF \
+		-DHWY_ENABLE_CONTRIB=OFF \
+		-DHWY_ENABLE_EXAMPLES=OFF \
+	&& cmake --build build --parallel \
+	&& DESTDIR="{{ LibrariesPath }}/highway-cache" cmake --install build \
+	&& cd .. \
+	&& rm -rf highway
+
 FROM builder AS mozjpeg
 RUN git clone -b v4.0.3 --depth=1 {{ GIT }}/mozilla/mozjpeg.git \
 	&& cd mozjpeg \
@@ -113,6 +162,33 @@ RUN git clone -b v1.3.1 --depth=1 {{ GIT }}/xiph/opus.git \
 	&& cd .. \
 	&& rm -rf opus
 
+FROM builder AS dav1d
+COPY --link --from=nasm {{ LibrariesPath }}/nasm-cache /
+
+RUN git clone -b 1.0.0 --depth=1 {{ GIT }}/videolan/dav1d.git \
+	&& cd dav1d \
+	&& meson build \
+		--buildtype=release \
+		--default-library=both \
+		-Denable_tools=false \
+		-Denable_tests=false \
+	&& meson compile -C build \
+	&& DESTDIR="{{ LibrariesPath }}/dav1d-cache" meson install -C build \
+	&& cd .. \
+	&& rm -rf dav1d
+
+FROM builder AS libde265
+RUN git clone -b v1.0.8 --depth=1 {{ GIT }}/strukturag/libde265.git \
+	&& cd libde265 \
+	&& cmake -GNinja . \
+		-DCMAKE_BUILD_TYPE=Release \
+		-DBUILD_SHARED_LIBS=OFF \
+		-DENABLE_SDL=OFF \
+	&& cmake --build . --parallel \
+	&& DESTDIR="{{ LibrariesPath }}/libde265-cache" cmake --install . \
+	&& cd .. \
+	&& rm -rf libde265
+
 FROM builder AS libvpx
 RUN git clone -b v1.11.0 --depth=1 {{ GIT }}/webmproject/libvpx.git \
 	&& cd libvpx \
@@ -128,6 +204,64 @@ RUN git clone -b v1.11.0 --depth=1 {{ GIT }}/webmproject/libvpx.git \
 	&& make DESTDIR="{{ LibrariesPath }}/libvpx-cache" install \
 	&& cd .. \
 	&& rm -rf libvpx
+
+FROM builder AS libavif
+COPY --link --from=dav1d {{ LibrariesPath }}/dav1d-cache /
+
+RUN git clone -b v0.10.1 --depth=1 {{ GIT }}/AOMediaCodec/libavif.git \
+	&& cd libavif \
+	&& cmake -GNinja -B build . \
+		-DCMAKE_BUILD_TYPE=Release \
+		-DBUILD_SHARED_LIBS=OFF \
+		-DAVIF_CODEC_DAV1D=ON \
+	&& cmake --build build --parallel \
+	&& DESTDIR="{{ LibrariesPath }}/libavif-cache" cmake --install build \
+	&& cd .. \
+	&& rm -rf libavif
+
+FROM builder AS libheif
+COPY --link --from=libde265 {{ LibrariesPath }}/libde265-cache /
+
+RUN git clone -b v1.13.0 --depth=1 {{ GIT }}/strukturag/libheif.git \
+	&& cd libheif \
+	&& cmake -GNinja -B build . \
+		-DCMAKE_BUILD_TYPE=Release \
+		-DBUILD_SHARED_LIBS=OFF \
+		-DWITH_X265=OFF \
+		-DWITH_AOM=OFF \
+		-DWITH_RAV1E=OFF \
+		-DWITH_DAV1D=OFF \
+		-DWITH_EXAMPLES=OFF \
+	&& cmake --build build --parallel \
+	&& DESTDIR="{{ LibrariesPath }}/libheif-cache" cmake --install build \
+	&& cd .. \
+	&& rm -rf libheif
+
+FROM builder AS libjxl
+COPY --link --from=lcms2 {{ LibrariesPath }}/lcms2-cache /
+COPY --link --from=brotli {{ LibrariesPath }}/brotli-cache /
+COPY --link --from=highway {{ LibrariesPath }}/highway-cache /
+
+RUN git clone -b v0.7.0 --depth=1 {{ GIT }}/libjxl/libjxl.git \
+	&& cd libjxl \
+	&& cmake -GNinja -B build . \
+		-DCMAKE_BUILD_TYPE=Release \
+		-DBUILD_SHARED_LIBS=OFF \
+		-DBUILD_TESTING=OFF \
+		-DJPEGXL_ENABLE_DEVTOOLS=OFF \
+		-DJPEGXL_ENABLE_TOOLS=OFF \
+		-DJPEGXL_ENABLE_DOXYGEN=OFF \
+		-DJPEGXL_ENABLE_MANPAGES=OFF \
+		-DJPEGXL_ENABLE_BENCHMARK=OFF \
+		-DJPEGXL_ENABLE_EXAMPLES=OFF \
+		-DJPEGXL_ENABLE_JNI=OFF \
+		-DJPEGXL_ENABLE_SJPEG=OFF \
+		-DJPEGXL_ENABLE_OPENEXR=OFF \
+		-DJPEGXL_ENABLE_SKCMS=OFF \
+	&& cmake --build build --parallel \
+	&& DESTDIR="{{ LibrariesPath }}/libjxl-cache" cmake --install build \
+	&& cd .. \
+	&& rm -rf libjxl
 
 FROM builder AS rnnoise
 RUN git clone -b master --depth=1 {{ GIT }}/desktop-app/rnnoise \
@@ -274,7 +408,7 @@ RUN git clone -b libXcomposite-0.4.5 --depth=1 {{ GIT_FREEDESKTOP }}/libxcomposi
 FROM builder AS wayland
 COPY --link --from=libffi {{ LibrariesPath }}/libffi-cache /
 
-RUN git clone -b 1.20.0 --depth=1 {{ GIT_FREEDESKTOP }}/wayland.git \
+RUN git clone -b 1.21.0 --depth=1 {{ GIT_FREEDESKTOP }}/wayland.git \
 	&& cd wayland \
 	&& meson build \
 		--buildtype=release \
@@ -637,9 +771,17 @@ COPY --link --from=libffi {{ LibrariesPath }}/libffi-cache /
 COPY --link --from=zlib {{ LibrariesPath }}/zlib-cache /
 COPY --link --from=xz {{ LibrariesPath }}/xz-cache /
 COPY --link --from=libproxy {{ LibrariesPath }}/libproxy-cache /
+COPY --link --from=lcms2 {{ LibrariesPath }}/lcms2-cache /
+COPY --link --from=brotli {{ LibrariesPath }}/brotli-cache /
+COPY --link --from=highway {{ LibrariesPath }}/highway-cache /
 COPY --link --from=mozjpeg {{ LibrariesPath }}/mozjpeg-cache /
 COPY --link --from=opus {{ LibrariesPath }}/opus-cache /
+COPY --link --from=dav1d {{ LibrariesPath }}/dav1d-cache /
+COPY --link --from=libde265 {{ LibrariesPath }}/libde265-cache /
 COPY --link --from=libvpx {{ LibrariesPath }}/libvpx-cache /
+COPY --link --from=libavif {{ LibrariesPath }}/libavif-cache /
+COPY --link --from=libheif {{ LibrariesPath }}/libheif-cache /
+COPY --link --from=libjxl {{ LibrariesPath }}/libjxl-cache /
 COPY --link --from=rnnoise {{ LibrariesPath }}/rnnoise-cache /
 COPY --link --from=xcb {{ LibrariesPath }}/xcb-cache /
 COPY --link --from=xcb-wm {{ LibrariesPath }}/xcb-wm-cache /

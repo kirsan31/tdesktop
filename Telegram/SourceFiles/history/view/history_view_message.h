@@ -10,11 +10,14 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/view/history_view_element.h"
 #include "history/view/history_view_bottom_info.h"
 #include "ui/effects/animations.h"
-#include "base/weak_ptr.h"
 
 class HistoryMessage;
 struct HistoryMessageEdited;
 struct HistoryMessageForwarded;
+
+namespace Data {
+struct ReactionId;
+} // namespace Data
 
 namespace HistoryView {
 
@@ -43,7 +46,7 @@ struct PsaTooltipState : public RuntimeComponent<PsaTooltipState, Element> {
 	mutable bool buttonVisible = true;
 };
 
-class Message : public Element, public base::has_weak_ptr {
+class Message final : public Element {
 public:
 	Message(
 		not_null<ElementDelegate*> delegate,
@@ -134,9 +137,11 @@ public:
 	void applyGroupAdminChanges(
 		const base::flat_set<UserId> &changes) override;
 
-	void animateReaction(ReactionAnimationArgs &&args) override;
+	void animateReaction(Reactions::AnimationArgs &&args) override;
 	auto takeReactionAnimations()
-		-> base::flat_map<QString, std::unique_ptr<Reactions::Animation>> override;
+	-> base::flat_map<
+		Data::ReactionId,
+		std::unique_ptr<Reactions::Animation>> override;
 
 	QRect innerGeometry() const override;
 
@@ -145,6 +150,7 @@ protected:
 
 private:
 	struct CommentsButton;
+	struct FromNameStatus;
 
 	void initLogEntryOriginal();
 	void initPsa();
@@ -220,6 +226,8 @@ private:
 	QSize performCountOptimalSize() override;
 	QSize performCountCurrentSize(int newWidth) override;
 	bool hasVisibleText() const override;
+	[[nodiscard]] int visibleTextLength() const;
+	[[nodiscard]] int visibleMediaTextLength() const;
 	[[nodiscard]] bool needInfoDisplay() const;
 
 	[[nodiscard]] bool isPinnedContext() const;
@@ -252,6 +260,7 @@ private:
 	mutable std::unique_ptr<CommentsButton> _comments;
 
 	mutable Ui::Text::String _fromName;
+	mutable std::unique_ptr<FromNameStatus> _fromNameStatus;
 	Ui::Text::String _rightBadge;
 	mutable int _fromNameVersion = 0;
 	int _bubbleWidthLimit = 0;

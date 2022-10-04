@@ -16,6 +16,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/text/text_utilities.h"
 #include "ui/chat/chat_style.h"
 #include "ui/chat/chat_theme.h"
+#include "ui/painter.h"
 #include "history/history.h"
 #include "history/history_message.h"
 #include "history/view/history_view_service_message.h"
@@ -457,11 +458,18 @@ void HistoryMessageReply::paint(
 				p.setPen(inBubble
 					? stm->historyTextFg
 					: st->msgImgReplyBarColor());
-				p.setTextPalette(inBubble
-					? stm->replyTextPalette
-					: st->imgReplyTextPalette());
-				holder->prepareCustomEmojiPaint(p, replyToText);
-				replyToText.drawLeftElided(p, x + st::msgReplyBarSkip + previewSkip, y + st::msgReplyPadding.top() + st::msgServiceNameFont->height, w - st::msgReplyBarSkip - previewSkip, w + 2 * x);
+				holder->prepareCustomEmojiPaint(p, context, replyToText);
+				replyToText.draw(p, {
+					.position = QPoint(
+						x + st::msgReplyBarSkip + previewSkip,
+						y + st::msgReplyPadding.top() + st::msgServiceNameFont->height),
+					.availableWidth = w - st::msgReplyBarSkip - previewSkip,
+					.palette = &(inBubble
+						? stm->replyTextPalette
+						: st->imgReplyTextPalette()),
+					.spoiler = Ui::Text::DefaultSpoilerCache(),
+					.elisionLines = 1,
+				});
 				p.setTextPalette(stm->textPalette);
 			}
 		} else {
@@ -912,6 +920,18 @@ void HistoryMessageReplyMarkup::updateData(
 		HistoryMessageMarkupData &&markup) {
 	data = std::move(markup);
 	inlineKeyboard = nullptr;
+}
+
+bool HistoryMessageReplyMarkup::hiddenBy(Data::Media *media) const {
+	if (media && (data.flags & ReplyMarkupFlag::OnlyBuyButton)) {
+		if (const auto invoice = media->invoice()) {
+			if (invoice->extendedPreview
+				&& (!invoice->extendedMedia || !invoice->receiptMsgId)) {
+				return true;
+			}
+		}
+	}
+	return false;
 }
 
 HistoryMessageLogEntryOriginal::HistoryMessageLogEntryOriginal() = default;

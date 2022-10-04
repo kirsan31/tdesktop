@@ -52,6 +52,7 @@ class ScheduledMessages;
 class SendActionManager;
 class SponsoredMessages;
 class Reactions;
+class EmojiStatuses;
 class ChatFilters;
 class CloudThemes;
 class Streaming;
@@ -117,6 +118,9 @@ public:
 	}
 	[[nodiscard]] Reactions &reactions() const {
 		return *_reactions;
+	}
+	[[nodiscard]] EmojiStatuses &emojiStatuses() const {
+		return *_emojiStatuses;
 	}
 	[[nodiscard]] NotifySettings &notifySettings() const {
 		return *_notifySettings;
@@ -292,8 +296,7 @@ public:
 		int from,
 		int till);
 
-	void registerShownSpoiler(FullMsgId id);
-	void unregisterShownSpoiler(FullMsgId id);
+	void registerShownSpoiler(not_null<ViewElement*> view);
 	void hideShownSpoilers();
 
 	using MegagroupParticipant = std::tuple<
@@ -952,7 +955,7 @@ private:
 	rpl::event_stream<InviteToCall> _invitesToCalls;
 	base::flat_map<uint64, base::flat_set<not_null<UserData*>>> _invitedToCallUsers;
 
-	base::flat_set<not_null<HistoryItem*>> _shownSpoilers;
+	base::flat_set<not_null<ViewElement*>> _shownSpoilers;
 
 	History *_topPromoted = nullptr;
 
@@ -981,6 +984,7 @@ private:
 	const std::unique_ptr<Stickers> _stickers;
 	std::unique_ptr<SponsoredMessages> _sponsoredMessages;
 	const std::unique_ptr<Reactions> _reactions;
+	const std::unique_ptr<EmojiStatuses> _emojiStatuses;
 	const std::unique_ptr<NotifySettings> _notifySettings;
 	const std::unique_ptr<CustomEmojiManager> _customEmojiManager;
 

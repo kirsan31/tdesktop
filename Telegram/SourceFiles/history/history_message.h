@@ -168,6 +168,7 @@ public:
 	void applyEdition(HistoryMessageEdition &&edition) override;
 
 	void applyEdition(const MTPDmessageService &message) override;
+	void applyEdition(const MTPMessageExtendedMedia &media) override;
 	void updateSentContent(
 		const TextWithEntities &textWithEntities,
 		const MTPMessageMedia *media) override;
@@ -180,13 +181,10 @@ public:
 	[[nodiscard]] Storage::SharedMediaTypesMask sharedMediaTypes() const override;
 
 	void setText(const TextWithEntities &textWithEntities) override;
-	[[nodiscard]] Ui::Text::IsolatedEmoji isolatedEmoji() const override;
-	[[nodiscard]] Ui::Text::OnlyCustomEmoji onlyCustomEmoji() const override;
 	[[nodiscard]] TextWithEntities originalText() const override;
 	[[nodiscard]] auto originalTextWithLocalEntities() const
 		-> TextWithEntities override;
 	[[nodiscard]] TextForMimeData clipboardText() const override;
-	[[nodiscard]] bool textHasLinks() const override;
 
 	[[nodiscard]] int viewsCount() const override;
 	[[nodiscard]] int repliesCount() const override;
@@ -211,7 +209,6 @@ public:
 	[[nodiscard]] MsgId dependencyMsgId() const override {
 		return replyToId();
 	}
-	void hideSpoilers() override;
 
 	void applySentMessage(const MTPDmessage &data) override;
 	void applySentMessage(
@@ -226,16 +223,13 @@ public:
 	~HistoryMessage();
 
 private:
-	void setEmptyText();
+	void setTextValue(TextWithEntities text);
 	[[nodiscard]] bool isTooOldForEdit(TimeId now) const;
 	[[nodiscard]] bool isLegacyMessage() const {
 		return _flags & MessageFlag::Legacy;
 	}
 
 	[[nodiscard]] bool checkCommentsLinkedChat(ChannelId id) const;
-
-	void clearSpecialOnlyEmoji();
-	void checkSpecialOnlyEmoji();
 
 	// For an invoice button we replace the button text with a "Receipt" key.
 	// It should show the receipt for the payed invoice. Still let mobile apps do that.
@@ -270,7 +264,6 @@ private:
 	[[nodiscard]] bool generateLocalEntitiesByReply() const;
 	[[nodiscard]] TextWithEntities withLocalEntities(
 		const TextWithEntities &textWithEntities) const;
-	void reapplyText();
 
 	[[nodiscard]] bool checkRepliesPts(
 		const HistoryMessageRepliesData &data) const;

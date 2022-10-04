@@ -11,6 +11,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/ui_utility.h"
 #include "ui/chat/chat_theme.h"
 #include "ui/toasts/common_toasts.h"
+#include "ui/painter.h"
 #include "boxes/premium_preview_box.h"
 #include "data/data_peer.h"
 #include "data/data_user.h"
@@ -184,7 +185,7 @@ void SectionWidget::PaintBackground(
 		not_null<Ui::ChatTheme*> theme,
 		not_null<QWidget*> widget,
 		QRect clip) {
-	Painter p(widget);
+	auto p = QPainter(widget);
 
 	const auto &background = theme->background();
 	if (background.colorForFill) {
@@ -277,7 +278,7 @@ void SectionWidget::PaintBackground(
 
 void SectionWidget::paintEvent(QPaintEvent *e) {
 	if (_showAnimation) {
-		Painter p(this);
+		auto p = QPainter(this);
 		_showAnimation->paintContents(p);
 	}
 }
@@ -343,41 +344,23 @@ bool ShowSendPremiumError(
 	return true;
 }
 
-[[nodiscard]] auto ExtractDisabledReactions(
-	not_null<PeerData*> peer,
-	const std::vector<Data::Reaction> &list)
--> base::flat_map<QString, ReactionDisableType> {
-	auto result = base::flat_map<QString, ReactionDisableType>();
-	const auto type = peer->isBroadcast()
-		? ReactionDisableType::Channel
-		: ReactionDisableType::Group;
-	if (const auto allowed = Data::PeerAllowedReactions(peer)) {
-		for (const auto &reaction : list) {
-			if (reaction.premium && !allowed->contains(reaction.emoji)) {
-				result.emplace(reaction.emoji, type);
-			}
-		}
-	}
-	return result;
-}
-
 bool ShowReactPremiumError(
 		not_null<SessionController*> controller,
 		not_null<HistoryItem*> item,
-		const QString &emoji) {
-	if (item->chosenReaction() == emoji || controller->session().premium()) {
+		const Data::ReactionId &id) {
+	if (controller->session().premium()
+		|| ranges::contains(item->chosenReactions(), id)) {
 		return false;
 	}
 	const auto &list = controller->session().data().reactions().list(
 		Data::Reactions::Type::Active);
-	const auto i = ranges::find(list, emoji, &Data::Reaction::emoji);
+	const auto i = ranges::find(list, id, &Data::Reaction::id);
 	if (i == end(list) || !i->premium) {
-		return false;
+		if (!id.custom()) {
+			return false;
+		}
 	}
-	ShowPremiumPreviewBox(
-		controller,
-		PremiumPreview::Reactions,
-		ExtractDisabledReactions(item->history()->peer, list));
+	ShowPremiumPreviewBox(controller, PremiumPreview::InfiniteReactions);
 	return true;
 }
 

@@ -8,7 +8,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #pragma once
 
 #include "ui/effects/animations.h"
+#include "ui/effects/round_area_with_shadow.h"
 #include "ui/widgets/scroll_area.h"
+#include "data/data_message_reaction_id.h"
 #include "ui/chat/chat_style.h"
 
 namespace Ui {
@@ -72,10 +74,12 @@ public:
 	Button(
 		Fn<void(QRect)> update,
 		ButtonParameters parameters,
-		Fn<void()> hideMe);
+		Fn<void(bool)> toggleExpanded,
+		Fn<void()> hide);
 	~Button();
 
 	void applyParameters(ButtonParameters parameters);
+	void expandWithoutCustom();
 
 	using State = ButtonState;
 	void applyState(State state);
@@ -109,6 +113,8 @@ private:
 	void updateExpandDirection(const ButtonParameters &parameters);
 
 	const Fn<void(QRect)> _update;
+	const Fn<void(bool)> _toggleExpanded;
+
 	State _state = State::Hidden;
 	float64 _finalScale = 0.;
 	Ui::Animations::Simple _scaleAnimation;
@@ -130,6 +136,23 @@ private:
 
 };
 
+struct ChosenReaction {
+	FullMsgId context;
+	Data::ReactionId id;
+	std::shared_ptr<Lottie::Icon> icon;
+	QRect geometry;
+
+	explicit operator bool() const {
+		return context && !id.empty();
+	}
+};
+
+struct ExpandRequest {
+	FullMsgId context;
+	QRect button;
+	bool expanded = false;
+};
+
 using IconFactory = Fn<std::shared_ptr<Lottie::Icon>(
 	not_null<Data::DocumentMedia*>,
 	int)>;
@@ -143,15 +166,15 @@ public:
 		IconFactory iconFactory);
 	~Manager();
 
-	using AllowedSublist = std::optional<base::flat_set<QString>>;
+	using ReactionId = ::Data::ReactionId;
 
 	void applyList(
 		const std::vector<Data::Reaction> &list,
-		const QString &favorite,
+		const ReactionId &favorite,
 		bool premiumPossible);
-	void updateAllowedSublist(AllowedSublist filter);
+	void updateFilter(Data::ReactionsFilter filter);
 	void updateAllowSendingPremium(bool allow);
-	[[nodiscard]] const AllowedSublist &allowedSublist() const;
+	[[nodiscard]] const Data::ReactionsFilter &filter() const;
 	void updateUniqueLimit(not_null<HistoryItem*> item);
 
 	void updateButton(ButtonParameters parameters);
@@ -161,19 +184,14 @@ public:
 
 	[[nodiscard]] bool consumeWheelEvent(not_null<QWheelEvent*> e);
 
-	struct Chosen {
-		FullMsgId context;
-		QString emoji;
-		std::shared_ptr<Lottie::Icon> icon;
-		QRect geometry;
-
-		explicit operator bool() const {
-			return context && !emoji.isNull();
-		}
-	};
-	[[nodiscard]] rpl::producer<Chosen> chosen() const {
+	[[nodiscard]] rpl::producer<ChosenReaction> chosen() const {
 		return _chosen.events();
 	}
+	[[nodiscard]] auto expandSelectorRequests() const
+	-> rpl::producer<ExpandRequest> {
+		return _expandSelectorRequests.events();
+	}
+	void setExternalSelectorShown(rpl::producer<bool> shown);
 
 	[[nodiscard]] std::optional<QRect> lookupEffectArea(
 		FullMsgId itemId) const;
@@ -185,8 +203,8 @@ public:
 	bool showContextMenu(
 		QWidget *parent,
 		QContextMenuEvent *e,
-		const QString &favorite);
-	[[nodiscard]] rpl::producer<QString> faveRequests() const;
+		const ReactionId &favorite);
+	[[nodiscard]] rpl::producer<ReactionId> faveRequests() const;
 
 	[[nodiscard]] rpl::lifetime &lifetime() {
 		return _lifetime;
@@ -198,7 +216,7 @@ private:
 		std::shared_ptr<Lottie::Icon> icon;
 	};
 	struct ReactionIcons {
-		QString emoji;
+		ReactionId id;
 		not_null<DocumentData*> appearAnimation;
 		not_null<DocumentData*> selectAnimation;
 		std::shared_ptr<Lottie::Icon> appear;
@@ -211,18 +229,16 @@ private:
 		mutable bool selected = false;
 		mutable bool selectAnimated = false;
 	};
-	struct OverlayImage {
-		not_null<QImage*> cache;
-		QRect source;
-	};
-	static constexpr auto kFramesCount = 32;
+	static constexpr auto kFramesCount = Ui::RoundAreaWithShadow::kFramesCount;
 
 	void applyListFilters();
 	void showButtonDelayed();
 	void stealWheelEvents(not_null<QWidget*> target);
 
-	[[nodiscard]] Chosen lookupChosen(const QString &emoji) const;
+	[[nodiscard]] ChosenReaction lookupChosen(const ReactionId &id) const;
 	[[nodiscard]] bool overCurrentButton(QPoint position) const;
+	[[nodiscard]] bool applyUniqueLimit() const;
+	void toggleExpanded(bool expanded);
 
 	void removeStaleButtons();
 	void paintButton(
@@ -249,49 +265,12 @@ private:
 		not_null<Button*> button,
 		int scroll,
 		float64 expandRatio);
-	void overlayExpandedBorder(
-		Painter &p,
-		QSize size,
-		float64 expandRatio,
-		float64 scale,
-		const QColor &shadow);
-	void paintLongImage(
-		QPainter &p,
-		QRect geometry,
-		const QImage &image,
-		QRect source);
 
 	void resolveMainReactionIcon();
 	void setMainReactionIcon();
 	void clearAppearAnimations();
 	[[nodiscard]] QRect cacheRect(int frameIndex, int columnIndex) const;
-	[[nodiscard]] QRect overlayCacheRect(
-		int frameIndex,
-		int columnIndex) const;
-	QRect validateShadow(
-		int frameIndex,
-		float64 scale,
-		const QColor &shadow);
 	QRect validateEmoji(int frameIndex, float64 scale);
-	QRect validateFrame(
-		int frameIndex,
-		float64 scale,
-		const QColor &background,
-		const QColor &shadow);
-	OverlayImage validateOverlayMask(
-		int frameIndex,
-		QSize innerSize,
-		float64 radius,
-		float64 scale);
-	OverlayImage validateOverlayShadow(
-		int frameIndex,
-		QSize innerSize,
-		float64 radius,
-		float64 scale,
-		const QColor &shadow,
-		const OverlayImage &mask);
-	void setBackgroundColor(const QColor &background);
-	void setShadowColor(const QColor &shadow);
 
 	void setSelectedIcon(int index) const;
 	void clearStateForHidden(ReactionIcons &icon);
@@ -312,30 +291,21 @@ private:
 	void checkIcons();
 
 	const IconFactory _iconFactory;
-	rpl::event_stream<Chosen> _chosen;
+	rpl::event_stream<ChosenReaction> _chosen;
+	rpl::event_stream<ExpandRequest> _expandSelectorRequests;
 	std::vector<ReactionIcons> _list;
-	QString _favorite;
-	AllowedSublist _filter;
+	ReactionId _favorite;
+	Data::ReactionsFilter _filter;
 	QSize _outer;
 	QRect _inner;
-	QSize _overlayFull;
-	QImage _cacheBg;
-	QImage _cacheParts;
-	QImage _overlayCacheParts;
-	QImage _overlayMaskScaled;
-	QImage _overlayShadowScaled;
-	QImage _shadowBuffer;
+	Ui::RoundAreaWithShadow _cachedRound;
+	QImage _emojiParts;
 	QImage _expandedBuffer;
+	QColor _gradientBackground;
 	QImage _topGradient;
 	QImage _bottomGradient;
-	std::array<bool, kFramesCount> _validBg = { { false } };
-	std::array<bool, kFramesCount> _validShadow = { { false } };
 	std::array<bool, kFramesCount> _validEmoji = { { false } };
-	std::array<bool, kFramesCount> _validOverlayMask = { { false } };
-	std::array<bool, kFramesCount> _validOverlayShadow = { { false } };
-	QColor _background;
 	QColor _gradient;
-	QColor _shadow;
 
 	std::shared_ptr<Data::DocumentMedia> _mainReactionMedia;
 	std::shared_ptr<Lottie::Icon> _mainReactionIcon;
@@ -358,10 +328,10 @@ private:
 	std::unique_ptr<Button> _button;
 	std::vector<std::unique_ptr<Button>> _buttonHiding;
 	FullMsgId _buttonContext;
-	base::flat_set<QString> _buttonAlreadyList;
+	base::flat_set<ReactionId> _buttonAlreadyList;
 	int _buttonAlreadyNotMineCount = 0;
-	mutable base::flat_map<QString, ClickHandlerPtr> _reactionsLinks;
-	Fn<Fn<void()>(QString)> _createChooseCallback;
+	mutable base::flat_map<ReactionId, ClickHandlerPtr> _reactionsLinks;
+	Fn<Fn<void()>(ReactionId)> _createChooseCallback;
 
 	base::flat_map<FullMsgId, QRect> _activeEffectAreas;
 
@@ -369,7 +339,8 @@ private:
 	base::flat_map<FullMsgId, Ui::ReactionPaintInfo> _collectedEffects;
 
 	base::unique_qptr<Ui::PopupMenu> _menu;
-	rpl::event_stream<QString> _faveRequests;
+	rpl::event_stream<ReactionId> _faveRequests;
+	bool _externalSelectorShown = false;
 
 	rpl::lifetime _lifetime;
 
@@ -393,7 +364,7 @@ private:
 void SetupManagerList(
 	not_null<Manager*> manager,
 	not_null<Main::Session*> session,
-	rpl::producer<Manager::AllowedSublist> filter);
+	rpl::producer<Data::ReactionsFilter> filter);
 
 [[nodiscard]] std::shared_ptr<Lottie::Icon> DefaultIconFactory(
 	not_null<Data::DocumentMedia*> media,

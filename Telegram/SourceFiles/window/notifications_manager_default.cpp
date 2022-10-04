@@ -20,6 +20,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/text/text_utilities.h"
 #include "ui/emoji_config.h"
 #include "ui/empty_userpic.h"
+#include "ui/painter.h"
 #include "ui/ui_utility.h"
 #include "data/data_session.h"
 #include "data/stickers/data_custom_emoji.h"
@@ -82,7 +83,7 @@ Manager::Manager(System *system)
 Manager::QueuedNotification::QueuedNotification(NotificationFields &&fields)
 : history(fields.item->history())
 , peer(history->peer)
-, reaction(fields.reactionEmoji)
+, reaction(fields.reactionId)
 , author(!fields.reactionFrom
 	? fields.item->notificationHeader()
 	: (fields.reactionFrom != peer)
@@ -90,7 +91,7 @@ Manager::QueuedNotification::QueuedNotification(NotificationFields &&fields)
 	: QString())
 , item((fields.forwardedCount < 2) ? fields.item.get() : nullptr)
 , forwardedCount(fields.forwardedCount)
-, fromScheduled(reaction.isEmpty() && (fields.item->out() || peer->isSelf())
+, fromScheduled(reaction.empty() && (fields.item->out() || peer->isSelf())
 	&& fields.item->isFromScheduled()) {
 }
 
@@ -603,7 +604,7 @@ Notification::Notification(
 	not_null<PeerData*> peer,
 	const QString &author,
 	HistoryItem *item,
-	const QString &reaction,
+	const Data::ReactionId &reaction,
 	int forwardedCount,
 	bool fromScheduled,
 	QPoint startPosition,
@@ -780,16 +781,15 @@ void Notification::repaintText() {
 }
 
 void Notification::paintText(Painter &p) {
-	p.setTextPalette(st::dialogsTextPalette);
 	p.setPen(st::dialogsTextFg);
 	p.setFont(st::dialogsTextFont);
-	_textCache.drawElided(
-		p,
-		_textRect.left(),
-		_textRect.top(),
-		_textRect.width(),
-		_textRect.height() / st::dialogsTextFont->height);
-	p.restoreTextPalette();
+	_textCache.draw(p, {
+		.position = _textRect.topLeft(),
+		.availableWidth = _textRect.width(),
+		.palette = &st::dialogsTextPalette,
+		.spoiler = Ui::Text::DefaultSpoilerCache(),
+		.elisionLines = _textRect.height() / st::dialogsTextFont->height,
+	});
 }
 
 void Notification::updateNotifyDisplay() {
@@ -799,7 +799,7 @@ void Notification::updateNotifyDisplay() {
 
 	const auto options = manager()->getNotificationOptions(
 		_item,
-		(_reaction.isEmpty()
+		(_reaction.empty()
 			? ItemNotificationType::Message
 			: ItemNotificationType::Reaction));
 	_hideReplyButton = options.hideReplyButton;
@@ -852,7 +852,7 @@ void Notification::updateNotifyDisplay() {
 		}
 
 		const auto composeText = !options.hideMessageText
-			|| (!_reaction.isEmpty() && !options.hideNameAndPhoto);
+			|| (!_reaction.empty() && !options.hideNameAndPhoto);
 		if (composeText) {
 			auto old = base::take(_textCache);
 			_textCache = Ui::Text::String(itemWidth);
@@ -861,7 +861,7 @@ void Notification::updateNotifyDisplay() {
 				st::notifyItemTop + st::msgNameFont->height,
 				itemWidth,
 				2 * st::dialogsTextFont->height);
-			const auto text = !_reaction.isEmpty()
+			const auto text = !_reaction.empty()
 				? (!_author.isEmpty()
 					? Ui::Text::PlainLink(_author).append(' ')
 					: TextWithEntities()
@@ -902,7 +902,7 @@ void Notification::updateNotifyDisplay() {
 				context);
 			_textRect = r;
 			paintText(p);
-			if (!_textCache.hasCustomEmoji()) {
+			if (!_textCache.hasPersistentAnimation()) {
 				_textCache = Ui::Text::String();
 			}
 		} else {

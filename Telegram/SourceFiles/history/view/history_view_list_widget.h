@@ -26,6 +26,7 @@ namespace Ui {
 class PopupMenu;
 class ChatTheme;
 struct ChatPaintContext;
+enum class TouchScrollState;
 } // namespace Ui
 
 namespace Window {
@@ -36,10 +37,12 @@ namespace Data {
 struct Group;
 class CloudImageView;
 struct Reaction;
+struct AllowedReactions;
 } // namespace Data
 
 namespace HistoryView::Reactions {
 class Manager;
+struct ChosenReaction;
 struct ButtonParameters;
 } // namespace HistoryView::Reactions
 
@@ -84,7 +87,7 @@ using SelectedItems = std::vector<SelectedItem>;
 class ListDelegate {
 public:
 	virtual Context listContext() = 0;
-	virtual void listScrollTo(int top) = 0;
+	virtual bool listScrollTo(int top) = 0; // true if scroll was changed.
 	virtual void listCancelRequest() = 0;
 	virtual void listDeleteRequest() = 0;
 	virtual rpl::producer<Data::MessagesSlice> listSource(
@@ -118,7 +121,7 @@ public:
 	}
 	virtual CopyRestrictionType listSelectRestrictionType() = 0;
 	virtual auto listAllowedReactionsValue()
-		-> rpl::producer<std::optional<base::flat_set<QString>>> = 0;
+		-> rpl::producer<Data::AllowedReactions> = 0;
 	virtual void listShowPremiumToast(not_null<DocumentData*> document) = 0;
 };
 
@@ -222,6 +225,8 @@ public:
 	void selectItem(not_null<HistoryItem*> item);
 	void selectItemAsGroup(not_null<HistoryItem*> item);
 
+	void touchScrollUpdated(const QPoint &screenPos);
+
 	[[nodiscard]] bool loadedAtTopKnown() const;
 	[[nodiscard]] bool loadedAtTop() const;
 	[[nodiscard]] bool loadedAtBottomKnown() const;
@@ -285,7 +290,7 @@ public:
 	void elementShowTooltip(
 		const TextWithEntities &text,
 		Fn<void()> hiddenCallback) override;
-	bool elementIsGifPaused() override;
+	bool elementAnimationsPaused() override;
 	bool elementHideReply(not_null<const Element*> view) override;
 	bool elementShownUnread(not_null<const Element*> view) override;
 	void elementSendBotCommand(
@@ -301,8 +306,6 @@ public:
 		Element *replacing) override;
 	void elementCancelPremium(not_null<const Element*> view) override;
 
-	void elementShowSpoilerAnimation() override;
-
 	void setEmptyInfoWidget(base::unique_qptr<Ui::RpWidget> &&w);
 
 	~ListWidget();
@@ -312,6 +315,8 @@ protected:
 		int visibleTop,
 		int visibleBottom) override;
 
+	bool eventHook(QEvent *e) override; // calls touchEvent when necessary
+	void touchEvent(QTouchEvent *e);
 	void paintEvent(QPaintEvent *e) override;
 	void keyPressEvent(QKeyEvent *e) override;
 	void mousePressEvent(QMouseEvent *e) override;
@@ -379,6 +384,10 @@ private:
 	using ScrollTopState = ListMemento::ScrollTopState;
 	using PointState = HistoryView::PointState;
 	using CursorState = HistoryView::CursorState;
+	using ChosenReaction = HistoryView::Reactions::ChosenReaction;
+
+	void onTouchSelect();
+	void onTouchScrollTimer();
 
 	void refreshViewer();
 	void updateAroundPositionFromNearest(int nearestIndex);
@@ -414,6 +423,11 @@ private:
 	QPoint mapPointToItem(QPoint point, const Element *view) const;
 
 	void showContextMenu(QContextMenuEvent *e, bool showFromTouch = false);
+	void reactionChosen(ChosenReaction reaction);
+
+	void touchResetSpeed();
+	void touchUpdateSpeed();
+	void touchDeaccelerate(int32 elapsed);
 
 	[[nodiscard]] int findItemIndexByY(int y) const;
 	[[nodiscard]] not_null<Element*> findItemByY(int y) const;
@@ -583,6 +597,8 @@ private:
 	base::unique_qptr<Ui::RpWidget> _emptyInfo = nullptr;
 
 	std::unique_ptr<HistoryView::Reactions::Manager> _reactionsManager;
+	rpl::variable<HistoryItem*> _reactionsItem;
+	bool _useCornerReaction = false;
 
 	int _minHeight = 0;
 	int _visibleTop = 0;
@@ -641,11 +657,25 @@ private:
 
 	ElementHighlighter _highlighter;
 
-	Ui::Animations::Simple _spoilerOpacity;
+	// scroll by touch support (at least Windows Surface tablets)
+	bool _touchScroll = false;
+	bool _touchSelect = false;
+	bool _touchInProgress = false;
+	QPoint _touchStart, _touchPrevPos, _touchPos;
+	base::Timer _touchSelectTimer;
 
 	Ui::DraggingScrollManager _selectScroll;
 
 	InfoTooltip _topToast;
+
+	Ui::TouchScrollState _touchScrollState = Ui::TouchScrollState();
+	bool _touchPrevPosValid = false;
+	bool _touchWaitingAcceleration = false;
+	QPoint _touchSpeed;
+	crl::time _touchSpeedTime = 0;
+	crl::time _touchAccelerationTime = 0;
+	crl::time _touchTime = 0;
+	base::Timer _touchScrollTimer;
 
 	rpl::event_stream<FullMsgId> _requestedToEditMessage;
 	rpl::event_stream<FullMsgId> _requestedToReplyToMessage;

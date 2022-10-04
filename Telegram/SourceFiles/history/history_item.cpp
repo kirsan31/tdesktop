@@ -376,8 +376,8 @@ void HistoryItem::invalidateChatListEntry() {
 }
 
 void HistoryItem::customEmojiRepaint() {
-	if (!_customEmojiRepaintScheduled) {
-		_customEmojiRepaintScheduled = true;
+	if (!(_flags & MessageFlag::CustomEmojiRepainting)) {
+		_flags |= MessageFlag::CustomEmojiRepainting;
 		history()->owner().requestItemRepaint(this);
 	}
 }
@@ -883,15 +883,9 @@ bool HistoryItem::canReact() const {
 	return true;
 }
 
-void HistoryItem::addReaction(const QString &reaction) {
-	if (!_reactions) {
-		_reactions = std::make_unique<Data::MessageReactions>(this);
-	}
-	_reactions->add(reaction);
-	history()->owner().notifyItemDataChange(this);
-}
-
-void HistoryItem::toggleReaction(const QString &reaction) {
+void HistoryItem::toggleReaction(
+		const Data::ReactionId &reaction,
+		ReactionSource source) {
 	if (!_reactions) {
 		_reactions = std::make_unique<Data::MessageReactions>(this);
 		const auto canViewReactions = !isDiscussionPost()
@@ -899,16 +893,16 @@ void HistoryItem::toggleReaction(const QString &reaction) {
 		if (canViewReactions) {
 			_flags |= MessageFlag::CanViewReactions;
 		}
-		_reactions->add(reaction);
-	} else if (_reactions->chosen() == reaction) {
-		_reactions->remove();
+		_reactions->add(reaction, (source == ReactionSource::Selector));
+	} else if (ranges::contains(_reactions->chosen(), reaction)) {
+		_reactions->remove(reaction);
 		if (_reactions->empty()) {
 			_reactions = nullptr;
 			_flags &= ~MessageFlag::CanViewReactions;
 			history()->owner().notifyItemDataChange(this);
 		}
 	} else {
-		_reactions->add(reaction);
+		_reactions->add(reaction, (source == ReactionSource::Selector));
 	}
 	history()->owner().notifyItemDataChange(this);
 }
@@ -977,15 +971,17 @@ void HistoryItem::updateReactionsUnknown() {
 	_reactionsLastRefreshed = 1;
 }
 
-const base::flat_map<QString, int> &HistoryItem::reactions() const {
-	static const auto kEmpty = base::flat_map<QString, int>();
+const std::vector<Data::MessageReaction> &HistoryItem::reactions() const {
+	static const auto kEmpty = std::vector<Data::MessageReaction>();
 	return _reactions ? _reactions->list() : kEmpty;
 }
 
 auto HistoryItem::recentReactions() const
--> const base::flat_map<QString, std::vector<Data::RecentReaction>> & {
+-> const base::flat_map<
+		Data::ReactionId,
+		std::vector<Data::RecentReaction>> & {
 	static const auto kEmpty = base::flat_map<
-		QString,
+		Data::ReactionId,
 		std::vector<Data::RecentReaction>>();
 	return _reactions ? _reactions->recent() : kEmpty;
 }
@@ -996,25 +992,28 @@ bool HistoryItem::canViewReactions() const {
 		&& !_reactions->list().empty();
 }
 
-QString HistoryItem::chosenReaction() const {
-	return _reactions ? _reactions->chosen() : QString();
+std::vector<Data::ReactionId> HistoryItem::chosenReactions() const {
+	return _reactions
+		? _reactions->chosen()
+		: std::vector<Data::ReactionId>();
 }
 
-QString HistoryItem::lookupUnreadReaction(not_null<UserData*> from) const {
+Data::ReactionId HistoryItem::lookupUnreadReaction(
+		not_null<UserData*> from) const {
 	if (!_reactions) {
-		return QString();
+		return {};
 	}
 	const auto recent = _reactions->recent();
-	for (const auto &[emoji, list] : _reactions->recent()) {
+	for (const auto &[id, list] : _reactions->recent()) {
 		const auto i = ranges::find(
 			list,
 			from,
 			&Data::RecentReaction::peer);
 		if (i != end(list) && i->unread) {
-			return emoji;
+			return id;
 		}
 	}
-	return QString();
+	return {};
 }
 
 crl::time HistoryItem::lastReactionsRefreshTime() const {
@@ -1170,6 +1169,15 @@ bool HistoryItem::isRegular() const {
 	return isHistoryEntry() && !isLocal();
 }
 
+bool HistoryItem::hasExtendedMediaPreview() const {
+	if (const auto media = _media.get()) {
+		if (const auto invoice = media->invoice()) {
+			return (invoice->extendedPreview && !invoice->extendedMedia);
+		}
+	}
+	return false;
+}
+
 void HistoryItem::sendFailed() {
 	Expects(_flags & MessageFlag::BeingSent);
 	Expects(!(_flags & MessageFlag::SendingFailed));
@@ -1242,7 +1250,7 @@ MessageGroupId HistoryItem::groupId() const {
 }
 
 bool HistoryItem::isEmpty() const {
-	return _text.isEmpty()
+	return _text.empty()
 		&& !_media
 		&& !Has<HistoryMessageLogEntryOriginal>();
 }
@@ -1252,7 +1260,7 @@ TextWithEntities HistoryItem::notificationText() const {
 		if (_media && !isService()) {
 			return _media->notificationText();
 		} else if (!emptyText()) {
-			return _text.toTextWithEntities();
+			return _text;
 		}
 		return TextWithEntities();
 	}();
@@ -1263,14 +1271,17 @@ TextWithEntities HistoryItem::notificationText() const {
 		Ui::kQEllipsis);
 }
 
+const std::vector<ClickHandlerPtr> &HistoryItem::customTextLinks() const {
+	static const auto result = std::vector<ClickHandlerPtr>();
+	return result;
+}
+
 ItemPreview HistoryItem::toPreview(ToPreviewOptions options) const {
 	auto result = [&]() -> ItemPreview {
 		if (_media) {
 			return _media->toPreview(options);
 		} else if (!emptyText()) {
-			return {
-				.text = _text.toTextWithEntities()
-			};
+			return { .text = _text };
 		}
 		return {};
 	}();
@@ -1315,14 +1326,6 @@ TextWithEntities HistoryItem::inReplyText() const {
 		.hideSender = true,
 		.generateImages = false,
 	}).text;
-}
-
-Ui::Text::IsolatedEmoji HistoryItem::isolatedEmoji() const {
-	return {};
-}
-
-Ui::Text::OnlyCustomEmoji HistoryItem::onlyCustomEmoji() const {
-	return {};
 }
 
 HistoryItem::~HistoryItem() {
@@ -1462,14 +1465,14 @@ not_null<HistoryItem*> HistoryItem::Create(
 				data.vdate().v,
 				data.vfrom_id() ? peerFromMTP(*data.vfrom_id()) : PeerId(0));
 		} else if (checked == MediaCheckResult::Empty) {
-			const auto text = HistoryService::PreparedText{
+			auto text = HistoryService::PreparedText{
 				tr::lng_message_empty(tr::now, Ui::Text::WithEntities)
 			};
 			return history->makeServiceMessage(
 				id,
 				FlagsFromMTP(id, data.vflags().v, localFlags),
 				data.vdate().v,
-				text,
+				std::move(text),
 				data.vfrom_id() ? peerFromMTP(*data.vfrom_id()) : PeerId(0));
 		} else if (checked == MediaCheckResult::HasTimeToLive) {
 			return history->makeServiceMessage(id, data, localFlags);
@@ -1481,9 +1484,12 @@ not_null<HistoryItem*> HistoryItem::Create(
 		}
 		return history->makeServiceMessage(id, data, localFlags);
 	}, [&](const MTPDmessageEmpty &data) -> HistoryItem* {
-		const auto text = HistoryService::PreparedText{
-			tr::lng_message_empty(tr::now, Ui::Text::WithEntities)
-		};
-		return history->makeServiceMessage(id, localFlags, TimeId(0), text);
+		return history->makeServiceMessage(
+			id,
+			localFlags,
+			TimeId(0),
+			HistoryService::PreparedText{ tr::lng_message_empty(
+				tr::now,
+				Ui::Text::WithEntities) });
 	});
 }

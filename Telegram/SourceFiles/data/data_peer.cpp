@@ -37,6 +37,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/empty_userpic.h"
 #include "ui/text/text_options.h"
 #include "ui/toasts/common_toasts.h"
+#include "ui/painter.h"
 #include "ui/ui_utility.h"
 #include "history/history.h"
 #include "history/view/history_view_element.h"
@@ -107,6 +108,39 @@ bool ApplyBotMenuButton(
 	info->botMenuButtonUrl = url;
 
 	return changed;
+}
+
+bool operator<(
+		const AllowedReactions &a,
+		const AllowedReactions &b) {
+	return (a.type < b.type) || ((a.type == b.type) && (a.some < b.some));
+}
+
+bool operator==(
+		const AllowedReactions &a,
+		const AllowedReactions &b) {
+	return (a.type == b.type) && (a.some == b.some);
+}
+
+AllowedReactions Parse(const MTPChatReactions &value) {
+	return value.match([&](const MTPDchatReactionsNone &) {
+		return AllowedReactions();
+	}, [&](const MTPDchatReactionsAll &data) {
+		return AllowedReactions{
+			.type = (data.is_allow_custom()
+				? AllowedReactionsType::All
+				: AllowedReactionsType::Default),
+		};
+	}, [&](const MTPDchatReactionsSome &data) {
+		return AllowedReactions{
+			.some = ranges::views::all(
+				data.vreactions().v
+			) | ranges::views::transform(
+				ReactionFromMTP
+			) | ranges::to_vector,
+			.type = AllowedReactionsType::Some,
+		};
+	});
 }
 
 } // namespace Data

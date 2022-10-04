@@ -18,6 +18,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/wrap/fade_wrap.h"
 #include "ui/effects/radial_animation.h"
 #include "ui/controls/download_bar.h"
+#include "ui/painter.h"
 #include "ui/ui_utility.h"
 #include "lang/lang_keys.h"
 #include "mainwindow.h"
@@ -48,6 +49,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_histories.h"
 #include "data/data_changes.h"
 #include "data/data_download_manager.h"
+#include "data/data_chat_filters.h"
 #include "info/downloads/info_downloads_widget.h"
 #include "info/info_memento.h"
 #include "facades.h"
@@ -136,7 +138,7 @@ void Widget::BottomButton::onStateChanged(State was, StateChangeSource source) {
 }
 
 void Widget::BottomButton::paintEvent(QPaintEvent *e) {
-	Painter p(this);
+	auto p = QPainter(this);
 
 	const auto over = isOver() && !isDisabled();
 
@@ -854,8 +856,13 @@ void Widget::escape() {
 	} else if (!cancelSearch()) {
 		if (controller()->activeChatEntryCurrent().key) {
 			controller()->content()->dialogsCancelled();
-		} else if (controller()->activeChatsFilterCurrent()) {
-			controller()->setActiveChatsFilter(FilterId(0));
+		} else {
+			const auto filters = &session().data().chatsFilters();
+			const auto &list = filters->list();
+			const auto first = list.empty() ? FilterId() : list.front().id();
+			if (controller()->activeChatsFilterCurrent() != first) {
+				controller()->setActiveChatsFilter(first);
+			}
 		}
 	} else if (!_searchInChat && !controller()->selectingPeer()) {
 		if (controller()->activeChatEntryCurrent().key) {

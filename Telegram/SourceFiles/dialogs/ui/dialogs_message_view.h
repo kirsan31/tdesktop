@@ -40,20 +40,25 @@ public:
 	void itemInvalidated(not_null<const HistoryItem*> item);
 	[[nodiscard]] bool dependsOn(not_null<const HistoryItem*> item) const;
 
+	[[nodiscard]] bool prepared(not_null<const HistoryItem*> item) const;
+	void prepare(
+		not_null<const HistoryItem*> item,
+		Fn<void()> customEmojiRepaint,
+		ToPreviewOptions options);
 	void paint(
 		Painter &p,
-		not_null<const HistoryItem*> item,
 		const QRect &geometry,
 		bool active,
 		bool selected,
-		ToPreviewOptions options) const;
+		crl::time now,
+		bool paused) const;
 
 private:
 	struct LoadingContext;
 
 	mutable const HistoryItem *_textCachedFor = nullptr;
-	mutable Ui::Text::String _senderCache;
-	mutable Ui::Text::String _textCache;
+	mutable Text::String _senderCache;
+	mutable Text::String _textCache;
 	mutable std::vector<ItemPreviewImage> _imagesCache;
 	mutable std::unique_ptr<LoadingContext> _loadingContext;
 

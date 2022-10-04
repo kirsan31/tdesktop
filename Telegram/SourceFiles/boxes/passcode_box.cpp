@@ -26,6 +26,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/widgets/sent_code_field.h"
 #include "ui/wrap/vertical_layout.h"
 #include "ui/wrap/fade_wrap.h"
+#include "ui/painter.h"
 #include "passport/passport_encryption.h"
 #include "passport/passport_panel_edit_contact.h"
 #include "settings/settings_privacy_security.h"
@@ -1297,6 +1298,7 @@ void RecoverBox::proceedToChange(const QString &code) {
 	// like if (_cloudFields.turningOff) { just RecoverPassword else Check }
 	fields.mtp.curRequest = {};
 	fields.hasPassword = false;
+	fields.customCheckCallback = nullptr;
 	auto box = Box<PasscodeBox>(_session, fields);
 
 	box->boxClosing(

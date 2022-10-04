@@ -17,6 +17,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/text/text_utilities.h"
 #include "ui/cached_round_corners.h"
 #include "ui/chat/chat_style.h"
+#include "ui/painter.h"
 #include "core/ui_integration.h"
 #include "data/data_session.h"
 #include "data/data_game.h"
@@ -48,7 +49,7 @@ Game::Game(
 }
 
 QSize Game::countOptimalSize() {
-	auto lineHeight = unitedLineHeight();
+	auto lineHeight = UnitedLineHeight();
 
 	const auto item = _parent->data();
 	if (!_openl && item->isRegular()) {
@@ -149,7 +150,7 @@ QSize Game::countCurrentSize(int newWidth) {
 
 	// enable any count of lines in game description / message
 	auto linesMax = 4096;
-	auto lineHeight = unitedLineHeight();
+	auto lineHeight = UnitedLineHeight();
 	auto newHeight = 0;
 	if (_title.isEmpty()) {
 		_titleLines = 0;
@@ -225,7 +226,7 @@ void Game::draw(Painter &p, const PaintContext &context) const {
 	QRect bar(style::rtlrect(st::msgPadding.left(), tshift, st::webPageBar, height() - tshift - bshift, width()));
 	p.fillRect(bar, barfg);
 
-	auto lineHeight = unitedLineHeight();
+	auto lineHeight = UnitedLineHeight();
 	if (_titleLines) {
 		p.setPen(semibold);
 		p.setTextPalette(stm->semiboldPalette);
@@ -245,8 +246,18 @@ void Game::draw(Painter &p, const PaintContext &context) const {
 		if (_description.hasSkipBlock()) {
 			endskip = _parent->skipBlockWidth();
 		}
-		_parent->prepareCustomEmojiPaint(p, _description);
-		_description.drawLeftElided(p, padding.left(), tshift, paintw, width(), _descriptionLines, style::al_left, 0, -1, endskip, false, toDescriptionSelection(context.selection));
+		_parent->prepareCustomEmojiPaint(p, context, _description);
+		_description.draw(p, {
+			.position = { padding.left(), tshift },
+			.outerWidth = width(),
+			.availableWidth = paintw,
+			.spoiler = Ui::Text::DefaultSpoilerCache(),
+			.now = context.now,
+			.paused = context.paused,
+			.selection = toDescriptionSelection(context.selection),
+			.elisionLines = _descriptionLines,
+			.elisionRemoveFromEnd = endskip,
+		});
 		tshift += _descriptionLines * lineHeight;
 	}
 	if (_attach) {
@@ -301,7 +312,7 @@ TextState Game::textState(QPoint point, StateRequest request) const {
 
 	auto inThumb = false;
 	auto symbolAdd = 0;
-	auto lineHeight = unitedLineHeight();
+	auto lineHeight = UnitedLineHeight();
 	if (_titleLines) {
 		if (point.y() >= tshift && point.y() < tshift + _titleLines * lineHeight) {
 			Ui::Text::StateRequestElided titleRequest = request.forText();
@@ -453,7 +464,7 @@ void Game::unloadHeavyPart() {
 	if (_attach) {
 		_attach->unloadHeavyPart();
 	}
-	_description.unloadCustomEmoji();
+	_description.unloadPersistentAnimation();
 }
 
 Game::~Game() {

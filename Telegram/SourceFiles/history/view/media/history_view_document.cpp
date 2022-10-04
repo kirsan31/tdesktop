@@ -25,6 +25,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/chat/message_bubble.h"
 #include "ui/chat/chat_style.h"
 #include "ui/cached_round_corners.h"
+#include "ui/painter.h"
 #include "ui/ui_utility.h"
 #include "data/data_session.h"
 #include "data/data_document.h"
@@ -140,6 +141,28 @@ void PaintWaveform(
 
 		maxValue = (sum < (barCount + 1) / 2) ? 0 : value;
 	}
+}
+
+[[nodiscard]] int MaxStatusWidth(not_null<DocumentData*> document) {
+	using namespace Ui;
+	auto result = 0;
+	const auto add = [&](const QString &text) {
+		accumulate_max(result, st::normalFont->width(text));
+	};
+	add(FormatDownloadText(document->size, document->size));
+	const auto duration = document->getDuration();
+	if (const auto song = document->song()) {
+		add(FormatPlayedText(duration, duration));
+		add(FormatDurationAndSizeText(duration, document->size));
+	} else if (const auto voice = document->voice()) {
+		add(FormatPlayedText(duration, duration));
+		add(FormatDurationAndSizeText(duration, document->size));
+	} else if (document->isVideoFile()) {
+		add(FormatDurationAndSizeText(duration, document->size));
+	} else {
+		add(FormatSizeText(document->size));
+	}
+	return result;
 }
 
 } // namespace
@@ -317,10 +340,10 @@ QSize Document::countOptimalSize() {
 	const auto tleft = st.padding.left() + st.thumbSize + st.padding.right();
 	const auto tright = st.padding.left();
 	if (thumbed) {
-		accumulate_max(maxWidth, tleft + documentMaxStatusWidth(_data) + tright);
+		accumulate_max(maxWidth, tleft + MaxStatusWidth(_data) + tright);
 	} else {
 		auto unread = _data->isVoiceMessage() ? (st::mediaUnreadSkip + st::mediaUnreadSize) : 0;
-		accumulate_max(maxWidth, tleft + documentMaxStatusWidth(_data) + unread + _parent->skipBlockWidth() + st::msgPadding.right());
+		accumulate_max(maxWidth, tleft + MaxStatusWidth(_data) + unread + _parent->skipBlockWidth() + st::msgPadding.right());
 	}
 
 	if (auto named = Get<HistoryDocumentNamed>()) {
@@ -560,7 +583,7 @@ void Document::draw(
 			? &stm->historyFileCancel
 			: nullptr;
 
-		const auto paintContent = [&](Painter &q) {
+		const auto paintContent = [&](QPainter &q) {
 			if (previous && radialOpacity > 0. && radialOpacity < 1.) {
 				PaintInterpolatedIcon(q, icon, *previous, radialOpacity, inner);
 			} else {
@@ -674,8 +697,16 @@ void Document::draw(
 	}
 	if (const auto captioned = Get<HistoryDocumentCaptioned>()) {
 		p.setPen(stm->historyTextFg);
-		_parent->prepareCustomEmojiPaint(p, captioned->_caption);
-		captioned->_caption.draw(p, st::msgPadding.left(), captiontop, captionw, style::al_left, 0, -1, selection);
+		_parent->prepareCustomEmojiPaint(p, context, captioned->_caption);
+		captioned->_caption.draw(p, {
+			.position = { st::msgPadding.left(), captiontop },
+			.availableWidth = captionw,
+			.palette = &stm->textPalette,
+			.spoiler = Ui::Text::DefaultSpoilerCache(),
+			.now = context.now,
+			.paused = context.paused,
+			.selection = selection,
+		});
 	}
 }
 
@@ -686,7 +717,7 @@ bool Document::hasHeavyPart() const {
 void Document::unloadHeavyPart() {
 	_dataMedia = nullptr;
 	if (const auto captioned = Get<HistoryDocumentCaptioned>()) {
-		captioned->_caption.unloadCustomEmoji();
+		captioned->_caption.unloadPersistentAnimation();
 	}
 }
 
@@ -742,7 +773,7 @@ void Document::drawCornerDownload(
 	const auto &icon = _data->loading()
 		? stm->historyAudioCancel
 		: stm->historyAudioDownload;
-	const auto paintContent = [&](Painter &q) {
+	const auto paintContent = [&](QPainter &q) {
 		if (bubblePattern) {
 			auto hq = PainterHighQualityEnabler(q);
 			auto pen = stm->msgBg->p;

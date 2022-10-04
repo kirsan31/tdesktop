@@ -15,14 +15,6 @@ class LocationPoint;
 
 namespace Platform {
 
-bool InFlatpak();
-bool InSnap();
-
-QString AppRuntimeDirectory();
-QString GetIconName();
-
-void InstallLauncher(bool force = false);
-
 inline void IgnoreApplicationActivationRightNow() {
 }
 
@@ -47,8 +39,6 @@ void psSendToMenu(bool send, bool silent = false);
 
 int psCleanup();
 int psFixPrevious();
-
-void psNewVersion();
 
 inline QByteArray psDownloadPathBookmark(const QString &path) {
 	return QByteArray();

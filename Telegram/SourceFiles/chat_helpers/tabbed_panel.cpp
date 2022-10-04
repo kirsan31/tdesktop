@@ -133,7 +133,19 @@ void TabbedPanel::moveBottomRight(int bottom, int right) {
 	_right = right;
 	// If the panel is already shown, update the position.
 	if (!isHidden() && isNew) {
-		moveByBottom();
+		moveHorizontally();
+	} else {
+		updateContentHeight();
+	}
+}
+
+void TabbedPanel::moveTopRight(int top, int right) {
+	const auto isNew = (_top != top || _right != right);
+	_top = top;
+	_right = right;
+	// If the panel is already shown, update the position.
+	if (!isHidden() && isNew) {
+		moveHorizontally();
 	} else {
 		updateContentHeight();
 	}
@@ -149,16 +161,26 @@ void TabbedPanel::setDesiredHeightValues(
 	updateContentHeight();
 }
 
+void TabbedPanel::setDropDown(bool dropDown) {
+	selector()->setDropDown(dropDown);
+	_dropDown = dropDown;
+}
+
 void TabbedPanel::updateContentHeight() {
 	auto addedHeight = innerPadding().top() + innerPadding().bottom();
 	auto marginsHeight = _selector->marginTop() + _selector->marginBottom();
-	auto availableHeight = _bottom - marginsHeight;
-	auto wantedContentHeight = qRound(_heightRatio * availableHeight) - addedHeight;
+	auto availableHeight = _dropDown
+		? (parentWidget()->height() - _top - marginsHeight)
+		: (_bottom - marginsHeight);
+	auto wantedContentHeight = qRound(_heightRatio * availableHeight)
+		- addedHeight;
 	auto contentHeight = marginsHeight + std::clamp(
 		wantedContentHeight,
 		_minContentHeight,
 		_maxContentHeight);
-	auto resultTop = _bottom - addedHeight - contentHeight;
+	auto resultTop = _dropDown
+		? _top
+		: (_bottom - addedHeight - contentHeight);
 	if (contentHeight == _contentHeight) {
 		move(x(), resultTop);
 		return;
@@ -175,7 +197,7 @@ void TabbedPanel::updateContentHeight() {
 }
 
 void TabbedPanel::paintEvent(QPaintEvent *e) {
-	Painter p(this);
+	auto p = QPainter(this);
 
 	// This call can finish _a_show animation and destroy _showAnimation.
 	auto opacityAnimating = _a_opacity.animating();
@@ -205,8 +227,12 @@ void TabbedPanel::paintEvent(QPaintEvent *e) {
 	}
 }
 
-void TabbedPanel::moveByBottom() {
-	const auto right = std::max(parentWidget()->width() - _right, 0);
+void TabbedPanel::moveHorizontally() {
+	const auto padding = innerPadding();
+	const auto width = innerRect().width() + padding.left() + padding.right();
+	const auto right = std::max(
+		parentWidget()->width() - std::max(_right, width),
+		0);
 	moveToRight(right, y());
 	updateContentHeight();
 }
@@ -320,7 +346,7 @@ void TabbedPanel::startShowAnimation() {
 	if (!_a_show.animating()) {
 		auto image = grabForAnimation();
 
-		_showAnimation = std::make_unique<Ui::PanelAnimation>(st::emojiPanAnimation, Ui::PanelAnimation::Origin::BottomRight);
+		_showAnimation = std::make_unique<Ui::PanelAnimation>(st::emojiPanAnimation, _dropDown ? Ui::PanelAnimation::Origin::TopRight : Ui::PanelAnimation::Origin::BottomRight);
 		auto inner = rect().marginsRemoved(st::emojiPanMargins);
 		_showAnimation->setFinalImage(std::move(image), QRect(inner.topLeft() * cIntRetinaFactor(), inner.size() * cIntRetinaFactor()));
 		_showAnimation->setCornerMasks(Images::CornersMask(ImageRoundRadius::Small));
@@ -405,7 +431,7 @@ void TabbedPanel::showStarted() {
 	}
 	if (isHidden()) {
 		_selector->showStarted();
-		moveByBottom();
+		moveHorizontally();
 		raise();
 		show();
 		startShowAnimation();
@@ -427,7 +453,7 @@ bool TabbedPanel::eventFilter(QObject *obj, QEvent *e) {
 
 void TabbedPanel::showFromSelector() {
 	if (isHidden()) {
-		moveByBottom();
+		moveHorizontally();
 		startShowAnimation();
 		show();
 	}

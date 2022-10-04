@@ -77,7 +77,7 @@ public:
 
 	// ListDelegate interface.
 	Context listContext() override;
-	void listScrollTo(int top) override;
+	bool listScrollTo(int top) override;
 	void listCancelRequest() override;
 	void listDeleteRequest() override;
 	rpl::producer<Data::MessagesSlice> listSource(
@@ -106,7 +106,7 @@ public:
 	CopyRestrictionType listCopyRestrictionType(HistoryItem *item) override;
 	CopyRestrictionType listSelectRestrictionType() override;
 	auto listAllowedReactionsValue()
-		-> rpl::producer<std::optional<base::flat_set<QString>>> override;
+		-> rpl::producer<Data::AllowedReactions> override;
 	void listShowPremiumToast(not_null<DocumentData*> document) override;
 
 protected:

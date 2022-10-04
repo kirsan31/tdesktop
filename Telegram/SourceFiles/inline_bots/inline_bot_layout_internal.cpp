@@ -28,6 +28,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/image/image.h"
 #include "ui/text/format_values.h"
 #include "ui/cached_round_corners.h"
+#include "ui/painter.h"
 #include "main/main_session.h"
 #include "lang/lang_keys.h"
 #include "styles/style_overview.h"
@@ -1183,7 +1184,7 @@ void Contact::initDimensions() {
 }
 
 void Contact::paint(Painter &p, const QRect &clip, const PaintContext *context) const {
-	int32 left = st::emojiPanHeaderLeft - st::inlineResultsLeft;
+	int32 left = st::defaultEmojiPan.headerLeft - st::inlineResultsLeft;
 
 	left = st::inlineFileSize + st::inlineThumbSkip;
 	prepareThumbnail(st::inlineFileSize, st::inlineFileSize);
@@ -1272,7 +1273,7 @@ Article::Article(
 
 void Article::initDimensions() {
 	_maxw = st::emojiPanWidth - st::emojiScroll.width - st::inlineResultsLeft;
-	int32 textWidth = _maxw - (_withThumb ? (st::inlineThumbSize + st::inlineThumbSkip) : (st::emojiPanHeaderLeft - st::inlineResultsLeft));
+	int32 textWidth = _maxw - (_withThumb ? (st::inlineThumbSize + st::inlineThumbSkip) : (st::defaultEmojiPan.headerLeft - st::inlineResultsLeft));
 	TextParseOptions titleOpts = { 0, textWidth, 2 * st::semiboldFont->height, Qt::LayoutDirectionAuto };
 	_title.setText(st::semiboldTextStyle, TextUtilities::SingleLine(_result->getLayoutTitle()), titleOpts);
 	int32 titleHeight = qMin(_title.countHeight(textWidth), 2 * st::semiboldFont->height);
@@ -1294,7 +1295,7 @@ int32 Article::resizeGetHeight(int32 width) {
 	if (_url) {
 		_urlText = getResultUrl();
 		_urlWidth = st::normalFont->width(_urlText);
-		int32 textWidth = _width - (_withThumb ? (st::inlineThumbSize + st::inlineThumbSkip) : (st::emojiPanHeaderLeft - st::inlineResultsLeft));
+		int32 textWidth = _width - (_withThumb ? (st::inlineThumbSize + st::inlineThumbSkip) : (st::defaultEmojiPan.headerLeft - st::inlineResultsLeft));
 		if (_urlWidth > textWidth) {
 			_urlText = st::normalFont->elided(_urlText, textWidth);
 			_urlWidth = st::normalFont->width(_urlText);
@@ -1305,7 +1306,7 @@ int32 Article::resizeGetHeight(int32 width) {
 }
 
 void Article::paint(Painter &p, const QRect &clip, const PaintContext *context) const {
-	int32 left = st::emojiPanHeaderLeft - st::inlineResultsLeft;
+	int32 left = st::defaultEmojiPan.headerLeft - st::inlineResultsLeft;
 	if (_withThumb) {
 		left = st::inlineThumbSize + st::inlineThumbSkip;
 		prepareThumbnail(st::inlineThumbSize, st::inlineThumbSize);
@@ -1470,7 +1471,7 @@ void Game::setPosition(int32 position) {
 }
 
 void Game::paint(Painter &p, const QRect &clip, const PaintContext *context) const {
-	int32 left = st::emojiPanHeaderLeft - st::inlineResultsLeft;
+	int32 left = st::defaultEmojiPan.headerLeft - st::inlineResultsLeft;
 
 	left = st::inlineThumbSize + st::inlineThumbSkip;
 	auto rthumb = style::rtlrect(0, st::inlineRowMargin, st::inlineThumbSize, st::inlineThumbSize, _width);

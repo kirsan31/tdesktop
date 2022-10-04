@@ -24,6 +24,27 @@ constexpr auto kMinYScale = 0.2;
 
 } // namespace
 
+std::vector<TimeId> DefaultTimePickerValues() {
+	return {
+		(60 * 15),
+		(60 * 30),
+		(3600 * 1),
+		(3600 * 2),
+		(3600 * 3),
+		(3600 * 4),
+		(3600 * 8),
+		(3600 * 12),
+		(86400 * 1),
+		(86400 * 2),
+		(86400 * 3),
+		(86400 * 7 * 1),
+		(86400 * 7 * 2),
+		(86400 * 31 * 1),
+		(86400 * 31 * 2),
+		(86400 * 31 * 3),
+	};
+}
+
 Fn<TimeId()> TimePickerBox(
 		not_null<GenericBox*> box,
 		std::vector<TimeId> values,
@@ -61,7 +82,7 @@ Fn<TimeId()> TimePickerBox(
 	}();
 	const auto itemHeight = st::historyMessagesTTLPickerItemHeight;
 	auto paintCallback = [=](
-			Painter &p,
+			QPainter &p,
 			int index,
 			float64 y,
 			float64 distanceFromCenter,
@@ -97,7 +118,7 @@ Fn<TimeId()> TimePickerBox(
 
 	content->paintRequest(
 	) | rpl::start_with_next([=](const QRect &r) {
-		Painter p(content);
+		auto p = QPainter(content);
 
 		p.fillRect(r, Qt::transparent);
 

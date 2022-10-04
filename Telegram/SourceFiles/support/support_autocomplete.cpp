@@ -13,6 +13,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/widgets/input_fields.h"
 #include "ui/widgets/buttons.h"
 #include "ui/wrap/padding_wrap.h"
+#include "ui/painter.h"
 #include "support/support_templates.h"
 #include "support/support_common.h"
 #include "history/view/history_view_message.h"
@@ -570,7 +571,8 @@ void ConfirmContactBox::paintEvent(QPaintEvent *e) {
 	auto context = theme->preparePaintContext(
 		_chatStyle.get(),
 		rect(),
-		rect());
+		rect(),
+		controller()->isGifPausedAtLeastFor(Window::GifPauseReason::Layer));
 	p.translate(st::boxPadding.left(), 0);
 	if (_comment) {
 		context.outbg = _comment->hasOutLayout();

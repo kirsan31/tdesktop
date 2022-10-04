@@ -36,6 +36,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/cached_round_corners.h"
 #include "ui/text/format_values.h" // Ui::FormatPhone
 #include "ui/text/text_utilities.h"
+#include "ui/painter.h"
 #include "window/section_widget.h"
 #include "window/window_controller.h"
 #include "window/window_session_controller.h"
@@ -197,7 +198,7 @@ AdminLog::OwnedItem GenerateForwardedItem(
 
 struct ForwardedTooltip {
 	QRect geometry;
-	Fn<void(Painter&)> paint;
+	Fn<void(QPainter&)> paint;
 };
 [[nodiscard]] ForwardedTooltip PrepareForwardedTooltip(
 		not_null<HistoryView::Element*> view,
@@ -276,7 +277,7 @@ struct ForwardedTooltip {
 		{ line, line, line, line + arrowSize });
 	const auto origin = full.topLeft();
 
-	const auto paint = [=](Painter &p) {
+	const auto paint = [=](QPainter &p) {
 		p.translate(-origin);
 
 		Ui::FillRoundRect(
@@ -498,17 +499,11 @@ auto PhoneNumberPrivacyController::warning() const
 
 void PhoneNumberPrivacyController::prepareWarningLabel(
 		not_null<Ui::FlatLabel*> warning) const {
-	warning->setClickHandlerFilter([=](
-			const ClickHandlerPtr &link,
-			Qt::MouseButton button) {
-		if (button == Qt::LeftButton) {
-			QGuiApplication::clipboard()->setText(PublicLinkByPhone(
-				_controller->session().user()));
-			_controller->window().showToast(
-				tr::lng_username_copied(tr::now));
-			return false;
-		}
-		return true;
+	warning->overrideLinkClickHandler([=] {
+		QGuiApplication::clipboard()->setText(PublicLinkByPhone(
+			_controller->session().user()));
+		_controller->window().showToast(
+			tr::lng_username_copied(tr::now));
 	});
 }
 
@@ -924,7 +919,7 @@ object_ptr<Ui::RpWidget> ForwardsPrivacyController::setupAboveWidget(
 	state->tooltip->paintRequest(
 	) | rpl::start_with_next([=] {
 		if (state->info.paint) {
-			auto p = Painter(state->tooltip.get());
+			auto p = QPainter(state->tooltip.get());
 			state->info.paint(p);
 		}
 	}, state->tooltip->lifetime());
@@ -996,7 +991,9 @@ object_ptr<Ui::RpWidget> ForwardsPrivacyController::setupAboveWidget(
 		auto context = theme->preparePaintContext(
 			_chatStyle.get(),
 			widget->rect(),
-			widget->rect());
+			widget->rect(),
+			_controller->isGifPausedAtLeastFor(
+				Window::GifPauseReason::Layer));
 		p.translate(padding / 2, padding + view->marginBottom());
 		context.outbg = view->hasOutLayout();
 		view->draw(p, context);

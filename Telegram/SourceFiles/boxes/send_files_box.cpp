@@ -26,6 +26,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/mime_type.h"
 #include "base/event_filter.h"
 #include "boxes/premium_limits_box.h"
+#include "boxes/premium_preview_box.h"
 #include "ui/boxes/confirm_box.h"
 #include "ui/effects/animations.h"
 #include "ui/effects/scroll_content_shadow.h"
@@ -44,10 +45,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/text/text_options.h"
 #include "ui/toast/toast.h"
 #include "ui/controls/emoji_button.h"
+#include "ui/painter.h"
 #include "lottie/lottie_single_player.h"
 #include "data/data_document.h"
 #include "data/data_user.h"
 #include "data/data_premium_limits.h"
+#include "data/stickers/data_stickers.h"
 #include "data/stickers/data_custom_emoji.h"
 #include "media/clip/media_clip_reader.h"
 #include "api/api_common.h"
@@ -744,14 +747,23 @@ void SendFilesBox::setupEmojiPanel() {
 	_emojiPanel->selector()->setAllowEmojiWithoutPremium(
 		_allowEmojiWithoutPremium);
 	_emojiPanel->selector()->emojiChosen(
-	) | rpl::start_with_next([=](EmojiPtr emoji) {
-		Ui::InsertEmojiAtCursor(_caption->textCursor(), emoji);
+	) | rpl::start_with_next([=](ChatHelpers::EmojiChosen data) {
+		Ui::InsertEmojiAtCursor(_caption->textCursor(), data.emoji);
 	}, lifetime());
 	_emojiPanel->selector()->customEmojiChosen(
-	) | rpl::start_with_next([=](Selector::FileChosen data) {
-		Data::InsertCustomEmoji(_caption.data(), data.document);
+	) | rpl::start_with_next([=](ChatHelpers::FileChosen data) {
+		const auto info = data.document->sticker();
+		if (info
+			&& info->setType == Data::StickersType::Emoji
+			&& !_controller->session().premium()
+			&& !_allowEmojiWithoutPremium) {
+			ShowPremiumPreviewBox(
+				_controller,
+				PremiumPreview::AnimatedEmoji);
+		} else {
+			Data::InsertCustomEmoji(_caption.data(), data.document);
+		}
 	}, lifetime());
-	_emojiPanel->selector()->showPromoForPremiumEmoji();
 
 	const auto filterCallback = [=](not_null<QEvent*> event) {
 		emojiFilterForGeometry(event);
@@ -793,13 +805,13 @@ void SendFilesBox::captionResized() {
 }
 
 bool SendFilesBox::canAddFiles(not_null<const QMimeData*> data) const {
-	return (data->hasUrls() && CanAddUrls(data->urls())) || data->hasImage();
+	return CanAddUrls(base::GetMimeUrls(data)) || data->hasImage();
 }
 
 bool SendFilesBox::addFiles(not_null<const QMimeData*> data) {
 	const auto premium = _controller->session().premium();
 	auto list = [&] {
-		const auto urls = data->hasUrls() ? data->urls() : QList<QUrl>();
+		const auto urls = base::GetMimeUrls(data);
 		auto result = CanAddUrls(urls)
 			? Storage::PrepareMediaList(
 				urls,

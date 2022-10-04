@@ -24,6 +24,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/text/format_values.h"
 #include "ui/chat/chat_style.h"
 #include "ui/cached_round_corners.h"
+#include "ui/painter.h"
 #include "data/data_session.h"
 #include "data/data_wall_paper.h"
 #include "data/data_media_types.h"
@@ -106,7 +107,7 @@ QSize WebPage::countOptimalSize() {
 		_title = Ui::Text::String(st::msgMinWidth - st::webPageLeft);
 		_description = Ui::Text::String(st::msgMinWidth - st::webPageLeft);
 	}
-	auto lineHeight = unitedLineHeight();
+	auto lineHeight = UnitedLineHeight();
 
 	if (!_openl && !_data->url.isEmpty()) {
 		const auto previewOfHiddenUrl = [&] {
@@ -328,7 +329,7 @@ QSize WebPage::countCurrentSize(int newWidth) {
 	auto innerWidth = newWidth - st::msgPadding.left() - st::webPageLeft - st::msgPadding.right();
 	auto newHeight = 0;
 
-	auto lineHeight = unitedLineHeight();
+	auto lineHeight = UnitedLineHeight();
 	auto linesMax = isLogEntryOriginal() ? kMaxOriginalEntryLines : 5;
 	auto siteNameHeight = _siteNameLines ? lineHeight : 0;
 	if (asArticle()) {
@@ -464,7 +465,7 @@ void WebPage::unloadHeavyPart() {
 	if (_attach) {
 		_attach->unloadHeavyPart();
 	}
-	_description.unloadCustomEmoji();
+	_description.unloadPersistentAnimation();
 	_photoMedia = nullptr;
 }
 
@@ -498,7 +499,7 @@ void WebPage::draw(Painter &p, const PaintContext &context) const {
 	QRect bar(style::rtlrect(st::msgPadding.left(), tshift, st::webPageBar, height() - tshift - bshift, width()));
 	p.fillRect(bar, barfg);
 
-	auto lineHeight = unitedLineHeight();
+	auto lineHeight = UnitedLineHeight();
 	if (asArticle()) {
 		ensurePhotoMediaCreated();
 
@@ -566,14 +567,21 @@ void WebPage::draw(Painter &p, const PaintContext &context) const {
 		if (_description.hasSkipBlock()) {
 			endskip = _parent->skipBlockWidth();
 		}
-		_parent->prepareCustomEmojiPaint(p, _description);
-		if (_descriptionLines > 0) {
-			_description.drawLeftElided(p, padding.left(), tshift, paintw, width(), _descriptionLines, style::al_left, 0, -1, endskip, false, toDescriptionSelection(context.selection));
-			tshift += _descriptionLines * lineHeight;
-		} else {
-			_description.drawLeft(p, padding.left(), tshift, paintw, width(), style::al_left, 0, -1, toDescriptionSelection(context.selection));
-			tshift += _description.countHeight(paintw);
-		}
+		_parent->prepareCustomEmojiPaint(p, context, _description);
+		_description.draw(p, {
+			.position = { padding.left(), tshift },
+			.outerWidth = width(),
+			.availableWidth = paintw,
+			.spoiler = Ui::Text::DefaultSpoilerCache(),
+			.now = context.now,
+			.paused = context.paused,
+			.selection = toDescriptionSelection(context.selection),
+			.elisionLines = std::max(_descriptionLines, 0),
+			.elisionRemoveFromEnd = (_descriptionLines > 0) ? endskip : 0,
+		});
+		tshift += (_descriptionLines > 0)
+			? (_descriptionLines * lineHeight)
+			: _description.countHeight(paintw);
 	}
 	if (_attach) {
 		auto attachAtTop = !_siteNameLines && !_titleLines && !_descriptionLines;
@@ -650,7 +658,7 @@ TextState WebPage::textState(QPoint point, StateRequest request) const {
 	}
 	paintw -= padding.left() + padding.right();
 
-	auto lineHeight = unitedLineHeight();
+	auto lineHeight = UnitedLineHeight();
 	auto inThumb = false;
 	if (asArticle()) {
 		auto pw = qMax(_pixw, lineHeight);

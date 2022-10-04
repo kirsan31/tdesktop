@@ -10,6 +10,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/cached_round_corners.h"
 #include "ui/style/style_core_palette.h"
 #include "layout/layout_selection.h"
+#include "styles/style_basic.h"
 
 enum class ImageRoundRadius;
 
@@ -107,6 +108,7 @@ struct ChatPaintContext {
 	QRect clip;
 	TextSelection selection;
 	bool outbg = false;
+	bool paused = false;
 	crl::time now = 0;
 
 	void translate(int x, int y) {
@@ -132,7 +134,7 @@ struct ChatPaintContext {
 		return translated(point.x(), point.y());
 	}
 	[[nodiscard]] ChatPaintContext withSelection(
-		TextSelection selection) const {
+			TextSelection selection) const {
 		auto result = *this;
 		result.selection = selection;
 		return result;
@@ -350,13 +352,13 @@ private:
 };
 
 void FillComplexOverlayRect(
-	Painter &p,
+	QPainter &p,
 	not_null<const ChatStyle*> st,
 	QRect rect,
 	ImageRoundRadius radius,
 	RectParts roundCorners);
 void FillComplexLocationRect(
-	Painter &p,
+	QPainter &p,
 	not_null<const ChatStyle*> st,
 	QRect rect,
 	ImageRoundRadius radius,

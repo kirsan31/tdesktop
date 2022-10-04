@@ -12,6 +12,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/widgets/labels.h"
 #include "ui/widgets/checkbox.h"
 #include "ui/widgets/popup_menu.h"
+#include "ui/painter.h"
 #include "core/application.h"
 #include "calls/calls_instance.h"
 #include "history/history.h"
@@ -108,7 +109,16 @@ public:
 		Fn<void()> updateCallback) override;
 	void rightActionStopLastRipple() override;
 
-	int nameIconWidth() const override {
+	int paintNameIconGetWidth(
+			Painter &p,
+			Fn<void()> repaint,
+			crl::time now,
+			int nameLeft,
+			int nameTop,
+			int nameWidth,
+			int availableWidth,
+			int outerWidth,
+			bool selected) override {
 		return 0;
 	}
 	QSize rightActionSize() const override {

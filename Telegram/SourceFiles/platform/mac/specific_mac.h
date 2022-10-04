@@ -33,6 +33,9 @@ inline bool SkipTaskbarSupported() {
 	return false;
 }
 
+inline void InstallLauncher(bool force) {
+}
+
 namespace ThirdParty {
 
 inline void start() {
@@ -57,8 +60,6 @@ void psSendToMenu(bool send, bool silent = false);
 
 int psCleanup();
 int psFixPrevious();
-
-void psNewVersion();
 
 void psDownloadPathEnableAccess();
 QByteArray psDownloadPathBookmark(const QString &path);

@@ -36,6 +36,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "apiwrap.h"
 #include "api/api_chat_participants.h"
 #include "ui/boxes/confirm_box.h"
+#include "ui/painter.h"
 #include "history/history.h"
 #include "history/history_item.h"
 #include "history/view/controls/history_view_voice_record_bar.h"
@@ -745,13 +746,15 @@ void FieldHeader::paintEditOrReplyToMessage(Painter &p) {
 		availableWidth);
 
 	p.setPen(st::historyComposeAreaFg);
-	p.setTextPalette(st::historyComposeAreaPalette);
-	_shownMessageText.drawElided(
-		p,
-		replySkip,
-		st::msgReplyPadding.top() + st::msgServiceNameFont->height,
-		availableWidth);
-	p.restoreTextPalette();
+	_shownMessageText.draw(p, {
+		.position = QPoint(
+			replySkip,
+			st::msgReplyPadding.top() + st::msgServiceNameFont->height),
+		.availableWidth = availableWidth,
+		.palette = &st::historyComposeAreaPalette,
+		.spoiler = Ui::Text::DefaultSpoilerCache(),
+		.elisionLines = 1,
+	});
 }
 
 void FieldHeader::updateVisible() {
@@ -1072,7 +1075,7 @@ rpl::producer<PhotoChosen> ComposeControls::photoChosen() const {
 }
 
 auto ComposeControls::inlineResultChosen() const
-->rpl::producer<ChatHelpers::TabbedSelector::InlineChosen> {
+-> rpl::producer<InlineChosen> {
 	return _inlineResultChosen.events();
 }
 
@@ -1357,7 +1360,7 @@ void ComposeControls::clearListenState() {
 	_voiceRecordBar->clearListenState();
 }
 
-void ComposeControls::drawRestrictedWrite(Painter &p, const QString &error) {
+void ComposeControls::drawRestrictedWrite(QPainter &p, const QString &error) {
 	p.fillRect(_writeRestricted->rect(), st::historyReplyBg);
 
 	p.setFont(st::normalFont);
@@ -1525,11 +1528,7 @@ void ComposeControls::initAutocomplete() {
 		//_saveDraftStart = crl::now();
 		//saveDraft();
 		//saveCloudDraft(); // won't be needed if SendInlineBotResult will clear the cloud draft
-		_fileChosen.fire(FileChosen{
-			.document = data.sticker,
-			.options = data.options,
-			.messageSendingFrom = base::take(data.messageSendingFrom),
-		});
+		_fileChosen.fire(std::move(data));
 	}, _autocomplete->lifetime());
 
 	_autocomplete->choosingProcesses(
@@ -1858,25 +1857,31 @@ void ComposeControls::initTabbedSelector() {
 	});
 
 	selector->emojiChosen(
-	) | rpl::start_with_next([=](EmojiPtr emoji) {
-		Ui::InsertEmojiAtCursor(_field->textCursor(), emoji);
+	) | rpl::start_with_next([=](ChatHelpers::EmojiChosen data) {
+		Ui::InsertEmojiAtCursor(_field->textCursor(), data.emoji);
 	}, wrap->lifetime());
 
-	using FileChosen = ChatHelpers::TabbedSelector::FileChosen;
-	selector->customEmojiChosen(
-	) | rpl::start_with_next([=](FileChosen data) {
-		Data::InsertCustomEmoji(_field, data.document);
-	}, wrap->lifetime());
-
-	selector->premiumEmojiChosen(
-	) | rpl::start_with_next([=](not_null<DocumentData*> document) {
-		if (_unavailableEmojiPasted) {
-			_unavailableEmojiPasted(document);
+	rpl::merge(
+		selector->fileChosen(),
+		selector->customEmojiChosen(),
+		_window->stickerOrEmojiChosen()
+	) | rpl::start_with_next([=](ChatHelpers::FileChosen &&data) {
+		if (const auto info = data.document->sticker()
+			; info && info->setType == Data::StickersType::Emoji) {
+			if (data.document->isPremiumEmoji()
+				&& !session().premium()
+				&& (!_history
+					|| !Data::AllowEmojiWithoutPremium(_history->peer))) {
+				if (_unavailableEmojiPasted) {
+					_unavailableEmojiPasted(data.document);
+				}
+			} else {
+				Data::InsertCustomEmoji(_field, data.document);
+			}
+		} else {
+			_fileChosen.fire(std::move(data));
 		}
 	}, wrap->lifetime());
-
-	selector->fileChosen(
-	) | rpl::start_to_stream(_fileChosen, wrap->lifetime());
 
 	selector->photoChosen(
 	) | rpl::start_to_stream(_photoChosen, wrap->lifetime());

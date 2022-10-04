@@ -9,9 +9,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "history/history.h"
 #include "history/history_item.h"
+#include "history/history_message.h" // CreateMedia.
 #include "history/history_location_manager.h"
 #include "history/view/history_view_element.h"
 #include "history/view/history_view_item_preview.h"
+#include "history/view/media/history_view_extended_preview.h"
 #include "history/view/media/history_view_photo.h"
 #include "history/view/media/history_view_sticker.h"
 #include "history/view/media/history_view_gif.h"
@@ -29,6 +31,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/view/media/history_view_service_media_gift.h"
 #include "dialogs/ui/dialogs_message_view.h"
 #include "ui/image/image.h"
+#include "ui/effects/spoiler_mess.h"
 #include "ui/text/format_song_document_name.h"
 #include "ui/text/format_values.h"
 #include "ui/text/text_entity.h"
@@ -230,6 +233,49 @@ template <typename MediaType>
 	return (i != end(*existing)) ? *i : ItemPreviewImage();
 }
 
+bool UpdateExtendedMedia(
+		Invoice &invoice,
+		not_null<HistoryMessage*> item,
+		const MTPMessageExtendedMedia &media) {
+	return media.match([&](const MTPDmessageExtendedMediaPreview &data) {
+		if (invoice.extendedMedia) {
+			return false;
+		}
+		auto changed = false;
+		auto &preview = invoice.extendedPreview;
+		if (const auto &w = data.vw()) {
+			const auto &h = data.vh();
+			Assert(h.has_value());
+			const auto dimensions = QSize(w->v, h->v);
+			if (preview.dimensions != dimensions) {
+				preview.dimensions = dimensions;
+				changed = true;
+			}
+		}
+		if (const auto &thumb = data.vthumb()) {
+			if (thumb->type() == mtpc_photoStrippedSize) {
+				const auto bytes = thumb->c_photoStrippedSize().vbytes().v;
+				if (preview.inlineThumbnailBytes != bytes) {
+					preview.inlineThumbnailBytes = bytes;
+					changed = true;
+				}
+			}
+		}
+		if (const auto &duration = data.vvideo_duration()) {
+			if (preview.videoDuration != duration->v) {
+				preview.videoDuration = duration->v;
+				changed = true;
+			}
+		}
+		return changed;
+	}, [&](const MTPDmessageExtendedMedia &data) {
+		invoice.extendedMedia = HistoryMessage::CreateMedia(
+			item,
+			data.vmedia());
+		return true;
+	});
+}
+
 } // namespace
 
 TextForMimeData WithCaptionClipboardText(
@@ -245,10 +291,10 @@ TextForMimeData WithCaptionClipboardText(
 }
 
 Invoice ComputeInvoiceData(
-		not_null<HistoryItem*> item,
+		not_null<HistoryMessage*> item,
 		const MTPDmessageMediaInvoice &data) {
 	auto description = qs(data.vdescription());
-	return {
+	auto result = Invoice{
 		.receiptMsgId = data.vreceipt_msg_id().value_or_empty(),
 		.amount = data.vtotal_amount().v,
 		.currency = qs(data.vcurrency()),
@@ -263,6 +309,10 @@ Invoice ComputeInvoiceData(
 			: nullptr),
 		.isTest = data.is_test(),
 	};
+	if (const auto &media = data.vextended_media()) {
+		UpdateExtendedMedia(result, item, *media);
+	}
+	return result;
 }
 
 Call ComputeCallData(const MTPDmessageActionPhoneCall &call) {
@@ -1479,7 +1529,22 @@ MediaInvoice::MediaInvoice(
 	not_null<HistoryItem*> parent,
 	const Invoice &data)
 : Media(parent)
-, _invoice(data) {
+, _invoice{
+	.receiptMsgId = data.receiptMsgId,
+	.amount = data.amount,
+	.currency = data.currency,
+	.title = data.title,
+	.description = data.description,
+	.extendedPreview = data.extendedPreview,
+	.extendedMedia = (data.extendedMedia
+		? data.extendedMedia->clone(parent)
+		: nullptr),
+	.photo = data.photo,
+	.isTest = data.isTest,
+} {
+	if (_invoice.extendedPreview && !_invoice.extendedMedia) {
+		Ui::PrepareImageSpoiler();
+	}
 }
 
 std::unique_ptr<Media> MediaInvoice::clone(not_null<HistoryItem*> parent) {
@@ -1533,10 +1598,28 @@ bool MediaInvoice::updateSentMedia(const MTPMessageMedia &media) {
 	return true;
 }
 
+bool MediaInvoice::updateExtendedMedia(
+		not_null<HistoryMessage*> item,
+		const MTPMessageExtendedMedia &media) {
+	Expects(item == parent());
+
+	return UpdateExtendedMedia(_invoice, item, media);
+}
+
 std::unique_ptr<HistoryView::Media> MediaInvoice::createView(
 		not_null<HistoryView::Element*> message,
 		not_null<HistoryItem*> realParent,
 		HistoryView::Element *replacing) {
+	if (_invoice.extendedMedia) {
+		return _invoice.extendedMedia->createView(
+			message,
+			realParent,
+			replacing);
+	} else if (_invoice.extendedPreview) {
+		return std::make_unique<HistoryView::ExtendedPreview>(
+			message,
+			&_invoice);
+	}
 	return std::make_unique<HistoryView::Invoice>(message, &_invoice);
 }
 

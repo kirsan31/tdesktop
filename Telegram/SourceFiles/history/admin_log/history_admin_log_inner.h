@@ -124,7 +124,7 @@ public:
 	void elementShowTooltip(
 		const TextWithEntities &text,
 		Fn<void()> hiddenCallback) override;
-	bool elementIsGifPaused() override;
+	bool elementAnimationsPaused() override;
 	bool elementHideReply(
 		not_null<const HistoryView::Element*> view) override;
 	bool elementShownUnread(
@@ -143,7 +143,6 @@ public:
 		HistoryView::Element *replacing) override;
 	void elementCancelPremium(
 		not_null<const HistoryView::Element*> view) override;
-	void elementShowSpoilerAnimation() override;
 
 	~InnerWidget();
 
@@ -326,8 +325,6 @@ private:
 
 	QPoint _trippleClickPoint;
 	base::Timer _trippleClickTimer;
-
-	Ui::Animations::Simple _spoilerOpacity;
 
 	FilterValue _filter;
 	QString _searchQuery;

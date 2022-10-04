@@ -13,9 +13,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/history_message.h"
 #include "history/view/media/history_view_media.h"
 #include "history/view/media/history_view_web_page.h"
-#include "history/view/history_view_react_animation.h"
-#include "history/view/history_view_react_button.h"
-#include "history/view/history_view_reactions.h"
+#include "history/view/reactions/history_view_reactions.h"
+#include "history/view/reactions/history_view_reactions_animation.h"
+#include "history/view/reactions/history_view_reactions_button.h"
 #include "history/view/history_view_group_call_bar.h" // UserpicInRow.
 #include "history/view/history_view_view_button.h" // ViewButton.
 #include "history/history.h"
@@ -37,9 +37,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "mainwidget.h"
 #include "main/main_session.h"
 #include "ui/text/text_options.h"
+#include "ui/painter.h"
 #include "window/window_session_controller.h"
 #include "apiwrap.h"
-
 #include "styles/style_widgets.h"
 #include "styles/style_chat.h"
 #include "styles/style_dialogs.h"
@@ -47,6 +47,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 namespace HistoryView {
 namespace {
 
+constexpr auto kPlayStatusLimit = 2;
 const auto kPsaTooltipPrefix = "cloud_lng_tooltip_psa_";
 
 std::optional<Window::SessionController*> ExtractController(
@@ -65,25 +66,25 @@ public:
 	int buttonRadius() const override;
 
 	void startPaint(
-		Painter &p,
+		QPainter &p,
 		const Ui::ChatStyle *st) const override;
 	const style::TextStyle &textStyle() const override;
 	void repaint(not_null<const HistoryItem*> item) const override;
 
 protected:
 	void paintButtonBg(
-		Painter &p,
+		QPainter &p,
 		const Ui::ChatStyle *st,
 		const QRect &rect,
 		float64 howMuchOver) const override;
 	void paintButtonIcon(
-		Painter &p,
+		QPainter &p,
 		const Ui::ChatStyle *st,
 		const QRect &rect,
 		int outerWidth,
 		HistoryMessageMarkupButton::Type type) const override;
 	void paintButtonLoading(
-		Painter &p,
+		QPainter &p,
 		const Ui::ChatStyle *st,
 		const QRect &rect) const override;
 	int minButtonWidth(HistoryMessageMarkupButton::Type type) const override;
@@ -91,7 +92,7 @@ protected:
 };
 
 void KeyboardStyle::startPaint(
-		Painter &p,
+		QPainter &p,
 		const Ui::ChatStyle *st) const {
 	Expects(st != nullptr);
 
@@ -111,7 +112,7 @@ int KeyboardStyle::buttonRadius() const {
 }
 
 void KeyboardStyle::paintButtonBg(
-		Painter &p,
+		QPainter &p,
 		const Ui::ChatStyle *st,
 		const QRect &rect,
 		float64 howMuchOver) const {
@@ -128,7 +129,7 @@ void KeyboardStyle::paintButtonBg(
 }
 
 void KeyboardStyle::paintButtonIcon(
-		Painter &p,
+		QPainter &p,
 		const Ui::ChatStyle *st,
 		const QRect &rect,
 		int outerWidth,
@@ -154,7 +155,7 @@ void KeyboardStyle::paintButtonIcon(
 }
 
 void KeyboardStyle::paintButtonLoading(
-		Painter &p,
+		QPainter &p,
 		const Ui::ChatStyle *st,
 		const QRect &rect) const {
 	Expects(st != nullptr);
@@ -228,10 +229,13 @@ struct Message::CommentsButton {
 	QImage cachedUserpics;
 	ClickHandlerPtr link;
 	QPoint lastPoint;
+};
 
-	QString rightActionCountString;
-	int rightActionCount = 0;
-	int rightActionCountWidth = 0;
+struct Message::FromNameStatus {
+	DocumentId id = 0;
+	std::unique_ptr<Ui::Text::CustomEmoji> custom;
+	Ui::Text::CustomEmojiColored colored;
+	int skip = 0;
 };
 
 LogEntryOriginal::LogEntryOriginal() = default;
@@ -251,7 +255,7 @@ Message::Message(
 	not_null<ElementDelegate*> delegate,
 	not_null<HistoryMessage*> data,
 	Element *replacing)
-: Element(delegate, data, replacing)
+: Element(delegate, data, replacing, Flag(0))
 , _bottomInfo(
 		&data->history()->owner().reactions(),
 		BottomInfoDataFromMessage(this)) {
@@ -260,10 +264,12 @@ Message::Message(
 	refreshReactions();
 	auto animations = replacing
 		? replacing->takeReactionAnimations()
-		: base::flat_map<QString, std::unique_ptr<Reactions::Animation>>();
+		: base::flat_map<
+			Data::ReactionId,
+			std::unique_ptr<Reactions::Animation>>();
 	if (!animations.empty()) {
 		const auto repainter = [=] { repaint(); };
-		for (const auto &[emoji, animation] : animations) {
+		for (const auto &[id, animation] : animations) {
 			animation->setRepaintCallback(repainter);
 		}
 		if (_reactions) {
@@ -275,8 +281,9 @@ Message::Message(
 }
 
 Message::~Message() {
-	if (_comments) {
+	if (_comments || (_fromNameStatus && _fromNameStatus->custom)) {
 		_comments = nullptr;
+		_fromNameStatus = nullptr;
 		checkHeavyPart();
 	}
 }
@@ -334,7 +341,7 @@ void Message::applyGroupAdminChanges(
 	}
 }
 
-void Message::animateReaction(ReactionAnimationArgs &&args) {
+void Message::animateReaction(Reactions::AnimationArgs &&args) {
 	const auto item = message();
 	const auto media = this->media();
 
@@ -433,23 +440,24 @@ void Message::animateReaction(ReactionAnimationArgs &&args) {
 }
 
 auto Message::takeReactionAnimations()
--> base::flat_map<QString, std::unique_ptr<Reactions::Animation>> {
+-> base::flat_map<Data::ReactionId, std::unique_ptr<Reactions::Animation>> {
 	return _reactions
 		? _reactions->takeAnimations()
 		: _bottomInfo.takeReactionAnimations();
 }
 
 QSize Message::performCountOptimalSize() {
+	validateText();
+	updateViewButtonExistence();
+	updateMediaInBubbleState();
+	refreshRightBadge();
+	refreshInfoSkipBlock();
+
 	const auto item = message();
 	const auto media = this->media();
 
 	auto maxWidth = 0;
 	auto minHeight = 0;
-
-	updateViewButtonExistence();
-	updateMediaInBubbleState();
-	refreshRightBadge();
-	refreshInfoSkipBlock();
 
 	const auto reactionsInBubble = _reactions && embedReactionsInBubble();
 	if (_reactions) {
@@ -483,7 +491,7 @@ QSize Message::performCountOptimalSize() {
 		if (context() == Context::Replies && item->isDiscussionPost()) {
 			maxWidth = std::max(maxWidth, st::msgMaxWidth);
 		}
-		minHeight = hasVisibleText() ? item->_text.minHeight() : 0;
+		minHeight = hasVisibleText() ? text().minHeight() : 0;
 		if (reactionsInBubble) {
 			const auto reactionsMaxWidth = st::msgPadding.left()
 				+ _reactions->maxWidth()
@@ -522,8 +530,8 @@ QSize Message::performCountOptimalSize() {
 					- st::msgPadding.left()
 					- st::msgPadding.right();
 				if (hasVisibleText() && maxWidth < plainMaxWidth()) {
-					minHeight -= item->_text.minHeight();
-					minHeight += item->_text.countHeight(innerWidth);
+					minHeight -= text().minHeight();
+					minHeight += text().countHeight(innerWidth);
 				}
 				if (reactionsInBubble) {
 					minHeight -= _reactions->minHeight();
@@ -545,9 +553,11 @@ QSize Message::performCountOptimalSize() {
 					: item->hiddenSenderInfo()->nameText();
 				auto namew = st::msgPadding.left()
 					+ name.maxWidth()
+					+ (_fromNameStatus ? st::dialogsPremiumIcon.width() : 0)
 					+ st::msgPadding.right();
 				if (via && !displayForwardedFrom()) {
-					namew += st::msgServiceFont->spacew + via->maxWidth;
+					namew += st::msgServiceFont->spacew + via->maxWidth
+						+ (_fromNameStatus ? st::msgServiceFont->spacew : 0);
 				}
 				const auto replyWidth = hasFastReply()
 					? st::msgFont->width(FastReplyText())
@@ -595,7 +605,7 @@ QSize Message::performCountOptimalSize() {
 		minHeight = 0;
 	}
 	if (const auto markup = item->inlineReplyMarkup()) {
-		if (!markup->inlineKeyboard) {
+		if (!markup->inlineKeyboard && !markup->hiddenBy(item->media())) {
 			markup->inlineKeyboard = std::make_unique<ReplyKeyboard>(
 				item,
 				std::make_unique<KeyboardStyle>(st::msgBotKbButton));
@@ -603,7 +613,7 @@ QSize Message::performCountOptimalSize() {
 
 		// if we have a text bubble we can resize it to fit the keyboard
 		// but if we have only media we don't do that
-		if (hasVisibleText()) {
+		if (hasVisibleText() && markup->inlineKeyboard) {
 			accumulate_max(maxWidth, markup->inlineKeyboard->naturalWidth());
 		}
 	}
@@ -737,6 +747,7 @@ void Message::draw(Painter &p, const PaintContext &context) const {
 		g.setHeight(g.height() - reactionsHeight);
 		const auto reactionsPosition = QPoint(reactionsLeft + g.left(), g.top() + g.height() + st::mediaInBubbleSkip);
 		p.translate(reactionsPosition);
+		prepareCustomEmojiPaint(p, context, *_reactions);
 		_reactions->paint(p, context, g.width(), context.clip.translated(-reactionsPosition));
 		if (context.reactionInfo) {
 			context.reactionInfo->position = reactionsPosition;
@@ -792,6 +803,7 @@ void Message::draw(Painter &p, const PaintContext &context) const {
 			trect.setHeight(trect.height() - reactionsHeight);
 			const auto reactionsPosition = QPoint(trect.left(), trect.top() + trect.height() + reactionsTop);
 			p.translate(reactionsPosition);
+			prepareCustomEmojiPaint(p, context, *_reactions);
 			_reactions->paint(p, context, g.width(), context.clip.translated(-reactionsPosition));
 			if (context.reactionInfo) {
 				context.reactionInfo->position = reactionsPosition;
@@ -1083,34 +1095,79 @@ void Message::paintFromName(
 		availableWidth -= st::msgPadding.right() + rightWidth;
 	}
 
-	p.setFont(st::msgNameFont);
 	const auto stm = context.messageStyle();
-
-	const auto nameText = [&]() -> const Ui::Text::String * {
-		const auto from = item->displayFrom();
-		const auto service = (context.outbg || item->isPost());
-		const auto st = context.st;
+	const auto from = item->displayFrom();
+	const auto info = from ? nullptr : item->hiddenSenderInfo();
+	Assert(from || info);
+	const auto service = (context.outbg || item->isPost());
+	const auto st = context.st;
+	const auto nameFg = !service
+		? FromNameFg(context, from ? from->id : info->colorPeerId)
+		: item->isSponsored()
+		? st->boxTextFgGood()
+		: stm->msgServiceFg;
+	const auto nameText = [&] {
 		if (from) {
-			p.setPen(!service
-				? FromNameFg(context, from->id)
-				: item->isSponsored()
-				? st->boxTextFgGood()
-				: stm->msgServiceFg);
 			validateFromNameText(from);
-			return &_fromName;
-		} else if (const auto info = item->hiddenSenderInfo()) {
-			p.setPen(!service
-				? FromNameFg(context, info->colorPeerId)
-				: item->isSponsored()
-				? st->boxTextFgGood()
-				: stm->msgServiceFg);
-			return &info->nameText();
-		} else {
-			Unexpected("Corrupt sender information in message.");
+			return static_cast<const Ui::Text::String*>(&_fromName);
 		}
+		return &info->nameText();
 	}();
+	const auto statusWidth = _fromNameStatus
+		? st::dialogsPremiumIcon.width()
+		: 0;
+	if (statusWidth && availableWidth > statusWidth) {
+		const auto x = availableLeft
+			+ std::min(availableWidth - statusWidth, nameText->maxWidth());
+		const auto y = trect.top();
+		const auto color = QColor(
+			nameFg->c.red(),
+			nameFg->c.green(),
+			nameFg->c.blue(),
+			nameFg->c.alpha() * 115 / 255);
+		const auto user = from->asUser();
+		const auto id = user ? user->emojiStatusId() : 0;
+		if (_fromNameStatus->id != id) {
+			const auto that = const_cast<Message*>(this);
+			_fromNameStatus->custom = id
+				? std::make_unique<Ui::Text::LimitedLoopsEmoji>(
+					user->owner().customEmojiManager().create(
+						id,
+						[=] { that->customEmojiRepaint(); }),
+					kPlayStatusLimit)
+				: nullptr;
+			if (id && !_fromNameStatus->id) {
+				history()->owner().registerHeavyViewPart(that);
+			} else if (!id && _fromNameStatus->id) {
+				that->checkHeavyPart();
+			}
+			_fromNameStatus->id = id;
+		}
+		if (_fromNameStatus->custom) {
+			clearCustomEmojiRepaint();
+			_fromNameStatus->colored.color = color;
+			_fromNameStatus->custom->paint(p, {
+				.preview = color,
+				.colored = &_fromNameStatus->colored,
+				.now = context.now,
+				.position = QPoint(
+					x - 2 * _fromNameStatus->skip,
+					y + _fromNameStatus->skip),
+				.paused = context.paused,
+			});
+		} else {
+			st::dialogsPremiumIcon.paint(p, x, y, width(), color);
+		}
+		availableWidth -= statusWidth;
+	}
+	p.setFont(st::msgNameFont);
+	p.setPen(nameFg);
 	nameText->drawElided(p, availableLeft, trect.top(), availableWidth);
-	const auto skipWidth = nameText->maxWidth() + st::msgServiceFont->spacew;
+	const auto skipWidth = nameText->maxWidth()
+		+ (_fromNameStatus
+			? (st::dialogsPremiumIcon.width() + st::msgServiceFont->spacew)
+			: 0)
+		+ st::msgServiceFont->spacew;
 	availableLeft += skipWidth;
 	availableWidth -= skipWidth;
 
@@ -1238,20 +1295,19 @@ void Message::paintText(
 	if (!hasVisibleText()) {
 		return;
 	}
-	const auto item = message();
 	const auto stm = context.messageStyle();
 	p.setPen(stm->historyTextFg);
 	p.setFont(st::msgFont);
-	prepareCustomEmojiPaint(p, item->_text);
-	item->_text.draw(
-		p,
-		trect.x(),
-		trect.y(),
-		trect.width(),
-		style::al_left,
-		0,
-		-1,
-		context.selection);
+	prepareCustomEmojiPaint(p, context, text());
+	text().draw(p, {
+		.position = trect.topLeft(),
+		.availableWidth = trect.width(),
+		.palette = &stm->textPalette,
+		.spoiler = Ui::Text::DefaultSpoilerCache(),
+		.now = context.now,
+		.paused = context.paused,
+		.selection = context.selection,
+	});
 }
 
 PointState Message::pointState(QPoint point) const {
@@ -1378,12 +1434,21 @@ void Message::toggleCommentsButtonRipple(bool pressed) {
 }
 
 bool Message::hasHeavyPart() const {
-	return _comments || Element::hasHeavyPart();
+	return _comments
+		|| (_fromNameStatus && _fromNameStatus->custom)
+		|| Element::hasHeavyPart();
 }
 
 void Message::unloadHeavyPart() {
 	Element::unloadHeavyPart();
+	if (_reactions) {
+		_reactions->unloadCustomEmoji();
+	}
 	_comments = nullptr;
+	if (_fromNameStatus) {
+		_fromNameStatus->custom = nullptr;
+		_fromNameStatus->id = 0;
+	}
 }
 
 bool Message::showForwardsFromSender(
@@ -1541,7 +1606,8 @@ TextState Message::textState(
 				result = entry->textState(
 					point - QPoint(entryLeft, entryTop),
 					request);
-				result.symbol += item->_text.length() + (mediaDisplayed ? media->fullSelectionLength() : 0);
+				result.symbol += visibleTextLength()
+					+ visibleMediaTextLength();
 			}
 		}
 
@@ -1559,7 +1625,7 @@ TextState Message::textState(
 				result = bottomInfoResult;
 			}
 		};
-		if (inBubble) {
+		if (!result.symbol && inBubble) {
 			if (mediaDisplayed) {
 				auto mediaHeight = media->height();
 				auto mediaLeft = trect.x() - st::msgPadding.left();
@@ -1567,18 +1633,18 @@ TextState Message::textState(
 
 				if (point.y() >= mediaTop && point.y() < mediaTop + mediaHeight) {
 					result = media->textState(point - QPoint(mediaLeft, mediaTop), request);
-					result.symbol += item->_text.length();
+					result.symbol += visibleTextLength();
 				} else if (getStateText(point, trect, &result, request)) {
 					checkBottomInfoState();
 					return result;
 				} else if (point.y() >= trect.y() + trect.height()) {
-					result.symbol = item->_text.length();
+					result.symbol = visibleTextLength();
 				}
 			} else if (getStateText(point, trect, &result, request)) {
 				checkBottomInfoState();
 				return result;
 			} else if (point.y() >= trect.y() + trect.height()) {
-				result.symbol = item->_text.length();
+				result.symbol = visibleTextLength();
 			}
 		}
 		checkBottomInfoState();
@@ -1600,7 +1666,7 @@ TextState Message::textState(
 		}
 	} else if (media && media->isDisplayed()) {
 		result = media->textState(point - g.topLeft(), request);
-		result.symbol += item->_text.length();
+		result.symbol += visibleTextLength();
 	}
 
 	if (keyboard && item->isHistoryEntry()) {
@@ -1873,7 +1939,7 @@ bool Message::getStateText(
 	}
 	const auto item = message();
 	if (base::in_range(point.y(), trect.y(), trect.y() + trect.height())) {
-		*outResult = TextState(item, item->_text.getState(
+		*outResult = TextState(item, text().getState(
 			point - trect.topLeft(),
 			trect.width(),
 			request.forText()));
@@ -1935,11 +2001,11 @@ void Message::updatePressed(QPoint point) {
 }
 
 TextForMimeData Message::selectedText(TextSelection selection) const {
-	const auto item = message();
 	const auto media = this->media();
-
 	auto logEntryOriginalResult = TextForMimeData();
-	auto textResult = item->_text.toTextForMimeData(selection);
+	auto textResult = hasVisibleText()
+		? text().toTextForMimeData(selection)
+		: TextForMimeData();
 	auto skipped = skipTextSelection(selection);
 	auto mediaDisplayed = (media && media->isDisplayed());
 	auto mediaResult = (mediaDisplayed || isHiddenByGroup())
@@ -1968,11 +2034,12 @@ TextForMimeData Message::selectedText(TextSelection selection) const {
 TextSelection Message::adjustSelection(
 		TextSelection selection,
 		TextSelectType type) const {
-	const auto item = message();
 	const auto media = this->media();
 
-	auto result = item->_text.adjustSelection(selection, type);
-	auto beforeMediaLength = item->_text.length();
+	auto result = hasVisibleText()
+		? text().adjustSelection(selection, type)
+		: selection;
+	auto beforeMediaLength = visibleTextLength();
 	if (selection.to <= beforeMediaLength) {
 		return result;
 	}
@@ -1986,8 +2053,7 @@ TextSelection Message::adjustSelection(
 			result.to = mediaSelection.to;
 		}
 	}
-	auto beforeEntryLength = beforeMediaLength
-		+ (mediaDisplayed ? media->fullSelectionLength() : 0);
+	auto beforeEntryLength = beforeMediaLength + visibleMediaTextLength();
 	if (selection.to <= beforeEntryLength) {
 		return result;
 	}
@@ -2165,7 +2231,34 @@ bool Message::isSignedAuthorElided() const {
 }
 
 bool Message::embedReactionsInBottomInfo() const {
-	return data()->history()->peer->isUser();
+	const auto item = data();
+	const auto user = item->history()->peer->asUser();
+	if (!user || user->isPremium() || user->session().premium()) {
+		// Only in messages of a non premium user with a non premium user.
+		return false;
+	}
+	auto seenMy = false;
+	auto seenHis = false;
+	for (const auto &reaction : item->reactions()) {
+		if (reaction.id.custom()) {
+			// Only in messages without any custom emoji reactions.
+			return false;
+		}
+		// Only in messages without two reactions from the same person.
+		if (reaction.my) {
+			if (seenMy) {
+				return false;
+			}
+			seenMy = true;
+		}
+		if (!reaction.my || (reaction.count > 1)) {
+			if (seenHis) {
+				return false;
+			}
+			seenHis = true;
+		}
+	}
+	return true;
 }
 
 bool Message::embedReactionsInBubble() const {
@@ -2182,15 +2275,18 @@ void Message::refreshReactions() {
 	using namespace Reactions;
 	auto reactionsData = InlineListDataFromMessage(this);
 	if (!_reactions) {
-		const auto handlerFactory = [=](QString emoji) {
+		const auto handlerFactory = [=](ReactionId id) {
 			const auto weak = base::make_weak(this);
 			return std::make_shared<LambdaClickHandler>([=] {
 				if (const auto strong = weak.get()) {
-					strong->data()->toggleReaction(emoji);
+					strong->data()->toggleReaction(
+						id,
+						HistoryItem::ReactionSource::Existing);
 					if (const auto now = weak.get()) {
-						if (now->data()->chosenReaction() == emoji) {
+						const auto chosen = now->data()->chosenReactions();
+						if (ranges::contains(chosen, id)) {
 							now->animateReaction({
-								.emoji = emoji,
+								.id = id,
 							});
 						}
 					}
@@ -2200,6 +2296,7 @@ void Message::refreshReactions() {
 		_reactions = std::make_unique<InlineList>(
 			&item->history()->owner().reactions(),
 			handlerFactory,
+			[=] { customEmojiRepaint(); },
 			std::move(reactionsData));
 	} else {
 		_reactions->update(std::move(reactionsData), width());
@@ -2207,13 +2304,29 @@ void Message::refreshReactions() {
 }
 
 void Message::validateFromNameText(PeerData *from) const {
-	const auto version = from ? from->nameVersion() : 0;
+	if (!from) {
+		if (_fromNameStatus) {
+			_fromNameStatus = nullptr;
+		}
+		return;
+	}
+	const auto version = from->nameVersion();
 	if (_fromNameVersion < version) {
 		_fromNameVersion = version;
 		_fromName.setText(
 			st::msgNameStyle,
 			from->name(),
 			Ui::NameTextOptions());
+	}
+	if (from->isPremium()) {
+		if (!_fromNameStatus) {
+			_fromNameStatus = std::make_unique<FromNameStatus>();
+			const auto size = st::emojiSize;
+			const auto emoji = Ui::Text::AdjustCustomEmojiSize(size);
+			_fromNameStatus->skip = (size - emoji) / 2;
+		}
+	} else if (_fromNameStatus) {
+		_fromNameStatus = nullptr;
 	}
 }
 
@@ -2258,13 +2371,13 @@ void Message::refreshDataIdHook() {
 
 int Message::plainMaxWidth() const {
 	return st::msgPadding.left()
-		+ (hasVisibleText() ? message()->_text.maxWidth() : 0)
+		+ (hasVisibleText() ? text().maxWidth() : 0)
 		+ st::msgPadding.right();
 }
 
 int Message::monospaceMaxWidth() const {
 	return st::msgPadding.left()
-		+ (hasVisibleText() ? message()->_text.countMaxMonospaceWidth() : 0)
+		+ (hasVisibleText() ? text().countMaxMonospaceWidth() : 0)
 		+ st::msgPadding.right();
 }
 
@@ -2768,20 +2881,27 @@ void Message::fromNameUpdated(int width) const {
 				- st::msgPadding.left()
 				- st::msgPadding.right()
 				- nameText->maxWidth()
+				+ (_fromNameStatus
+					? (st::dialogsPremiumIcon.width()
+						+ st::msgServiceFont->spacew)
+					: 0)
 				- st::msgServiceFont->spacew);
 		}
 	}
 }
 
 TextSelection Message::skipTextSelection(TextSelection selection) const {
-	if (selection.from == 0xFFFF) {
+	if (selection.from == 0xFFFF || !hasVisibleText()) {
 		return selection;
 	}
-	return HistoryView::UnshiftItemSelection(selection, message()->_text);
+	return HistoryView::UnshiftItemSelection(selection, text());
 }
 
 TextSelection Message::unskipTextSelection(TextSelection selection) const {
-	return HistoryView::ShiftItemSelection(selection, message()->_text);
+	if (!hasVisibleText()) {
+		return selection;
+	}
+	return HistoryView::ShiftItemSelection(selection, text());
 }
 
 QRect Message::innerGeometry() const {
@@ -2939,15 +3059,7 @@ int Message::resizeContentGetHeight(int newWidth) {
 				entry->resizeGetHeight(contentWidth);
 			}
 		} else {
-			if (hasVisibleText()) {
-				if (textWidth != item->_textWidth) {
-					item->_textWidth = textWidth;
-					item->_textHeight = item->_text.countHeight(textWidth);
-				}
-				newHeight = item->_textHeight;
-			} else {
-				newHeight = 0;
-			}
+			newHeight = hasVisibleText() ? textHeightFor(textWidth) : 0;
 			if (!mediaOnBottom && (!_viewButton || !reactionsInBubble)) {
 				newHeight += st::msgPadding.bottom();
 				if (mediaDisplayed) {
@@ -3052,6 +3164,17 @@ bool Message::hasVisibleText() const {
 	return !media || !media->hideMessageText();
 }
 
+int Message::visibleTextLength() const {
+	return hasVisibleText() ? text().length() : 0;
+}
+
+int Message::visibleMediaTextLength() const {
+	const auto media = this->media();
+	return (media && media->isDisplayed())
+		? media->fullSelectionLength()
+		: 0;
+}
+
 QSize Message::performCountCurrentSize(int newWidth) {
 	const auto newHeight = resizeContentGetHeight(newWidth);
 
@@ -3062,7 +3185,7 @@ void Message::refreshInfoSkipBlock() {
 	const auto item = message();
 	const auto media = this->media();
 	const auto hasTextSkipBlock = [&] {
-		if (item->_text.isEmpty()) {
+		if (item->_text.empty()) {
 			return false;
 		} else if (item->Has<HistoryMessageLogEntryOriginal>()) {
 			return false;
@@ -3082,15 +3205,7 @@ void Message::refreshInfoSkipBlock() {
 			_reactions->removeSkipBlock();
 		}
 	}
-	if (!hasTextSkipBlock) {
-		if (item->_text.removeSkipBlock()) {
-			item->_textWidth = -1;
-			item->_textHeight = 0;
-		}
-	} else if (item->_text.updateSkipBlock(skipWidth, skipHeight)) {
-		item->_textWidth = -1;
-		item->_textHeight = 0;
-	}
+	validateTextSkipBlock(hasTextSkipBlock, skipWidth, skipHeight);
 }
 
 TimeId Message::displayedEditDate() const {
