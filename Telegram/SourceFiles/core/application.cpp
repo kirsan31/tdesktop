@@ -12,6 +12,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_document.h"
 #include "data/data_session.h"
 #include "data/data_user.h"
+#include "data/data_channel.h"
 #include "data/data_download_manager.h"
 #include "base/timer.h"
 #include "base/event_filter.h"
@@ -272,8 +273,8 @@ void Application::run() {
 
 	DEBUG_LOG(("Application Info: inited..."));
 
-	cChangeDateFormat(QLocale::system().dateFormat(QLocale::ShortFormat));
-	cChangeTimeFormat(QLocale::system().timeFormat(QLocale::ShortFormat));
+	cChangeDateFormat(QLocale().dateFormat(QLocale::ShortFormat));
+	cChangeTimeFormat(QLocale().timeFormat(QLocale::ShortFormat));
 
 	DEBUG_LOG(("Application Info: starting app..."));
 
@@ -586,6 +587,12 @@ void Application::saveSettings() {
 	Local::writeSettings();
 }
 
+bool Application::canSaveFileWithoutAskingForPath() const {
+	return !Core::App().settings().askDownloadPath()
+		&& (!KSandbox::isInside()
+			|| !Core::App().settings().downloadPath().isEmpty());
+}
+
 MTP::Config &Application::fallbackProductionConfig() const {
 	if (!_fallbackProductionConfig) {
 		_fallbackProductionConfig = std::make_unique<MTP::Config>(
@@ -768,7 +775,7 @@ void Application::forceLogOut(
 	}));
 	box->setCloseByEscape(false);
 	box->setCloseByOutsideClick(false);
-	const auto weak = base::make_weak(account.get());
+	const auto weak = base::make_weak(account);
 	connect(box, &QObject::destroyed, [=] {
 		crl::on_main(weak, [=] {
 			account->forcedLogOut();
@@ -820,10 +827,6 @@ rpl::producer<bool> Application::appDeactivatedValue() const {
 	)) | rpl::map([=](Qt::ApplicationState state) {
 		return (state != Qt::ApplicationActive);
 	});
-}
-
-void Application::call_handleObservables() {
-	base::HandleObservables();
 }
 
 void Application::switchDebugMode() {
@@ -1032,11 +1035,15 @@ void Application::preventOrInvoke(Fn<void()> &&callback) {
 }
 
 void Application::lockByPasscode() {
+	enumerateWindows([&](not_null<Window::Controller*> w) {
+		_passcodeLock = true;
+		w->setupPasscodeLock();
+	});
+}
+
+void Application::maybeLockByPasscode() {
 	preventOrInvoke([=] {
-		enumerateWindows([&](not_null<Window::Controller*> w) {
-			_passcodeLock = true;
-			w->setupPasscodeLock();
-		});
+		lockByPasscode();
 	});
 }
 
@@ -1139,14 +1146,6 @@ bool Application::hasActiveWindow(not_null<Main::Session*> session) const {
 	return false;
 }
 
-void Application::saveCurrentDraftsToHistories() {
-	if (!_primaryWindow) {
-		return;
-	} else if (const auto controller = _primaryWindow->sessionController()) {
-		controller->content()->saveFieldToHistoryLocalDraft();
-	}
-}
-
 Window::Controller *Application::primaryWindow() const {
 	return _primaryWindow.get();
 }
@@ -1224,6 +1223,9 @@ void Application::closeChatFromWindows(not_null<PeerData*> peer) {
 			primary->showPeerHistory(
 				PeerId(0),
 				Window::SectionShow::Way::ClearStack);
+		}
+		if (primary->openedForum().current() == peer) {
+			primary->closeForum();
 		}
 	}
 }
@@ -1427,7 +1429,7 @@ void Application::startShortcuts() {
 		});
 		request->check(Command::Lock) && request->handle([=] {
 			if (!passcodeLocked() && _domain->local().hasLocalPasscode()) {
-				lockByPasscode();
+				maybeLockByPasscode();
 				return true;
 			}
 			return false;
@@ -1444,7 +1446,9 @@ void Application::startShortcuts() {
 void Application::RegisterUrlScheme() {
 	base::Platform::RegisterUrlScheme(base::Platform::UrlSchemeDescriptor{
 		.executable = cExeDir() + cExeName(),
-		.arguments = qsl("-workdir \"%1\"").arg(cWorkingDir()),
+		.arguments = Sandbox::Instance().customWorkingDir()
+			? qsl("-workdir \"%1\"").arg(cWorkingDir())
+			: QString(),
 		.protocol = qsl("tg"),
 		.protocolName = qsl("Telegram Link"),
 		.shortAppName = qsl("tdesktop"),

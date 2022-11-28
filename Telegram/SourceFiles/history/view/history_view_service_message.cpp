@@ -15,17 +15,27 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_abstract_structure.h"
 #include "data/data_chat.h"
 #include "data/data_channel.h"
+#include "info/profile/info_profile_cover.h"
 #include "ui/chat/chat_style.h"
 #include "ui/text/text_options.h"
 #include "ui/painter.h"
 #include "ui/ui_utility.h"
 #include "mainwidget.h"
 #include "menu/menu_ttl_validator.h"
+#include "data/data_forum_topic.h"
 #include "lang/lang_keys.h"
 #include "styles/style_chat.h"
+#include "styles/style_info.h"
 
 namespace HistoryView {
 namespace {
+
+TextParseOptions EmptyLineOptions = {
+	TextParseMultiline, // flags
+	4096, // maxw
+	1, // maxh
+	Qt::LayoutDirectionAuto, // lang-dependent
+};
 
 enum CircleMask {
 	NormalMask     = 0x00,
@@ -178,7 +188,11 @@ bool NeedAboutGroup(not_null<History*> history) {
 	return false;
 }
 
-} // namepsace
+void SetText(Ui::Text::String &text, const QString &content) {
+	text.setText(st::serviceTextStyle, content, EmptyLineOptions);
+}
+
+} // namespace
 
 void ServiceMessagePainter::PaintDate(
 		Painter &p,
@@ -636,11 +650,29 @@ TextSelection Service::adjustSelection(
 	return text().adjustSelection(selection, type);
 }
 
-EmptyPainter::EmptyPainter(not_null<History*> history) : _history(history) {
+EmptyPainter::EmptyPainter(not_null<History*> history)
+: _history(history)
+, _header(st::msgMinWidth)
+, _text(st::msgMinWidth) {
 	if (NeedAboutGroup(_history)) {
 		fillAboutGroup();
 	}
 }
+
+EmptyPainter::EmptyPainter(
+	not_null<Data::ForumTopic*> topic,
+	Fn<bool()> paused,
+	Fn<void()> update)
+: _history(topic->history())
+, _topic(topic)
+, _icon(
+	std::make_unique<Info::Profile::TopicIconView>(topic, paused, update))
+, _header(st::msgMinWidth)
+, _text(st::msgMinWidth) {
+	fillAboutTopic();
+}
+
+EmptyPainter::~EmptyPainter() = default;
 
 void EmptyPainter::fillAboutGroup() {
 	const auto phrases = {
@@ -649,18 +681,21 @@ void EmptyPainter::fillAboutGroup() {
 		tr::lng_group_about3(tr::now),
 		tr::lng_group_about4(tr::now),
 	};
-	const auto setText = [](Ui::Text::String &text, const QString &content) {
-		text.setText(
-			st::serviceTextStyle,
-			content,
-			Ui::NameTextOptions());
-	};
-	setText(_header, tr::lng_group_about_header(tr::now));
-	setText(_text, tr::lng_group_about_text(tr::now));
+	SetText(_header, tr::lng_group_about_header(tr::now));
+	SetText(_text, tr::lng_group_about_text(tr::now));
 	for (const auto &text : phrases) {
 		_phrases.emplace_back(st::msgMinWidth);
-		setText(_phrases.back(), text);
+		SetText(_phrases.back(), text);
 	}
+}
+
+void EmptyPainter::fillAboutTopic() {
+	SetText(_header, _topic->my()
+		? tr::lng_forum_topic_created_title_my(tr::now)
+		: tr::lng_forum_topic_created_title(tr::now));
+	SetText(_text, _topic->my()
+		? tr::lng_forum_topic_created_body_my(tr::now)
+		: tr::lng_forum_topic_created_body(tr::now));
 }
 
 void EmptyPainter::paint(
@@ -668,15 +703,16 @@ void EmptyPainter::paint(
 		not_null<const Ui::ChatStyle*> st,
 		int width,
 		int height) {
-	if (_phrases.empty()) {
+	if (_phrases.empty() && _text.isEmpty()) {
 		return;
 	}
 	constexpr auto kMaxTextLines = 3;
-	const auto maxPhraseWidth = ranges::max_element(
-		_phrases,
-		ranges::less(),
-		&Ui::Text::String::maxWidth
-	)->maxWidth();
+	const auto maxPhraseWidth = _phrases.empty()
+		? 0
+		: ranges::max_element(
+			_phrases,
+			ranges::less(),
+			&Ui::Text::String::maxWidth)->maxWidth();
 
 	const auto &font = st::serviceTextStyle.font;
 	const auto maxBubbleWidth = width - 2 * st::historyGroupAboutMargin;
@@ -693,13 +729,17 @@ void EmptyPainter::paint(
 			text.countHeight(innerWidth),
 			kMaxTextLines * font->height);
 	};
+	const auto iconHeight = _icon
+		? st::infoTopicCover.photo.size.height()
+		: 0;
 	const auto bubbleHeight = padding.top()
+		+ (_icon ? (iconHeight + st::historyGroupAboutHeaderSkip) : 0)
 		+ textHeight(_header)
 		+ st::historyGroupAboutHeaderSkip
 		+ textHeight(_text)
 		+ st::historyGroupAboutTextSkip
 		+ ranges::accumulate(_phrases, 0, ranges::plus(), textHeight)
-		+ st::historyGroupAboutSkip * int(_phrases.size() - 1)
+		+ st::historyGroupAboutSkip * std::max(int(_phrases.size()) - 1, 0)
 		+ padding.bottom();
 	const auto bubbleLeft = (width - bubbleWidth) / 2;
 	const auto bubbleTop = (height - bubbleHeight) / 2;
@@ -716,6 +756,13 @@ void EmptyPainter::paint(
 	const auto left = bubbleLeft + padding.left();
 	auto top = bubbleTop + padding.top();
 
+	if (_icon) {
+		_icon->paintInRect(
+			p,
+			QRect(bubbleLeft, top, bubbleWidth, iconHeight));
+		top += iconHeight + st::historyGroupAboutHeaderSkip;
+	}
+
 	_header.drawElided(
 		p,
 		left,
@@ -730,7 +777,8 @@ void EmptyPainter::paint(
 		left,
 		top,
 		innerWidth,
-		kMaxTextLines);
+		kMaxTextLines,
+		_topic ? style::al_top : style::al_topleft);
 	top += textHeight(_text) + st::historyGroupAboutTextSkip;
 
 	for (const auto &text : _phrases) {

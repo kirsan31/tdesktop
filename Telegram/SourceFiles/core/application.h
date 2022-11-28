@@ -152,7 +152,6 @@ public:
 
 	// Windows interface.
 	bool hasActiveWindow(not_null<Main::Session*> session) const;
-	void saveCurrentDraftsToHistories();
 	[[nodiscard]] Window::Controller *primaryWindow() const;
 	[[nodiscard]] Window::Controller *activeWindow() const;
 	[[nodiscard]] Window::Controller *separateWindowForPeer(
@@ -179,6 +178,7 @@ public:
 	[[nodiscard]] Settings &settings();
 	void saveSettingsDelayed(crl::time delay = kDefaultSaveDelay);
 	void saveSettings();
+	[[nodiscard]] bool canSaveFileWithoutAskingForPath() const;
 
 	// Fallback config and proxy.
 	[[nodiscard]] MTP::Config &fallbackProductionConfig() const;
@@ -263,6 +263,7 @@ public:
 	[[nodiscard]] bool downloadPreventsQuit();
 	void checkLocalTime();
 	void lockByPasscode();
+	void maybeLockByPasscode();
 	void unlockPasscode();
 	[[nodiscard]] bool passcodeLocked() const;
 	rpl::producer<bool> passcodeLockChanges() const;
@@ -295,8 +296,6 @@ public:
 	void writeInstallBetaVersionsSetting();
 
 	void preventOrInvoke(Fn<void()> &&callback);
-
-	void call_handleObservables();
 
 	// Global runtime variables.
 	void setScreenIsLocked(bool locked);

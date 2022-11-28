@@ -401,7 +401,7 @@ void Session::addWindow(not_null<Window::SessionController*> controller) {
 		_windows.remove(controller);
 	});
 	updates().addActiveChat(controller->activeChatChanges(
-	) | rpl::map([=](const Dialogs::Key &chat) {
+	) | rpl::map([=](Dialogs::Key chat) {
 		return chat.peer();
 	}) | rpl::distinct_until_changed());
 }
@@ -440,7 +440,7 @@ void Session::uploadsStopWithConfirmation(Fn<void()> done) {
 
 				if (const auto item = data().message(id)) {
 					if (const auto window = tryResolveWindow()) {
-						window->showPeerHistoryAtItem(item);
+						window->showMessage(item);
 					}
 				}
 			});
