@@ -355,7 +355,6 @@ parts:
       - -DCMAKE_INSTALL_PREFIX=/usr
       - -DBUILD_SHARED_LIBS=ON
       - -Dprotobuf_BUILD_TESTS=OFF
-      - -Dprotobuf_BUILD_LIBPROTOC=ON
     prime:
       - -./usr/bin
       - -./usr/include
@@ -511,7 +510,7 @@ parts:
   webrtc:
     source: https://github.com/desktop-app/tg_owt.git
     source-depth: 1
-    source-commit: 10d5f4bf77333ef6b43516f90d2ce13273255f41
+    source-commit: cc8edd5719556e1711f50da9a3f7a4c59bba574d
     plugin: cmake
     build-packages:
       - yasm

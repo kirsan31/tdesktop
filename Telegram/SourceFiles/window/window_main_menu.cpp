@@ -432,8 +432,8 @@ MainMenu::MainMenu(
 	parentResized();
 
 	_telegram->setMarkedText(Ui::Text::Link(
-		qsl("Telegram Desktop mod"),
-		qsl("https://github.com/kirsan31/tdesktop")));
+		u"Telegram Desktop mod"_q,
+		u"https://github.com/kirsan31/tdesktop"_q));
 	_telegram->setLinksTrusted();
 	_version->setMarkedText(
 		Ui::Text::Link(
@@ -691,8 +691,7 @@ void MainMenu::setupMenu() {
 			tr::lng_saved_messages(),
 			{ &st::settingsIconSavedMessages, kIconLightBlue }
 		)->setClickedCallback([=] {
-			const auto self = controller->session().user();
-			controller->content()->chooseThread(self, ShowAtUnreadMsgId);
+			controller->showPeerHistory(controller->session().user());
 		});
 	} else {
 		addAction(

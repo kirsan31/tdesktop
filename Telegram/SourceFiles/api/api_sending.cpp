@@ -166,7 +166,7 @@ void SendExistingMedia(
 			), [=](const MTPUpdates &result, const MTP::Response &response) {
 		}, [=](const MTP::Error &error, const MTP::Response &response) {
 			if (error.code() == 400
-				&& error.type().startsWith(qstr("FILE_REFERENCE_"))) {
+				&& error.type().startsWith(u"FILE_REFERENCE_"_q)) {
 				api->refreshFileReference(origin, [=](const auto &result) {
 					if (media->fileReference() != usedFileReference) {
 						repeatRequest(repeatRequest);
@@ -392,6 +392,7 @@ void SendConfirmedFile(
 	action.replyTo = file->to.replyTo;
 	action.topicRootId = file->to.topicRootId;
 	action.generateLocal = true;
+	action.replaceMediaOf = file->to.replaceMediaOf;
 	session->api().sendAction(action);
 
 	auto caption = TextWithEntities{
