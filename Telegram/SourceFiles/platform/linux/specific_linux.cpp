@@ -119,10 +119,12 @@ namespace {
 constexpr auto kDesktopFile = ":/misc/org.telegram.desktop.desktop"_cs;
 
 #ifndef DESKTOP_APP_DISABLE_DBUS_INTEGRATION
-void PortalAutostart(bool start, bool silent) {
+bool PortalAutostart(bool start, bool silent) {
 	if (cExeName().isEmpty()) {
-		return;
+		return false;
 	}
+
+	auto error = false;
 
 	try {
 		const auto connection = Gio::DBus::Connection::get_sync(
@@ -182,14 +184,18 @@ void PortalAutostart(bool start, bool silent) {
 					const auto response = base::Platform::GlibVariantCast<
 						uint>(parameters.get_child(0));
 
-					if (response && !silent) {
-						LOG(("Portal Autostart Error: Request denied"));
+					if (response) {
+						if (!silent) {
+							LOG(("Portal Autostart Error: Request denied"));
+						}
+						error = true;
 					}
 				} catch (const std::exception &e) {
 					if (!silent) {
 						LOG(("Portal Autostart Error: %1").arg(
 							QString::fromStdString(e.what())));
 					}
+					error = true;
 				}
 
 				loop->quit();
@@ -227,7 +233,10 @@ void PortalAutostart(bool start, bool silent) {
 			LOG(("Portal Autostart Error: %1").arg(
 				QString::fromStdString(e.what())));
 		}
+		error = true;
 	}
+
+	return !error;
 }
 
 void LaunchGApplication() {
@@ -264,7 +273,8 @@ void LaunchGApplication() {
 
 		if (ranges::contains(
 			activatableNames,
-			"org.freedesktop.Notifications")) {
+			"org.freedesktop.Notifications",
+			&Glib::ustring::raw)) {
 			return true;
 		}
 
@@ -416,6 +426,7 @@ void LaunchGApplication() {
 bool GenerateDesktopFile(
 		const QString &targetPath,
 		const QStringList &args = {},
+		bool onlyMainGroup = false,
 		bool silent = false) {
 	if (targetPath.isEmpty() || cExeName().isEmpty()) {
 		return false;
@@ -450,6 +461,11 @@ bool GenerateDesktopFile(
 				| Glib::KeyFile::Flags::KEEP_TRANSLATIONS);
 
 		for (const auto &group : target->get_groups()) {
+			if (onlyMainGroup && group != "Desktop Entry") {
+				target->remove_group(group);
+				continue;
+			}
+
 			if (target->has_key(group, "TryExec")) {
 				target->set_string(
 					group,
@@ -497,15 +513,22 @@ bool GenerateDesktopFile(
 					}
 				}
 			}
-
-			target->save_to_file(targetFile.toStdString());
 		}
+
+		target->save_to_file(targetFile.toStdString());
 	} catch (const std::exception &e) {
 		if (!silent) {
 			LOG(("App Error: %1").arg(QString::fromStdString(e.what())));
 		}
 		return false;
 	}
+
+	QFile::setPermissions(
+		targetFile,
+		QFile::permissions(targetFile)
+			| QFileDevice::ExeOwner
+			| QFileDevice::ExeGroup
+			| QFileDevice::ExeOther);
 
 	if (!Core::UpdaterDisabled()) {
 		DEBUG_LOG(("App Info: removing old .desktop files"));
@@ -598,11 +621,7 @@ std::optional<bool> IsDarkMode() {
 
 bool AutostartSupported() {
 #ifndef DESKTOP_APP_DISABLE_DBUS_INTEGRATION
-	// snap sandbox doesn't allow creating files
-	// in folders with names started with a dot
-	// and doesn't provide any api to add an app to autostart
-	// thus, autostart isn't supported in snap
-	return !KSandbox::isSnap();
+	return true;
 #else // !DESKTOP_APP_DISABLE_DBUS_INTEGRATION
 	return false;
 #endif // DESKTOP_APP_DISABLE_DBUS_INTEGRATION
@@ -610,25 +629,31 @@ bool AutostartSupported() {
 
 void AutostartToggle(bool enabled, Fn<void(bool)> done) {
 #ifndef DESKTOP_APP_DISABLE_DBUS_INTEGRATION
-	const auto guard = gsl::finally([&] {
-		if (done) {
-			done(enabled);
-		}
-	});
+	const auto success = [&] {
+		const auto silent = !done;
 
-	const auto silent = !done;
-	if (KSandbox::isFlatpak()) {
-		PortalAutostart(enabled, silent);
-	} else {
+		if (KSandbox::isFlatpak()) {
+			return PortalAutostart(enabled, silent);
+		}
+
 		const auto autostart = QStandardPaths::writableLocation(
 			QStandardPaths::GenericConfigLocation)
 			+ u"/autostart/"_q;
 
-		if (enabled) {
-			GenerateDesktopFile(autostart, { u"-autostart"_q }, silent);
-		} else {
-			QFile::remove(autostart + QGuiApplication::desktopFileName());
+		if (!enabled) {
+			return QFile::remove(
+				autostart + QGuiApplication::desktopFileName());
 		}
+
+		return GenerateDesktopFile(
+			autostart,
+			{ u"-autostart"_q },
+			true,
+			silent);
+	}();
+
+	if (done) {
+		done(enabled && success);
 	}
 #endif // !DESKTOP_APP_DISABLE_DBUS_INTEGRATION
 }

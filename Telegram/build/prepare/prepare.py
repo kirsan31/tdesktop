@@ -12,8 +12,15 @@ def error(text):
     print('[ERROR] ' + text)
     finish(1)
 
+def nativeToolsError():
+    error('Make sure to run from Native Tools Command Prompt.')
+
 win = (sys.platform == 'win32')
 mac = (sys.platform == 'darwin')
+
+if win and not 'Platform' in os.environ:
+    nativeToolsError()
+
 win32 = win and (os.environ['Platform'] == 'x86')
 win64 = win and (os.environ['Platform'] == 'x64')
 
@@ -21,7 +28,7 @@ if win and not 'COMSPEC' in os.environ:
     error('COMSPEC environment variable is not set.')
 
 if win and not win32 and not win64:
-    error('Make sure to run from Native Tools Command Prompt.')
+    nativeToolsError()
 
 os.chdir(scriptPath + '/../../../..')
 
@@ -338,7 +345,7 @@ def runStages():
             continue
         index = index + 1
         version = ('#' + str(stage['version'])) if (stage['version'] != '0') else ''
-        prefix = '[' + os.path.join(str(index), str(count)) + '](' + os.path.join(stage['location'], stage['name']) + version + ')'
+        prefix = '[' + str(index) + '/' + str(count) + '](' + stage['location'] + '/' + stage['name'] + version + ')'
         print(prefix + ': ', end = '', flush=True)
         stage['key'] = computeCacheKey(stage)
         commands = removeDir(stage['name']) + '\n' + stage['commands']
@@ -397,7 +404,7 @@ if customRunCommand:
 stage('patches', """
     git clone https://github.com/desktop-app/patches.git
     cd patches
-    git checkout 92f4ee3867
+    git checkout 9e04e2eb9c
 """)
 
 stage('msys64', """
@@ -413,9 +420,18 @@ win:
     del msys64.exe
 
     bash -c "pacman-key --init; pacman-key --populate; pacman -Syu --noconfirm"
-    pacman -S --noconfirm mingw-w64-x86_64-perl mingw-w64-x86_64-nasm mingw-w64-x86_64-yasm mingw-w64-x86_64-ninja
+    pacman -Syu --noconfirm mingw-w64-x86_64-perl mingw-w64-x86_64-nasm mingw-w64-x86_64-yasm mingw-w64-x86_64-ninja
 
     SET PATH=%PATH_BACKUP_%
+""", 'ThirdParty')
+
+stage('python', """
+version: """ + (subprocess.run(['python', '-V'], capture_output=True, text=True, env=modifiedEnv).stdout.strip().split()[-1] if win else '0') + """
+win:
+    python -m venv python
+    python\\Scripts\\activate.bat
+    pip install pywin32 six meson
+    deactivate
 """, 'ThirdParty')
 
 stage('NuGet', """
@@ -653,6 +669,133 @@ mac:
     mv lib/.libs/libiconv.a out.x86_64
     lipo -create out.arm64/libiconv.a out.x86_64/libiconv.a -output lib/.libs/libiconv.a
     make install
+""")
+
+stage('dav1d', """
+win:
+    git clone -b 1.0.0 --depth 1 https://code.videolan.org/videolan/dav1d.git
+    cd dav1d
+depends:python/Scripts/activate.bat
+    %THIRDPARTY_DIR%\\python\\Scripts\\activate.bat
+    meson setup --prefix %LIBS_DIR%/local --default-library=static --buildtype=debug -Denable_tools=false -Denable_tests=false -Db_vscrt=mtd builddir-debug
+    meson compile -C builddir-debug
+    meson install -C builddir-debug
+release:
+    meson setup --prefix %LIBS_DIR%/local --default-library=static --buildtype=release -Denable_tools=false -Denable_tests=false -Db_vscrt=mt builddir-release
+    meson compile -C builddir-release
+    meson install -C builddir-release
+win:
+    copy %LIBS_DIR%\\local\\lib\\libdav1d.a %LIBS_DIR%\\local\\lib\\dav1d.lib
+    deactivate
+""")
+
+stage('libavif', """
+win:
+    git clone -b v0.11.1 --depth 1 https://github.com/AOMediaCodec/libavif.git
+    cd libavif
+    cmake . ^
+        -A %WIN32X64% ^
+        -DCMAKE_INSTALL_PREFIX=%LIBS_DIR%/local ^
+        -DCMAKE_C_FLAGS_DEBUG="/MTd /Zi /Ob0 /Od /RTC1" ^
+        -DCMAKE_C_FLAGS_RELEASE="/MT /O2 /Ob2 /DNDEBUG" ^
+        -DBUILD_SHARED_LIBS=OFF ^
+        -DAVIF_ENABLE_WERROR=OFF ^
+        -DAVIF_CODEC_DAV1D=ON
+    cmake --build . --config Debug
+    cmake --install . --config Debug
+release:
+    cmake --build . --config Release
+    cmake --install . --config Release
+""")
+
+stage('libde265', """
+win:
+    git clone https://github.com/strukturag/libde265.git
+    cd libde265
+    git checkout c96962cf6a0259f1678e9a0e1566eb9b5516093a
+    cmake . ^
+        -A %WIN32X64% ^
+        -DCMAKE_INSTALL_PREFIX=%LIBS_DIR%/local ^
+        -DCMAKE_C_FLAGS="/DLIBDE265_STATIC_BUILD" ^
+        -DCMAKE_CXX_FLAGS="/DLIBDE265_STATIC_BUILD" ^
+        -DCMAKE_C_FLAGS_DEBUG="/MTd /Zi /Ob0 /Od /RTC1" ^
+        -DCMAKE_CXX_FLAGS_DEBUG="/MTd /Zi /Ob0 /Od /RTC1" ^
+        -DCMAKE_C_FLAGS_RELEASE="/MT /O2 /Ob2 /DNDEBUG" ^
+        -DCMAKE_CXX_FLAGS_RELEASE="/MT /O2 /Ob2 /DNDEBUG" ^
+        -DENABLE_SDL=OFF ^
+        -DBUILD_SHARED_LIBS=OFF ^
+        -DENABLE_DECODER=OFF ^
+        -DENABLE_ENCODER=OFF
+    cmake --build . --config Debug
+    cmake --install . --config Debug
+release:
+    cmake --build . --config Release
+    cmake --install . --config Release
+""")
+
+stage('libheif', """
+win:
+    git clone --depth 1 -b v1.14.0 https://github.com/strukturag/libheif.git
+    cd libheif
+    %THIRDPARTY_DIR%\\msys64\\usr\\bin\\sed.exe -i 's/LIBHEIF_EXPORTS/LIBDE265_STATIC_BUILD/g' libheif/CMakeLists.txt
+    %THIRDPARTY_DIR%\\msys64\\usr\\bin\\sed.exe -i 's/HAVE_VISIBILITY/LIBHEIF_STATIC_BUILD/g' libheif/CMakeLists.txt
+    cmake . ^
+        -A %WIN32X64% ^
+        -DCMAKE_INSTALL_PREFIX=%LIBS_DIR%/local ^
+        -DCMAKE_C_FLAGS_DEBUG="/MTd /Zi /Ob0 /Od /RTC1" ^
+        -DCMAKE_CXX_FLAGS_DEBUG="/MTd /Zi /Ob0 /Od /RTC1" ^
+        -DCMAKE_C_FLAGS_RELEASE="/MT /O2 /Ob2 /DNDEBUG" ^
+        -DCMAKE_CXX_FLAGS_RELEASE="/MT /O2 /Ob2 /DNDEBUG" ^
+        -DBUILD_SHARED_LIBS=OFF ^
+        -DENABLE_PLUGIN_LOADING=OFF ^
+        -DWITH_LIBDE265=ON ^
+        -DWITH_SvtEnc=OFF ^
+        -DWITH_RAV1E=OFF ^
+        -DWITH_EXAMPLES=OFF
+    cmake --build . --config Debug
+    cmake --install . --config Debug
+release:
+    cmake --build . --config Release
+    cmake --install . --config Release
+""")
+
+stage('libjxl', """
+win:
+    git clone -b v0.7.0 --depth 1 --recursive --shallow-submodules https://github.com/libjxl/libjxl.git
+    cd libjxl
+    cmake . ^
+        -A %WIN32X64% ^
+        -DCMAKE_INSTALL_PREFIX=%LIBS_DIR%/local ^
+        -DCMAKE_C_FLAGS="/DJXL_STATIC_DEFINE /DJXL_THREADS_STATIC_DEFINE" ^
+        -DCMAKE_CXX_FLAGS="/DJXL_STATIC_DEFINE /DJXL_THREADS_STATIC_DEFINE" ^
+        -DCMAKE_C_FLAGS_DEBUG="/MTd /Zi /Ob0 /Od /RTC1" ^
+        -DCMAKE_CXX_FLAGS_DEBUG="/MTd /Zi /Ob0 /Od /RTC1" ^
+        -DCMAKE_C_FLAGS_RELEASE="/MT /O2 /Ob2 /DNDEBUG" ^
+        -DCMAKE_CXX_FLAGS_RELEASE="/MT /O2 /Ob2 /DNDEBUG" ^
+        -DBUILD_SHARED_LIBS=OFF ^
+        -DBUILD_TESTING=OFF ^
+        -DJPEGXL_ENABLE_FUZZERS=OFF ^
+        -DJPEGXL_ENABLE_DEVTOOLS=OFF ^
+        -DJPEGXL_ENABLE_TOOLS=OFF ^
+        -DJPEGXL_ENABLE_DOXYGEN=OFF ^
+        -DJPEGXL_ENABLE_MANPAGES=OFF ^
+        -DJPEGXL_ENABLE_EXAMPLES=OFF ^
+        -DJPEGXL_ENABLE_JNI=OFF ^
+        -DJPEGXL_ENABLE_SJPEG=OFF ^
+        -DJPEGXL_ENABLE_OPENEXR=OFF ^
+        -DJPEGXL_ENABLE_SKCMS=ON ^
+        -DJPEGXL_BUNDLE_SKCMS=ON ^
+        -DJPEGXL_ENABLE_VIEWERS=OFF ^
+        -DJPEGXL_ENABLE_TCMALLOC=OFF ^
+        -DJPEGXL_ENABLE_PLUGINS=OFF ^
+        -DJPEGXL_ENABLE_COVERAGE=OFF ^
+        -DJPEGXL_ENABLE_PROFILER=OFF ^
+        -DJPEGXL_WARNINGS_AS_ERRORS=OFF
+    cmake --build . --config Debug
+    cmake --install . --config Debug
+release:
+    cmake --build . --config Release
+    cmake --install . --config Release
 """)
 
 stage('libvpx', """
@@ -953,6 +1096,8 @@ win:
     ) else (
         SET "FolderPostfix="
     )
+depends:python/Scripts/activate.bat
+    %THIRDPARTY_DIR%\\python\\Scripts\\activate.bat
     cd src\\client\\windows
     gyp --no-circular-check breakpad_client.gyp --format=ninja
     cd ..\\..
@@ -963,6 +1108,8 @@ release:
     gyp dump_syms.gyp --format=ninja
     cd ..\\..\\..
     ninja -C out/Release%FolderPostfix% dump_syms
+win:
+    deactivate
 mac:
     git clone https://chromium.googlesource.com/linux-syscall-support src/third_party/lss
     cd src/third_party/lss
@@ -1324,4 +1471,10 @@ win:
 #         -Dprotobuf_WITH_ZLIB_DEFAULT=OFF
 #     cmake --build . $MAKE_THREADS_CNT
 
-runStages()
+if win:
+    currentCodePage = subprocess.run('chcp', capture_output=True, shell=True, text=True, env=modifiedEnv).stdout.strip().split()[-1]
+    subprocess.run('chcp 65001 > nul', shell=True, env=modifiedEnv)
+    runStages()
+    subprocess.run('chcp ' + currentCodePage + ' > nul', shell=True, env=modifiedEnv)
+else:
+    runStages()
