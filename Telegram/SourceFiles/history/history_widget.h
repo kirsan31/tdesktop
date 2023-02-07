@@ -91,6 +91,7 @@ class TopBarWidget;
 class ContactStatus;
 class Element;
 class PinnedTracker;
+class TranslateBar;
 class ComposeSearch;
 namespace Controls {
 class RecordLock;
@@ -102,8 +103,6 @@ class TTLButton;
 
 class BotKeyboard;
 class HistoryInner;
-
-extern const char kOptionAutoScrollInactiveChat[];
 
 class HistoryWidget final
 	: public Window::AbstractSectionWidget
@@ -237,6 +236,7 @@ public:
 	[[nodiscard]] rpl::producer<> cancelRequests() const {
 		return _cancelRequests.events();
 	}
+	void searchInChatEmbedded(std::optional<QString> query = {});
 
 	void updateNotifyControls();
 
@@ -431,6 +431,12 @@ private:
 		Ui::PreparedList &&list,
 		const QString &insertTextOnCancel = QString());
 	bool showSendingFilesError(const Ui::PreparedList &list) const;
+	bool showSendingFilesError(
+		const Ui::PreparedList &list,
+		std::optional<bool> compress) const;
+	bool showSendMessageError(
+		const TextWithTags &textWithTags,
+		bool ignoreSlowmodeCountdown) const;
 
 	void sendingFilesConfirmed(
 		Ui::PreparedList &&list,
@@ -489,6 +495,7 @@ private:
 	void updateReplyEditText(not_null<HistoryItem*> item);
 
 	void updatePinnedViewer();
+	void setupTranslateBar();
 	void setupPinnedTracker();
 	void checkPinnedBarState();
 	void clearHidingPinnedBar();
@@ -562,6 +569,8 @@ private:
 	void clearFieldText(
 		TextUpdateEvents events = 0,
 		FieldHistoryAction fieldHistoryAction = FieldHistoryAction::Clear);
+	[[nodiscard]] int fieldHeight() const;
+	[[nodiscard]] bool fieldOrDisabledShown() const;
 
 	void unregisterDraftSources();
 	void registerDraftSource();
@@ -574,6 +583,7 @@ private:
 
 	// when scroll position or scroll area size changed this method
 	// updates the boundings of the visible area in HistoryInner
+	[[nodiscard]] bool hasSavedScroll() const;
 	void visibleAreaUpdated();
 	int countInitialScrollTop();
 	int countAutomaticScrollTop();
@@ -581,8 +591,8 @@ private:
 	void checkReplyReturns();
 	void scrollToAnimationCallback(FullMsgId attachToId, int relativeTo);
 
-	bool readyToForward() const;
-	bool hasSilentToggle() const;
+	[[nodiscard]] bool readyToForward() const;
+	[[nodiscard]] bool hasSilentToggle() const;
 
 	void checkSupportPreload(bool force = false);
 	void handleSupportSwitch(not_null<History*> updated);
@@ -632,6 +642,9 @@ private:
 
 	object_ptr<Ui::IconButton> _fieldBarCancel;
 
+	std::unique_ptr<HistoryView::TranslateBar> _translateBar;
+	int _translateBarHeight = 0;
+
 	std::unique_ptr<HistoryView::PinnedTracker> _pinnedTracker;
 	std::unique_ptr<Ui::PinnedBar> _pinnedBar;
 	std::unique_ptr<Ui::PinnedBar> _hidingPinnedBar;
@@ -665,6 +678,7 @@ private:
 	PeerData *_peer = nullptr;
 
 	bool _canSendMessages = false;
+	bool _canSendTexts = false;
 	MsgId _showAtMsgId = ShowAtUnreadMsgId;
 
 	int _firstLoadRequest = 0; // Not real mtpRequestId.
@@ -731,6 +745,7 @@ private:
 	std::unique_ptr<HistoryView::ComposeSearch> _composeSearch;
 	bool _cmdStartShown = false;
 	object_ptr<Ui::InputField> _field;
+	base::unique_qptr<Ui::RpWidget> _fieldDisabled;
 	bool _inReplyEditForward = false;
 	bool _inClickable = false;
 
