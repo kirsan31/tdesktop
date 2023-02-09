@@ -22,7 +22,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 namespace Ui {
 namespace {
 
-const auto kLanguageNamePrefix = "cloud_lng_passport_in_";
+const auto kLanguageNamePrefix = "cloud_lng_language_";
+const auto kTranslateToPrefix = "cloud_lng_translate_to_";
 
 [[nodiscard]] std::vector<LanguageId> TranslationLanguagesList() {
 	// If adding some languages here you need to check that it is
@@ -214,12 +215,13 @@ QString LanguageNameTranslated(const QString &twoLetterCode) {
 		kLanguageNamePrefix + twoLetterCode.toUtf8());
 }
 
+QString LanguageNameLocal(LanguageId id) {
+	return QLocale::languageToString(id.language());
+}
+
 QString LanguageName(LanguageId id) {
-	const auto code = id.locale().name().toLower().mid(0, 2);
-	const auto translated = LanguageNameTranslated(code);
-	return translated.isEmpty()
-		? QLocale::languageToString(id.locale().language())
-		: translated;
+	const auto translated = LanguageNameTranslated(id.twoLetterCode());
+	return translated.isEmpty() ? LanguageNameLocal(id) : translated;
 }
 
 QString LanguageNameNative(LanguageId id) {
@@ -236,12 +238,36 @@ QString LanguageNameNative(LanguageId id) {
 	}
 }
 
+rpl::producer<QString> TranslateBarTo(LanguageId id) {
+	const auto translated = Lang::GetNonDefaultValue(
+		kTranslateToPrefix + id.twoLetterCode().toUtf8());
+	return (translated.isEmpty()
+		? tr::lng_translate_bar_to_other
+		: tr::lng_translate_bar_to)(
+			lt_name,
+			rpl::single(translated.isEmpty()
+				? LanguageNameLocal(id)
+				: translated));
+}
+
+QString TranslateMenuDont(tr::now_t, LanguageId id) {
+	const auto translated = Lang::GetNonDefaultValue(
+		kTranslateToPrefix + id.twoLetterCode().toUtf8());
+	return (translated.isEmpty()
+		? tr::lng_translate_menu_dont_other
+		: tr::lng_translate_menu_dont)(
+			tr::now,
+			lt_name,
+			translated.isEmpty() ? LanguageNameLocal(id) : translated);
+}
+
 void ChooseLanguageBox(
 		not_null<GenericBox*> box,
 		rpl::producer<QString> title,
 		Fn<void(std::vector<LanguageId>)> callback,
 		std::vector<LanguageId> selected,
-		bool multiselect) {
+		bool multiselect,
+		Fn<bool(LanguageId)> toggleCheck) {
 	box->setMinHeight(st::boxWidth);
 	box->setMaxHeight(st::boxWidth);
 	box->setTitle(std::move(title));
@@ -256,6 +282,9 @@ void ChooseLanguageBox(
 	const auto container = box->verticalLayout();
 	const auto langs = [&] {
 		auto list = TranslationLanguagesList();
+		for (const auto id : list) {
+			LOG(("cloud_lng_language_%1").arg(id.twoLetterCode()));
+		}
 		const auto current = LanguageId{ QLocale(
 			Lang::LanguageIdOrDefault(Lang::Id())).language() };
 		if (const auto i = ranges::find(list, current); i != end(list)) {
@@ -266,6 +295,14 @@ void ChooseLanguageBox(
 		});
 		return list;
 	}();
+	struct ToggleOne {
+		LanguageId id;
+		bool selected = false;
+	};
+	struct State {
+		rpl::event_stream<ToggleOne> toggles;
+	};
+	const auto state = box->lifetime().make_state<State>();
 	auto rows = std::vector<not_null<SlideWrap<Row>*>>();
 	rows.reserve(langs.size());
 	for (const auto &id : langs) {
@@ -274,9 +311,21 @@ void ChooseLanguageBox(
 				container,
 				object_ptr<Row>(container, id)));
 		if (multiselect) {
-			button->entity()->toggleOn(
-				rpl::single(ranges::contains(selected, id)),
-				false);
+			button->entity()->toggleOn(rpl::single(
+				ranges::contains(selected, id)
+			) | rpl::then(state->toggles.events(
+			) | rpl::filter([=](ToggleOne one) {
+				return one.id == id;
+			}) | rpl::map([=](ToggleOne one) {
+				return one.selected;
+			})));
+
+			button->entity()->toggledChanges(
+			) | rpl::start_with_next([=](bool value) {
+				if (toggleCheck && !toggleCheck(id)) {
+					state->toggles.fire({ .id = id, .selected = !value });
+				}
+			}, button->lifetime());
 		} else {
 			button->entity()->setClickedCallback([=] {
 				callback({ id });
