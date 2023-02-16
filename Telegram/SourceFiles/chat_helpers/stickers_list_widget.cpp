@@ -1080,20 +1080,10 @@ void StickersListWidget::pauseInvisibleLottieIn(const SectionInfo &info) {
 }
 
 void StickersListWidget::paintEmptySearchResults(Painter &p) {
-	const auto iconLeft = (width() - st::stickersEmpty.width()) / 2;
-	const auto iconTop = (height() / 3) - (st::stickersEmpty.height() / 2);
-	st::stickersEmpty.paint(p, iconLeft, iconTop, width());
-
-	const auto text = tr::lng_stickers_nothing_found(tr::now);
-	const auto textWidth = st::normalFont->width(text);
-	p.setFont(st::normalFont);
-	p.setPen(st::windowSubTextFg);
-	p.drawTextLeft(
-		(width() - textWidth) / 2,
-		iconTop + st::stickersEmpty.height() - st::normalFont->height,
-		width(),
-		text,
-		textWidth);
+	Inner::paintEmptySearchResults(
+		p,
+		st::stickersEmpty,
+		tr::lng_stickers_nothing_found(tr::now));
 }
 
 int StickersListWidget::megagroupSetInfoLeft() const {
@@ -2463,7 +2453,18 @@ auto StickersListWidget::getLottieRenderer()
 }
 
 void StickersListWidget::showStickerSet(uint64 setId) {
+	if (_showingSetById) {
+		return;
+	}
+	_showingSetById = true;
+	const auto guard = gsl::finally([&] { _showingSetById = false; });
+
 	clearSelection();
+	if (_search
+		&& (!_searchQuery.isEmpty() || !_searchNextQuery.isEmpty())) {
+		_search->cancel();
+		cancelSetsSearch();
+	}
 
 	if (setId == Data::Stickers::FeaturedSetId) {
 		if (_section != Section::Featured) {
