@@ -1149,14 +1149,14 @@ sendAsButton: SendAsButton {
 }
 
 reactionInlinePadding: margins(5px, 2px, 7px, 2px);
-reactionInlineSize: 18px;
-reactionInlineImage: 32px;
+reactionInlineSize: 22px; // custom emoji size
+reactionInlineImage: 38px; // affect emoji size
 reactionInlineSkip: 3px;
 reactionInlineBetween: 4px;
 reactionInlineInBubbleLeft: -3px;
 reactionInlineUserpicsPadding: margins(1px, 1px, 1px, 1px);
 reactionInlineUserpics: GroupCallUserpics {
-	size: 20px;
+	size: 24px; // user pic size
 	shift: 7px;
 	stroke: 1px;
 	align: align(left);
