@@ -357,9 +357,6 @@ QString GenerateInviteLinkText(const MTPExportedChatInvite &data) {
 		u"https://"_q,
 		QString()
 	).replace(
-		u"t.me/+"_q,
-		QString()
-	).replace(
 		u"t.me/joinchat/"_q,
 		QString()
 	) : label;
@@ -1392,9 +1389,13 @@ void GenerateItems(
 
 	const auto createParticipantJoinByInvite = [&](
 			const LogJoinByInvite &data) {
-		const auto text = (channel->isMegagroup()
-			? tr::lng_admin_log_participant_joined_by_link
-			: tr::lng_admin_log_participant_joined_by_link_channel);
+		const auto text = data.is_via_chatlist()
+			? (channel->isMegagroup()
+				? tr::lng_admin_log_participant_joined_by_filter_link
+				: tr::lng_admin_log_participant_joined_by_filter_link_channel)
+			: (channel->isMegagroup()
+				? tr::lng_admin_log_participant_joined_by_link
+				: tr::lng_admin_log_participant_joined_by_link_channel);
 		addInviteLinkServiceMessage(
 			text(
 				tr::now,

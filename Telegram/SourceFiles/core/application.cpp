@@ -1573,6 +1573,10 @@ QPoint Application::getPointForCallPanelCenter() const {
 	return QGuiApplication::primaryScreen()->geometry().center();
 }
 
+bool Application::isSharingScreen() const {
+	return _calls->isSharingScreen();
+}
+
 // macOS Qt bug workaround, sometimes no leaveEvent() gets to the nested widgets.
 void Application::registerLeaveSubscription(not_null<QWidget*> widget) {
 #ifdef Q_OS_MAC
@@ -1730,7 +1734,9 @@ void Application::startShortcuts() {
 
 void Application::RegisterUrlScheme() {
 	base::Platform::RegisterUrlScheme(base::Platform::UrlSchemeDescriptor{
-		.executable = cExeDir() + cExeName(),
+		.executable = (!Platform::IsLinux() || !Core::UpdaterDisabled())
+			? (cExeDir() + cExeName())
+			: cExeName(),
 		.arguments = Sandbox::Instance().customWorkingDir()
 			? u"-workdir \"%1\""_q.arg(cWorkingDir())
 			: QString(),

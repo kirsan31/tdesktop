@@ -50,7 +50,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "dialogs/ui/dialogs_message_view.h"
 #include "data/notify/data_notify_settings.h"
 #include "data/data_bot_app.h"
-#include "data/data_scheduled_messages.h" // kScheduledUntilOnlineTimestamp
+#include "data/data_scheduled_messages.h"
 #include "data/data_changes.h"
 #include "data/data_session.h"
 #include "data/data_message_reactions.h"
@@ -66,6 +66,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_group_call.h" // Data::GroupCall::id().
 #include "data/data_poll.h" // PollData::publicVotes.
 #include "data/data_sponsored_messages.h"
+#include "data/data_wall_paper.h"
 #include "data/data_web_page.h"
 #include "chat_helpers/stickers_gift_box_pack.h"
 #include "payments/payments_checkout_process.h" // CheckoutProcess::Start.
@@ -78,6 +79,26 @@ constexpr auto kNotificationTextLimit = 255;
 constexpr auto kPinnedMessageTextLimit = 16;
 
 using ItemPreview = HistoryView::ItemPreview;
+
+[[nodiscard]] TextWithEntities SpoilerLoginCode(TextWithEntities text) {
+	const auto r = QRegularExpression(u"([\\d\\-]{5,7})"_q);
+	const auto m = r.match(text.text);
+	if (!m.hasMatch()) {
+		return text;
+	}
+	const auto codeStart = int(m.capturedStart(1));
+	const auto codeLength = int(m.capturedLength(1));
+	auto i = text.entities.begin();
+	const auto e = text.entities.end();
+	while (i != e && i->offset() < codeStart) {
+		if (i->offset() + i->length() > codeStart) {
+			return text; // Entities should not intersect code.
+		}
+		++i;
+	}
+	text.entities.insert(i, { EntityType::Spoiler, codeStart, codeLength });
+	return text;
+}
 
 [[nodiscard]] bool HasNotEmojiAndSpaces(const QString &text) {
 	if (text.isEmpty()) {
@@ -316,7 +337,10 @@ HistoryItem::HistoryItem(
 		setText(_media ? textWithEntities : EnsureNonEmpty(textWithEntities));
 		if (const auto groupedId = data.vgrouped_id()) {
 			setGroupId(
-				MessageGroupId::FromRaw(history->peer->id, groupedId->v));
+				MessageGroupId::FromRaw(
+					history->peer->id,
+					groupedId->v,
+					_flags & MessageFlag::IsOrWasScheduled));
 		}
 		setReactions(data.vreactions());
 		applyTTL(data);
@@ -506,7 +530,10 @@ HistoryItem::HistoryItem(
 	setMedia(media);
 	setText(textWithEntities);
 	if (groupedId) {
-		setGroupId(MessageGroupId::FromRaw(history->peer->id, groupedId));
+		setGroupId(MessageGroupId::FromRaw(
+			history->peer->id,
+			groupedId,
+			flags & MessageFlag::IsOrWasScheduled));
 	}
 }
 
@@ -672,6 +699,8 @@ HistoryServiceDependentData *HistoryItem::GetServiceDependentData() {
 		return payment;
 	} else if (const auto info = Get<HistoryServiceTopicInfo>()) {
 		return info;
+	} else if (const auto same = Get<HistoryServiceSameBackground>()) {
+		return same;
 	}
 	return nullptr;
 }
@@ -2210,6 +2239,13 @@ bool HistoryItem::hasDirectLink() const {
 	return isRegular() && _history->peer->isChannel();
 }
 
+bool HistoryItem::changesWallPaper() const {
+	if (const auto media = _media.get()) {
+		return media->paper() != nullptr;
+	}
+	return Has<HistoryServiceSameBackground>();
+}
+
 FullMsgId HistoryItem::fullId() const {
 	return FullMsgId(_history->peer->id, id);
 }
@@ -2754,8 +2790,9 @@ bool HistoryItem::isEmpty() const {
 		&& !Has<HistoryMessageLogEntryOriginal>();
 }
 
-TextWithEntities HistoryItem::notificationText() const {
-	const auto result = [&] {
+TextWithEntities HistoryItem::notificationText(
+		NotificationTextOptions options) const {
+	auto result = [&] {
 		if (_media && !isService()) {
 			return _media->notificationText();
 		} else if (!emptyText()) {
@@ -2763,6 +2800,11 @@ TextWithEntities HistoryItem::notificationText() const {
 		}
 		return TextWithEntities();
 	}();
+	if (options.spoilerLoginCode
+		&& !out()
+		&& history()->peer->isNotificationsUser()) {
+		result = SpoilerLoginCode(std::move(result));
+	}
 	if (result.text.size() <= kNotificationTextLimit) {
 		return result;
 	}
@@ -2792,6 +2834,11 @@ ItemPreview HistoryItem::toPreview(ToPreviewOptions options) const {
 		}
 		return {};
 	}();
+	if (options.spoilerLoginCode
+		&& !out()
+		&& history()->peer->isNotificationsUser()) {
+		result.text = SpoilerLoginCode(std::move(result.text));
+	}
 	const auto fromSender = [](not_null<PeerData*> sender) {
 		return sender->isSelf()
 			? tr::lng_from_you(tr::now)
@@ -3426,6 +3473,8 @@ void HistoryItem::createServiceFromMtp(const MTPDmessageService &message) {
 				}
 			}, call->lifetime);
 		}
+	} else if (type == mtpc_messageActionSetSameChatWallPaper) {
+		UpdateComponents(HistoryServiceSameBackground::Bit());
 	}
 	if (const auto replyTo = message.vreply_to()) {
 		replyTo->match([&](const MTPDmessageReplyHeader &data) {
@@ -4157,6 +4206,52 @@ void HistoryItem::setServiceMessageByAction(const MTPmessageAction &action) {
 		return result;
 	};
 
+	auto prepareSetChatWallPaper = [&](
+			const MTPDmessageActionSetChatWallPaper &action) {
+		const auto isSelf = (_from->id == _from->session().userPeerId());
+		const auto peer = isSelf ? history()->peer : _from;
+		const auto user = peer->asUser();
+		const auto name = (user && !user->firstName.isEmpty())
+			? user->firstName
+			: peer->name();
+		auto result = PreparedServiceText{};
+		result.links.push_back(peer->createOpenLink());
+		result.text = isSelf
+			? tr::lng_action_set_wallpaper_me(
+				tr::now,
+				Ui::Text::WithEntities)
+			: tr::lng_action_set_wallpaper(
+				tr::now,
+				lt_user,
+				Ui::Text::Link(name, 1), // Link 1.
+				Ui::Text::WithEntities);
+		return result;
+	};
+
+	auto prepareSetSameChatWallPaper = [&](
+			const MTPDmessageActionSetSameChatWallPaper &action) {
+		const auto isSelf = (_from->id == _from->session().userPeerId());
+		const auto peer = isSelf ? history()->peer : _from;
+		const auto user = peer->asUser();
+		const auto name = (user && !user->firstName.isEmpty())
+			? user->firstName
+			: peer->name();
+		auto result = PreparedServiceText{};
+		if (!isSelf) {
+			result.links.push_back(peer->createOpenLink());
+		}
+		result.text = isSelf
+			? tr::lng_action_set_same_wallpaper_me(
+				tr::now,
+				Ui::Text::WithEntities)
+			: tr::lng_action_set_same_wallpaper(
+				tr::now,
+				lt_user,
+				Ui::Text::Link(name, 1), // Link 1.
+				Ui::Text::WithEntities);
+		return result;
+	};
+
 	setServiceText(action.match([&](
 			const MTPDmessageActionChatAddUser &data) {
 		return prepareChatAddUserText(data);
@@ -4233,6 +4328,10 @@ void HistoryItem::setServiceMessageByAction(const MTPmessageAction &action) {
 		return prepareSuggestProfilePhoto(data);
 	}, [&](const MTPDmessageActionRequestedPeer &data) {
 		return prepareRequestedPeer(data);
+	}, [&](const MTPDmessageActionSetChatWallPaper &data) {
+		return prepareSetChatWallPaper(data);
+	}, [&](const MTPDmessageActionSetSameChatWallPaper &data) {
+		return prepareSetSameChatWallPaper(data);
 	}, [](const MTPDmessageActionEmpty &) {
 		return PreparedServiceText{ { tr::lng_message_empty(tr::now) } };
 	}));
@@ -4296,6 +4395,12 @@ void HistoryItem::applyAction(const MTPMessageAction &action) {
 				history()->owner().processPhoto(photo));
 		}, [](const MTPDphotoEmpty &) {
 		});
+	}, [&](const MTPDmessageActionSetChatWallPaper &data) {
+		const auto session = &history()->session();
+		const auto &attached = data.vwallpaper();
+		if (const auto paper = Data::WallPaper::Create(session, attached)) {
+			_media = std::make_unique<Data::MediaWallPaper>(this, *paper);
+		}
 	}, [](const auto &) {
 	});
 }

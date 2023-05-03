@@ -21,11 +21,6 @@ apps:
     common-id: org.telegram.desktop
     desktop: usr/share/applications/org.telegram.desktop.desktop
     autostart: telegram-desktop_telegram-desktop.desktop
-    environment:
-      # Tell glib to use portals on file associations handling.
-      GTK_USE_PORTAL: 1
-      # Use sandboxed ibus api
-      IBUS_USE_PORTAL: 1
     plugs:
       - alsa
       - audio-playback
@@ -110,10 +105,10 @@ parts:
       - python3
       - libasound2-dev
       - libavif-dev
-      - libglib2.0-dev
       - libheif-dev
       - libopus-dev
       - libpulse-dev
+      - libssl-dev
       - libwayland-dev
       - libxcb1-dev
       - libxcb-keysyms1-dev
@@ -123,10 +118,10 @@ parts:
     stage-packages:
       - libasound2
       - libavif13
-      - libglib2.0-0
       - libheif1
       - libopus0
       - libpulse0
+      - libssl3
       - libwayland-client0
       - libwebkit2gtk-4.1-0
       - libxcb1
@@ -172,7 +167,6 @@ parts:
       - glibmm
       - mozjpeg
       - openal
-      - openssl
       - protobuf
       - qt
       - rnnoise
@@ -185,7 +179,7 @@ parts:
     override-pull: |
       craftctl default
       cp -r . "$CRAFT_STAGE/patches"
-    override-stage: |
+    override-prime: |
       rm -rf patches
     stage: [-./*]
 
@@ -194,6 +188,8 @@ parts:
     source-subdir: qt
     plugin: make
     make-parameters: ["FLAVOR=qt5"]
+    build-environment:
+      - LD_LIBRARY_PATH: $CRAFT_STAGE/usr/lib/$CRAFT_ARCH_TRIPLET${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}
     build-packages:
       - build-essential
       - dpkg-dev
@@ -252,16 +248,13 @@ parts:
   glibmm:
     source: https://github.com/GNOME/glibmm.git
     source-depth: 1
-    source-tag: 2.72.1
+    source-tag: 2.76.0
     plugin: meson
     build-packages:
       - meson
       - mm-common
       - ninja-build
-      - libglib2.0-dev
       - libxml-parser-perl
-    stage-packages:
-      - libglib2.0-0
     meson-parameters:
       - --buildtype=release
       - --prefix=/usr
@@ -299,9 +292,6 @@ parts:
       - -DJPEGXL_ENABLE_SJPEG=OFF
       - -DJPEGXL_ENABLE_OPENEXR=OFF
       - -DJPEGXL_ENABLE_SKCMS=OFF
-    override-pull: |
-      craftctl default
-      sed -i 's/NOT JPEGXL_ENABLE_SKCMS/0/' lib/jxl.cmake
     stage:
       - -./usr/lib/$CRAFT_ARCH_TRIPLET/libbrotli*
     prime:
@@ -336,7 +326,7 @@ parts:
   openal:
     source: https://github.com/kcat/openal-soft.git
     source-depth: 1
-    source-tag: 1.22.2
+    source-tag: 1.23.0
     plugin: cmake
     build-environment:
       - LDFLAGS: -s
@@ -362,29 +352,6 @@ parts:
       - -./usr/lib/$CRAFT_ARCH_TRIPLET/cmake
       - -./usr/lib/$CRAFT_ARCH_TRIPLET/pkgconfig
       - -./usr/lib/$CRAFT_ARCH_TRIPLET/*.so
-
-  openssl:
-    source: https://github.com/openssl/openssl.git
-    source-depth: 1
-    source-branch: OpenSSL_1_1_1-stable
-    plugin: make
-    build-environment:
-      - LDFLAGS: -s
-    override-build: |
-      ./config \
-        shared \
-        --prefix=/usr \
-        --openssldir=/usr/lib/ssl \
-        --libdir=lib/$CRAFT_ARCH_TRIPLET \
-        no-tests
-      craftctl default
-    prime:
-      - -./usr/bin
-      - -./usr/include
-      - -./usr/lib/$CRAFT_ARCH_TRIPLET/pkgconfig
-      - -./usr/lib/$CRAFT_ARCH_TRIPLET/*.a
-      - -./usr/lib/$CRAFT_ARCH_TRIPLET/*.so
-      - -./usr/share
 
   protobuf:
     source: https://github.com/protocolbuffers/protobuf.git
@@ -419,7 +386,6 @@ parts:
       - libegl-dev
       - libfontconfig1-dev
       - libfreetype-dev
-      - libglib2.0-dev
       - libglx-dev
       - libgtk-3-dev
       - libharfbuzz-dev
@@ -430,6 +396,7 @@ parts:
       - libpcre2-dev
       - libpng-dev
       - libsm-dev
+      - libssl-dev
       - libvulkan-dev
       - libwayland-dev
       - libx11-dev
@@ -457,7 +424,6 @@ parts:
       - libegl1
       - libfontconfig1
       - libfreetype6
-      - libglib2.0-0
       - libglx0
       - libgtk-3-0
       - libharfbuzz0b
@@ -468,6 +434,7 @@ parts:
       - libpcre2-16-0
       - libpng16-16
       - libsm6
+      - libssl3
       - libvulkan1
       - libwayland-client0
       - libwayland-cursor0
@@ -496,11 +463,13 @@ parts:
     override-pull: |
       QT=6.5.0
 
-      git clone -b v${QT}-beta3 --depth=1 git://code.qt.io/qt/qt5.git .
+      git clone -b v${QT} --depth=1 https://code.qt.io/qt/qt5.git .
       git submodule update --init --recursive --depth=1 qtbase qtdeclarative qtwayland qtimageformats qtsvg qt5compat qtshadertools
 
       cd qtbase
       find $CRAFT_STAGE/patches/qtbase_${QT} -type f -print0 | sort -z | xargs -r0 git apply
+      cd ../qtwayland
+      sed -i 's/qMin(version, 8)/qMin(version, 7)/' src/client/qwaylandinputdevice.cpp
       cd ..
     override-build: |
       ./configure \
@@ -536,8 +505,8 @@ parts:
       - -./usr/mkspecs
       - -./usr/modules
     after:
+      - glibmm
       - mozjpeg
-      - openssl
       - patches
 
   rnnoise:
@@ -563,7 +532,7 @@ parts:
   webrtc:
     source: https://github.com/desktop-app/tg_owt.git
     source-depth: 1
-    source-commit: 5098730b9eb6173f0b52068fe2555b7c1015123a
+    source-commit: dcb5069ff76bd293e86928804208737e6cee2ccc
     plugin: cmake
     build-environment:
       - LDFLAGS: -s
@@ -573,10 +542,10 @@ parts:
       - libegl-dev
       - libgbm-dev
       - libgl-dev
-      - libglib2.0-dev
       - libopenh264-dev
       - libopus-dev
       - libpipewire-0.3-dev
+      - libssl-dev
       - libvpx-dev
       - libx11-dev
       - libxcomposite-dev
@@ -591,9 +560,9 @@ parts:
       - libegl1
       - libgbm1
       - libgl1
-      - libglib2.0-0
       - libopenh264-6
       - libopus0
+      - libssl3
       - libvpx7
       - libx11-6
       - libxcomposite1
@@ -614,5 +583,5 @@ parts:
       - -./usr/lib/$CRAFT_ARCH_TRIPLET/*.a
     after:
       - ffmpeg
+      - glibmm
       - mozjpeg
-      - openssl
