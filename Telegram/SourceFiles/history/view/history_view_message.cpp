@@ -25,7 +25,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/effects/reaction_fly_animation.h"
 #include "ui/chat/message_bubble.h"
 #include "ui/chat/chat_style.h"
-#include "ui/toasts/common_toasts.h"
 #include "ui/text/text_utilities.h"
 #include "ui/text/text_entity.h"
 #include "ui/cached_round_corners.h"
@@ -46,6 +45,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "apiwrap.h"
 #include "styles/style_widgets.h"
 #include "styles/style_chat.h"
+#include "styles/style_chat_helpers.h"
 #include "styles/style_dialogs.h"
 
 namespace HistoryView {
@@ -1777,9 +1777,8 @@ void Message::unloadHeavyPart() {
 bool Message::showForwardsFromSender(
 		not_null<HistoryMessageForwarded*> forwarded) const {
 	const auto peer = data()->history()->peer;
-	return peer->isSelf()
-		|| peer->isRepliesChat()
-		|| forwarded->imported;
+	return !forwarded->story
+		&& (peer->isSelf() || peer->isRepliesChat() || forwarded->imported);
 }
 
 bool Message::hasFromPhoto() const {
@@ -2061,11 +2060,8 @@ ClickHandlerPtr Message::createGoToCommentsLink() const {
 			const auto history = item->history();
 			if (const auto channel = history->peer->asChannel()) {
 				if (channel->invitePeekExpires()) {
-					const auto show = Window::Show(controller);
-					Ui::ShowMultilineToast({
-						.parentOverride = show.toastParent(),
-						.text = { tr::lng_channel_invite_private(tr::now) },
-					});
+					controller->showToast(
+						tr::lng_channel_invite_private(tr::now));
 					return;
 				}
 			}
@@ -2272,7 +2268,8 @@ bool Message::getStateReplyInfo(
 	if (auto reply = displayedReply()) {
 		int32 h = st::msgReplyPadding.top() + st::msgReplyBarSize.height() + st::msgReplyPadding.bottom();
 		if (point.y() >= trect.top() && point.y() < trect.top() + h) {
-			if (reply->replyToMsg && QRect(trect.x(), trect.y() + st::msgReplyPadding.top(), trect.width(), st::msgReplyBarSize.height()).contains(point)) {
+			if ((reply->replyToMsg || reply->replyToStory)
+				&& QRect(trect.x(), trect.y() + st::msgReplyPadding.top(), trect.width(), st::msgReplyBarSize.height()).contains(point)) {
 				outResult->link = reply->replyToLink();
 			}
 			return true;
@@ -2879,7 +2876,9 @@ bool Message::displayFromName() const {
 bool Message::displayForwardedFrom() const {
 	const auto item = data();
 	if (const auto forwarded = item->Get<HistoryMessageForwarded>()) {
-		if (showForwardsFromSender(forwarded)) {
+		if (forwarded->story) {
+			return true;
+		} else if (showForwardsFromSender(forwarded)) {
 			return false;
 		}
 		if (const auto sender = item->discussionPostOriginalSender()) {
@@ -3684,6 +3683,9 @@ bool Message::needInfoDisplay() const {
 
 bool Message::hasVisibleText() const {
 	if (data()->emptyText()) {
+		if (const auto media = data()->media()) {
+			return media->storyExpired();
+		}
 		return false;
 	}
 	const auto media = this->media();
@@ -3712,6 +3714,9 @@ void Message::refreshInfoSkipBlock() {
 	const auto media = this->media();
 	const auto hasTextSkipBlock = [&] {
 		if (item->_text.empty()) {
+			if (const auto media = data()->media()) {
+				return media->storyExpired();
+			}
 			return false;
 		} else if (item->Has<HistoryMessageLogEntryOriginal>()) {
 			return false;

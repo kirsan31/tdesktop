@@ -24,6 +24,7 @@ struct MultiSelect;
 
 namespace Main {
 class Session;
+class SessionShow;
 } // namespace Main
 
 namespace Ui {
@@ -35,6 +36,7 @@ class SlideWrap;
 class FlatLabel;
 struct ScrollToRequest;
 class PopupMenu;
+struct OutlineSegment;
 } // namespace Ui
 
 using PaintRoundImageCallback = Fn<void(
@@ -201,6 +203,8 @@ public:
 		}
 		setCheckedInternal(checked, animated);
 	}
+	void setCustomizedCheckSegments(
+		std::vector<Ui::OutlineSegment> segments);
 	void setHidden(bool hidden) {
 		_hidden = hidden;
 	}
@@ -323,13 +327,14 @@ public:
 	virtual void peerListScrollToTop() = 0;
 	virtual int peerListFullRowsCount() = 0;
 	virtual PeerListRow *peerListFindRow(PeerListRowId id) = 0;
+	virtual std::optional<QPoint> peerListLastRowMousePosition() = 0;
 	virtual void peerListSortRows(Fn<bool(const PeerListRow &a, const PeerListRow &b)> compare) = 0;
 	virtual int peerListPartitionRows(Fn<bool(const PeerListRow &a)> border) = 0;
 	virtual void peerListShowBox(
 		object_ptr<Ui::BoxContent> content,
 		Ui::LayerOptions options = Ui::LayerOption::KeepOther) = 0;
 	virtual void peerListHideLayer() = 0;
-	virtual not_null<QWidget*> peerListToastParent() = 0;
+	virtual std::shared_ptr<Main::SessionShow> peerListUiShow() = 0;
 
 	template <typename PeerDataRange>
 	void peerListAddSelectedPeers(PeerDataRange &&range) {
@@ -499,6 +504,9 @@ public:
 		return delegate()->peerListIsRowChecked(row);
 	}
 
+	virtual bool trackSelectedList() {
+		return true;
+	}
 	virtual bool searchInLocal() {
 		return true;
 	}
@@ -608,6 +616,7 @@ public:
 	void prependRow(std::unique_ptr<PeerListRow> row);
 	void prependRowFromSearchResult(not_null<PeerListRow*> row);
 	PeerListRow *findRow(PeerListRowId id);
+	std::optional<QPoint> lastRowMousePosition() const;
 	void updateRow(not_null<PeerListRow*> row) {
 		updateRow(row, RowIndex());
 	}
@@ -862,6 +871,9 @@ public:
 	PeerListRow *peerListFindRow(PeerListRowId id) override {
 		return _content->findRow(id);
 	}
+	std::optional<QPoint> peerListLastRowMousePosition() override {
+		return _content->lastRowMousePosition();
+	}
 	void peerListUpdateRow(not_null<PeerListRow*> row) override {
 		_content->updateRow(row);
 	}
@@ -999,22 +1011,24 @@ public:
 	void peerListHideLayer() override {
 		Unexpected("...DelegateSimple::peerListHideLayer");
 	}
-	not_null<QWidget*> peerListToastParent() override {
-		Unexpected("...DelegateSimple::peerListToastParent");
+	std::shared_ptr<Main::SessionShow> peerListUiShow() override {
+		Unexpected("...DelegateSimple::peerListUiShow");
 	}
 
 };
 
 class PeerListContentDelegateShow : public PeerListContentDelegateSimple {
 public:
-	PeerListContentDelegateShow(std::shared_ptr<Ui::Show> show);
+	explicit PeerListContentDelegateShow(
+		std::shared_ptr<Main::SessionShow> show);
 	void peerListShowBox(
 		object_ptr<Ui::BoxContent> content,
 		Ui::LayerOptions options = Ui::LayerOption::KeepOther) override;
 	void peerListHideLayer() override;
-	not_null<QWidget*> peerListToastParent() override;
+	std::shared_ptr<Main::SessionShow> peerListUiShow() override;
+
 private:
-	std::shared_ptr<Ui::Show> _show;
+	std::shared_ptr<Main::SessionShow> _show;
 
 };
 
@@ -1050,7 +1064,7 @@ public:
 		object_ptr<Ui::BoxContent> content,
 		Ui::LayerOptions options = Ui::LayerOption::KeepOther) override;
 	void peerListHideLayer() override;
-	not_null<QWidget*> peerListToastParent() override;
+	std::shared_ptr<Main::SessionShow> peerListUiShow() override;
 
 	void setAddedTopScrollSkip(int skip);
 
@@ -1092,7 +1106,7 @@ private:
 
 	object_ptr<Ui::SlideWrap<Ui::MultiSelect>> _select = { nullptr };
 
-	const Ui::BoxShow _show;
+	const std::shared_ptr<Main::SessionShow> _show;
 	std::unique_ptr<PeerListController> _controller;
 	Fn<void(PeerListBox*)> _init;
 	bool _scrollBottomFixed = false;

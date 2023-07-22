@@ -12,6 +12,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/qt_signal_producer.h"
 #include "base/unixtime.h"
 #include "boxes/edit_caption_box.h"
+#include "chat_helpers/compose/compose_show.h"
 #include "chat_helpers/emoji_suggestions_widget.h"
 #include "chat_helpers/message_field.h"
 #include "menu/menu_send.h"
@@ -57,7 +58,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/session/send_as_peers.h"
 #include "media/audio/media_audio_capture.h"
 #include "media/audio/media_audio.h"
-#include "styles/style_chat.h"
 #include "ui/text/text_options.h"
 #include "ui/ui_utility.h"
 #include "ui/widgets/input_fields.h"
@@ -71,6 +71,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "window/window_adaptive.h"
 #include "window/window_session_controller.h"
 #include "mainwindow.h"
+#include "styles/style_chat.h"
+#include "styles/style_chat_helpers.h"
 
 namespace HistoryView {
 namespace {
@@ -340,7 +342,7 @@ class FieldHeader final : public Ui::RpWidget {
 public:
 	FieldHeader(
 		QWidget *parent,
-		not_null<Window::SessionController*> controller);
+		std::shared_ptr<ChatHelpers::Show> show);
 
 	void setHistory(const SetHistoryArgs &args);
 	void init();
@@ -354,6 +356,7 @@ public:
 		rpl::producer<QString> title,
 		rpl::producer<QString> description,
 		rpl::producer<WebPageData*> page);
+	void previewUnregister();
 
 	[[nodiscard]] bool isDisplayed() const;
 	[[nodiscard]] bool isEditingMessage() const;
@@ -402,7 +405,7 @@ private:
 		bool cancelled = false;
 	};
 
-	const not_null<Window::SessionController*> _controller;
+	const std::shared_ptr<ChatHelpers::Show> _show;
 	History *_history = nullptr;
 	rpl::variable<QString> _title;
 	rpl::variable<QString> _description;
@@ -412,6 +415,7 @@ private:
 	rpl::event_stream<> _replyCancelled;
 	rpl::event_stream<> _forwardCancelled;
 	rpl::event_stream<> _previewCancelled;
+	rpl::lifetime _previewLifetime;
 
 	rpl::variable<FullMsgId> _editMsgId;
 	rpl::variable<FullMsgId> _replyToId;
@@ -436,12 +440,12 @@ private:
 
 FieldHeader::FieldHeader(
 	QWidget *parent,
-	not_null<Window::SessionController*> controller)
+	std::shared_ptr<ChatHelpers::Show> show)
 : RpWidget(parent)
-, _controller(controller)
+, _show(std::move(show))
 , _forwardPanel(
 	std::make_unique<ForwardPanel>([=] { customEmojiRepaint(); }))
-, _data(&controller->session().data())
+, _data(&_show->session().data())
 , _cancel(Ui::CreateChild<Ui::IconButton>(this, st::historyReplyCancel)) {
 	resize(QSize(parent->width(), st::historyReplyHeight));
 	init();
@@ -466,8 +470,7 @@ void FieldHeader::init() {
 	paintRequest(
 	) | rpl::start_with_next([=] {
 		Painter p(this);
-		p.setInactive(
-			_controller->isGifPausedAtLeastFor(Window::GifPauseReason::Any));
+		p.setInactive(_show->paused(Window::GifPauseReason::Any));
 		p.fillRect(rect(), st::historyComposeAreaBg);
 
 		const auto position = st::historyReplyIconPosition;
@@ -581,7 +584,7 @@ void FieldHeader::init() {
 				update();
 			} else if (isLeftButton && inPreviewRect) {
 				if (!isEditingMessage() && readyToForward()) {
-					_forwardPanel->editOptions(_controller);
+					_forwardPanel->editOptions(_show);
 				} else {
 					auto id = isEditingMessage()
 						? _editMsgId.current()
@@ -677,17 +680,18 @@ void FieldHeader::resolveMessageData() {
 }
 
 void FieldHeader::previewRequested(
-	rpl::producer<QString> title,
-	rpl::producer<QString> description,
-	rpl::producer<WebPageData*> page) {
+		rpl::producer<QString> title,
+		rpl::producer<QString> description,
+		rpl::producer<WebPageData*> page) {
+	_previewLifetime.destroy();
 
 	std::move(
 		title
 	) | rpl::filter([=] {
 		return !_preview.cancelled;
-	}) | start_with_next([=](const QString &t) {
+	}) | rpl::start_with_next([=](const QString &t) {
 		_title = t;
-	}, lifetime());
+	}, _previewLifetime);
 
 	std::move(
 		description
@@ -695,7 +699,7 @@ void FieldHeader::previewRequested(
 		return !_preview.cancelled;
 	}) | rpl::start_with_next([=](const QString &d) {
 		_description = d;
-	}, lifetime());
+	}, _previewLifetime);
 
 	std::move(
 		page
@@ -704,8 +708,11 @@ void FieldHeader::previewRequested(
 	}) | rpl::start_with_next([=](WebPageData *p) {
 		_preview.data = p;
 		updateVisible();
-	}, lifetime());
+	}, _previewLifetime);
+}
 
+void FieldHeader::previewUnregister() {
+	_previewLifetime.destroy();
 }
 
 void FieldHeader::paintWebPage(Painter &p, not_null<PeerData*> context) {
@@ -915,45 +922,97 @@ MessageToEdit FieldHeader::queryToEdit() {
 
 ComposeControls::ComposeControls(
 	not_null<Ui::RpWidget*> parent,
-	not_null<Window::SessionController*> window,
+	not_null<Window::SessionController*> controller,
 	Fn<void(not_null<DocumentData*>)> unavailableEmojiPasted,
 	Mode mode,
 	SendMenu::Type sendMenuType)
-: _parent(parent)
-, _window(window)
-, _mode(mode)
+: ComposeControls(parent, ComposeControlsDescriptor{
+	.show = controller->uiShow(),
+	.unavailableEmojiPasted = std::move(unavailableEmojiPasted),
+	.mode = mode,
+	.sendMenuType = sendMenuType,
+	.regularWindow = controller,
+	.stickerOrEmojiChosen = controller->stickerOrEmojiChosen(),
+}) {
+}
+
+ComposeControls::ComposeControls(
+	not_null<Ui::RpWidget*> parent,
+	ComposeControlsDescriptor descriptor)
+: _st(descriptor.stOverride
+	? *descriptor.stOverride
+	: st::defaultComposeControls)
+, _features(descriptor.features)
+, _parent(parent)
+, _show(std::move(descriptor.show))
+, _session(&_show->session())
+, _regularWindow(descriptor.regularWindow)
+, _ownedSelector(_regularWindow
+	? nullptr
+	: std::make_unique<ChatHelpers::TabbedSelector>(
+		_parent,
+		ChatHelpers::TabbedSelectorDescriptor{
+			.show = _show,
+			.st = _st.tabbed,
+			.level = Window::GifPauseReason::TabbedPanel,
+			.mode = ChatHelpers::TabbedSelector::Mode::Full,
+			.features = _features,
+		}))
+, _selector(_regularWindow
+	? _regularWindow->tabbedSelector()
+	: not_null(_ownedSelector.get()))
+, _mode(descriptor.mode)
 , _wrap(std::make_unique<Ui::RpWidget>(parent))
 , _writeRestricted(std::make_unique<Ui::RpWidget>(parent))
-, _send(std::make_shared<Ui::SendButton>(_wrap.get()))
+, _send(std::make_shared<Ui::SendButton>(_wrap.get(), _st.send))
 , _attachToggle(Ui::CreateChild<Ui::IconButton>(
 	_wrap.get(),
-	st::historyAttach))
+	_st.attach))
 , _tabbedSelectorToggle(Ui::CreateChild<Ui::EmojiButton>(
 	_wrap.get(),
-	st::historyAttachEmoji))
+	_st.emoji))
+, _fieldCustomPlaceholder(std::move(descriptor.customPlaceholder))
 , _field(
 	Ui::CreateChild<Ui::InputField>(
 		_wrap.get(),
-		st::historyComposeField,
+		_st.field,
 		Ui::InputField::Mode::MultiLine,
-		tr::lng_message_ph()))
-, _botCommandStart(Ui::CreateChild<Ui::IconButton>(
-	_wrap.get(),
-	st::historyBotCommandStart))
+		(_fieldCustomPlaceholder
+			? rpl::duplicate(_fieldCustomPlaceholder)
+			: tr::lng_message_ph())))
+, _botCommandStart(_features.botCommandSend
+	? Ui::CreateChild<Ui::IconButton>(
+		_wrap.get(),
+		st::historyBotCommandStart)
+	: nullptr)
 , _autocomplete(std::make_unique<FieldAutocomplete>(
 	parent,
-	window))
-, _header(std::make_unique<FieldHeader>(_wrap.get(), _window))
+	_show,
+	&_st.tabbed))
+, _header(std::make_unique<FieldHeader>(_wrap.get(), _show))
 , _voiceRecordBar(std::make_unique<VoiceRecordBar>(
 	_wrap.get(),
-	parent,
-	window,
-	_send,
-	st::historySendSize.height()))
-, _sendMenuType(sendMenuType)
-, _unavailableEmojiPasted(unavailableEmojiPasted)
+	Controls::VoiceRecordBarDescriptor{
+		.outerContainer = parent,
+		.show = _show,
+		.send = _send,
+		.customCancelText = descriptor.voiceCustomCancelText,
+		.stOverride = &_st.record,
+		.recorderHeight = st::historySendSize.height(),
+		.lockFromBottom = descriptor.voiceLockFromBottom,
+	}))
+, _sendMenuType(descriptor.sendMenuType)
+, _unavailableEmojiPasted(std::move(descriptor.unavailableEmojiPasted))
 , _saveDraftTimer([=] { saveDraft(); })
 , _saveCloudDraftTimer([=] { saveCloudDraft(); }) {
+	if (_st.radius > 0) {
+		_backgroundRect.emplace(_st.radius, _st.bg);
+	}
+	if (descriptor.stickerOrEmojiChosen) {
+		std::move(
+			descriptor.stickerOrEmojiChosen
+		) | rpl::start_to_stream(_stickerOrEmojiChosen, _wrap->lifetime());
+	}
 	init();
 }
 
@@ -965,14 +1024,10 @@ ComposeControls::~ComposeControls() {
 }
 
 Main::Session &ComposeControls::session() const {
-	return _window->session();
+	return _show->session();
 }
 
 void ComposeControls::setHistory(SetHistoryArgs &&args) {
-	// Right now only single non-null set of history is supported.
-	// Otherwise initWebpageProcess should be updated / rewritten.
-	Expects(!_history && (*args.history));
-
 	_showSlowmodeError = std::move(args.showSlowmodeError);
 	_sendActionFactory = std::move(args.sendActionFactory);
 	_slowmodeSecondsLeft = rpl::single(0)
@@ -987,10 +1042,10 @@ void ComposeControls::setHistory(SetHistoryArgs &&args) {
 	}
 	unregisterDraftSources();
 	_history = history;
+	_historyLifetime.destroy();
 	_header->setHistory(args);
 	registerDraftSource();
-	_window->tabbedSelector()->setCurrentPeer(
-		history ? history->peer.get() : nullptr);
+	_selector->setCurrentPeer(history ? history->peer.get() : nullptr);
 	initWebpageProcess();
 	initForwardProcess();
 	updateBotCommandShown();
@@ -999,9 +1054,12 @@ void ComposeControls::setHistory(SetHistoryArgs &&args) {
 	updateControlsVisibility();
 	updateFieldPlaceholder();
 	updateAttachBotsMenu();
-	//if (!_history) {
-	//	return;
-	//}
+
+	_sendAs = nullptr;
+	_silent = nullptr;
+	if (!_history) {
+		return;
+	}
 	const auto peer = _history->peer;
 	initSendAsButton(peer);
 	if (peer->isChat() && peer->asChat()->noParticipantInfo()) {
@@ -1076,6 +1134,15 @@ bool ComposeControls::focus() {
 	return true;
 }
 
+rpl::producer<bool> ComposeControls::focusedValue() const {
+	return rpl::single(Ui::InFocusChain(_wrap.get()))
+		| rpl::then(_focusChanges.events());
+}
+
+rpl::producer<bool> ComposeControls::tabbedPanelShownValue() const {
+	return _tabbedPanel ? _tabbedPanel->shownValue() : rpl::single(false);
+}
+
 rpl::producer<> ComposeControls::cancelRequests() const {
 	return _cancelRequests.events();
 }
@@ -1093,6 +1160,10 @@ auto ComposeControls::editLastMessageRequests() const
 auto ComposeControls::replyNextRequests() const
 -> rpl::producer<ReplyNextRequest> {
 	return _replyNextRequests.events();
+}
+
+rpl::producer<> ComposeControls::focusRequests() const {
+	return _focusRequests.events();
 }
 
 auto ComposeControls::sendContentRequests(SendRequestType requestType) const {
@@ -1146,7 +1217,8 @@ rpl::producer<std::optional<bool>> ComposeControls::attachRequests() const {
 		_attachRequests.events()
 	) | rpl::filter([=] {
 		if (isEditingMessage()) {
-			_window->show(Ui::MakeInformBox(tr::lng_edit_caption_attach()));
+			_show->showBox(
+				Ui::MakeInformBox(tr::lng_edit_caption_attach()));
 			return false;
 		}
 		return true;
@@ -1158,17 +1230,17 @@ void ComposeControls::setMimeDataHook(MimeDataHook hook) {
 }
 
 bool ComposeControls::confirmMediaEdit(Ui::PreparedList &list) {
-	if (!isEditingMessage()) {
+	if (!isEditingMessage() || !_regularWindow) {
 		return false;
 	} else if (_canReplaceMedia) {
 		EditCaptionBox::StartMediaReplace(
-			_window,
+			_regularWindow,
 			_editingId,
 			std::move(list),
 			_field->getTextWithTags(),
 			crl::guard(_wrap.get(), [=] { cancelEditMessage(); }));
 	} else {
-		_window->showToast({ tr::lng_edit_caption_attach(tr::now) });
+		_show->showToast(tr::lng_edit_caption_attach(tr::now));
 	}
 	return true;
 }
@@ -1332,7 +1404,7 @@ void ComposeControls::checkAutocomplete() {
 	const auto peer = _history->peer;
 	const auto autocomplete = _isInlineBot
 		? AutocompleteQuery()
-		: ParseMentionHashtagBotCommandQuery(_field);
+		: ParseMentionHashtagBotCommandQuery(_field, _features);
 	if (!autocomplete.query.isEmpty()) {
 		if (autocomplete.query[0] == '#'
 			&& cRecentWriteHashtags().isEmpty()
@@ -1379,7 +1451,9 @@ void ComposeControls::init() {
 		updateWrappingVisibility();
 	}, _wrap->lifetime());
 
-	_botCommandStart->setClickedCallback([=] { setText({ "/" }); });
+	if (_botCommandStart) {
+		_botCommandStart->setClickedCallback([=] { setText({ "/" }); });
+	}
 
 	_wrap->sizeValue(
 	) | rpl::start_with_next([=](QSize size) {
@@ -1459,7 +1533,7 @@ void ComposeControls::init() {
 		cancelEditMessage();
 	}, _wrap->lifetime());
 
-	_window->materializeLocalDraftsRequests(
+	Core::App().materializeLocalDraftsRequests(
 	) | rpl::start_with_next([=] {
 		saveFieldToHistoryLocalDraft();
 	}, _wrap->lifetime());
@@ -1559,6 +1633,8 @@ void ComposeControls::initKeyHandler() {
 				});
 				return Result::Cancel;
 			}
+		} else if (k->key() == Qt::Key_Escape) {
+			return Result::Cancel;
 		}
 		return Result::Continue;
 	});
@@ -1571,9 +1647,14 @@ void ComposeControls::initField() {
 	Ui::Connect(_field, &Ui::InputField::cancelled, [=] { escape(); });
 	Ui::Connect(_field, &Ui::InputField::tabbed, [=] { fieldTabbed(); });
 	Ui::Connect(_field, &Ui::InputField::resized, [=] { updateHeight(); });
-	//Ui::Connect(_field, &Ui::InputField::focused, [=] { fieldFocused(); });
+	Ui::Connect(_field, &Ui::InputField::focused, [=] {
+		_focusChanges.fire(true);
+	});
+	Ui::Connect(_field, &Ui::InputField::blurred, [=] {
+		_focusChanges.fire(false);
+	});
 	Ui::Connect(_field, &Ui::InputField::changed, [=] { fieldChanged(); });
-	InitMessageField(_window, _field, [=](not_null<DocumentData*> emoji) {
+	InitMessageField(_show, _field, [=](not_null<DocumentData*> emoji) {
 		if (_history && Data::AllowEmojiWithoutPremium(_history->peer)) {
 			return true;
 		}
@@ -1589,8 +1670,12 @@ void ComposeControls::initField() {
 	const auto suggestions = Ui::Emoji::SuggestionsController::Init(
 		_parent,
 		_field,
-		&_window->session(),
-		{ .suggestCustomEmoji = true, .allowCustomWithoutPremium = allow });
+		_session,
+		{
+			.suggestCustomEmoji = true,
+			.allowCustomWithoutPremium = allow,
+			.st = &_st.suggestions,
+		});
 	_raiseEmojiSuggestions = [=] { suggestions->raise(); };
 
 	const auto rawTextEdit = _field->rawTextEdit().get();
@@ -1678,7 +1763,7 @@ void ComposeControls::initAutocomplete() {
 
 	_field->rawTextEdit()->installEventFilter(_autocomplete.get());
 
-	_window->session().data().botCommandsChanges(
+	_session->data().botCommandsChanges(
 	) | rpl::filter([=](not_null<PeerData*> peer) {
 		return _history && (_history->peer == peer);
 	}) | rpl::start_with_next([=] {
@@ -1687,7 +1772,7 @@ void ComposeControls::initAutocomplete() {
 		}
 	}, _autocomplete->lifetime());
 
-	_window->session().data().stickers().updated(
+	_session->data().stickers().updated(
 		Data::StickersType::Stickers
 	) | rpl::start_with_next([=] {
 		updateStickersByEmoji();
@@ -1735,7 +1820,9 @@ void ComposeControls::updateFieldPlaceholder() {
 	}
 
 	_field->setPlaceholder([&] {
-		if (isEditingMessage()) {
+		if (_fieldCustomPlaceholder) {
+			return rpl::duplicate(_fieldCustomPlaceholder);
+		} else if (isEditingMessage()) {
 			return tr::lng_edit_message_text();
 		} else if (!_history) {
 			return tr::lng_message_ph();
@@ -1773,7 +1860,8 @@ void ComposeControls::fieldChanged() {
 		&& !_header->isEditingMessage()
 		&& (_textUpdateEvents & TextUpdateEvent::SendTyping));
 	updateSendButtonType();
-	if (!HasSendText(_field) && _preview) {
+	_hasSendText = HasSendText(_field);
+	if (!_hasSendText.current() && _preview) {
 		_preview->setState(Data::PreviewState::Allowed);
 	}
 	if (updateBotCommandShown()) {
@@ -1936,9 +2024,12 @@ void ComposeControls::applyDraft(FieldHistoryAction fieldHistoryAction) {
 		updateControlsGeometry(_wrap->size());
 	});
 
+	const auto hadFocus = Ui::InFocusChain(_field);
 	if (!draft) {
 		clearFieldText(0, fieldHistoryAction);
-		_field->setFocus();
+		if (hadFocus) {
+			_field->setFocus();
+		}
 		_header->editMessage({});
 		_header->replyToMessage({});
 		_canReplaceMedia = false;
@@ -1948,7 +2039,9 @@ void ComposeControls::applyDraft(FieldHistoryAction fieldHistoryAction) {
 
 	_textUpdateEvents = 0;
 	setFieldText(draft->textWithTags, 0, fieldHistoryAction);
-	_field->setFocus();
+	if (hadFocus) {
+		_field->setFocus();
+	}
 	draft->cursor.applyTo(_field);
 	_textUpdateEvents = TextUpdateEvent::SaveDraft | TextUpdateEvent::SendTyping;
 	if (_preview) {
@@ -1989,7 +2082,7 @@ rpl::producer<SendActionUpdate> ComposeControls::sendActionUpdates() const {
 }
 
 void ComposeControls::initTabbedSelector() {
-	if (_window->hasTabbedSelectorOwnership()) {
+	if (!_regularWindow || _regularWindow->hasTabbedSelectorOwnership()) {
 		createTabbedPanel();
 	} else {
 		setTabbedPanel(nullptr);
@@ -2003,25 +2096,24 @@ void ComposeControls::initTabbedSelector() {
 		}
 	});
 
-	const auto selector = _window->tabbedSelector();
 	const auto wrap = _wrap.get();
 
-	base::install_event_filter(wrap, selector, [=](not_null<QEvent*> e) {
+	base::install_event_filter(wrap, _selector, [=](not_null<QEvent*> e) {
 		if (_tabbedPanel && e->type() == QEvent::ParentChange) {
 			setTabbedPanel(nullptr);
 		}
 		return base::EventFilterResult::Continue;
 	});
 
-	selector->emojiChosen(
+	_selector->emojiChosen(
 	) | rpl::start_with_next([=](ChatHelpers::EmojiChosen data) {
 		Ui::InsertEmojiAtCursor(_field->textCursor(), data.emoji);
 	}, wrap->lifetime());
 
 	rpl::merge(
-		selector->fileChosen(),
-		selector->customEmojiChosen(),
-		_window->stickerOrEmojiChosen()
+		_selector->fileChosen(),
+		_selector->customEmojiChosen(),
+		_stickerOrEmojiChosen.events()
 	) | rpl::start_with_next([=](ChatHelpers::FileChosen &&data) {
 		if (const auto info = data.document->sticker()
 			; info && info->setType == Data::StickersType::Emoji) {
@@ -2040,18 +2132,18 @@ void ComposeControls::initTabbedSelector() {
 		}
 	}, wrap->lifetime());
 
-	selector->photoChosen(
+	_selector->photoChosen(
 	) | rpl::start_to_stream(_photoChosen, wrap->lifetime());
 
-	selector->inlineResultChosen(
+	_selector->inlineResultChosen(
 	) | rpl::start_to_stream(_inlineResultChosen, wrap->lifetime());
 
-	selector->contextMenuRequested(
+	_selector->contextMenuRequested(
 	) | rpl::start_with_next([=] {
-		selector->showMenuWithType(sendMenuType());
+		_selector->showMenuWithType(sendMenuType());
 	}, wrap->lifetime());
 
-	selector->choosingStickerUpdated(
+	_selector->choosingStickerUpdated(
 	) | rpl::start_with_next([=](ChatHelpers::TabbedSelector::Action action) {
 		_sendActionUpdates.fire({
 			.type = Api::SendProgressType::ChooseSticker,
@@ -2104,7 +2196,7 @@ void ComposeControls::initSendAsButton(not_null<PeerData*> peer) {
 			updateControlsGeometry(_wrap->size());
 			orderControls();
 		}
-	}, _wrap->lifetime());
+	}, _historyLifetime);
 
 	updateSendAsButton();
 }
@@ -2166,16 +2258,31 @@ void ComposeControls::initWriteRestriction() {
 	}, _wrap->lifetime());
 }
 
+void ComposeControls::changeFocusedControl() {
+	_focusRequests.fire({});
+	if (_regularWindow) {
+		_regularWindow->widget()->setInnerFocus();
+	}
+}
+
 void ComposeControls::initVoiceRecordBar() {
 	_voiceRecordBar->recordingStateChanges(
 	) | rpl::start_with_next([=](bool active) {
+		if (active) {
+			_recording = true;
+			changeFocusedControl();
+		}
 		_field->setVisible(!active);
+		if (!active) {
+			changeFocusedControl();
+			_recording = false;
+		}
 	}, _wrap->lifetime());
 
 	_voiceRecordBar->setStartRecordingFilter([=] {
 		const auto error = [&]() -> std::optional<QString> {
 			const auto peer = _history ? _history->peer.get() : nullptr;
-			if (!peer) {
+			if (peer) {
 				if (const auto error = Data::RestrictionError(
 						peer,
 						ChatRestriction::SendVoiceMessages)) {
@@ -2185,33 +2292,13 @@ void ComposeControls::initVoiceRecordBar() {
 			return std::nullopt;
 		}();
 		if (error) {
-			_window->show(Ui::MakeInformBox(*error));
+			_show->showToast(*error);
 			return true;
 		} else if (_showSlowmodeError && _showSlowmodeError()) {
 			return true;
 		}
 		return false;
 	});
-
-	{
-		auto geometry = rpl::merge(
-			_wrap->geometryValue(),
-			_send->geometryValue()
-		) | rpl::map([=](QRect geometry) {
-			auto r = _send->geometry();
-			r.setY(r.y() + _wrap->y());
-			return r;
-		});
-		_voiceRecordBar->setSendButtonGeometryValue(std::move(geometry));
-	}
-
-	{
-		auto bottom = _wrap->geometryValue(
-		) | rpl::map([=](QRect geometry) {
-			return geometry.y() - st::historyRecordLockPosition.y();
-		});
-		_voiceRecordBar->setLockBottom(std::move(bottom));
-	}
 
 	_voiceRecordBar->updateSendButtonTypeRequests(
 	) | rpl::start_with_next([=] {
@@ -2321,9 +2408,11 @@ void ComposeControls::updateControlsGeometry(QSize size) {
 	right += _send->width();
 	_tabbedSelectorToggle->moveToRight(right, buttonsTop);
 	right += _tabbedSelectorToggle->width();
-	_botCommandStart->moveToRight(right, buttonsTop);
-	if (_botCommandShown) {
-		right += _botCommandStart->width();
+	if (_botCommandStart) {
+		_botCommandStart->moveToRight(right, buttonsTop);
+		if (_botCommandShown) {
+			right += _botCommandStart->width();
+		}
 	}
 	if (_silent) {
 		_silent->moveToRight(right, buttonsTop);
@@ -2340,7 +2429,9 @@ void ComposeControls::updateControlsGeometry(QSize size) {
 }
 
 void ComposeControls::updateControlsVisibility() {
-	_botCommandStart->setVisible(_botCommandShown);
+	if (_botCommandStart) {
+		_botCommandStart->setVisible(_botCommandShown);
+	}
 	if (_ttlInfo) {
 		_ttlInfo->show();
 	}
@@ -2358,7 +2449,8 @@ void ComposeControls::updateControlsVisibility() {
 bool ComposeControls::updateBotCommandShown() {
 	auto shown = false;
 	const auto peer = _history ? _history->peer.get() : nullptr;
-	if (peer
+	if (_botCommandStart
+		&& peer
 		&& ((peer->isChat() && peer->asChat()->botStatus > 0)
 			|| (peer->isMegagroup() && peer->asChannel()->mgInfo->botStatus > 0)
 			|| (peer->isUser() && peer->asUser()->isBot()))) {
@@ -2388,7 +2480,9 @@ void ComposeControls::updateOuterGeometry(QRect rect) {
 
 void ComposeControls::updateMessagesTTLShown() {
 	const auto peer = _history ? _history->peer.get() : nullptr;
-	const auto shown = peer && (peer->messagesTTL() > 0);
+	const auto shown = _features.ttlInfo
+		&& peer
+		&& (peer->messagesTTL() > 0);
 	if (!shown && _ttlInfo) {
 		_ttlInfo = nullptr;
 		updateControlsVisibility();
@@ -2396,7 +2490,7 @@ void ComposeControls::updateMessagesTTLShown() {
 	} else if (shown && !_ttlInfo) {
 		_ttlInfo = std::make_unique<Controls::TTLButton>(
 			_wrap.get(),
-			std::make_shared<Window::Show>(_window),
+			_show,
 			peer);
 		orderControls();
 		updateControlsVisibility();
@@ -2405,10 +2499,12 @@ void ComposeControls::updateMessagesTTLShown() {
 }
 
 bool ComposeControls::updateSendAsButton() {
-	Expects(_history != nullptr);
-
-	const auto peer = _history->peer;
-	if (isEditingMessage() || !session().sendAsPeers().shouldChoose(peer)) {
+	const auto peer = _history ? _history->peer.get() : nullptr;
+	if (!_features.sendAs
+		|| !peer
+		|| !_regularWindow
+		|| isEditingMessage()
+		|| !session().sendAsPeers().shouldChoose(peer)) {
 		if (!_sendAs) {
 			return false;
 		}
@@ -2422,19 +2518,22 @@ bool ComposeControls::updateSendAsButton() {
 		st::sendAsButton);
 	Ui::SetupSendAsButton(
 		_sendAs.get(),
-		rpl::single(peer.get()),
-		_window);
+		rpl::single(peer),
+		_regularWindow);
 	return true;
 }
 
 void ComposeControls::updateAttachBotsMenu() {
 	_attachBotsMenu = nullptr;
-	if (!_history || !_sendActionFactory) {
+	if (!_features.attachBotsMenu
+		|| !_history
+		|| !_sendActionFactory
+		|| !_regularWindow) {
 		return;
 	}
 	_attachBotsMenu = InlineBots::MakeAttachBotsMenu(
 		_parent,
-		_window,
+		_regularWindow,
 		_history->peer,
 		_sendActionFactory,
 		[=](bool compress) { _attachRequests.fire_copy(compress); });
@@ -2453,7 +2552,18 @@ void ComposeControls::updateAttachBotsMenu() {
 void ComposeControls::paintBackground(QRect clip) {
 	Painter p(_wrap.get());
 
-	p.fillRect(clip, st::historyComposeAreaBg);
+	if (_backgroundRect) {
+		//p.setCompositionMode(QPainter::CompositionMode_Source);
+		//p.fillRect(clip, Qt::transparent);
+		//p.setCompositionMode(QPainter::CompositionMode_SourceOver);
+		//_backgroundRect->paint(p, _wrap->rect());
+		auto hq = PainterHighQualityEnabler(p);
+		p.setBrush(_st.bg);
+		p.setPen(Qt::NoPen);
+		p.drawRoundedRect(_wrap->rect(), _st.radius, _st.radius);
+	} else {
+		p.fillRect(clip, _st.bg);
+	}
 }
 
 void ComposeControls::escape() {
@@ -2467,7 +2577,7 @@ void ComposeControls::escape() {
 bool ComposeControls::pushTabbedSelectorToThirdSection(
 		not_null<Data::Thread*> thread,
 		const Window::SectionShow &params) {
-	if (!_tabbedPanel) {
+	if (!_tabbedPanel || !_regularWindow) {
 		return true;
 	//} else if (!_canSendMessages) {
 	//	Core::App().settings().setTabbedReplacedWithInfo(true);
@@ -2479,8 +2589,8 @@ bool ComposeControls::pushTabbedSelectorToThirdSection(
 		&st::historyAttachEmojiActive,
 		&st::historyRecordVoiceFgActive,
 		&st::historyRecordVoiceRippleBgActive);
-	_window->resizeForThirdSection();
-	_window->showSection(
+	_regularWindow->resizeForThirdSection();
+	_regularWindow->showSection(
 		std::make_shared<ChatHelpers::TabbedMemento>(),
 		params.withThirdColumn());
 	return true;
@@ -2493,10 +2603,21 @@ bool ComposeControls::returnTabbedSelector() {
 }
 
 void ComposeControls::createTabbedPanel() {
-	setTabbedPanel(std::make_unique<ChatHelpers::TabbedPanel>(
+	using namespace ChatHelpers;
+	auto descriptor = TabbedPanelDescriptor{
+		.regularWindow = _regularWindow,
+		.ownedSelector = (_ownedSelector
+			? object_ptr<TabbedSelector>::fromRaw(_ownedSelector.release())
+			: object_ptr<TabbedSelector>(nullptr)),
+		.nonOwnedSelector = _ownedSelector ? nullptr : _selector.get(),
+	};
+	setTabbedPanel(std::make_unique<TabbedPanel>(
 		_parent,
-		_window,
-		_window->tabbedSelector()));
+		std::move(descriptor)));
+	_tabbedPanel->setDesiredHeightValues(
+		st::emojiPanHeightRatio,
+		_st.tabbedHeightMin,
+		_st.tabbedHeightMax);
 }
 
 void ComposeControls::setTabbedPanel(
@@ -2514,12 +2635,12 @@ void ComposeControls::setTabbedPanel(
 }
 
 void ComposeControls::toggleTabbedSelectorMode() {
-	if (!_history) {
+	if (!_history || !_regularWindow) {
 		return;
 	}
 	if (_tabbedPanel) {
-		if (_window->canShowThirdSection()
-				&& !_window->adaptive().isOneColumn()) {
+		if (_regularWindow->canShowThirdSection()
+				&& !_regularWindow->adaptive().isOneColumn()) {
 			Core::App().settings().setTabbedSelectorSectionEnabled(true);
 			Core::App().saveSettingsDelayed();
 			const auto topic = _history->peer->forumTopicFor(
@@ -2531,7 +2652,7 @@ void ComposeControls::toggleTabbedSelectorMode() {
 			_tabbedPanel->toggleAnimated();
 		}
 	} else {
-		_window->closeThirdSection();
+		_regularWindow->closeThirdSection();
 	}
 }
 
@@ -2555,7 +2676,7 @@ void ComposeControls::editMessage(not_null<HistoryItem*> item) {
 	Expects(draftKeyCurrent() != Data::DraftKey::None());
 
 	if (_voiceRecordBar->isActive()) {
-		_window->show(Ui::MakeInformBox(tr::lng_edit_caption_voice()));
+		_show->showBox(Ui::MakeInformBox(tr::lng_edit_caption_voice()));
 		return;
 	}
 
@@ -2609,7 +2730,7 @@ void ComposeControls::editMessage(not_null<HistoryItem*> item) {
 }
 
 bool ComposeControls::updateReplaceMediaButton() {
-	if (!_canReplaceMedia) {
+	if (!_canReplaceMedia || !_regularWindow) {
 		const auto result = (_replaceMedia != nullptr);
 		_replaceMedia = nullptr;
 		return result;
@@ -2621,7 +2742,7 @@ bool ComposeControls::updateReplaceMediaButton() {
 		st::historyReplaceMedia);
 	_replaceMedia->setClickedCallback([=] {
 		EditCaptionBox::StartMediaReplace(
-			_window,
+			_regularWindow,
 			_editingId,
 			_field->getTextWithTags(),
 			crl::guard(_wrap.get(), [=] { cancelEditMessage(); }));
@@ -2676,24 +2797,24 @@ void ComposeControls::replyToMessage(FullMsgId id) {
 }
 
 void ComposeControls::cancelReplyMessage() {
-	Expects(_history != nullptr);
-
 	const auto wasReply = replyingToMessage();
 	_header->replyToMessage({});
-	const auto key = draftKey(DraftType::Normal);
-	if (const auto localDraft = _history->draft(key)) {
-		if (localDraft->msgId) {
-			if (localDraft->textWithTags.text.isEmpty()) {
-				_history->clearDraft(key);
-			} else {
-				localDraft->msgId = 0;
+	if (_history) {
+		const auto key = draftKey(DraftType::Normal);
+		if (const auto localDraft = _history->draft(key)) {
+			if (localDraft->msgId) {
+				if (localDraft->textWithTags.text.isEmpty()) {
+					_history->clearDraft(key);
+				} else {
+					localDraft->msgId = 0;
+				}
 			}
 		}
-	}
-	if (wasReply) {
-		_saveDraftText = true;
-		_saveDraftStart = crl::now();
-		saveDraft();
+		if (wasReply) {
+			_saveDraftText = true;
+			_saveDraftStart = crl::now();
+			saveDraft();
+		}
 	}
 }
 
@@ -2728,16 +2849,26 @@ bool ComposeControls::handleCancelRequest() {
 	return false;
 }
 
-void ComposeControls::initWebpageProcess() {
-	Expects(_history);
+void ComposeControls::tryProcessKeyInput(not_null<QKeyEvent*> e) {
+	if (_field->isVisible()) {
+		_field->setFocusFast();
+		QCoreApplication::sendEvent(_field->rawTextEdit(), e);
+	}
+}
 
-	auto &lifetime = _wrap->lifetime();
+void ComposeControls::initWebpageProcess() {
+	if (!_history) {
+		_preview = nullptr;
+		_header->previewUnregister();
+		return;
+	}
+
 	_preview = std::make_unique<WebpageProcessor>(_history, _field);
 
 	_preview->paintRequests(
 	) | rpl::start_with_next(crl::guard(_header.get(), [=] {
 		_header->update();
-	}), lifetime);
+	}), _historyLifetime);
 
 	session().changes().peerUpdates(
 		Data::PeerUpdate::Flag::Rights
@@ -2766,7 +2897,7 @@ void ComposeControls::initWebpageProcess() {
 				updateControlsGeometry(_wrap->size());
 			}
 		}
-	}, lifetime);
+	}, _historyLifetime);
 
 	_header->previewRequested(
 		_preview->titleChanges(),
@@ -2832,6 +2963,25 @@ bool ComposeControls::isRecording() const {
 	return _voiceRecordBar->isRecording();
 }
 
+bool ComposeControls::isRecordingPressed() const {
+	return !_voiceRecordBar->isRecordingLocked()
+		&& (!_voiceRecordBar->isHidden()
+			|| (_send->type() == Ui::SendButton::Type::Record
+				&& _send->isDown()));
+}
+
+rpl::producer<bool> ComposeControls::recordingActiveValue() const {
+	return _voiceRecordBar->shownValue();
+}
+
+rpl::producer<bool> ComposeControls::hasSendTextValue() const {
+	return _hasSendText.value();
+}
+
+rpl::producer<bool> ComposeControls::fieldMenuShownValue() const {
+	return _field->menuShownValue();
+}
+
 bool ComposeControls::preventsClose(Fn<void()> &&continueCallback) const {
 	if (_voiceRecordBar->isActive()) {
 		_voiceRecordBar->showDiscardBox(std::move(continueCallback));
@@ -2841,7 +2991,7 @@ bool ComposeControls::preventsClose(Fn<void()> &&continueCallback) const {
 }
 
 bool ComposeControls::hasSilentBroadcastToggle() const {
-	if (!_history) {
+	if (!_features.silentBroadcastToggle || !_history) {
 		return false;
 	}
 	const auto &peer = _history->peer;
@@ -2852,7 +3002,7 @@ bool ComposeControls::hasSilentBroadcastToggle() const {
 }
 
 void ComposeControls::updateInlineBotQuery() {
-	if (!_history) {
+	if (!_history || !_regularWindow) {
 		return;
 	}
 	const auto query = ParseInlineBotQuery(&session(), _field);
@@ -2916,6 +3066,8 @@ void ComposeControls::updateInlineBotQuery() {
 void ComposeControls::applyInlineBotQuery(
 		UserData *bot,
 		const QString &query) {
+	Expects(_regularWindow != nullptr);
+
 	if (_history && bot) {
 		if (_inlineBot != bot) {
 			_inlineBot = bot;
@@ -2925,15 +3077,15 @@ void ComposeControls::applyInlineBotQuery(
 		if (!_inlineResults) {
 			_inlineResults = std::make_unique<InlineBots::Layout::Widget>(
 				_parent,
-				_window);
+				_regularWindow);
 			_inlineResults->setResultSelectedCallback([=](
 					InlineBots::ResultSelected result) {
 				if (result.open) {
 					const auto request = result.result->openRequest();
 					if (const auto photo = request.photo()) {
-						_window->openPhoto(photo, {}, {});
+						_regularWindow->openPhoto(photo, {});
 					} else if (const auto document = request.document()) {
-						_window->openDocument(document, {}, {});
+						_regularWindow->openDocument(document, false, {});
 					}
 				} else {
 					_inlineResultChosen.fire_copy(result);

@@ -10,7 +10,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "mainwidget.h"
 #include "ui/ui_utility.h"
 #include "ui/chat/chat_theme.h"
-#include "ui/toasts/common_toasts.h"
 #include "ui/painter.h"
 #include "boxes/premium_preview_box.h"
 #include "data/data_peer.h"
@@ -458,11 +457,17 @@ auto ChatThemeValueFromPeer(
 bool ShowSendPremiumError(
 		not_null<SessionController*> controller,
 		not_null<DocumentData*> document) {
+	return ShowSendPremiumError(controller->uiShow(), document);
+}
+
+bool ShowSendPremiumError(
+		std::shared_ptr<ChatHelpers::Show> show,
+		not_null<DocumentData*> document) {
 	if (!document->isPremiumSticker()
 		|| document->session().premium()) {
 		return false;
 	}
-	ShowStickerPreviewBox(controller, document);
+	ShowStickerPreviewBox(std::move(show), document);
 	return true;
 }
 

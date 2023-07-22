@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #pragma once
 
+#include "chat_helpers/compose/compose_features.h"
 #include "chat_helpers/tabbed_selector.h"
 #include "data/stickers/data_stickers.h"
 #include "ui/round_rect.h"
@@ -50,6 +51,7 @@ enum class Notification;
 
 namespace style {
 struct EmojiPan;
+struct FlatLabel;
 } // namespace style
 
 namespace ChatHelpers {
@@ -65,6 +67,14 @@ enum class StickersListMode {
 	UserpicBuilder,
 };
 
+struct StickersListDescriptor {
+	std::shared_ptr<Show> show;
+	StickersListMode mode = StickersListMode::Full;
+	Fn<bool()> paused;
+	const style::EmojiPan *st = nullptr;
+	ComposeFeatures features;
+};
+
 class StickersListWidget final : public TabbedSelector::Inner {
 public:
 	using Mode = StickersListMode;
@@ -72,8 +82,11 @@ public:
 	StickersListWidget(
 		QWidget *parent,
 		not_null<Window::SessionController*> controller,
-		Window::GifPauseReason level,
+		PauseReason level,
 		Mode mode = Mode::Full);
+	StickersListWidget(
+		QWidget *parent,
+		StickersListDescriptor &&descriptor);
 
 	rpl::producer<FileChosen> chosen() const;
 	rpl::producer<> scrollUpdated() const;
@@ -340,8 +353,9 @@ private:
 		not_null<DocumentData*> document);
 
 	const Mode _mode;
-
-	not_null<Window::SessionController*> _controller;
+	const std::shared_ptr<Show> _show;
+	const ComposeFeatures _features;
+	Ui::RoundRect _overBg;
 	std::unique_ptr<Ui::TabbedSearch> _search;
 	MTP::Sender _api;
 	std::unique_ptr<LocalStickersManager> _localSetsManager;
@@ -414,6 +428,7 @@ private:
 
 [[nodiscard]] object_ptr<Ui::BoxContent> MakeConfirmRemoveSetBox(
 	not_null<Main::Session*> session,
+	const style::FlatLabel &st,
 	uint64 setId);
 
 } // namespace ChatHelpers

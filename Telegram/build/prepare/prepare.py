@@ -404,7 +404,7 @@ if customRunCommand:
 stage('patches', """
     git clone https://github.com/desktop-app/patches.git
     cd patches
-    git checkout d0e227f7fd
+    git checkout 3fad86d684
 """)
 
 stage('msys64', """
@@ -673,7 +673,7 @@ mac:
 
 stage('dav1d', """
 win:
-    git clone -b 1.0.0 --depth 1 https://code.videolan.org/videolan/dav1d.git
+    git clone -b 1.2.1 --depth 1 https://code.videolan.org/videolan/dav1d.git
     cd dav1d
 depends:python/Scripts/activate.bat
     %THIRDPARTY_DIR%\\python\\Scripts\\activate.bat
@@ -710,7 +710,7 @@ release:
 
 stage('libde265', """
 win:
-    git clone --depth 1 -b v1.0.11 https://github.com/strukturag/libde265.git
+    git clone --depth 1 -b v1.0.12 https://github.com/strukturag/libde265.git
     cd libde265
     cmake . ^
         -A %WIN32X64% ^
@@ -734,7 +734,7 @@ release:
 
 stage('libheif', """
 win:
-    git clone --depth 1 -b v1.15.1 https://github.com/strukturag/libheif.git
+    git clone --depth 1 -b v1.16.2 https://github.com/strukturag/libheif.git
     cd libheif
     %THIRDPARTY_DIR%\\msys64\\usr\\bin\\sed.exe -i 's/LIBHEIF_EXPORTS/LIBDE265_STATIC_BUILD/g' libheif/CMakeLists.txt
     %THIRDPARTY_DIR%\\msys64\\usr\\bin\\sed.exe -i 's/HAVE_VISIBILITY/LIBHEIF_STATIC_BUILD/g' libheif/CMakeLists.txt
@@ -762,7 +762,7 @@ release:
 
 stage('libjxl', """
 win:
-    git clone -b v0.8.1 --depth 1 --recursive --shallow-submodules https://github.com/libjxl/libjxl.git
+    git clone -b v0.8.2 --depth 1 --recursive --shallow-submodules https://github.com/libjxl/libjxl.git
     cd libjxl
     cmake . ^
         -A %WIN32X64% ^
@@ -1302,7 +1302,7 @@ if buildQt6:
 mac:
     git clone -b v6.3.2 https://code.qt.io/qt/qt5.git qt_6_3_2
     cd qt_6_3_2
-    perl init-repository --module-subset=qtbase,qtimageformats,qtsvg,qt5compat
+    perl init-repository --module-subset=qtbase,qtimageformats,qtsvg
 depends:patches/qtbase_6.3.2/*.patch
     cd qtbase
 
