@@ -34,7 +34,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "boxes/abstract_box.h"
 #include "base/timer.h"
 #include "styles/style_calls.h"
-#include "styles/style_chat.h" // style::GroupCallUserpics
+#include "styles/style_chat_helpers.h" // style::GroupCallUserpics
 #include "styles/style_layers.h"
 
 namespace Calls {
@@ -292,8 +292,7 @@ void TopBar::initControls() {
 			call->setMuted(!call->muted());
 		} else if (const auto group = _groupCall.get()) {
 			if (group->mutedByAdmin()) {
-				Ui::Toast::Show(
-					_show->toastParent(),
+				_show->showToast(
 					tr::lng_group_call_force_muted_sub(tr::now));
 			} else {
 				group->setMuted((group->muted() == MuteState::Muted)

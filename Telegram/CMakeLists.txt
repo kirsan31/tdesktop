@@ -230,8 +230,6 @@ PRIVATE
     boxes/background_box.h
     boxes/background_preview_box.cpp
     boxes/background_preview_box.h
-    boxes/change_phone_box.cpp
-    boxes/change_phone_box.h
     boxes/choose_filter_box.cpp
     boxes/choose_filter_box.h
     boxes/connection_box.cpp
@@ -350,6 +348,9 @@ PRIVATE
     calls/calls_video_bubble.h
     calls/calls_video_incoming.cpp
     calls/calls_video_incoming.h
+    chat_helpers/compose/compose_features.h
+    chat_helpers/compose/compose_show.cpp
+    chat_helpers/compose/compose_show.h
     chat_helpers/bot_command.cpp
     chat_helpers/bot_command.h
     chat_helpers/bot_keyboard.cpp
@@ -548,6 +549,12 @@ PRIVATE
     data/data_sparse_ids.h
     data/data_sponsored_messages.cpp
     data/data_sponsored_messages.h
+    data/data_stories.cpp
+    data/data_stories.h
+    data/data_stories_ids.cpp
+    data/data_stories_ids.h
+    data/data_story.cpp
+    data/data_story.h
     data/data_streaming.cpp
     data/data_streaming.h
     data/data_thread.cpp
@@ -588,6 +595,8 @@ PRIVATE
     dialogs/ui/dialogs_layout.h
     dialogs/ui/dialogs_message_view.cpp
     dialogs/ui/dialogs_message_view.h
+    dialogs/ui/dialogs_stories_content.cpp
+    dialogs/ui/dialogs_stories_content.h
     dialogs/ui/dialogs_topics_view.cpp
     dialogs/ui/dialogs_topics_view.h
     dialogs/ui/dialogs_video_userpic.cpp
@@ -691,6 +700,8 @@ PRIVATE
     history/view/media/history_view_sticker_player.cpp
     history/view/media/history_view_sticker_player.h
     history/view/media/history_view_sticker_player_abstract.h
+    history/view/media/history_view_story_mention.cpp
+    history/view/media/history_view_story_mention.h
     history/view/media/history_view_theme_document.cpp
     history/view/media/history_view_theme_document.h
     history/view/media/history_view_userpic_suggestion.cpp
@@ -866,6 +877,12 @@ PRIVATE
     info/profile/info_profile_widget.h
     info/settings/info_settings_widget.cpp
     info/settings/info_settings_widget.h
+    info/stories/info_stories_inner_widget.cpp
+    info/stories/info_stories_inner_widget.h
+    info/stories/info_stories_provider.cpp
+    info/stories/info_stories_provider.h
+    info/stories/info_stories_widget.cpp
+    info/stories/info_stories_widget.h
     info/userpic/info_userpic_colors_editor.cpp
     info/userpic/info_userpic_colors_editor.h
     info/userpic/info_userpic_emoji_builder.cpp
@@ -934,8 +951,8 @@ PRIVATE
     main/main_session_settings.h
     main/session/send_as_peers.cpp
     main/session/send_as_peers.h
-    media/system_media_controls_manager.h
-    media/system_media_controls_manager.cpp
+    main/session/session_show.cpp
+    main/session/session_show.h
     media/audio/media_audio.cpp
     media/audio/media_audio.h
     media/audio/media_audio_capture.cpp
@@ -960,6 +977,28 @@ PRIVATE
     media/player/media_player_volume_controller.h
     media/player/media_player_widget.cpp
     media/player/media_player_widget.h
+    media/stories/media_stories_caption_full_view.cpp
+    media/stories/media_stories_caption_full_view.h
+    media/stories/media_stories_controller.cpp
+    media/stories/media_stories_controller.h
+    media/stories/media_stories_delegate.cpp
+    media/stories/media_stories_delegate.h
+    media/stories/media_stories_header.cpp
+    media/stories/media_stories_header.h
+    media/stories/media_stories_reactions.cpp
+    media/stories/media_stories_reactions.h
+    media/stories/media_stories_recent_views.cpp
+    media/stories/media_stories_recent_views.h
+    media/stories/media_stories_reply.cpp
+    media/stories/media_stories_reply.h
+    media/stories/media_stories_share.cpp
+    media/stories/media_stories_share.h
+    media/stories/media_stories_sibling.cpp
+    media/stories/media_stories_sibling.h
+    media/stories/media_stories_slider.cpp
+    media/stories/media_stories_slider.h
+    media/stories/media_stories_view.cpp
+    media/stories/media_stories_view.h
     media/streaming/media_streaming_audio_track.cpp
     media/streaming/media_streaming_audio_track.h
     media/streaming/media_streaming_common.h
@@ -1005,6 +1044,8 @@ PRIVATE
     media/view/media_view_playback_progress.cpp
     media/view/media_view_playback_progress.h
     media/view/media_view_open_common.h
+    media/system_media_controls_manager.h
+    media/system_media_controls_manager.cpp
     menu/menu_antispam_validator.cpp
     menu/menu_antispam_validator.h
     menu/menu_item_download_files.cpp
@@ -1082,7 +1123,6 @@ PRIVATE
     platform/linux/integration_linux.h
     platform/linux/main_window_linux.cpp
     platform/linux/main_window_linux.h
-    platform/linux/notifications_manager_linux_dummy.cpp
     platform/linux/notifications_manager_linux.cpp
     platform/linux/notifications_manager_linux.h
     platform/linux/overlay_widget_linux.h
@@ -1401,18 +1441,6 @@ if (NOT build_winstore)
     )
 endif()
 
-if (DESKTOP_APP_DISABLE_DBUS_INTEGRATION)
-    remove_target_sources(Telegram ${src_loc}
-        platform/linux/linux_xdp_open_with_dialog.cpp
-        platform/linux/linux_xdp_open_with_dialog.h
-        platform/linux/notifications_manager_linux.cpp
-    )
-else()
-    remove_target_sources(Telegram ${src_loc}
-        platform/linux/notifications_manager_linux_dummy.cpp
-    )
-endif()
-
 if (DESKTOP_APP_DISABLE_WAYLAND_INTEGRATION)
     remove_target_sources(Telegram ${src_loc}
         platform/linux/linux_wayland_integration.cpp
@@ -1522,12 +1550,13 @@ elseif (APPLE)
         endif()
     endif()
 else()
-    if (NOT DESKTOP_APP_DISABLE_DBUS_INTEGRATION)
-        target_link_libraries(Telegram
-        PRIVATE
-            desktop-app::external_glibmm
-        )
-    endif()
+    target_link_libraries(Telegram
+    PRIVATE
+        desktop-app::external_glibmm
+    )
+
+    include(${cmake_helpers_loc}/external/glib/generate_dbus.cmake)
+    generate_dbus(Telegram org.freedesktop.portal. XdpInhibit ${src_loc}/platform/linux/org.freedesktop.portal.Inhibit.xml)
 
     if (NOT DESKTOP_APP_DISABLE_X11_INTEGRATION)
         target_link_libraries(Telegram
@@ -1539,6 +1568,7 @@ else()
     if (NOT DESKTOP_APP_DISABLE_WAYLAND_INTEGRATION)
         qt_generate_wayland_protocol_client_sources(Telegram
         FILES
+            ${third_party_loc}/wayland/protocol/wayland.xml
             ${third_party_loc}/plasma-wayland-protocols/src/protocols/plasma-shell.xml
         )
 
@@ -1739,5 +1769,6 @@ if (LINUX AND DESKTOP_APP_USE_PACKAGED)
     install(FILES "Resources/art/icon256.png" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/256x256/apps" RENAME "telegram.png")
     install(FILES "Resources/art/icon512.png" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/512x512/apps" RENAME "telegram.png")
     install(FILES "../lib/xdg/org.telegram.desktop.desktop" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/applications")
+    install(FILES "../lib/xdg/org.telegram.desktop.service" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/dbus-1/services")
     install(FILES "${CMAKE_CURRENT_BINARY_DIR}/org.telegram.desktop.metainfo.xml" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/metainfo")
 endif()

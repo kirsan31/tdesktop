@@ -40,9 +40,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include <QtGui/QWindow>
 
-#ifndef DESKTOP_APP_DISABLE_DBUS_INTEGRATION
+#if __has_include(<giomm.h>)
 #include <giomm.h>
-#endif // !DESKTOP_APP_DISABLE_DBUS_INTEGRATION
+#endif // __has_include(<giomm.h>)
 
 namespace Window {
 namespace Notifications {
@@ -90,11 +90,11 @@ base::options::toggle OptionGNotification({
 	.description = "Force enable GLib's GNotification."
 		" When disabled, autodetect is used.",
 	.scope = [] {
-#ifndef DESKTOP_APP_DISABLE_DBUS_INTEGRATION
+#if __has_include(<giomm.h>)
 		return bool(Gio::Application::get_default());
-#else // !DESKTOP_APP_DISABLE_DBUS_INTEGRATION
+#else // __has_include(<giomm.h>)
 		return false;
-#endif // DESKTOP_APP_DISABLE_DBUS_INTEGRATION
+#endif // __has_include(<giomm.h>)
 	},
 	.restartRequired = true,
 });
@@ -1113,13 +1113,16 @@ void Manager::notificationReplied(
 
 	auto message = Api::MessageToSend(Api::SendAction(history));
 	message.textWithTags = reply;
-	message.action.replyTo = (id.msgId > 0 && !history->peer->isUser()
+	const auto replyToId = (id.msgId > 0 && !history->peer->isUser()
 		&& id.msgId != topicRootId)
 		? id.msgId
 		: history->peer->isForum()
 		? topicRootId
 		: MsgId(0);
-	message.action.topicRootId = topic ? topic->rootId() : 0;
+	message.action.replyTo = {
+		.msgId = replyToId,
+		.topicRootId = topic ? topic->rootId() : 0,
+	};
 	message.action.clearDraft = false;
 	history->session().api().sendMessage(std::move(message));
 

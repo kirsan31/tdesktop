@@ -860,12 +860,10 @@ void TopBarUser::updateTitle(
 	auto link = std::make_shared<LambdaClickHandler>([=,
 			stickerSetIdentifier = stickerInfo->set] {
 		setPaused(true);
-		const auto box = controller->show(
-			Box<StickerSetBox>(
-				controller,
-				stickerSetIdentifier,
-				Data::StickersType::Emoji),
-			Ui::LayerOption::KeepOther);
+		const auto box = controller->show(Box<StickerSetBox>(
+			controller->uiShow(),
+			stickerSetIdentifier,
+			Data::StickersType::Emoji));
 
 		box->boxClosing(
 		) | rpl::start_with_next(crl::guard(this, [=] {
@@ -1784,6 +1782,11 @@ QString LookupPremiumRef(PremiumPreview section) {
 
 not_null<Ui::GradientButton*> CreateSubscribeButton(
 		SubscribeButtonArgs &&args) {
+	Expects(args.show || args.controller);
+
+	if (!args.show && args.controller) {
+		args.show = args.controller->uiShow();
+	}
 	const auto result = Ui::CreateChild<Ui::GradientButton>(
 		args.parent.get(),
 		args.gradientStops
@@ -1791,9 +1794,14 @@ not_null<Ui::GradientButton*> CreateSubscribeButton(
 			: Ui::Premium::ButtonGradientStops());
 
 	result->setClickedCallback([
-			controller = args.controller,
+			show = args.show,
 			computeRef = args.computeRef,
 			computeBotUrl = args.computeBotUrl] {
+		const auto window = show->resolveWindow(
+			ChatHelpers::WindowUsage::PremiumPromo);
+		if (!window) {
+			return;
+		}
 		const auto url = computeBotUrl ? computeBotUrl() : QString();
 		if (!url.isEmpty()) {
 			const auto local = Core::TryConvertUrlToLocal(url);
@@ -1803,19 +1811,19 @@ not_null<Ui::GradientButton*> CreateSubscribeButton(
 			UrlClickHandler::Open(
 				local,
 				QVariant::fromValue(ClickHandlerContext{
-					.sessionWindow = base::make_weak(controller),
+					.sessionWindow = base::make_weak(window),
 					.botStartAutoSubmit = true,
 				}));
 		} else {
-			SendScreenAccept(controller);
-			StartPremiumPayment(controller, computeRef());
+			SendScreenAccept(window);
+			StartPremiumPayment(window, computeRef());
 		}
 	});
 
 	const auto &st = st::premiumPreviewBox.button;
 	result->resize(args.parent->width(), st.height);
 
-	const auto premium = &args.controller->session().api().premium();
+	const auto premium = &args.show->session().api().premium();
 	premium->reload();
 	const auto computeCost = [=] {
 		const auto amount = premium->monthlyAmount();

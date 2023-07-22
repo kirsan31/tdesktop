@@ -460,8 +460,8 @@ QString ThemeDocumentBox::title() {
 	return QString();
 }
 
-QString ThemeDocumentBox::subtitle() {
-	return _parent->data()->notificationText().text;
+TextWithEntities ThemeDocumentBox::subtitle() {
+	return _parent->data()->notificationText();
 }
 
 QString ThemeDocumentBox::button() {
@@ -483,12 +483,10 @@ ClickHandlerPtr ThemeDocumentBox::createViewLink() {
 			if (out) {
 				controller->toggleChooseChatTheme(to);
 			} else if (maybe) {
-				controller->show(
-					Box<BackgroundPreviewBox>(
-						controller,
-						*maybe,
-						BackgroundPreviewArgs{ to, itemId }),
-					Ui::LayerOption::KeepOther);
+				controller->show(Box<BackgroundPreviewBox>(
+					controller,
+					*maybe,
+					BackgroundPreviewArgs{ to, itemId }));
 			}
 		}
 	});

@@ -28,9 +28,11 @@ apps:
       - camera
       - desktop
       - desktop-legacy
+      - gsettings
       - hardware-observe
       - home
       - network
+      - network-bind
       - network-status
       - opengl
       - removable-media
@@ -38,7 +40,7 @@ apps:
       - wayland
       - x11
     slots:
-      - tdesktop-mpris
+      - mpris
 
 hooks:
   configure:
@@ -52,7 +54,6 @@ plugs:
     mount-host-font-cache: false
   # Support for common GTK themes
   # https://forum.snapcraft.io/t/how-to-use-the-system-gtk-theme-via-the-gtk-common-themes-snap/6235
-  gsettings:
   gtk-3-themes:
     interface: content
     target: $SNAP/data-dir/themes
@@ -65,11 +66,6 @@ plugs:
     interface: content
     target: $SNAP/data-dir/sounds
     default-provider: gtk-common-themes
-
-slots:
-  tdesktop-mpris:
-    interface: mpris
-    name: tdesktop
 
 layout:
   /usr/share/alsa:
@@ -99,12 +95,16 @@ parts:
     parse-info: [usr/share/metainfo/org.telegram.desktop.metainfo.xml]
     build-environment:
       - LD_LIBRARY_PATH: $CRAFT_STAGE/usr/lib/$CRAFT_ARCH_TRIPLET${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}
-      - LDFLAGS: -s
+      - LDFLAGS: ${LDFLAGS:+$LDFLAGS} -s
     build-packages:
       - clang
+      - libtool-bin
       - python3
       - libasound2-dev
       - libavif-dev
+      - libboost-program-options-dev
+      - libfmt-dev
+      - libgirepository1.0-dev
       - libheif-dev
       - libopus-dev
       - libpulse-dev
@@ -248,7 +248,7 @@ parts:
   glibmm:
     source: https://github.com/GNOME/glibmm.git
     source-depth: 1
-    source-tag: 2.76.0
+    source-tag: 2.77.0
     plugin: meson
     build-packages:
       - meson
@@ -272,10 +272,10 @@ parts:
   libjxl:
     source: https://github.com/libjxl/libjxl.git
     source-depth: 1
-    source-tag: v0.8.1
+    source-tag: v0.8.2
     plugin: cmake
     build-environment:
-      - LDFLAGS: -s
+      - LDFLAGS: ${LDFLAGS:+$LDFLAGS} -s
     cmake-generator: Ninja
     cmake-parameters:
       - -DCMAKE_BUILD_TYPE=Release
@@ -308,7 +308,7 @@ parts:
     source-tag: v4.0.3
     plugin: cmake
     build-environment:
-      - LDFLAGS: -s
+      - LDFLAGS: ${LDFLAGS:+$LDFLAGS} -s
     cmake-generator: Ninja
     cmake-parameters:
       - -DCMAKE_BUILD_TYPE=Release
@@ -329,7 +329,7 @@ parts:
     source-tag: 1.23.0
     plugin: cmake
     build-environment:
-      - LDFLAGS: -s
+      - LDFLAGS: ${LDFLAGS:+$LDFLAGS} -s
     build-packages:
       - libasound2-dev
       - libdbus-1-dev
@@ -359,7 +359,7 @@ parts:
     source-tag: v21.9
     plugin: cmake
     build-environment:
-      - LDFLAGS: -s
+      - LDFLAGS: ${LDFLAGS:+$LDFLAGS} -s
     build-packages:
       - zlib1g-dev
     stage-packages:
@@ -380,7 +380,7 @@ parts:
   qt:
     plugin: nil
     build-environment:
-      - LDFLAGS: -s
+      - LDFLAGS: ${LDFLAGS:+$LDFLAGS} -s
     build-packages:
       - libdbus-1-dev
       - libegl-dev
@@ -461,10 +461,10 @@ parts:
       - libxkbcommon-x11-0
       - zlib1g
     override-pull: |
-      QT=6.5.0
+      QT=6.5.2
 
       git clone -b v${QT} --depth=1 https://code.qt.io/qt/qt5.git .
-      git submodule update --init --recursive --depth=1 qtbase qtdeclarative qtwayland qtimageformats qtsvg qt5compat qtshadertools
+      git submodule update --init --recursive --depth=1 qtbase qtdeclarative qtwayland qtimageformats qtsvg qtshadertools
 
       cd qtbase
       find $CRAFT_STAGE/patches/qtbase_${QT} -type f -print0 | sort -z | xargs -r0 git apply
@@ -535,7 +535,7 @@ parts:
     source-commit: dcb5069ff76bd293e86928804208737e6cee2ccc
     plugin: cmake
     build-environment:
-      - LDFLAGS: -s
+      - LDFLAGS: ${LDFLAGS:+$LDFLAGS} -s
     build-packages:
       - yasm
       - libdrm-dev

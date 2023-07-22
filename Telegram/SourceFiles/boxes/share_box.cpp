@@ -63,7 +63,7 @@ public:
 	Inner(
 		QWidget *parent,
 		const Descriptor &descriptor,
-		std::shared_ptr<Ui::BoxShow> show);
+		std::shared_ptr<Ui::Show> show);
 
 	void setPeerSelectedChangedCallback(
 		Fn<void(not_null<Data::Thread*> thread, bool selected)> callback);
@@ -146,7 +146,7 @@ private:
 	void refresh();
 
 	const Descriptor &_descriptor;
-	const std::shared_ptr<Ui::BoxShow> _show;
+	const std::shared_ptr<Ui::Show> _show;
 	const style::PeerList &_st;
 
 	float64 _columnSkip = 0.;
@@ -181,7 +181,6 @@ private:
 ShareBox::ShareBox(QWidget*, Descriptor &&descriptor)
 : _descriptor(std::move(descriptor))
 , _api(&_descriptor.session->mtp())
-, _show(std::make_shared<Ui::BoxShow>(this))
 , _select(
 	this,
 	(_descriptor.stMultiSelect
@@ -231,10 +230,10 @@ void ShareBox::prepareCommentField() {
 	connect(field, &Ui::InputField::submitted, [=] {
 		submit({});
 	});
-	if (_show->valid()) {
+	if (const auto show = uiShow(); show->valid()) {
 		InitMessageFieldHandlers(
 			_descriptor.session,
-			_show,
+			Main::MakeSessionShow(show, _descriptor.session),
 			field,
 			nullptr,
 			nullptr,
@@ -257,7 +256,7 @@ void ShareBox::prepare() {
 	setTitle(tr::lng_share_title());
 
 	_inner = setInnerWidget(
-		object_ptr<Inner>(this, _descriptor, _show),
+		object_ptr<Inner>(this, _descriptor, uiShow()),
 		getTopScrollSkip(),
 		getBottomScrollSkip());
 
@@ -590,14 +589,13 @@ void ShareBox::submitSilent() {
 
 void ShareBox::submitScheduled() {
 	const auto callback = [=](Api::SendOptions options) { submit(options); };
-	_show->showBox(
+	uiShow()->showBox(
 		HistoryView::PrepareScheduleBox(
 			this,
 			sendMenuType(),
 			callback,
 			HistoryView::DefaultScheduleTime(),
-			_descriptor.scheduleBoxStyle),
-		Ui::LayerOption::KeepOther);
+			_descriptor.scheduleBoxStyle));
 }
 
 void ShareBox::submitWhenOnline() {
@@ -643,7 +641,7 @@ void ShareBox::scrollAnimationCallback() {
 ShareBox::Inner::Inner(
 	QWidget *parent,
 	const Descriptor &descriptor,
-	std::shared_ptr<Ui::BoxShow> show)
+	std::shared_ptr<Ui::Show> show)
 : RpWidget(parent)
 , _descriptor(descriptor)
 , _show(std::move(show))
@@ -1373,9 +1371,7 @@ ShareBox::SubmitCallback ShareBox::DefaultForwardCallback(
 				).append("\n\n");
 			}
 			text.append(error.first);
-			show->showBox(
-				Ui::MakeInformBox(text),
-				Ui::LayerOption::KeepOther);
+			show->showBox(Ui::MakeInformBox(text));
 			return;
 		}
 
@@ -1418,15 +1414,16 @@ ShareBox::SubmitCallback ShareBox::DefaultForwardCallback(
 				? MsgId(0)
 				: topicRootId;
 			const auto peer = thread->peer();
-			histories.sendRequest(history, requestType, [=](
+			const auto threadHistory = thread->owningHistory();
+			histories.sendRequest(threadHistory, requestType, [=](
 					Fn<void()> finish) {
-				auto &api = history->session().api();
+				auto &api = threadHistory->session().api();
 				const auto sendFlags = commonSendFlags
 					| (topMsgId ? Flag::f_top_msg_id : Flag(0))
 					| (ShouldSendSilent(peer, options)
 						? Flag::f_silent
 						: Flag(0));
-				history->sendRequestId = api.request(
+				threadHistory->sendRequestId = api.request(
 					MTPmessages_ForwardMessages(
 						MTP_flags(sendFlags),
 						history->peer->input,
@@ -1437,33 +1434,28 @@ ShareBox::SubmitCallback ShareBox::DefaultForwardCallback(
 						MTP_int(options.scheduled),
 						MTP_inputPeerEmpty() // send_as
 				)).done([=](const MTPUpdates &updates, mtpRequestId reqId) {
-					history->session().api().applyUpdates(updates);
+					threadHistory->session().api().applyUpdates(updates);
 					state->requests.remove(reqId);
 					if (state->requests.empty()) {
 						if (show->valid()) {
-							Ui::Toast::Show(
-								show->toastParent(),
-								tr::lng_share_done(tr::now));
+							show->showToast(tr::lng_share_done(tr::now));
 							show->hideLayer();
 						}
 					}
 					finish();
 				}).fail([=](const MTP::Error &error) {
 					if (error.type() == u"VOICE_MESSAGES_FORBIDDEN"_q) {
-						if (show->valid()) {
-							Ui::Toast::Show(
-								show->toastParent(),
-								tr::lng_restricted_send_voice_messages(
-									tr::now,
-									lt_user,
-									peer->name()));
-						}
+						show->showToast(
+							tr::lng_restricted_send_voice_messages(
+								tr::now,
+								lt_user,
+								peer->name()));
 					}
 					finish();
-				}).afterRequest(history->sendRequestId).send();
-				return history->sendRequestId;
+				}).afterRequest(threadHistory->sendRequestId).send();
+				return threadHistory->sendRequestId;
 			});
-			state->requests.insert(history->sendRequestId);
+			state->requests.insert(threadHistory->sendRequestId);
 		}
 	};
 }
@@ -1471,7 +1463,7 @@ ShareBox::SubmitCallback ShareBox::DefaultForwardCallback(
 void FastShareMessage(
 		not_null<Window::SessionController*> controller,
 		not_null<HistoryItem*> item) {
-	const auto show = std::make_shared<Window::Show>(controller);
+	const auto show = controller->uiShow();
 	const auto history = item->history();
 	const auto owner = &history->owner();
 	const auto session = &history->session();
@@ -1493,7 +1485,7 @@ void FastShareMessage(
 			return item->media() && item->media()->forceForwardedInfo();
 		});
 
-	auto copyCallback = [=, toastParent = show->toastParent()] {
+	auto copyCallback = [=] {
 		const auto item = owner->message(msgIds[0]);
 		if (!item) {
 			return;
@@ -1509,8 +1501,7 @@ void FastShareMessage(
 
 					QGuiApplication::clipboard()->setText(link);
 
-					Ui::Toast::Show(
-						toastParent,
+					show->showToast(
 						tr::lng_share_game_link_copied(tr::now));
 				}
 			}

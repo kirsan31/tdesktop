@@ -95,7 +95,7 @@ constexpr auto kDefaultDimming = 50;
 	const auto flags = MessageFlag::FakeHistoryItem
 		| MessageFlag::HasFromId
 		| (out ? MessageFlag::Outgoing : MessageFlag(0));
-	const auto replyTo = MsgId();
+	const auto replyTo = FullReplyTo();
 	const auto viaBotId = UserId();
 	const auto groupedId = uint64();
 	const auto item = history->makeMessage(
@@ -640,9 +640,7 @@ void BackgroundPreviewBox::applyForEveryone() {
 void BackgroundPreviewBox::share() {
 	QGuiApplication::clipboard()->setText(
 		_paper.shareUrl(&_controller->session()));
-	Ui::Toast::Show(
-		Ui::BoxShow(this).toastParent(),
-		tr::lng_background_link_copied(tr::now));
+	showToast(tr::lng_background_link_copied(tr::now));
 }
 
 void BackgroundPreviewBox::paintEvent(QPaintEvent *e) {

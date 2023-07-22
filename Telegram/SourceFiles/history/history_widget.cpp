@@ -225,11 +225,11 @@ HistoryWidget::HistoryWidget(
 	_scroll.data(),
 	controller->chatStyle(),
 	static_cast<HistoryView::CornerButtonsDelegate*>(this))
-, _fieldAutocomplete(this, controller)
+, _fieldAutocomplete(this, controller->uiShow())
 , _supportAutocomplete(session().supportMode()
 	? object_ptr<Support::Autocomplete>(this, &session())
 	: nullptr)
-, _send(std::make_shared<Ui::SendButton>(this))
+, _send(std::make_shared<Ui::SendButton>(this, st::historySend))
 , _unblock(this, tr::lng_unblock_button(tr::now).toUpper(), st::historyUnblock)
 , _botStart(this, tr::lng_bot_start(tr::now).toUpper(), st::historyComposeButton)
 , _joinChannel(
@@ -248,7 +248,7 @@ HistoryWidget::HistoryWidget(
 , _botCommandStart(this, st::historyBotCommandStart)
 , _voiceRecordBar(std::make_unique<VoiceRecordBar>(
 	this,
-	controller,
+	controller->uiShow(),
 	_send,
 	st::historySendSize.height()))
 , _forwardPanel(std::make_unique<ForwardPanel>([=] { updateField(); }))
@@ -746,7 +746,7 @@ HistoryWidget::HistoryWidget(
 				const auto account = &_peer->account();
 				closeCurrent();
 				if (const auto primary = Core::App().windowFor(account)) {
-					controller->showToast({ unavailable });
+					controller->showToast(unavailable);
 				}
 				return;
 			}
@@ -853,7 +853,7 @@ HistoryWidget::HistoryWidget(
 	}) | rpl::start_with_next([=](const Api::SendAction &action) {
 		const auto lastKeyboardUsed = lastForceReplyReplied(FullMsgId(
 			action.history->peer->id,
-			action.replyTo));
+			action.replyTo.msgId));
 		if (action.replaceMediaOf) {
 		} else if (action.options.scheduled) {
 			cancelReply(lastKeyboardUsed);
@@ -879,7 +879,7 @@ HistoryWidget::HistoryWidget(
 		}, lifetime());
 	}
 
-	controller->materializeLocalDraftsRequests(
+	Core::App().materializeLocalDraftsRequests(
 	) | rpl::start_with_next([=] {
 		saveFieldToHistoryLocalDraft();
 	}, lifetime());
@@ -943,18 +943,6 @@ void HistoryWidget::refreshTabbedPanel() {
 }
 
 void HistoryWidget::initVoiceRecordBar() {
-	{
-		auto scrollHeight = rpl::combine(
-			_scroll->topValue(),
-			_scroll->heightValue()
-		) | rpl::map([](int top, int height) {
-			return top + height - st::historyRecordLockPosition.y();
-		});
-		_voiceRecordBar->setLockBottom(std::move(scrollHeight));
-	}
-
-	_voiceRecordBar->setSendButtonGeometryValue(_send->geometryValue());
-
 	_voiceRecordBar->setStartRecordingFilter([=] {
 		const auto error = [&]() -> std::optional<QString> {
 			if (_peer) {
@@ -967,7 +955,7 @@ void HistoryWidget::initVoiceRecordBar() {
 			return std::nullopt;
 		}();
 		if (error) {
-			controller()->showToast({ *error });
+			controller()->showToast(*error);
 			return true;
 		} else if (showSlowmodeError()) {
 			return true;
@@ -1028,7 +1016,12 @@ void HistoryWidget::initVoiceRecordBar() {
 
 	_voiceRecordBar->recordingTipRequests(
 	) | rpl::start_with_next([=] {
-		controller()->showToast({ tr::lng_record_hold_tip(tr::now) });
+		controller()->showToast(tr::lng_record_hold_tip(tr::now));
+	}, lifetime());
+
+	_voiceRecordBar->recordingStateChanges(
+	) | rpl::start_with_next([=](bool active) {
+		controller()->widget()->setInnerFocus();
 	}, lifetime());
 
 	_voiceRecordBar->hideFast();
@@ -1383,7 +1376,7 @@ AutocompleteQuery HistoryWidget::parseMentionHashtagBotCommandQuery() const {
 	const auto result = (isChoosingTheme()
 		|| (_inlineBot && !_inlineLookingUpBot))
 		? AutocompleteQuery()
-		: ParseMentionHashtagBotCommandQuery(_field);
+		: ParseMentionHashtagBotCommandQuery(_field, {});
 	if (result.query.isEmpty()) {
 		return result;
 	} else if (result.query[0] == '#'
@@ -1474,9 +1467,9 @@ void HistoryWidget::applyInlineBotQuery(UserData *bot, const QString &query) {
 				if (result.open) {
 					const auto request = result.result->openRequest();
 					if (const auto photo = request.photo()) {
-						controller()->openPhoto(photo, {}, {});
+						controller()->openPhoto(photo, {});
 					} else if (const auto document = request.document()) {
-						controller()->openDocument(document, {}, {});
+						controller()->openDocument(document, false, {});
 					}
 				} else {
 					sendInlineResult(result);
@@ -1581,7 +1574,7 @@ void HistoryWidget::toggleChooseChatTheme(
 	} else if (!show.value_or(true)) {
 		return;
 	} else if (_voiceRecordBar->isActive()) {
-		controller()->showToast({ tr::lng_chat_theme_cant_voice(tr::now) });
+		controller()->showToast(tr::lng_chat_theme_cant_voice(tr::now));
 		return;
 	}
 	_chooseTheme = std::make_unique<Ui::ChooseThemeController>(
@@ -1758,7 +1751,7 @@ void HistoryWidget::setInnerFocus() {
 			|| isRecording()
 			|| isBotStart()
 			|| isBlocked()
-			|| !_canSendTexts) {
+			|| (!_canSendTexts && !_editMsgId)) {
 			if (_scroll->isHidden()) {
 				setFocus();
 			} else {
@@ -1808,6 +1801,15 @@ bool HistoryWidget::notify_switchInlineBotButtonReceived(
 		return true;
 	}
 	return false;
+}
+
+void HistoryWidget::tryProcessKeyInput(not_null<QKeyEvent*> e) {
+	e->accept();
+	keyPressEvent(e);
+	if (!e->isAccepted() && _canSendTexts && _field->isVisible()) {
+		_field->setFocusFast();
+		QCoreApplication::sendEvent(_field->rawTextEdit(), e);
+	}
 }
 
 void HistoryWidget::setupShortcuts() {
@@ -1876,10 +1878,6 @@ void HistoryWidget::fastShowAtEnd(not_null<History*> history) {
 bool HistoryWidget::applyDraft(FieldHistoryAction fieldHistoryAction) {
 	InvokeQueued(this, [=] { updateStickersByEmoji(); });
 
-	if (_voiceRecordBar->isActive() || !_canSendTexts) {
-		return false;
-	}
-
 	const auto editDraft = _history ? _history->localEditDraft({}) : nullptr;
 	const auto draft = editDraft
 		? editDraft
@@ -1887,7 +1885,15 @@ bool HistoryWidget::applyDraft(FieldHistoryAction fieldHistoryAction) {
 		? _history->localDraft({})
 		: nullptr;
 	auto fieldAvailable = canWriteMessage();
-	if (!draft || (!_history->localEditDraft({}) && !fieldAvailable)) {
+	const auto editMsgId = editDraft ? editDraft->msgId : 0;
+	if (_voiceRecordBar->isActive() || (!_canSendTexts && !editMsgId)) {
+		if (!_canSendTexts) {
+			clearFieldText(0, fieldHistoryAction);
+		}
+		return false;
+	}
+
+	if (!draft || (!editDraft && !fieldAvailable)) {
 		auto fieldWillBeHiddenAfterEdit = (!fieldAvailable && _editMsgId != 0);
 		clearFieldText(0, fieldHistoryAction);
 		setInnerFocus();
@@ -1917,11 +1923,7 @@ bool HistoryWidget::applyDraft(FieldHistoryAction fieldHistoryAction) {
 
 	_processingReplyItem = _replyEditMsg = nullptr;
 	_processingReplyId = _replyToId = 0;
-	if (const auto editDraft = _history->localEditDraft({})) {
-		setEditMsgId(editDraft->msgId);
-	} else {
-		setEditMsgId(0);
-	}
+	setEditMsgId(editMsgId);
 	updateCmdStartShown();
 	updateControlsVisibility();
 	updateControlsGeometry();
@@ -2800,7 +2802,7 @@ void HistoryWidget::updateControlsVisibility() {
 		_send->show();
 		updateSendButtonType();
 
-		if (_canSendTexts) {
+		if (_canSendTexts || _editMsgId) {
 			_field->show();
 		} else {
 			fieldDisabledRemoved = false;
@@ -3096,9 +3098,9 @@ void HistoryWidget::messagesFailed(const MTP::Error &error, int requestId) {
 		auto was = _peer;
 		closeCurrent();
 		if (const auto primary = Core::App().windowFor(&was->account())) {
-			controller()->showToast({ (was && was->isMegagroup())
+			controller()->showToast((was && was->isMegagroup())
 				? tr::lng_group_not_accessible(tr::now)
-				: tr::lng_channel_not_accessible(tr::now) });
+				: tr::lng_channel_not_accessible(tr::now));
 		}
 		return;
 	}
@@ -3740,9 +3742,8 @@ void HistoryWidget::saveEditMsg() {
 		return;
 	} else if (!left.text.isEmpty()) {
 		const auto remove = left.text.size();
-		controller()->showToast({
-			tr::lng_edit_limit_reached(tr::now, lt_count, remove)
-		});
+		controller()->showToast(
+			tr::lng_edit_limit_reached(tr::now, lt_count, remove));
 		return;
 	}
 
@@ -3775,14 +3776,14 @@ void HistoryWidget::saveEditMsg() {
 				_saveEditMsgRequestId = 0;
 			}
 			if (ranges::contains(Api::kDefaultEditMessagesErrors, error)) {
-				controller()->showToast({ tr::lng_edit_error(tr::now) });
+				controller()->showToast(tr::lng_edit_error(tr::now));
 			} else if (error == u"MESSAGE_NOT_MODIFIED"_q) {
 				cancelEdit();
 			} else if (error == u"MESSAGE_EMPTY"_q) {
 				_field->selectAll();
 				setInnerFocus();
 			} else {
-				controller()->showToast({ tr::lng_edit_error(tr::now) });
+				controller()->showToast(tr::lng_edit_error(tr::now));
 			}
 			update();
 		})();
@@ -3849,8 +3850,7 @@ void HistoryWidget::hideSelectorControlsAnimated() {
 Api::SendAction HistoryWidget::prepareSendAction(
 		Api::SendOptions options) const {
 	auto result = Api::SendAction(_history, options);
-	result.replyTo = replyToId();
-	result.topicRootId = 0;
+	result.replyTo = { .msgId = replyToId() };
 	result.options.sendAs = _sendAs
 		? _history->session().sendAsPeers().resolveChosen(
 			_history->peer).get()
@@ -3883,7 +3883,7 @@ void HistoryWidget::send(Api::SendOptions options) {
 			? _previewData->id
 			: WebPageId(0));
 
-	auto message = ApiWrap::MessageToSend(prepareSendAction(options));
+	auto message = Api::MessageToSend(prepareSendAction(options));
 	message.textWithTags = _field->getTextWithAppliedMarkdown();
 	message.webPageId = webPageId;
 
@@ -3935,8 +3935,7 @@ void HistoryWidget::sendScheduled() {
 	}
 	const auto callback = [=](Api::SendOptions options) { send(options); };
 	controller()->show(
-		HistoryView::PrepareScheduleBox(_list, sendMenuType(), callback),
-		Ui::LayerOption::KeepOther);
+		HistoryView::PrepareScheduleBox(_list, sendMenuType(), callback));
 }
 
 void HistoryWidget::sendWhenOnline() {
@@ -4019,13 +4018,14 @@ void HistoryWidget::reportSelectedMessages() {
 	const auto reason = _chooseForReport->reason;
 	const auto weak = Ui::MakeWeak(_list.data());
 	controller()->window().show(Box([=](not_null<Ui::GenericBox*> box) {
-		Ui::ReportDetailsBox(box, [=](const QString &text) {
+		const auto &st = st::defaultReportBox;
+		Ui::ReportDetailsBox(box, st, [=](const QString &text) {
 			if (weak) {
 				clearSelected();
 				controller()->clearChooseReportMessages();
 			}
-			const auto toastParent = Window::Show(controller()).toastParent();
-			Api::SendReport(toastParent, peer, reason, text, ids);
+			const auto show = controller()->uiShow();
+			Api::SendReport(show, peer, reason, text, ids);
 			box->closeBox();
 		});
 	}));
@@ -4223,14 +4223,14 @@ void HistoryWidget::finishAnimating() {
 void HistoryWidget::chooseAttach(
 		std::optional<bool> overrideSendImagesAsPhotos) {
 	if (_editMsgId) {
-		controller()->showToast({ tr::lng_edit_caption_attach(tr::now) });
+		controller()->showToast(tr::lng_edit_caption_attach(tr::now));
 		return;
 	}
 
 	if (!_peer || !_canSendMessages) {
 		return;
 	} else if (const auto error = Data::AnyFileRestrictionError(_peer)) {
-		controller()->showToast({ *error });
+		controller()->showToast(*error);
 		return;
 	} else if (showSlowmodeError()) {
 		return;
@@ -4357,7 +4357,7 @@ void HistoryWidget::sendBotCommand(const Bot::SendCommandRequest &request) {
 
 	auto message = Api::MessageToSend(prepareSendAction({}));
 	message.textWithTags = { toSend, TextWithTags::Tags() };
-	message.action.replyTo = request.replyTo
+	message.action.replyTo.msgId = request.replyTo
 		? ((!_peer->isUser()/* && (botStatus == 0 || botStatus == 2)*/)
 			? request.replyTo
 			: replyToId())
@@ -4919,7 +4919,7 @@ void HistoryWidget::recountChatWidth() {
 }
 
 int HistoryWidget::fieldHeight() const {
-	return _canSendTexts
+	return (_canSendTexts || _editMsgId)
 		? _field->height()
 		: (st::historySendSize.height() - 2 * st::historySendPadding);
 }
@@ -5151,10 +5151,11 @@ bool HistoryWidget::showSendingFilesError(
 		return false;
 	} else if (text == u"(toolarge)"_q) {
 		const auto fileSize = list.files.back().size;
-		controller()->show(Box(FileSizeLimitBox, &session(), fileSize));
+		controller()->show(
+			Box(FileSizeLimitBox, &session(), fileSize, nullptr));
 		return true;
 	}
-	controller()->showToast({ text });
+	controller()->showToast(text);
 	return true;
 }
 
@@ -5178,7 +5179,7 @@ bool HistoryWidget::showSendMessageError(
 	if (error.isEmpty()) {
 		return false;
 	}
-	controller()->showToast({ error });
+	controller()->showToast(error);
 	return true;
 }
 
@@ -5212,7 +5213,7 @@ bool HistoryWidget::confirmSendingFiles(
 				crl::guard(_list, [=] { cancelEdit(); }));
 			return true;
 		}
-		controller()->showToast({ tr::lng_edit_caption_attach(tr::now) });
+		controller()->showToast(tr::lng_edit_caption_attach(tr::now));
 		return false;
 	} else if (showSendingFilesError(list)) {
 		return false;
@@ -5582,7 +5583,7 @@ int HistoryWidget::countInitialScrollTop() {
 		const auto itemTop = _list->itemTop(item);
 		if (itemTop < 0) {
 			setMsgId(0);
-			controller()->showToast({ tr::lng_message_not_found(tr::now) });
+			controller()->showToast(tr::lng_message_not_found(tr::now));
 			return countInitialScrollTop();
 		} else {
 			const auto view = item->mainView();
@@ -6136,7 +6137,7 @@ void HistoryWidget::mousePressEvent(QMouseEvent *e) {
 			crl::guard(_list, [=] { cancelEdit(); }));
 	} else if (_inReplyEditForward) {
 		if (readyToForward()) {
-			_forwardPanel->editOptions(controller());
+			_forwardPanel->editOptions(controller()->uiShow());
 		} else {
 			controller()->showPeerHistory(
 				_peer,
@@ -6293,7 +6294,7 @@ bool HistoryWidget::showSlowmodeError() {
 	if (text.isEmpty()) {
 		return false;
 	}
-	controller()->showToast({ text });
+	controller()->showToast(text);
 	return true;
 }
 
@@ -6314,7 +6315,7 @@ void HistoryWidget::sendInlineResult(InlineBots::ResultSelected result) {
 
 	auto errorText = result.result->getErrorOnSend(_history);
 	if (!errorText.isEmpty()) {
-		controller()->showToast({ errorText });
+		controller()->showToast(errorText);
 		return;
 	}
 
@@ -6600,7 +6601,7 @@ void HistoryWidget::checkMessagesTTL() {
 	} else if (!_ttlInfo || _ttlInfo->peer() != _peer) {
 		_ttlInfo = std::make_unique<HistoryView::Controls::TTLButton>(
 			this,
-			std::make_shared<Window::Show>(controller()),
+			controller()->uiShow(),
 			_peer);
 		orderWidgets();
 		updateControlsGeometry();
@@ -6821,7 +6822,7 @@ bool HistoryWidget::sendExistingDocument(
 		? Data::RestrictionError(_peer, ChatRestriction::SendStickers)
 		: std::nullopt;
 	if (error) {
-		controller()->showToast({ *error });
+		controller()->showToast(*error);
 		return false;
 	} else if (!_peer
 		|| !_canSendMessages
@@ -6856,7 +6857,7 @@ bool HistoryWidget::sendExistingPhoto(
 		? Data::RestrictionError(_peer, ChatRestriction::SendPhotos)
 		: std::nullopt;
 	if (error) {
-		controller()->showToast({ *error });
+		controller()->showToast(*error);
 		return false;
 	} else if (!_peer || !_canSendMessages) {
 		return false;
@@ -6972,7 +6973,7 @@ void HistoryWidget::processReply() {
 		return;
 	} else if (_processingReplyItem->history() == _migrated) {
 		if (_processingReplyItem->isService()) {
-			controller()->showToast({ tr::lng_reply_cant(tr::now) });
+			controller()->showToast(tr::lng_reply_cant(tr::now));
 		} else {
 			const auto itemId = _processingReplyItem->fullId();
 			controller()->show(
@@ -7060,7 +7061,7 @@ void HistoryWidget::editMessage(not_null<HistoryItem*> item) {
 	if (_chooseTheme) {
 		toggleChooseChatTheme(_peer);
 	} else if (_voiceRecordBar->isActive()) {
-		controller()->showToast({ tr::lng_edit_caption_voice(tr::now) });
+		controller()->showToast(tr::lng_edit_caption_voice(tr::now));
 		return;
 	} else if (_composeSearch) {
 		_composeSearch->hideAnimated();
@@ -7638,7 +7639,7 @@ void HistoryWidget::updateTopBarSelection() {
 			|| isRecording()
 			|| isBotStart()
 			|| isBlocked()
-			|| !_canSendTexts) {
+			|| (!_canSendTexts && !_editMsgId)) {
 			_list->setFocus();
 		} else {
 			_field->setFocus();

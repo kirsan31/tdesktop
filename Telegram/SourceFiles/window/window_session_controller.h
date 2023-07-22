@@ -12,6 +12,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/weak_ptr.h"
 #include "base/timer.h"
 #include "boxes/gift_premium_box.h" // GiftPremiumValidator.
+#include "chat_helpers/compose/compose_show.h"
 #include "data/data_chat_participant_status.h"
 #include "dialogs/dialogs_key.h"
 #include "ui/layers/layer_widget.h"
@@ -27,6 +28,11 @@ class MainWindow;
 namespace Adaptive {
 enum class WindowLayout;
 } // namespace Adaptive
+
+namespace Data {
+struct StoriesContext;
+enum class StorySourcesList : uchar;
+} // namespace Data
 
 namespace ChatHelpers {
 class TabbedSelector;
@@ -80,21 +86,13 @@ class CachedIconFactory;
 
 namespace Window {
 
+using GifPauseReason = ChatHelpers::PauseReason;
+using GifPauseReasons = ChatHelpers::PauseReasons;
+
 class MainWindow;
 class SectionMemento;
 class Controller;
 class FiltersMenu;
-
-enum class GifPauseReason {
-	Any           = 0,
-	InlineResults = (1 << 0),
-	TabbedPanel   = (1 << 1),
-	Layer         = (1 << 2),
-	RoundPlaying  = (1 << 3),
-	MediaPreview  = (1 << 4),
-};
-using GifPauseReasons = base::flags<GifPauseReason>;
-inline constexpr bool is_flag_type(GifPauseReason) { return true; };
 
 enum class ResolveType {
 	Default,
@@ -186,7 +184,7 @@ public:
 	explicit SessionNavigation(not_null<Main::Session*> session);
 	virtual ~SessionNavigation();
 
-	Main::Session &session() const;
+	[[nodiscard]] Main::Session &session() const;
 
 	virtual void showSection(
 		std::shared_ptr<SectionMemento> memento,
@@ -206,6 +204,7 @@ public:
 		std::variant<QString, ChannelId> usernameOrId;
 		QString phone;
 		MsgId messageId = ShowAtUnreadMsgId;
+		StoryId storyId = 0;
 		RepliesByLinkInfo repliesInfo;
 		ResolveType resolveType = ResolveType::Default;
 		QString startToken;
@@ -276,6 +275,17 @@ public:
 		FullMsgId contextId,
 		const SectionShow &params = SectionShow());
 
+	base::weak_ptr<Ui::Toast::Instance> showToast(
+		Ui::Toast::Config &&config);
+	base::weak_ptr<Ui::Toast::Instance> showToast(
+		TextWithEntities &&text,
+		crl::time duration = 0);
+	base::weak_ptr<Ui::Toast::Instance> showToast(
+		const QString &text,
+		crl::time duration = 0);
+
+	[[nodiscard]] virtual std::shared_ptr<ChatHelpers::Show> uiShow();
+
 private:
 	void resolvePhone(
 		const QString &phone,
@@ -345,8 +355,6 @@ public:
 		anim::type animated = anim::type::normal);
 	void hideLayer(anim::type animated = anim::type::normal);
 
-	void showToast(TextWithEntities &&text);
-
 	[[nodiscard]] auto sendingAnimation() const
 	-> Ui::MessageSendingAnimationController &;
 	[[nodiscard]] auto tabbedSelector() const
@@ -405,9 +413,6 @@ public:
 	}
 	bool isGifPausedAtLeastFor(GifPauseReason reason) const;
 	void floatPlayerAreaUpdated();
-
-	void materializeLocalDrafts();
-	[[nodiscard]] rpl::producer<> materializeLocalDraftsRequests() const;
 
 	struct ColumnLayout {
 		int bodyWidth = 0;
@@ -477,16 +482,24 @@ public:
 	void showPassportForm(const Passport::FormRequest &request);
 	void clearPassportForm();
 
+	struct MessageContext {
+		FullMsgId id;
+		MsgId topicRootId;
+	};
 	void openPhoto(
 		not_null<PhotoData*> photo,
-		FullMsgId contextId,
-		MsgId topicRootId);
+		MessageContext message,
+		const Data::StoriesContext *stories = nullptr);
 	void openPhoto(not_null<PhotoData*> photo, not_null<PeerData*> peer);
 	void openDocument(
 		not_null<DocumentData*> document,
-		FullMsgId contextId,
-		MsgId topicRootId,
-		bool showInMediaView = false);
+		bool showInMediaView,
+		MessageContext message,
+		const Data::StoriesContext *stories = nullptr);
+	bool openSharedStory(HistoryItem *item);
+	bool openFakeItemStory(
+		FullMsgId fakeItemId,
+		const Data::StoriesContext *stories = nullptr);
 
 	void showChooseReportMessages(
 		not_null<PeerData*> peer,
@@ -565,6 +578,14 @@ public:
 		return _peerThemeOverride.value();
 	}
 
+	void openPeerStory(
+		not_null<PeerData*> peer,
+		StoryId storyId,
+		Data::StoriesContext context);
+	void openPeerStories(
+		PeerId peerId,
+		std::optional<Data::StorySourcesList> list = std::nullopt);
+
 	struct PaintContextArgs {
 		not_null<Ui::ChatTheme*> theme;
 		int visibleAreaTop = 0;
@@ -591,6 +612,8 @@ public:
 	[[nodiscard]] QString premiumRef() const;
 
 	[[nodiscard]] bool contentOverlapped(QWidget *w, QPaintEvent *e);
+
+	[[nodiscard]] std::shared_ptr<ChatHelpers::Show> uiShow() override;
 
 	[[nodiscard]] rpl::lifetime &lifetime() {
 		return _lifetime;
@@ -642,6 +665,8 @@ private:
 	const std::unique_ptr<ChatHelpers::EmojiInteractions> _emojiInteractions;
 	const bool _isPrimary = false;
 
+	mutable std::shared_ptr<ChatHelpers::Show> _cachedShow;
+
 	QString _authedName;
 
 	using SendingAnimation = Ui::MessageSendingAnimationController;
@@ -692,11 +717,11 @@ private:
 	using ReactionIconFactory = HistoryView::Reactions::CachedIconFactory;
 	std::unique_ptr<ReactionIconFactory> _cachedReactionIconFactory;
 
+	base::has_weak_ptr _storyOpenGuard;
+
 	GiftPremiumValidator _giftPremiumValidator;
 
 	QString _premiumRef;
-
-	rpl::event_stream<> _materializeLocalDraftsRequests;
 
 	rpl::lifetime _lifetime;
 
@@ -710,23 +735,5 @@ void ActivateWindow(not_null<SessionController*> controller);
 [[nodiscard]] Fn<bool()> PausedIn(
 	not_null<SessionController*> controller,
 	GifPauseReason level);
-
-class Show : public Ui::Show {
-public:
-	explicit Show(not_null<SessionNavigation*> navigation);
-	explicit Show(Controller *window);
-	~Show();
-	void showBox(
-		object_ptr<Ui::BoxContent> content,
-		Ui::LayerOptions options = Ui::LayerOption::KeepOther) const override;
-	void hideLayer() const override;
-	[[nodiscard]] not_null<QWidget*> toastParent() const override;
-	[[nodiscard]] bool valid() const override;
-	operator bool() const override;
-
-private:
-	const base::weak_ptr<Controller> _window;
-
-};
 
 } // namespace Window

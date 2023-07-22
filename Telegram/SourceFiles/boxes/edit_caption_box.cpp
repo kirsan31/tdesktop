@@ -129,7 +129,7 @@ void ChooseReplacement(
 		}
 		const auto showError = [=](tr::phrase<> t) {
 			if (const auto strong = weak.get()) {
-				strong->showToast({ t(tr::now) });
+				strong->showToast(t(tr::now));
 			}
 		};
 
@@ -246,12 +246,12 @@ EditCaptionBox::EditCaptionBox(
 , _scroll(base::make_unique_q<Ui::ScrollArea>(this, st::boxScroll))
 , _field(base::make_unique_q<Ui::InputField>(
 	this,
-	st::confirmCaptionArea,
+	st::defaultComposeFiles.caption,
 	Ui::InputField::Mode::MultiLine,
 	tr::lng_photo_caption()))
 , _emojiToggle(base::make_unique_q<Ui::EmojiButton>(
 	this,
-	st::boxAttachEmoji))
+	st::defaultComposeFiles.emoji))
 , _initialText(std::move(text))
 , _initialList(std::move(list))
 , _saved(std::move(saved)) {
@@ -304,7 +304,7 @@ void EditCaptionBox::StartMediaReplace(
 	}
 	const auto type = ComputeAlbumType(item);
 	const auto showError = [=](tr::phrase<> t) {
-		controller->showToast({ t(tr::now) });
+		controller->showToast(t(tr::now));
 	};
 	const auto checkResult = [=](const Ui::PreparedList &list) {
 		if (list.files.size() != 1) {
@@ -402,6 +402,7 @@ void EditCaptionBox::rebuildPreview() {
 		if (photo || document->isVideoFile() || document->isAnimation()) {
 			const auto media = Ui::CreateChild<Ui::ItemSingleMediaPreview>(
 				this,
+				st::defaultComposeControls,
 				gifPaused,
 				_historyItem,
 				Ui::AttachControls::Type::EditOnly);
@@ -410,6 +411,7 @@ void EditCaptionBox::rebuildPreview() {
 		} else {
 			_content.reset(Ui::CreateChild<Ui::ItemSingleFilePreview>(
 				this,
+				st::defaultComposeControls,
 				_historyItem,
 				Ui::AttachControls::Type::EditOnly));
 		}
@@ -418,6 +420,7 @@ void EditCaptionBox::rebuildPreview() {
 
 		const auto media = Ui::SingleMediaPreview::Create(
 			this,
+			st::defaultComposeControls,
 			gifPaused,
 			file,
 			Ui::AttachControls::Type::EditOnly);
@@ -429,6 +432,7 @@ void EditCaptionBox::rebuildPreview() {
 		} else {
 			_content.reset(Ui::CreateChild<Ui::SingleFilePreview>(
 				this,
+				st::defaultComposeControls,
 				file,
 				Ui::AttachControls::Type::EditOnly));
 		}
@@ -482,7 +486,7 @@ void EditCaptionBox::setupField() {
 
 	_field->setSubmitSettings(
 		Core::App().settings().sendSubmitWay());
-	_field->setMaxHeight(st::confirmCaptionArea.heightMax);
+	_field->setMaxHeight(st::defaultComposeFiles.caption.heightMax);
 
 	connect(_field, &Ui::InputField::submitted, [=] { save(); });
 	connect(_field, &Ui::InputField::cancelled, [=] { closeBox(); });
@@ -596,7 +600,7 @@ void EditCaptionBox::setupPhotoEditorEventHandler() {
 		if (!_preparedList.files.empty()) {
 			Editor::OpenWithPreparedFile(
 				this,
-				controller,
+				controller->uiShow(),
 				&_preparedList.files.front(),
 				st::sendMediaPreviewSize,
 				[=] { rebuildPreview(); });
@@ -647,7 +651,7 @@ void EditCaptionBox::setupEmojiPanel() {
 		_controller,
 		object_ptr<Selector>(
 			nullptr,
-			_controller,
+			_controller->uiShow(),
 			Window::GifPauseReason::Layer,
 			Selector::Mode::EmojiOnly));
 	_emojiPanel->setDesiredHeightValues(
@@ -728,9 +732,7 @@ bool EditCaptionBox::setPreparedList(Ui::PreparedList &&list) {
 		}
 	}
 	if (invalidForAlbum) {
-		Ui::Toast::Show(
-			Ui::BoxShow(this).toastParent(),
-			tr::lng_edit_media_album_error(tr::now));
+		showToast(tr::lng_edit_media_album_error(tr::now));
 		return false;
 	}
 	const auto wasSpoiler = hasSpoiler();
@@ -847,7 +849,8 @@ bool EditCaptionBox::validateLength(const QString &text) const {
 	if (remove <= 0) {
 		return true;
 	}
-	_controller->show(Box(CaptionLimitReachedBox, session, remove));
+	_controller->show(
+		Box(CaptionLimitReachedBox, session, remove, nullptr));
 	return false;
 }
 

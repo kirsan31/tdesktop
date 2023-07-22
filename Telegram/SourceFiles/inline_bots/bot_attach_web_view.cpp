@@ -19,7 +19,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "storage/storage_domain.h"
 #include "info/profile/info_profile_values.h"
 #include "ui/boxes/confirm_box.h"
-#include "ui/toasts/common_toasts.h"
 #include "ui/chat/attach/attach_bot_webview.h"
 #include "ui/widgets/checkbox.h"
 #include "ui/widgets/dropdown_menu.h"
@@ -182,7 +181,7 @@ void ShowChooseBox(
 			&controller->session(),
 			std::move(done),
 			std::move(filter)),
-		std::move(initBox)), Ui::LayerOption::KeepOther);
+		std::move(initBox)));
 }
 
 [[nodiscard]] base::flat_set<not_null<AttachWebView*>> &ActiveWebViews() {
@@ -482,7 +481,6 @@ bool AttachWebView::IsSame(
 		&& (a->fromSwitch == b.fromSwitch)
 		&& (a->action.history == b.action.history)
 		&& (a->action.replyTo == b.action.replyTo)
-		&& (a->action.topicRootId == b.action.topicRootId)
 		&& (a->action.options.sendAs == b.action.options.sendAs)
 		&& (a->action.options.silent == b.action.options.silent);
 }
@@ -534,8 +532,7 @@ void AttachWebView::request(const WebViewButton &button) {
 	const auto flags = Flag::f_theme_params
 		| (button.url.isEmpty() ? Flag(0) : Flag::f_url)
 		| (_startCommand.isEmpty() ? Flag(0) : Flag::f_start_param)
-		| (action.replyTo ? Flag::f_reply_to_msg_id : Flag(0))
-		| (action.topicRootId ? Flag::f_top_msg_id : Flag(0))
+		| (action.replyTo ? Flag::f_reply_to : Flag(0))
 		| (action.options.sendAs ? Flag::f_send_as : Flag(0))
 		| (action.options.silent ? Flag::f_silent : Flag(0));
 	_requestId = _session->api().request(MTPmessages_RequestWebView(
@@ -546,8 +543,7 @@ void AttachWebView::request(const WebViewButton &button) {
 		MTP_string(_startCommand),
 		MTP_dataJSON(MTP_bytes(Window::Theme::WebViewParams().json)),
 		MTP_string("tdesktop"),
-		MTP_int(action.replyTo.bare),
-		MTP_int(action.topicRootId.bare),
+		action.mtpReplyTo(),
 		(action.options.sendAs
 			? action.options.sendAs->input
 			: MTP_inputPeerEmpty())
@@ -811,8 +807,7 @@ void AttachWebView::requestMenu(
 			MTP_flags(Flag::f_theme_params
 				| Flag::f_url
 				| Flag::f_from_bot_menu
-				| (action.replyTo? Flag::f_reply_to_msg_id : Flag(0))
-				| (action.topicRootId ? Flag::f_top_msg_id : Flag(0))
+				| (action.replyTo? Flag::f_reply_to : Flag(0))
 				| (action.options.sendAs ? Flag::f_send_as : Flag(0))
 				| (action.options.silent ? Flag::f_silent : Flag(0))),
 			action.history->peer->input,
@@ -821,8 +816,7 @@ void AttachWebView::requestMenu(
 			MTPstring(), // start_param
 			MTP_dataJSON(MTP_bytes(Window::Theme::WebViewParams().json)),
 			MTP_string("tdesktop"),
-			MTP_int(action.replyTo.bare),
-			MTP_int(action.topicRootId.bare),
+			action.mtpReplyTo(),
 			(action.options.sendAs
 				? action.options.sendAs->input
 				: MTP_inputPeerEmpty())
@@ -1062,8 +1056,10 @@ void AttachWebView::show(
 		} else if (!local.startsWith(u"tg://"_q, Qt::CaseInsensitive)) {
 			return false;
 		}
-		UrlClickHandler::Open(local, {});
 		close();
+		crl::on_main([=] {
+			UrlClickHandler::Open(local, {});
+		});
 		return true;
 	};
 	const auto panel = std::make_shared<
@@ -1188,15 +1184,13 @@ void AttachWebView::started(uint64 queryId) {
 		_session->api().request(base::take(_prolongId)).cancel();
 		_prolongId = _session->api().request(MTPmessages_ProlongWebView(
 			MTP_flags(Flag(0)
-				| (action.replyTo ? Flag::f_reply_to_msg_id : Flag(0))
-				| (action.topicRootId ? Flag::f_top_msg_id : Flag(0))
+				| (action.replyTo ? Flag::f_reply_to : Flag(0))
 				| (action.options.sendAs ? Flag::f_send_as : Flag(0))
 				| (action.options.silent ? Flag::f_silent : Flag(0))),
 			action.history->peer->input,
 			_bot->inputUser,
 			MTP_long(queryId),
-			MTP_int(action.replyTo.bare),
-			MTP_int(action.topicRootId.bare),
+			action.mtpReplyTo(),
 			(action.options.sendAs
 				? action.options.sendAs->input
 				: MTP_inputPeerEmpty())
@@ -1216,12 +1210,9 @@ void AttachWebView::showToast(
 		: _addToMenuContext
 		? _addToMenuContext->controller.get()
 		: nullptr;
-	Ui::ShowMultilineToast({
-		.parentOverride = (strong
-			? Window::Show(strong).toastParent().get()
-			: nullptr),
-		.text = { text },
-	});
+	if (strong) {
+		strong->showToast(text);
+	}
 }
 
 void AttachWebView::confirmAddToMenu(

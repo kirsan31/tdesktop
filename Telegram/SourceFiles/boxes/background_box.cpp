@@ -282,21 +282,19 @@ void BackgroundBox::chosen(const Data::WallPaper &paper) {
 				close();
 			});
 			_controller->show(Ui::MakeConfirmBox({
-				.text = u"Are you sure you want to reset the wallpaper?"_q,
+				.text = tr::lng_background_sure_reset_default(),
 				.confirmed = reset,
-				.confirmText = u"Reset"_q,
+				.confirmText = tr::lng_background_reset_default(),
 			}));
 		} else {
 			closeBox();
 		}
 		return;
 	}
-	_controller->show(
-		Box<BackgroundPreviewBox>(
-			_controller,
-			paper,
-			BackgroundPreviewArgs{ _forPeer }),
-		Ui::LayerOption::KeepOther);
+	_controller->show(Box<BackgroundPreviewBox>(
+		_controller,
+		paper,
+		BackgroundPreviewArgs{ _forPeer }));
 }
 
 void BackgroundBox::resetForPeer() {
@@ -332,13 +330,11 @@ void BackgroundBox::removePaper(const Data::WallPaper &paper) {
 			paper.mtpSettings()
 		)).send();
 	};
-	_controller->show(
-		Ui::MakeConfirmBox({
-			.text = tr::lng_background_sure_delete(),
-			.confirmed = remove,
-			.confirmText = tr::lng_selected_delete(),
-		}),
-		Ui::LayerOption::KeepOther);
+	_controller->show(Ui::MakeConfirmBox({
+		.text = tr::lng_background_sure_delete(),
+		.confirmed = remove,
+		.confirmText = tr::lng_selected_delete(),
+	}));
 }
 
 BackgroundBox::Inner::Inner(
