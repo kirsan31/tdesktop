@@ -1,10 +1,11 @@
 ﻿# [Telegram Desktop][telegram_desktop] – Mod
 
 Attempt to address this TDesktop issues:  
-[Change the Always on Top behavior of the Call Popup]  
-[Auto resizing message block]  
-[250ms delay added to show emoji panel on mouseover]  
-[removed -- to −, >> to », << to «]  
+- [Change the Always on Top behavior of the Call Popup]  
+- [Auto resizing message block]  
+- [250ms delay added to show emoji panel on mouseover]  
+- [removed -- to −, >> to », << to «]  
+- [bigEmoj](https://github.com/kirsan31/tdesktop/tree/bigEmoj) branch: increased the size of emoji and reactions to roughly match their size in the emoji picker.
 
 
 ### Original text:
