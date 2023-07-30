@@ -798,6 +798,22 @@ void Widget::setupStories() {
 		_scroll->viewportEvent(e);
 	}, _stories->lifetime());
 
+	if (!Core::App().settings().storiesClickTooltipHidden()) {
+		// Don't create tooltip
+		// until storiesClickTooltipHidden can be returned to false.
+		const auto hideTooltip = [=] {
+			Core::App().settings().setStoriesClickTooltipHidden(true);
+			Core::App().saveSettingsDelayed();
+		};
+		_stories->setShowTooltip(
+			parentWidget(),
+			rpl::combine(
+				Core::App().settings().storiesClickTooltipHiddenValue(),
+				shownValue(),
+				!rpl::mappers::_1 && rpl::mappers::_2),
+			hideTooltip);
+	}
+
 	_storiesContents.fire(Stories::ContentForSession(
 		&controller()->session(),
 		Data::StorySourcesList::NotHidden));
@@ -1370,6 +1386,15 @@ void Widget::jumpToTop(bool belowPinned) {
 	}
 }
 
+void Widget::raiseWithTooltip() {
+	raise();
+	if (_stories) {
+		Ui::PostponeCall(this, [=] {
+			_stories->raiseTooltip();
+		});
+	}
+}
+
 void Widget::scrollToDefault(bool verytop) {
 	if (verytop) {
 		//_scroll->verticalScrollBar()->setMinimum(0);
@@ -1447,6 +1472,7 @@ void Widget::stopWidthAnimation() {
 }
 
 void Widget::updateStoriesVisibility() {
+	updateLockUnlockVisibility();
 	if (!_stories) {
 		return;
 	}
@@ -1476,7 +1502,6 @@ void Widget::updateStoriesVisibility() {
 		if (_aboveScrollAdded > 0 && _updateScrollGeometryCached) {
 			_updateScrollGeometryCached();
 		}
-		updateLockUnlockVisibility();
 		updateLockUnlockPosition();
 	}
 }

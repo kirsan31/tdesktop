@@ -562,3 +562,16 @@ dialogsStoriesListInfo: DialogsStoriesList(dialogsStoriesList) {
 dialogsStoriesListMine: DialogsStoriesList(dialogsStoriesListInfo) {
 	readOpacity: 1.;
 }
+dialogsStoriesTooltip: ImportantTooltip(defaultImportantTooltip) {
+	padding: margins(0px, 0px, 0px, 0px);
+}
+dialogsStoriesTooltipLabel: defaultImportantTooltipLabel;
+dialogsStoriesTooltipMaxWidth: 200px;
+dialogsStoriesTooltipHide: IconButton(defaultIconButton) {
+	width: 34px;
+	height: 20px;
+	iconPosition: point(-1px, -1px);
+	icon: icon {{ "calls/video_tooltip", importantTooltipFg }};
+	iconOver: icon {{ "calls/video_tooltip", importantTooltipFg }};
+	ripple: emptyRippleAnimation;
+}

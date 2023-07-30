@@ -835,8 +835,8 @@ void Element::validateText() {
 		_media = nullptr;
 		if (!storyMention) {
 			if (_text.isEmpty()) {
-				setTextWithLinks(
-					Ui::Text::Italic(u"This story has expired"_q));
+				setTextWithLinks(Ui::Text::Italic(
+					tr::lng_forwarded_story_expired(tr::now)));
 			}
 			return;
 		}
