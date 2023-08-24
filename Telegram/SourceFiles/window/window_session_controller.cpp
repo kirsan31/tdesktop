@@ -521,10 +521,13 @@ void SessionNavigation::showPeerByLinkResolved(
 		const auto contextPeer = item
 			? item->history()->peer
 			: bot;
+		const auto action = bot->session().attachWebView().lookupLastAction(
+			info.clickFromAttachBotWebviewUrl
+		).value_or(Api::SendAction(bot->owner().history(contextPeer)));
 		crl::on_main(this, [=] {
 			bot->session().attachWebView().requestApp(
 				parentController(),
-				Api::SendAction(bot->owner().history(contextPeer)),
+				action,
 				bot,
 				info.botAppName,
 				info.startToken,
@@ -1157,6 +1160,8 @@ void SessionController::openFolder(not_null<Data::Folder*> folder) {
 	}
 	if (activeChatsFilterCurrent() != 0) {
 		setActiveChatsFilter(0);
+	} else if (adaptive().isOneColumn()) {
+		clearSectionStack(SectionShow::Way::ClearStack);
 	}
 	closeForum();
 	_openedFolder = folder.get();

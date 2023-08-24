@@ -1467,6 +1467,13 @@ void HistoryItem::applyEdition(HistoryMessageEdition &&edition) {
 	//	}
 	//}
 
+	const auto updatingSavedLocalEdit = !edition.savePreviousMedia
+		&& (_savedLocalEditMediaData != nullptr);
+	if (!_savedLocalEditMediaData && edition.savePreviousMedia) {
+		savePreviousMedia();
+	}
+	Assert(!updatingSavedLocalEdit || !isLocalUpdateMedia());
+
 	if (edition.isEditHide) {
 		_flags |= MessageFlag::HideEdited;
 	} else {
@@ -1485,7 +1492,11 @@ void HistoryItem::applyEdition(HistoryMessageEdition &&edition) {
 	if (!edition.useSameMarkup) {
 		setReplyMarkup(base::take(edition.replyMarkup));
 	}
-	if (!isLocalUpdateMedia()) {
+	if (updatingSavedLocalEdit) {
+		_savedLocalEditMediaData->media = edition.mtpMedia
+			? CreateMedia(this, *edition.mtpMedia)
+			: nullptr;
+	} else {
 		removeFromSharedMediaIndex();
 		refreshMedia(edition.mtpMedia);
 	}
@@ -1498,11 +1509,17 @@ void HistoryItem::applyEdition(HistoryMessageEdition &&edition) {
 	if (!edition.useSameForwards) {
 		setForwardsCount(edition.forwards);
 	}
-	setText(_media
+	const auto &checkedMedia = updatingSavedLocalEdit
+		? _savedLocalEditMediaData->media
+		: _media;
+	auto updatedText = checkedMedia
 		? edition.textWithEntities
-		: EnsureNonEmpty(edition.textWithEntities));
-	if (!isLocalUpdateMedia()) {
-		indexAsNewItem();
+		: EnsureNonEmpty(edition.textWithEntities);
+	if (updatingSavedLocalEdit) {
+		_savedLocalEditMediaData->text = std::move(updatedText);
+	} else {
+		setText(std::move(updatedText));
+		addToSharedMediaIndex();
 	}
 	if (!edition.useSameReplies) {
 		if (!edition.replies.isNull) {
@@ -1613,7 +1630,7 @@ void HistoryItem::applySentMessage(const MTPDmessage &data) {
 	setPostAuthor(data.vpost_author().value_or_empty());
 	setIsPinned(data.is_pinned());
 	contributeToSlowmode(data.vdate().v);
-	indexAsNewItem();
+	addToSharedMediaIndex();
 	invalidateChatListEntry();
 	if (const auto period = data.vttl_period(); period && period->v > 0) {
 		applyTTL(data.vdate().v + period->v);
@@ -1637,7 +1654,7 @@ void HistoryItem::applySentMessage(
 		}, data.vmedia());
 	contributeToSlowmode(data.vdate().v);
 	if (!wasAlready) {
-		indexAsNewItem();
+		addToSharedMediaIndex();
 	}
 	invalidateChatListEntry();
 	if (const auto period = data.vttl_period(); period && period->v > 0) {
@@ -1650,6 +1667,9 @@ void HistoryItem::applySentMessage(
 void HistoryItem::updateSentContent(
 		const TextWithEntities &textWithEntities,
 		const MTPMessageMedia *media) {
+	if (_savedLocalEditMediaData) {
+		return;
+	}
 	setText(textWithEntities);
 	if (_flags & MessageFlag::FromInlineBot) {
 		if (!media || !_media || !_media->updateInlineResultMedia(*media)) {
@@ -1796,6 +1816,12 @@ Storage::SharedMediaTypesMask HistoryItem::sharedMediaTypes() const {
 void HistoryItem::indexAsNewItem() {
 	if (isRegular()) {
 		addToUnreadThings(HistoryUnreadThings::AddType::New);
+	}
+	addToSharedMediaIndex();
+}
+
+void HistoryItem::addToSharedMediaIndex() {
+	if (isRegular()) {
 		if (const auto types = sharedMediaTypes()) {
 			_history->session().storage().add(Storage::SharedMediaAddNew(
 				_history->peer->id,

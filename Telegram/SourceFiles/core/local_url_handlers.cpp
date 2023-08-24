@@ -412,6 +412,7 @@ bool ResolveUsernameOrPhone(
 	}
 	const auto myContext = context.value<ClickHandlerContext>();
 	using Navigation = Window::SessionNavigation;
+	controller->window().activate();
 	controller->showPeerByLink(Navigation::PeerByLinkInfo{
 		.usernameOrId = domain,
 		.phone = phone,
@@ -446,8 +447,8 @@ bool ResolveUsernameOrPhone(
 			? std::make_optional(params.value(u"voicechat"_q))
 			: std::nullopt),
 		.clickFromMessageId = myContext.itemId,
+		.clickFromAttachBotWebviewUrl = myContext.attachBotWebviewUrl,
 	});
-	controller->window().activate();
 	return true;
 }
 
@@ -473,7 +474,7 @@ bool ResolvePrivatePost(
 	if (!channelId || (msgId && !IsServerMsgId(msgId))) {
 		return false;
 	}
-	const auto fromMessageId = context.value<ClickHandlerContext>().itemId;
+	const auto my = context.value<ClickHandlerContext>();
 	using Navigation = Window::SessionNavigation;
 	controller->showPeerByLink(Navigation::PeerByLinkInfo{
 		.usernameOrId = channelId,
@@ -487,7 +488,8 @@ bool ResolvePrivatePost(
 				Navigation::ThreadId{ threadId }
 			}
 			: Navigation::RepliesByLinkInfo{ v::null },
-		.clickFromMessageId = fromMessageId,
+		.clickFromMessageId = my.itemId,
+		.clickFromAttachBotWebviewUrl = my.attachBotWebviewUrl,
 	});
 	controller->window().activate();
 	return true;

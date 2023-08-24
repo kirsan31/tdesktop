@@ -35,6 +35,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_layers.h"
 #include "styles/style_boxes.h"
 #include "styles/style_info.h"
+#include "styles/style_menu_icons.h"
 #include "styles/style_window.h"
 #include "styles/style_settings.h"
 
@@ -318,16 +319,15 @@ not_null<Ui::RpWidget*> AddInnerToggle(
 		button->geometryValue(
 		) | rpl::start_with_next([=](const QRect &r) {
 			const auto w = st::rightsButtonToggleWidth;
-			constexpr auto kLineWidth = int(1);
 			toggleButton->setGeometry(
 				r.x() + r.width() - w,
 				r.y(),
 				w,
 				r.height());
 			separator->setGeometry(
-				toggleButton->x() - kLineWidth,
+				toggleButton->x() - st::lineWidth,
 				r.y() + (r.height() - separatorHeight) / 2,
-				kLineWidth,
+				st::lineWidth,
 				separatorHeight);
 		}, toggleButton->lifetime());
 
@@ -402,7 +402,7 @@ not_null<Ui::RpWidget*> AddInnerToggle(
 			(s.height() - label->height()) / 2);
 		arrow->moveToLeft(
 			std::min(
-				labelLeft + label->naturalWidth(),
+				labelLeft + label->textMaxWidth(),
 				labelRight - arrow->width()),
 			(s.height() - arrow->height()) / 2);
 	}, button->lifetime());
@@ -818,7 +818,7 @@ void AddSuggestGigagroup(
 		rpl::single(QString()),
 		std::move(callback),
 		st::manageGroupTopicsButton,
-		{ &st::settingsIconAskQuestion, Settings::kIconGreen }));
+		{ &st::menuIconChatDiscuss }));
 
 	container->add(
 		object_ptr<Ui::DividerLabel>(
@@ -854,7 +854,7 @@ void AddBannedButtons(
 				ParticipantsBoxController::Role::Restricted);
 		},
 		st::manageGroupTopicsButton,
-		{ &st::settingsIconKey, Settings::kIconLightOrange }));
+		{ &st::menuIconPermissions }));
 	if (channel) {
 		container->add(EditPeerInfoBox::CreateButton(
 			container,
@@ -868,7 +868,7 @@ void AddBannedButtons(
 					ParticipantsBoxController::Role::Kicked);
 			},
 			st::manageGroupTopicsButton,
-			{ &st::settingsIconMinus, Settings::kIconRed }));
+			{ &st::menuIconRemove }));
 	}
 }
 

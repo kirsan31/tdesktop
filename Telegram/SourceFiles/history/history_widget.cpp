@@ -1806,7 +1806,10 @@ bool HistoryWidget::notify_switchInlineBotButtonReceived(
 void HistoryWidget::tryProcessKeyInput(not_null<QKeyEvent*> e) {
 	e->accept();
 	keyPressEvent(e);
-	if (!e->isAccepted() && _canSendTexts && _field->isVisible()) {
+	if (!e->isAccepted()
+		&& _canSendTexts
+		&& _field->isVisible()
+		&& !e->text().isEmpty()) {
 		_field->setFocusFast();
 		QCoreApplication::sendEvent(_field->rawTextEdit(), e);
 	}
@@ -1915,12 +1918,6 @@ bool HistoryWidget::applyDraft(FieldHistoryAction fieldHistoryAction) {
 	_textUpdateEvents = TextUpdateEvent::SaveDraft
 		| TextUpdateEvent::SendTyping;
 
-	// Save links from _field to _parsedLinks without generating preview.
-	_previewState = Data::PreviewState::Cancelled;
-	_fieldLinksParser->parseNow();
-	_parsedLinks = _fieldLinksParser->list().current();
-	_previewState = draft->previewState;
-
 	_processingReplyItem = _replyEditMsg = nullptr;
 	_processingReplyId = _replyToId = 0;
 	setEditMsgId(editMsgId);
@@ -1938,6 +1935,19 @@ bool HistoryWidget::applyDraft(FieldHistoryAction fieldHistoryAction) {
 		_processingReplyId = draft ? draft->msgId : MsgId();
 		processReply();
 	}
+
+	// Save links from _field to _parsedLinks without generating preview.
+	_previewState = Data::PreviewState::Cancelled;
+	if (_editMsgId) {
+		_fieldLinksParser->setDisabled(!_replyEditMsg
+			|| (_replyEditMsg->media()
+				&& !_replyEditMsg->media()->webpage()));
+	}
+	_fieldLinksParser->parseNow();
+	_parsedLinks = _fieldLinksParser->list().current();
+	_previewState = draft->previewState;
+	checkPreview();
+
 	return true;
 }
 
@@ -2014,18 +2024,26 @@ void HistoryWidget::showHistory(
 				return;
 			}
 			if (!IsServerMsgId(showAtMsgId)
+				&& !IsClientMsgId(showAtMsgId)
 				&& !IsServerMsgId(-showAtMsgId)) {
 				// To end or to unread.
 				destroyUnreadBar();
 			}
 			const auto canShowNow = _history->isReadyFor(showAtMsgId);
 			if (!canShowNow) {
-				DEBUG_LOG(("JumpToEnd(%1, %2, %3): Showing delayed at %4."
-					).arg(_history->peer->name()
-					).arg(_history->inboxReadTillId().bare
-					).arg(Logs::b(_history->loadedAtBottom())
-					).arg(showAtMsgId.bare));
-				delayedShowAt(showAtMsgId);
+				if (!_firstLoadRequest) {
+					DEBUG_LOG(("JumpToEnd(%1, %2, %3): Showing delayed at %4."
+						).arg(_history->peer->name()
+						).arg(_history->inboxReadTillId().bare
+						).arg(Logs::b(_history->loadedAtBottom())
+						).arg(showAtMsgId.bare));
+					delayedShowAt(showAtMsgId);
+				} else if (_showAtMsgId != showAtMsgId) {
+					clearAllLoadRequests();
+					setMsgId(showAtMsgId);
+					firstLoadMessages();
+					doneShow();
+				}
 			} else {
 				_history->forgetScrollState();
 				if (_migrated) {
@@ -2469,6 +2487,9 @@ void HistoryWidget::registerDraftSource() {
 void HistoryWidget::setEditMsgId(MsgId msgId) {
 	unregisterDraftSources();
 	_editMsgId = msgId;
+	if (_fieldLinksParser && !_editMsgId) {
+		_fieldLinksParser->setDisabled(false);
+	}
 	if (!msgId) {
 		_canReplaceMedia = false;
 	}
@@ -5613,6 +5634,7 @@ int HistoryWidget::countInitialScrollTop() {
 		return _list->historyScrollTop();
 	} else if (_showAtMsgId
 		&& (IsServerMsgId(_showAtMsgId)
+			|| IsClientMsgId(_showAtMsgId)
 			|| IsServerMsgId(-_showAtMsgId))) {
 		const auto item = getItemFromHistoryOrMigrated(_showAtMsgId);
 		const auto itemTop = _list->itemTop(item);
@@ -6212,6 +6234,16 @@ void HistoryWidget::keyPressEvent(QKeyEvent *e) {
 			return;
 		}
 		_scroll->keyPressEvent(e);
+	} else if (e->key() == Qt::Key_Up
+		&& commonModifiers == Qt::ControlModifier) {
+		if (!replyToPreviousMessage()) {
+			e->ignore();
+		}
+	} else if (e->key() == Qt::Key_Down
+		&& commonModifiers == Qt::ControlModifier) {
+		if (!replyToNextMessage()) {
+			e->ignore();
+		}
 	} else if (e->key() == Qt::Key_Return || e->key() == Qt::Key_Enter) {
 		if (!_botStart->isHidden()) {
 			sendBotStartCommand();
@@ -6268,20 +6300,28 @@ bool HistoryWidget::replyToPreviousMessage() {
 	if (!_history || _editMsgId || _history->isForum()) {
 		return false;
 	}
-	const auto fullId = FullMsgId(_history->peer->id, _replyToId);
+	const auto fullId = FullMsgId(
+		_history->peer->id,
+		_field->isVisible()
+			? _replyToId
+			: _highlighter.latestSingleHighlightedMsgId());
 	if (const auto item = session().data().message(fullId)) {
 		if (const auto view = item->mainView()) {
 			if (const auto previousView = view->previousDisplayedInBlocks()) {
 				const auto previous = previousView->data();
 				controller()->showMessage(previous);
-				replyToMessage(previous);
+				if (_field->isVisible()) {
+					replyToMessage(previous);
+				}
 				return true;
 			}
 		}
 	} else if (const auto previousView = _history->findLastDisplayed()) {
 		const auto previous = previousView->data();
 		controller()->showMessage(previous);
-		replyToMessage(previous);
+		if (_field->isVisible()) {
+			replyToMessage(previous);
+		}
 		return true;
 	}
 	return false;
@@ -6291,13 +6331,19 @@ bool HistoryWidget::replyToNextMessage() {
 	if (!_history || _editMsgId || _history->isForum()) {
 		return false;
 	}
-	const auto fullId = FullMsgId(_history->peer->id, _replyToId);
+	const auto fullId = FullMsgId(
+		_history->peer->id,
+		_field->isVisible()
+			? _replyToId
+			: _highlighter.latestSingleHighlightedMsgId());
 	if (const auto item = session().data().message(fullId)) {
 		if (const auto view = item->mainView()) {
 			if (const auto nextView = view->nextDisplayedInBlocks()) {
 				const auto next = nextView->data();
 				controller()->showMessage(next);
-				replyToMessage(next);
+				if (_field->isVisible()) {
+					replyToMessage(next);
+				}
 			} else {
 				_highlighter.clear();
 				cancelReply(false);
@@ -7495,7 +7541,7 @@ void HistoryWidget::handlePeerUpdate() {
 		if (!channel->mgInfo->botStatus) {
 			session().api().chatParticipants().requestBots(channel);
 		}
-		if (channel->mgInfo->admins.empty()) {
+		if (!channel->mgInfo->adminsLoaded) {
 			session().api().chatParticipants().requestAdmins(channel);
 		}
 	}
@@ -7579,7 +7625,7 @@ void HistoryWidget::escape() {
 		cancelInlineBot();
 	} else if (_editMsgId) {
 		if (_replyEditMsg
-			&& PrepareEditText(_replyEditMsg) != _field->getTextWithTags()) {
+			&& EditTextChanged(_replyEditMsg, _field->getTextWithTags())) {
 			controller()->show(Ui::MakeConfirmBox({
 				.text = tr::lng_cancel_edit_post_sure(),
 				.confirmed = crl::guard(this, [this](Fn<void()> &&close) {

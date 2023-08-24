@@ -336,14 +336,18 @@ void EditExceptions(
 		Fn<void()> refresh) {
 	const auto include = (options & Flag::Contacts) != Flags(0);
 	const auto rules = data->current();
+	const auto session = &window->session();
 	auto controller = std::make_unique<EditFilterChatsListController>(
-		&window->session(),
+		session,
 		(include
 			? tr::lng_filters_include_title()
 			: tr::lng_filters_exclude_title()),
 		options,
 		rules.flags() & options,
-		include ? rules.always() : rules.never());
+		include ? rules.always() : rules.never(),
+		[=](int count) {
+			return Box(FilterChatsLimitBox, session, count, include);
+		});
 	const auto rawController = controller.get();
 	auto initBox = [=](not_null<PeerListBox*> box) {
 		box->setCloseByOutsideClick(false);
@@ -662,7 +666,7 @@ void EditFilterBox(
 		content,
 		tr::lng_filters_add_chats(),
 		st::settingsButtonActive,
-		{ &st::settingsIconAdd, 0, IconType::Round, &st::windowBgActive });
+		{ &st::settingsIconAdd, IconType::Round, &st::windowBgActive });
 
 	const auto include = SetupChatsPreview(
 		content,
@@ -689,7 +693,7 @@ void EditFilterBox(
 		excludeInner,
 		tr::lng_filters_remove_chats(),
 		st::settingsButtonActive,
-		{ &st::settingsIconRemove, 0, IconType::Round, &st::windowBgActive });
+		{ &st::settingsIconRemove, IconType::Round, &st::windowBgActive });
 
 	const auto exclude = SetupChatsPreview(
 		excludeInner,
@@ -742,13 +746,13 @@ void EditFilterBox(
 		state->hasLinks.value() | rpl::map(!rpl::mappers::_1),
 		tr::lng_filters_link_create(),
 		st::settingsButtonActive,
-		{ &st::settingsFolderShareIcon, 0, IconType::Simple });
+		{ &st::settingsFolderShareIcon, IconType::Simple });
 	const auto addLink = AddToggledButton(
 		content,
 		state->hasLinks.value(),
 		tr::lng_group_invite_add(),
 		st::settingsButtonActive,
-		{ &st::settingsIconAdd, 0, IconType::Round, &st::windowBgActive });
+		{ &st::settingsIconAdd, IconType::Round, &st::windowBgActive });
 
 	SetupFilterLinks(
 		content,
