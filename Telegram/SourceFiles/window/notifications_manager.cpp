@@ -66,7 +66,15 @@ constexpr auto kSystemAlertDuration = crl::time(0);
 	return result;
 }
 
-QString TextWithPermanentSpoiler(const TextWithEntities &textWithEntities) {
+[[nodiscard]] QString TextWithForwardedChar(
+		const QString &text,
+		bool forwarded) {
+	static const auto result = QString::fromUtf8("\xE2\x9E\xA1\xEF\xB8\x8F");
+	return forwarded ? result + text : text;
+}
+
+[[nodiscard]] QString TextWithPermanentSpoiler(
+		const TextWithEntities &textWithEntities) {
 	auto text = textWithEntities.text;
 	for (const auto &e : textWithEntities.entities) {
 		if (e.type() == EntityType::Spoiler) {
@@ -78,6 +86,25 @@ QString TextWithPermanentSpoiler(const TextWithEntities &textWithEntities) {
 		}
 	}
 	return text;
+}
+
+[[nodiscard]] QByteArray ReadRingtoneBytes(
+		const std::shared_ptr<Data::DocumentMedia> &media) {
+	const auto result = media->bytes();
+	if (!result.isEmpty()) {
+		return result;
+	}
+	const auto &location = media->owner()->location();
+	if (!location.isEmpty() && location.accessEnable()) {
+		const auto guard = gsl::finally([&] {
+			location.accessDisable();
+		});
+		auto f = QFile(location.name());
+		if (f.open(QIODevice::ReadOnly)) {
+			return f.readAll();
+		}
+	}
+	return {};
 }
 
 } // namespace
@@ -793,14 +820,16 @@ not_null<Media::Audio::Track*> System::lookupSound(
 		return i->second.get();
 	}
 	const auto &notifySettings = owner->notifySettings();
-	const auto custom = notifySettings.lookupRingtone(id);
-	if (custom && !custom->bytes().isEmpty()) {
-		const auto j = _customSoundTracks.emplace(
-			id,
-			Media::Audio::Current().createTrack()
-		).first;
-		j->second->fillFromData(bytes::make_vector(custom->bytes()));
-		return j->second.get();
+	if (const auto custom = notifySettings.lookupRingtone(id)) {
+		const auto bytes = ReadRingtoneBytes(custom);
+		if (!bytes.isEmpty()) {
+			const auto j = _customSoundTracks.emplace(
+				id,
+				Media::Audio::Current().createTrack()
+			).first;
+			j->second->fillFromData(bytes::make_vector(bytes));
+			return j->second.get();
+		}
 	}
 	ensureSoundCreated();
 	return _soundTrack.get();
@@ -1175,9 +1204,11 @@ void NativeManager::doShowNotification(NotificationFields &&fields) {
 		? tr::lng_forward_messages(tr::now, lt_count, fields.forwardedCount)
 		: item->groupId()
 		? tr::lng_in_dlg_album(tr::now)
-		: TextWithPermanentSpoiler(item->notificationText({
-			.spoilerLoginCode = options.spoilerLoginCode,
-		}));
+		: TextWithForwardedChar(
+			TextWithPermanentSpoiler(item->notificationText({
+				.spoilerLoginCode = options.spoilerLoginCode,
+			})),
+			(fields.forwardedCount == 1));
 
 	// #TODO optimize
 	auto userpicView = item->history()->peer->createUserpicView();
