@@ -1,3 +1,32 @@
+4.10.3 (02.10.23)
+
+- Fix crash on external link opening. (Linux only)
+
+4.10.2 (28.09.23)
+
+- Bug fixes and other minor improvements.
+
+4.10.1 (23.09.23)
+
+- Rebuild macOS version with Xcode 14.0.1.
+
+4.10 (22.09.23)
+
+- Stories for Channels.
+- Reaction Stickers in Stories.
+
+4.9.10 beta (22.09.23)
+
+- Update Qt to 6.2.5 on macOS.
+- Update minimum target to macOS 10.13 and toolchain to Xcode 15.
+- Update Linux build host from CentOS 7 to Rocky Linux 8.
+- Update Linux toolchain to GCC 12.
+
+4.9.9 (18.09.23)
+
+- Add support for Emoji 15.
+- Several crash fixes.
+
 4.9.8 (16.09.23)
 
 - Fix t.me/botname?startapp=token deeplinks.
@@ -87,7 +116,7 @@
 4.8.3 (31.05.23)
 
 - Fix main window focus from notifications with disabled animations.
-- Some minor fixes and improvements. 
+- Some minor fixes and improvements.
 
 4.8.2 (16.05.23)
 
