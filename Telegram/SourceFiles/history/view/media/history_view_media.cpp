@@ -21,6 +21,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/item_text_options.h"
 #include "ui/chat/chat_style.h"
 #include "ui/chat/message_bubble.h"
+#include "ui/effects/spoiler_mess.h"
 #include "ui/image/image_prepare.h"
 #include "ui/power_saving.h"
 #include "core/ui_integration.h"
@@ -180,12 +181,21 @@ Storage::SharedMediaTypesMask Media::sharedMediaTypes() const {
 	return {};
 }
 
+bool Media::allowTextSelectionByHandler(
+		const ClickHandlerPtr &handler) const {
+	return false;
+}
+
 not_null<Element*> Media::parent() const {
 	return _parent;
 }
 
 not_null<History*> Media::history() const {
 	return _parent->history();
+}
+
+SelectedQuote Media::selectedQuote(TextSelection selection) const {
+	return {};
 }
 
 bool Media::isDisplayed() const {

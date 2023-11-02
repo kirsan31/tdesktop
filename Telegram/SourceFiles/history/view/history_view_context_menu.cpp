@@ -51,6 +51,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_stories.h"
 #include "data/data_groups.h"
 #include "data/data_channel.h"
+#include "data/data_chat.h"
 #include "data/data_file_click_handler.h"
 #include "data/data_file_origin.h"
 #include "data/data_message_reactions.h"
@@ -538,9 +539,6 @@ bool AddRescheduleAction(
 				if (!item || !item->isScheduled()) {
 					continue;
 				}
-				if (!item->media() || !item->media()->webpage()) {
-					options.removeWebPageId = true;
-				}
 				Api::RescheduleMessage(item, options);
 				// Increase the scheduled date by 1s to keep the order.
 				options.scheduled += 1;
@@ -583,25 +581,34 @@ bool AddReplyToMessageAction(
 		const ContextMenuRequest &request,
 		not_null<ListWidget*> list) {
 	const auto context = list->elementContext();
-	const auto item = request.item;
+	const auto item = request.quoteItem ? request.quoteItem : request.item;
 	const auto topic = item ? item->topic() : nullptr;
 	const auto peer = item ? item->history()->peer.get() : nullptr;
 	if (!item
 		|| !item->isRegular()
-		|| !(topic
-			? Data::CanSendAnything(topic)
-			: Data::CanSendAnything(peer))
 		|| (context != Context::History && context != Context::Replies)) {
 		return false;
 	}
-	const auto owner = &item->history()->owner();
+	const auto canSendReply = topic
+		? Data::CanSendAnything(topic)
+		: Data::CanSendAnything(peer);
+	const auto canReply = canSendReply || item->allowsForward();
+	if (!canReply) {
+		return false;
+	}
+
+	const auto &quote = request.quote;
+	auto text = quote.empty()
+		? tr::lng_context_reply_msg(tr::now)
+		: tr::lng_context_quote_and_reply(tr::now);
+	text.replace('&', u"&&"_q);
 	const auto itemId = item->fullId();
-	menu->addAction(tr::lng_context_reply_msg(tr::now), [=] {
-		const auto item = owner->message(itemId);
+	menu->addAction(text, [=] {
 		if (!item) {
 			return;
+		} else {
+			list->replyToMessageRequestNotify({ itemId, quote });
 		}
-		list->replyToMessageRequestNotify(item->fullId());
 	}, &st::menuIconReply);
 	return true;
 }
@@ -925,7 +932,6 @@ void AddTopMessageActions(
 		not_null<Ui::PopupMenu*> menu,
 		const ContextMenuRequest &request,
 		not_null<ListWidget*> list) {
-	AddReplyToMessageAction(menu, request, list);
 	AddGoToMessageAction(menu, request, list);
 	AddViewRepliesAction(menu, request, list);
 	AddEditMessageAction(menu, request, list);
@@ -996,6 +1002,8 @@ base::unique_qptr<Ui::PopupMenu> FillContextMenu(
 	auto result = base::make_unique_q<Ui::PopupMenu>(
 		list,
 		st::popupMenuWithIcons);
+
+	AddReplyToMessageAction(result, request, list);
 
 	if (request.overSelection
 		&& !list->hasCopyRestrictionForSelected()

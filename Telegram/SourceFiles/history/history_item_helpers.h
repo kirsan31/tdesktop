@@ -85,8 +85,13 @@ void RequestDependentMessageStory(
 	const Api::SendOptions &options);
 [[nodiscard]] HistoryItem *LookupReplyTo(
 	not_null<History*> history,
-	MsgId replyToId);
-[[nodiscard]] MsgId LookupReplyToTop(HistoryItem *replyTo);
+	FullMsgId replyToId);
+[[nodiscard]] MsgId LookupReplyToTop(
+	not_null<History*> history,
+	HistoryItem *replyTo);
+[[nodiscard]] MsgId LookupReplyToTop(
+	not_null<History*> history,
+	FullReplyTo replyTo);
 [[nodiscard]] bool LookupReplyIsTopicPost(HistoryItem *replyTo);
 
 struct SendingErrorRequest {
@@ -118,10 +123,12 @@ struct SendingErrorRequest {
 [[nodiscard]] ClickHandlerPtr JumpToMessageClickHandler(
 	not_null<PeerData*> peer,
 	MsgId msgId,
-	FullMsgId returnToId = FullMsgId());
+	FullMsgId returnToId = FullMsgId(),
+	TextWithEntities highlightPart = {});
 [[nodiscard]] ClickHandlerPtr JumpToMessageClickHandler(
 	not_null<HistoryItem*> item,
-	FullMsgId returnToId = FullMsgId());
+	FullMsgId returnToId = FullMsgId(),
+	TextWithEntities highlightPart = {});
 [[nodiscard]] ClickHandlerPtr JumpToStoryClickHandler(
 	not_null<Data::Story*> story);
 ClickHandlerPtr JumpToStoryClickHandler(

@@ -579,11 +579,6 @@ bool InnerWidget::elementUnderCursor(
 	return (Element::Hovered() == view);
 }
 
-float64 InnerWidget::elementHighlightOpacity(
-		not_null<const HistoryItem*> item) const {
-	return 0.;
-}
-
 bool InnerWidget::elementInSelectionMode() {
 	return false;
 }
@@ -659,7 +654,7 @@ not_null<Ui::PathShiftGradient*> InnerWidget::elementPathShiftGradient() {
 	return _pathGradient.get();
 }
 
-void InnerWidget::elementReplyTo(const FullMsgId &to) {
+void InnerWidget::elementReplyTo(const FullReplyTo &to) {
 }
 
 void InnerWidget::elementStartInteraction(not_null<const Element*> view) {

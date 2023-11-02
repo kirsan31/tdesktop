@@ -69,8 +69,6 @@ class ElementDelegate {
 public:
 	virtual Context elementContext() = 0;
 	virtual bool elementUnderCursor(not_null<const Element*> view) = 0;
-	[[nodiscard]] virtual float64 elementHighlightOpacity(
-		not_null<const HistoryItem*> item) const = 0;
 	virtual bool elementInSelectionMode() = 0;
 	virtual bool elementIntersectsRange(
 		not_null<const Element*> view,
@@ -100,7 +98,7 @@ public:
 	virtual void elementHandleViaClick(not_null<UserData*> bot) = 0;
 	virtual bool elementIsChatWide() = 0;
 	virtual not_null<Ui::PathShiftGradient*> elementPathShiftGradient() = 0;
-	virtual void elementReplyTo(const FullMsgId &to) = 0;
+	virtual void elementReplyTo(const FullReplyTo &to) = 0;
 	virtual void elementStartInteraction(not_null<const Element*> view) = 0;
 	virtual void elementStartPremium(
 		not_null<const Element*> view,
@@ -120,8 +118,6 @@ public:
 class DefaultElementDelegate : public ElementDelegate {
 public:
 	bool elementUnderCursor(not_null<const Element*> view) override;
-	[[nodiscard]] float64 elementHighlightOpacity(
-		not_null<const HistoryItem*> item) const override;
 	bool elementInSelectionMode() override;
 	bool elementIntersectsRange(
 		not_null<const Element*> view,
@@ -149,7 +145,7 @@ public:
 		const FullMsgId &context) override;
 	void elementHandleViaClick(not_null<UserData*> bot) override;
 	bool elementIsChatWide() override;
-	void elementReplyTo(const FullMsgId &to) override;
+	void elementReplyTo(const FullReplyTo &to) override;
 	void elementStartInteraction(not_null<const Element*> view) override;
 	void elementStartPremium(
 		not_null<const Element*> view,
@@ -234,6 +230,26 @@ struct DateBadge : public RuntimeComponent<DateBadge, Element> {
 
 };
 
+// Any HistoryView::Element can have this Component for
+// displaying some text in layout of a service message above the message.
+struct ServicePreMessage
+	: public RuntimeComponent<ServicePreMessage, Element> {
+	void init(TextWithEntities string);
+
+	int resizeToWidth(int newWidth, bool chatWide);
+
+	void paint(
+		Painter &p,
+		const PaintContext &context,
+		QRect g,
+		bool chatWide) const;
+
+	Ui::Text::String text;
+	int width = 0;
+	int height = 0;
+
+};
+
 struct FakeBotAboutTop : public RuntimeComponent<FakeBotAboutTop, Element> {
 	void init();
 
@@ -250,6 +266,16 @@ struct TopicButton {
 	int nameVersion = 0;
 };
 
+struct SelectedQuote {
+	HistoryItem *item = nullptr;
+	TextWithEntities text;
+
+	explicit operator bool() const {
+		return item && !text.empty();
+	}
+	friend inline bool operator==(SelectedQuote, SelectedQuote) = default;
+};
+
 class Element
 	: public Object
 	, public RuntimeComposer<Element>
@@ -257,18 +283,19 @@ class Element
 	, public base::has_weak_ptr {
 public:
 	enum class Flag : uint16 {
-		ServiceMessage = 0x0001,
-		NeedsResize = 0x0002,
-		AttachedToPrevious = 0x0004,
-		AttachedToNext = 0x0008,
+		ServiceMessage           = 0x0001,
+		NeedsResize              = 0x0002,
+		AttachedToPrevious       = 0x0004,
+		AttachedToNext           = 0x0008,
 		BubbleAttachedToPrevious = 0x0010,
-		BubbleAttachedToNext = 0x0020,
-		HiddenByGroup = 0x0040,
-		SpecialOnlyEmoji = 0x0080,
-		CustomEmojiRepainting = 0x0100,
-		ScheduledUntilOnline = 0x0200,
-		TopicRootReply = 0x0400,
-		MediaOverriden = 0x0800,
+		BubbleAttachedToNext     = 0x0020,
+		HiddenByGroup            = 0x0040,
+		SpecialOnlyEmoji         = 0x0080,
+		CustomEmojiRepainting    = 0x0100,
+		ScheduledUntilOnline     = 0x0200,
+		TopicRootReply           = 0x0400,
+		MediaOverriden           = 0x0800,
+		HeavyCustomEmoji         = 0x1000,
 	};
 	using Flags = base::flags<Flag>;
 	friend inline constexpr auto is_flag_type(Flag) { return true; }
@@ -286,6 +313,7 @@ public:
 	[[nodiscard]] Context context() const;
 	void refreshDataId();
 
+	[[nodiscard]] uint8 colorIndex() const;
 	[[nodiscard]] QDateTime dateTime() const;
 
 	[[nodiscard]] int y() const;
@@ -339,6 +367,7 @@ public:
 
 	// For blocks context this should be called only from recountDisplayDate().
 	void setDisplayDate(bool displayDate);
+	void setServicePreMessage(TextWithEntities text);
 
 	bool computeIsAttachToPrevious(not_null<Element*> previous);
 
@@ -367,11 +396,24 @@ public:
 		int bottom,
 		QPoint point,
 		InfoDisplayType type) const;
-	virtual TextForMimeData selectedText(
+	virtual TextForMimeData selectedText(TextSelection selection) const = 0;
+	virtual SelectedQuote selectedQuote(
 		TextSelection selection) const = 0;
+	virtual TextSelection selectionFromQuote(
+		not_null<HistoryItem*> item,
+		const TextWithEntities &quote) const = 0;
 	[[nodiscard]] virtual TextSelection adjustSelection(
 		TextSelection selection,
 		TextSelectType type) const;
+
+	[[nodiscard]] static SelectedQuote FindSelectedQuote(
+		const Ui::Text::String &text,
+		TextSelection selection,
+		not_null<HistoryItem*> item);
+	[[nodiscard]] static TextSelection FindSelectionFromQuote(
+		const Ui::Text::String &text,
+		not_null<HistoryItem*> item,
+		const TextWithEntities &quote);
 
 	[[nodiscard]] virtual auto reactionButtonParameters(
 		QPoint position,
@@ -419,6 +461,8 @@ public:
 		const base::flat_set<UserId> &changes) {
 	}
 	[[nodiscard]] virtual bool toggleSelectionByHandlerClick(
+		const ClickHandlerPtr &handler) const;
+	[[nodiscard]] virtual bool allowTextSelectionByHandler(
 		const ClickHandlerPtr &handler) const;
 
 	struct VerticalRepaintRange {
@@ -568,9 +612,10 @@ private:
 	int _indexInBlock = -1;
 
 	mutable Flags _flags = Flag(0);
-	mutable bool _heavyCustomEmoji = false;
 	Context _context = Context();
 
 };
+
+constexpr auto size = sizeof(Element);
 
 } // namespace HistoryView

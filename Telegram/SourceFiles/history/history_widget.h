@@ -14,6 +14,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/history.h"
 #include "chat_helpers/bot_command.h"
 #include "chat_helpers/field_autocomplete.h"
+#include "data/data_drafts.h"
 #include "window/section_widget.h"
 #include "ui/widgets/fields/input_field.h"
 #include "mtproto/sender.h"
@@ -30,7 +31,6 @@ class Error;
 } // namespace MTP
 
 namespace Data {
-enum class PreviewState : char;
 class PhotoMedia;
 } // namespace Data
 
@@ -75,6 +75,7 @@ class SpoilerAnimation;
 enum class ReportReason;
 class ChooseThemeController;
 class ContinuousScroll;
+struct ChatPaintHighlight;
 } // namespace Ui
 
 namespace Window {
@@ -94,13 +95,15 @@ class Element;
 class PinnedTracker;
 class TranslateBar;
 class ComposeSearch;
-namespace Controls {
+} // namespace HistoryView
+
+namespace HistoryView::Controls {
 class RecordLock;
 class VoiceRecordBar;
 class ForwardPanel;
 class TTLButton;
-} // namespace Controls
-} // namespace HistoryView
+class WebpageProcessor;
+} // namespace HistoryView::Controls
 
 class BotKeyboard;
 class HistoryInner;
@@ -144,7 +147,9 @@ public:
 	void loadMessages();
 	void loadMessagesDown();
 	void firstLoadMessages();
-	void delayedShowAt(MsgId showAtMsgId);
+	void delayedShowAt(
+		MsgId showAtMsgId,
+		const TextWithEntities &highlightPart);
 
 	bool updateReplaceMediaButton();
 	void updateFieldPlaceholder();
@@ -158,7 +163,9 @@ public:
 
 	History *history() const;
 	PeerData *peer() const;
-	void setMsgId(MsgId showAtMsgId);
+	void setMsgId(
+		MsgId showAtMsgId,
+		const TextWithEntities &highlightPart = {});
 	MsgId msgId() const;
 
 	bool hasTopBarShadow() const {
@@ -175,19 +182,23 @@ public:
 
 	bool touchScroll(const QPoint &delta);
 
-	void enqueueMessageHighlight(not_null<HistoryView::Element*> view);
-	[[nodiscard]] float64 highlightOpacity(
+	void enqueueMessageHighlight(
+		not_null<HistoryView::Element*> view,
+		const TextWithEntities &part);
+	[[nodiscard]] Ui::ChatPaintHighlight itemHighlight(
 		not_null<const HistoryItem*> item) const;
 
 	MessageIdsList getSelectedItems() const;
 	void itemEdited(not_null<HistoryItem*> item);
 
-	void replyToMessage(FullMsgId itemId);
-	void replyToMessage(not_null<HistoryItem*> item);
+	void replyToMessage(FullReplyTo id);
+	void replyToMessage(
+		not_null<HistoryItem*> item,
+		TextWithEntities quote = {});
 	void editMessage(FullMsgId itemId);
 	void editMessage(not_null<HistoryItem*> item);
 
-	MsgId replyToId() const;
+	[[nodiscard]] FullReplyTo replyTo() const;
 	bool lastForceReplyReplied(const FullMsgId &replyTo) const;
 	bool lastForceReplyReplied() const;
 	bool cancelReply(bool lastKeyboardUsed = false);
@@ -198,13 +209,10 @@ public:
 	[[nodiscard]] QVector<FullMsgId> replyReturns() const;
 	void setReplyReturns(PeerId peer, QVector<FullMsgId> replyReturns);
 
-	void updatePreview();
-	void previewCancel();
-
 	void escape();
 
 	void sendBotCommand(const Bot::SendCommandRequest &request);
-	void hideSingleUseKeyboard(PeerData *peer, MsgId replyTo);
+	void hideSingleUseKeyboard(FullMsgId replyToId);
 	bool insertBotCommand(const QString &cmd);
 
 	bool eventFilter(QObject *obj, QEvent *e) override;
@@ -217,7 +225,10 @@ public:
 	void fastShowAtEnd(not_null<History*> history);
 	bool applyDraft(
 		FieldHistoryAction fieldHistoryAction = FieldHistoryAction::Clear);
-	void showHistory(const PeerId &peer, MsgId showAtMsgId, bool reload = false);
+	void showHistory(
+		const PeerId &peer,
+		MsgId showAtMsgId,
+		const TextWithEntities &highlightPart);
 	void setChooseReportMessagesDetails(
 		Ui::ReportReason reason,
 		Fn<void(MessageIdsList)> callback);
@@ -537,9 +548,10 @@ private:
 
 	void saveEditMsg();
 
-	void checkPreview();
-	void requestPreview();
-	void gotPreview(QString links, const MTPMessageMedia &media, mtpRequestId req);
+	void setupPreview();
+	void editDraftOptions();
+	void jumpToReply(FullReplyTo to);
+
 	void messagesReceived(not_null<PeerData*> peer, const MTPmessages_Messages &messages, int requestId);
 	void messagesFailed(const MTP::Error &error, int requestId);
 	void addMessagesToFront(not_null<PeerData*> peer, const QVector<MTPMessage> &messages);
@@ -633,11 +645,11 @@ private:
 	void searchInChat();
 
 	MTP::Sender _api;
-	MsgId _replyToId = 0;
+	FullReplyTo _replyTo;
 	Ui::Text::String _replyToName;
 	int _replyToNameVersion = 0;
 
-	MsgId _processingReplyId = 0;
+	FullReplyTo _processingReplyTo;
 	HistoryItem *_processingReplyItem = nullptr;
 
 	MsgId _editMsgId = 0;
@@ -671,16 +683,10 @@ private:
 
 	mtpRequestId _saveEditMsgRequestId = 0;
 
-	QStringList _parsedLinks;
-	QString _previewLinks;
-	WebPageData *_previewData = nullptr;
-	typedef QMap<QString, WebPageId> PreviewCache;
-	PreviewCache _previewCache;
-	mtpRequestId _previewRequest = 0;
+	std::unique_ptr<HistoryView::Controls::WebpageProcessor> _preview;
+	Fn<bool(QPainter &p, QRect to)> _previewDrawPreview;
 	Ui::Text::String _previewTitle;
 	Ui::Text::String _previewDescription;
-	base::Timer _previewTimer;
-	Data::PreviewState _previewState = Data::PreviewState();
 
 	bool _replyForwardPressed = false;
 
@@ -689,12 +695,14 @@ private:
 	bool _canSendMessages = false;
 	bool _canSendTexts = false;
 	MsgId _showAtMsgId = ShowAtUnreadMsgId;
+	TextWithEntities _showAtMsgHighlightPart;
 
 	int _firstLoadRequest = 0; // Not real mtpRequestId.
 	int _preloadRequest = 0; // Not real mtpRequestId.
 	int _preloadDownRequest = 0; // Not real mtpRequestId.
 
 	MsgId _delayedShowAtMsgId = -1;
+	TextWithEntities _delayedShowAtMsgHighlightPart;
 	int _delayedShowAtRequest = 0; // Not real mtpRequestId.
 
 	History *_supportPreloadHistory = nullptr;
@@ -722,7 +730,6 @@ private:
 
 	const object_ptr<FieldAutocomplete> _fieldAutocomplete;
 	object_ptr<Support::Autocomplete> _supportAutocomplete;
-	std::unique_ptr<MessageLinksParser> _fieldLinksParser;
 
 	UserData *_inlineBot = nullptr;
 	QString _inlineBotUsername;
@@ -757,7 +764,7 @@ private:
 	object_ptr<Ui::InputField> _field;
 	base::unique_qptr<Ui::RpWidget> _fieldDisabled;
 	Ui::Animations::Simple _inPhotoEditOver;
-	bool _inReplyEditForward = false;
+	bool _inDetails = false;
 	bool _inPhotoEdit = false;
 	bool _inClickable = false;
 
@@ -806,6 +813,7 @@ private:
 	int _itemsRevealHeight = 0;
 
 	bool _sponsoredMessagesStateKnown = false;
+	bool _justMarkingAsRead = false;
 
 	object_ptr<Ui::PlainShadow> _topShadow;
 	bool _inGrab = false;

@@ -401,16 +401,20 @@ void Photo::draw(Painter &p, const PaintContext &context) const {
 				_parent->width());
 			top += botTop->height;
 		}
+		auto highlightRequest = context.computeHighlightCache();
 		_caption.draw(p, {
 			.position = QPoint(st::msgPadding.left(), top),
 			.availableWidth = captionw,
 			.palette = &stm->textPalette,
+			.pre = stm->preCache.get(),
+			.blockquote = context.quoteCache(parent()->colorIndex()),
 			.colors = context.st->highlightColors(),
 			.spoiler = Ui::Text::DefaultSpoilerCache(),
 			.now = context.now,
 			.pausedEmoji = context.paused || On(PowerSaving::kEmojiChat),
 			.pausedSpoiler = context.paused || On(PowerSaving::kChatSpoiler),
 			.selection = context.selection,
+			.highlight = highlightRequest ? &*highlightRequest : nullptr,
 		});
 	} else if (!inWebPage) {
 		auto fullRight = paintx + paintw;
@@ -1045,6 +1049,16 @@ bool Photo::videoAutoplayEnabled() const {
 
 TextForMimeData Photo::selectedText(TextSelection selection) const {
 	return _caption.toTextForMimeData(selection);
+}
+
+SelectedQuote Photo::selectedQuote(TextSelection selection) const {
+	return Element::FindSelectedQuote(_caption, selection, _realParent);
+}
+
+TextSelection Photo::selectionFromQuote(
+		not_null<HistoryItem*> item,
+		const TextWithEntities &quote) const {
+	return Element::FindSelectionFromQuote(_caption, item, quote);
 }
 
 void Photo::hideSpoilers() {

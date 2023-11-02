@@ -49,6 +49,7 @@ struct StateRequest;
 struct MediaSpoiler;
 class StickerPlayer;
 class Element;
+struct SelectedQuote;
 
 using PaintContext = Ui::ChatPaintContext;
 
@@ -86,7 +87,14 @@ public:
 
 	[[nodiscard]] virtual TextForMimeData selectedText(
 			TextSelection selection) const {
-		return TextForMimeData();
+		return {};
+	}
+	[[nodiscard]] virtual SelectedQuote selectedQuote(
+		TextSelection selection) const;
+	[[nodiscard]] virtual TextSelection selectionFromQuote(
+			not_null<HistoryItem*> item,
+			const TextWithEntities &quote) const {
+		return {};
 	}
 
 	[[nodiscard]] virtual bool isDisplayed() const;
@@ -99,6 +107,9 @@ public:
 		return true;
 	}
 	[[nodiscard]] virtual bool hideServiceText() const {
+		return false;
+	}
+	[[nodiscard]] virtual bool hideFromName() const {
 		return false;
 	}
 	[[nodiscard]] virtual bool allowsFastShare() const {
@@ -125,6 +136,8 @@ public:
 	// toggle selection instead of activating the pressed link
 	[[nodiscard]] virtual bool toggleSelectionByHandlerClick(
 		const ClickHandlerPtr &p) const = 0;
+	[[nodiscard]] virtual bool allowTextSelectionByHandler(
+		const ClickHandlerPtr &p) const;
 
 	[[nodiscard]] virtual TextSelection adjustSelection(
 			TextSelection selection,

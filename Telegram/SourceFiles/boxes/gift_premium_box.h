@@ -11,8 +11,21 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 class UserData;
 
+namespace Api {
+struct GiftCode;
+} // namespace Api
+
+namespace Data {
+struct Giveaway;
+} // namespace Data
+
+namespace Ui {
+class GenericBox;
+} // namespace Ui
+
 namespace Window {
 class SessionController;
+class SessionNavigation;
 } // namespace Window
 
 class GiftPremiumValidator final {
@@ -29,3 +42,20 @@ private:
 	mtpRequestId _requestId = 0;
 
 };
+
+[[nodiscard]] rpl::producer<QString> GiftDurationValue(int months);
+[[nodiscard]] QString GiftDuration(int months);
+
+void GiftCodeBox(
+	not_null<Ui::GenericBox*> box,
+	not_null<Window::SessionNavigation*> controller,
+	const QString &slug);
+void ResolveGiftCode(
+	not_null<Window::SessionNavigation*> controller,
+	const QString &slug);
+
+void ResolveGiveawayInfo(
+	not_null<Window::SessionNavigation*> controller,
+	not_null<PeerData*> peer,
+	MsgId messageId,
+	Data::Giveaway giveaway);

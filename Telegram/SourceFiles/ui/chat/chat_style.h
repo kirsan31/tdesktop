@@ -21,11 +21,25 @@ struct TwoIconButton;
 struct ScrollArea;
 } // namespace style
 
+namespace Ui::Text {
+class CustomEmoji;
+} // namespace Ui::Text
+
 namespace Ui {
 
 class ChatTheme;
 class ChatStyle;
 struct BubblePattern;
+
+inline constexpr auto kColorPatternsCount = Text::kMaxQuoteOutlines;
+inline constexpr auto kColorIndexCount = uint8(1 << 6);
+inline constexpr auto kSimpleColorIndexCount = uint8(7);
+
+inline constexpr auto kDefaultBgOpacity = 0.12;
+inline constexpr auto kDefaultOutline1Opacity = 0.9;
+inline constexpr auto kDefaultOutline2Opacity = 0.3;
+inline constexpr auto kDefaultOutline3Opacity = 0.6;
+inline constexpr auto kDefaultOutlineOpacitySecond = 0.5;
 
 struct MessageStyle {
 	CornersPixmaps msgBgCornersSmall;
@@ -76,7 +90,13 @@ struct MessageStyle {
 	style::icon historyPollChoiceRight = { Qt::Uninitialized };
 	style::icon historyTranscribeIcon = { Qt::Uninitialized };
 	style::icon historyTranscribeHide = { Qt::Uninitialized };
-
+	std::array<
+		std::unique_ptr<Text::QuotePaintCache>,
+		kColorPatternsCount> quoteCache;
+	std::array<
+		std::unique_ptr<Text::QuotePaintCache>,
+		kColorPatternsCount> replyCache;
+	std::unique_ptr<Text::QuotePaintCache> preCache;
 };
 
 struct MessageImageStyle {
@@ -105,6 +125,29 @@ struct ReactionPaintInfo {
 	Fn<QRect(QPainter&)> effectPaint;
 };
 
+struct BackgroundEmojiCache {
+	QColor color;
+	std::array<QImage, 3> frames;
+};
+
+struct BackgroundEmojiData {
+	std::unique_ptr<Text::CustomEmoji> emoji;
+	QImage firstFrameMask;
+	std::array<BackgroundEmojiCache, 2 * (3 + kColorIndexCount)> caches;
+
+	[[nodiscard]] static int CacheIndex(
+		bool selected,
+		bool outbg,
+		bool inbubble,
+		uint8 colorIndexPlusOne);
+};
+
+struct ChatPaintHighlight {
+	float64 opacity = 0.;
+	float64 collapsion = 0.;
+	TextSelection range;
+};
+
 struct ChatPaintContext {
 	not_null<const ChatStyle*> st;
 	const BubblePattern *bubblesPattern = nullptr;
@@ -112,13 +155,15 @@ struct ChatPaintContext {
 	QRect viewport;
 	QRect clip;
 	TextSelection selection;
-	bool outbg = false;
-	bool paused = false;
+	ChatPaintHighlight highlight;
+	QPainterPath *highlightPathCache = nullptr;
+	mutable QRect highlightInterpolateTo;
 	crl::time now = 0;
 
 	void translate(int x, int y) {
 		viewport.translate(x, y);
 		clip.translate(x, y);
+		highlightInterpolateTo.translate(x, y);
 	}
 	void translate(QPoint point) {
 		translate(point.x(), point.y());
@@ -129,6 +174,8 @@ struct ChatPaintContext {
 	}
 	[[nodiscard]] not_null<const MessageStyle*> messageStyle() const;
 	[[nodiscard]] not_null<const MessageImageStyle*> imageStyle() const;
+	[[nodiscard]] not_null<Text::QuotePaintCache*> quoteCache(
+		uint8 colorIndex) const;
 
 	[[nodiscard]] ChatPaintContext translated(int x, int y) const {
 		auto result = *this;
@@ -144,6 +191,19 @@ struct ChatPaintContext {
 		result.selection = selection;
 		return result;
 	}
+	[[nodiscard]] auto computeHighlightCache() const
+	-> std::optional<Ui::Text::HighlightInfoRequest> {
+		if (highlight.range.empty() || highlight.collapsion <= 0.) {
+			return {};
+		}
+		return Ui::Text::HighlightInfoRequest{
+			.range = highlight.range,
+			.interpolateTo = highlightInterpolateTo,
+			.interpolateProgress = (1. - highlight.collapsion),
+			.outPath = highlightPathCache,
+		};
+	};
+
 
 	// This is supported only in unwrapped media for now.
 	enum class SkipDrawingParts {
@@ -153,22 +213,51 @@ struct ChatPaintContext {
 	};
 	SkipDrawingParts skipDrawingParts = SkipDrawingParts::None;
 
+	bool outbg = false;
+	bool paused = false;
+
 };
 
 [[nodiscard]] int HistoryServiceMsgRadius();
 [[nodiscard]] int HistoryServiceMsgInvertedRadius();
 [[nodiscard]] int HistoryServiceMsgInvertedShrink();
 
+struct ColorIndexData {
+	std::array<uint32, kColorPatternsCount> light = {};
+	std::array<uint32, kColorPatternsCount> dark = {};
+
+	friend inline bool operator==(
+		const ColorIndexData&,
+		const ColorIndexData&) = default;
+};
+
+struct ColorIndicesCompressed {
+	std::shared_ptr<std::array<ColorIndexData, kColorIndexCount>> colors;
+};
+
+struct ColorIndexValues {
+	std::array<QColor, kColorPatternsCount> outlines;
+	QColor name;
+	QColor bg;
+};
+
 class ChatStyle final : public style::palette {
 public:
-	ChatStyle();
+	explicit ChatStyle(rpl::producer<ColorIndicesCompressed> colorIndices);
 	explicit ChatStyle(not_null<const style::palette*> isolated);
+	ChatStyle(const ChatStyle &other) = delete;
+	ChatStyle &operator=(const ChatStyle &other) = delete;
+	~ChatStyle();
 
 	void apply(not_null<ChatTheme*> theme);
 	void applyCustomPalette(const style::palette *palette);
 	void applyAdjustedServiceBg(QColor serviceBg);
 
-	[[nodiscard]] std::span<Ui::Text::SpecialColor> highlightColors() const;
+	[[nodiscard]] bool dark() const {
+		return _dark;
+	}
+
+	[[nodiscard]] std::span<Text::SpecialColor> highlightColors() const;
 
 	[[nodiscard]] rpl::producer<> paletteChanged() const {
 		return _paletteChanged.events();
@@ -197,6 +286,32 @@ public:
 		bool outbg,
 		bool selected) const;
 	[[nodiscard]] const MessageImageStyle &imageStyle(bool selected) const;
+
+	[[nodiscard]] int colorPatternIndex(uint8 colorIndex) const;
+	[[nodiscard]] ColorIndexValues computeColorIndexValues(
+		bool selected,
+		uint8 colorIndex) const;
+
+	[[nodiscard]] auto serviceQuoteCache(bool twoColored) const
+		-> not_null<Text::QuotePaintCache*>;
+	[[nodiscard]] auto serviceReplyCache(bool twoColored) const
+		-> not_null<Text::QuotePaintCache*>;
+	[[nodiscard]] const ColorIndexValues &coloredValues(
+		bool selected,
+		uint8 colorIndex) const;
+	[[nodiscard]] not_null<Text::QuotePaintCache*> coloredQuoteCache(
+		bool selected,
+		uint8 colorIndex) const;
+	[[nodiscard]] not_null<Text::QuotePaintCache*> coloredReplyCache(
+		bool selected,
+		uint8 colorIndex) const;
+
+	[[nodiscard]] const style::TextPalette &coloredTextPalette(
+		bool selected,
+		uint8 colorIndex) const;
+
+	[[nodiscard]] not_null<BackgroundEmojiData*> backgroundEmojiData(
+		uint64 id) const;
 
 	[[nodiscard]] const CornersPixmaps &msgBotKbOverBgAddCornersSmall() const;
 	[[nodiscard]] const CornersPixmaps &msgBotKbOverBgAddCornersLarge() const;
@@ -283,7 +398,23 @@ public:
 	}
 
 private:
+	using ColoredQuotePaintCaches = std::array<
+		std::unique_ptr<Text::QuotePaintCache>,
+		kColorIndexCount * 2>;
+
+	struct ColoredPalette {
+		std::optional<style::owned_color> linkFg;
+		style::TextPalette data;
+	};
+
 	void assignPalette(not_null<const style::palette*> palette);
+	void clearColorIndexCaches();
+	void updateDarkValue();
+
+	[[nodiscard]] not_null<Text::QuotePaintCache*> coloredCache(
+		ColoredQuotePaintCaches &caches,
+		bool selected,
+		uint8 colorIndex) const;
 
 	void make(style::color &my, const style::color &original) const;
 	void make(style::icon &my, const style::icon &original) const;
@@ -334,7 +465,22 @@ private:
 	mutable CornersPixmaps _msgSelectOverlayCorners[
 		int(CachedCornerRadius::kCount)];
 
-	mutable std::vector<Ui::Text::SpecialColor> _highlightColors;
+	mutable std::vector<Text::SpecialColor> _highlightColors;
+	mutable std::array<
+		std::unique_ptr<Text::QuotePaintCache>,
+		2> _serviceQuoteCache;
+	mutable std::array<
+		std::unique_ptr<Text::QuotePaintCache>,
+		2> _serviceReplyCache;
+	mutable std::array<
+		std::optional<ColorIndexValues>,
+		2 * kColorIndexCount> _coloredValues;
+	mutable ColoredQuotePaintCaches _coloredQuoteCaches;
+	mutable ColoredQuotePaintCaches _coloredReplyCaches;
+	mutable std::array<
+		ColoredPalette,
+		2 * kColorIndexCount> _coloredTextPalettes;
+	mutable base::flat_map<uint64, BackgroundEmojiData> _backgroundEmojis;
 
 	style::TextPalette _historyPsaForwardPalette;
 	style::TextPalette _imgReplyTextPalette;
@@ -363,11 +509,30 @@ private:
 	style::icon _historyPollChoiceRight = { Qt::Uninitialized };
 	style::icon _historyPollChoiceWrong = { Qt::Uninitialized };
 
+	ColorIndicesCompressed _colorIndices;
+
+	bool _dark = false;
+
 	rpl::event_stream<> _paletteChanged;
 
 	rpl::lifetime _defaultPaletteChangeLifetime;
+	rpl::lifetime _colorIndicesLifetime;
 
 };
+
+[[nodiscard]] uint8 DecideColorIndex(uint64 id);
+[[nodiscard]] uint8 ColorIndexToPaletteIndex(uint8 colorIndex);
+
+[[nodiscard]] QColor FromNameFg(
+	not_null<const ChatStyle*> st,
+	bool selected,
+	uint8 colorIndex);
+
+[[nodiscard]] inline QColor FromNameFg(
+		const ChatPaintContext &context,
+		uint8 colorIndex) {
+	return FromNameFg(context.st, context.selected(), colorIndex);
+}
 
 void FillComplexOverlayRect(
 	QPainter &p,
