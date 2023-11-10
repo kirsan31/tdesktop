@@ -638,10 +638,11 @@ void DraftOptionsBox(
 	const auto &highlight = args.highlight;
 	const auto &clearOldDraft = args.clearOldDraft;
 	const auto resolveReply = [=] {
-		const auto current = state->quote.current();
 		auto result = draft.reply;
-		result.messageId = current.item->fullId();
-		result.quote = current.text;
+		if (const auto current = state->quote.current()) {
+			result.messageId = current.item->fullId();
+			result.quote = current.text;
+		}
 		return result;
 	};
 	const auto finish = [=](
@@ -668,6 +669,7 @@ void DraftOptionsBox(
 			});
 		}
 
+		const auto weak = Ui::MakeWeak(box);
 		Settings::AddButton(
 			bottom,
 			tr::lng_reply_show_in_chat(),
@@ -675,6 +677,9 @@ void DraftOptionsBox(
 			{ &st::menuIconShowInChat }
 		)->setClickedCallback([=] {
 			highlight(resolveReply());
+			if (const auto strong = weak.data()) {
+				strong->closeBox();
+			}
 		});
 
 		Settings::AddButton(
