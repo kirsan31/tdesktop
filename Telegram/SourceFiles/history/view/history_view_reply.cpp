@@ -38,32 +38,40 @@ namespace {
 
 constexpr auto kNonExpandedLinesLimit = 5;
 
+} // namespace
+
 void ValidateBackgroundEmoji(
 		DocumentId backgroundEmojiId,
 		not_null<Ui::BackgroundEmojiData*> data,
 		not_null<Ui::BackgroundEmojiCache*> cache,
 		not_null<Ui::Text::QuotePaintCache*> quote,
 		not_null<const Element*> view) {
+	if (data->firstFrameMask.isNull() && !data->emoji) {
+		data->emoji = CreateBackgroundEmojiInstance(
+			&view->history()->owner(),
+			backgroundEmojiId,
+			crl::guard(view, [=] { view->repaint(); }));
+	}
+	ValidateBackgroundEmoji(backgroundEmojiId, data, cache, quote);
+}
+
+void ValidateBackgroundEmoji(
+		DocumentId backgroundEmojiId,
+		not_null<Ui::BackgroundEmojiData*> data,
+		not_null<Ui::BackgroundEmojiCache*> cache,
+		not_null<Ui::Text::QuotePaintCache*> quote) {
+	Expects(!data->firstFrameMask.isNull() || data->emoji != nullptr);
+
 	if (data->firstFrameMask.isNull()) {
 		if (!cache->frames[0].isNull()) {
 			for (auto &frame : cache->frames) {
 				frame = QImage();
 			}
 		}
-		const auto tag = Data::CustomEmojiSizeTag::Isolated;
-		if (!data->emoji) {
-			const auto owner = &view->history()->owner();
-			const auto repaint = crl::guard(view, [=] {
-				view->history()->owner().requestViewRepaint(view);
-			});
-			data->emoji = owner->customEmojiManager().create(
-				backgroundEmojiId,
-				repaint,
-				tag);
-		}
 		if (!data->emoji->ready()) {
 			return;
 		}
+		const auto tag = Data::CustomEmojiSizeTag::Isolated;
 		const auto size = Data::FrameSizeFromTag(tag);
 		data->firstFrameMask = QImage(
 			QSize(size, size),
@@ -117,8 +125,19 @@ void ValidateBackgroundEmoji(
 	cache->frames[2] = make(kSize3);
 }
 
+auto CreateBackgroundEmojiInstance(
+	not_null<Data::Session*> owner,
+	DocumentId backgroundEmojiId,
+	Fn<void()> repaint)
+-> std::unique_ptr<Ui::Text::CustomEmoji> {
+	return owner->customEmojiManager().create(
+		backgroundEmojiId,
+		repaint,
+		Data::CustomEmojiSizeTag::Isolated);
+}
+
 void FillBackgroundEmoji(
-		Painter &p,
+		QPainter &p,
 		const QRect &rect,
 		bool quote,
 		const Ui::BackgroundEmojiCache &cache) {
@@ -158,8 +177,6 @@ void FillBackgroundEmoji(
 	p.setClipping(false);
 	p.setOpacity(1.);
 }
-
-} // namespace
 
 Reply::Reply()
 : _name(st::maxSignatureSize / 2)
@@ -270,6 +287,7 @@ void Reply::setLinkFrom(
 	const auto quote = fields.manualQuote
 		? fields.quote
 		: TextWithEntities();
+	const auto quoteOffset = fields.quoteOffset;
 	const auto returnToId = view->data()->fullId();
 	const auto externalLink = [=](ClickContext context) {
 		const auto my = context.other.value<ClickHandlerContext>();
@@ -292,7 +310,8 @@ void Reply::setLinkFrom(
 							channel,
 							messageId,
 							returnToId,
-							quote
+							quote,
+							quoteOffset
 						)->onClick(context);
 					} else {
 						controller->showPeerInfo(channel);
@@ -313,7 +332,7 @@ void Reply::setLinkFrom(
 	const auto message = data->resolvedMessage.get();
 	const auto story = data->resolvedStory.get();
 	_link = message
-		? JumpToMessageClickHandler(message, returnToId, quote)
+		? JumpToMessageClickHandler(message, returnToId, quote, quoteOffset)
 		: story
 		? JumpToStoryClickHandler(story)
 		: (data->external()
@@ -394,10 +413,11 @@ void Reply::updateName(
 			viaBotUsername = bot->username();
 		}
 	}
+	const auto history = view->history();
 	const auto &fields = data->fields();
 	const auto sender = resolvedSender.value_or(this->sender(view, data));
 	const auto externalPeer = fields.externalPeerId
-		? view->history()->owner().peer(fields.externalPeerId).get()
+		? history->owner().peer(fields.externalPeerId).get()
 		: nullptr;
 	const auto displayAsExternal = data->displayAsExternal(view->data());
 	const auto groupNameAdded = displayAsExternal
@@ -415,38 +435,20 @@ void Reply::updateName(
 			+ st::historyReplyPreviewMargin.right()
 			- st::historyReplyPadding.left())
 		: 0;
-	const auto peerIcon = [](PeerData *peer) {
-		using namespace std;
-		return !peer
-			? pair(&st::historyReplyUser, st::historyReplyUserPadding)
-			: peer->isBroadcast()
-			? pair(&st::historyReplyChannel, st::historyReplyChannelPadding)
-			: (peer->isChannel() || peer->isChat())
-			? pair(&st::historyReplyGroup, st::historyReplyGroupPadding)
-			: pair(&st::historyReplyUser, st::historyReplyUserPadding);
-	};
-	const auto peerEmoji = [&](PeerData *peer) {
-		const auto owner = &view->history()->owner();
-		const auto icon = peerIcon(peer);
-		return Ui::Text::SingleCustomEmoji(
-			owner->customEmojiManager().registerInternalEmoji(
-				*icon.first,
-				icon.second));
-	};
 	auto nameFull = TextWithEntities();
 	if (displayAsExternal && !groupNameAdded && !fields.storyId) {
-		nameFull.append(peerEmoji(sender));
+		nameFull.append(PeerEmoji(history, sender));
 	}
 	nameFull.append(name);
 	if (groupNameAdded) {
-		nameFull.append(' ').append(peerEmoji(externalPeer));
+		nameFull.append(' ').append(PeerEmoji(history, externalPeer));
 		nameFull.append(externalPeer->name());
 	}
 	if (!viaBotUsername.isEmpty()) {
 		nameFull.append(u" @"_q).append(viaBotUsername);
 	}
 	const auto context = Core::MarkedTextContext{
-		.session = &view->history()->session(),
+		.session = &history->session(),
 		.customEmojiRepaint = [] {},
 		.customEmojiLoopLimit = 1,
 	};
@@ -794,7 +796,7 @@ void Reply::createRippleAnimation(
 		Ui::RippleAnimation::RoundRectMask(
 			size,
 			st::messageQuoteStyle.radius),
-		[=] { view->history()->owner().requestViewRepaint(view); });
+		[=] { view->repaint(); });
 }
 
 void Reply::saveRipplePoint(QPoint point) const {
@@ -811,6 +813,66 @@ void Reply::stopLastRipple() {
 	if (_ripple.animation) {
 		_ripple.animation->lastStop();
 	}
+}
+
+TextWithEntities Reply::PeerEmoji(
+		not_null<History*> history,
+		PeerData *peer) {
+	return PeerEmoji(&history->owner(), peer);
+}
+
+TextWithEntities Reply::PeerEmoji(
+		not_null<Data::Session*> owner,
+		PeerData *peer) {
+	using namespace std;
+	const auto icon = !peer
+		? pair(&st::historyReplyUser, st::historyReplyUserPadding)
+		: peer->isBroadcast()
+		? pair(&st::historyReplyChannel, st::historyReplyChannelPadding)
+		: (peer->isChannel() || peer->isChat())
+		? pair(&st::historyReplyGroup, st::historyReplyGroupPadding)
+		: pair(&st::historyReplyUser, st::historyReplyUserPadding);
+	return Ui::Text::SingleCustomEmoji(
+		owner->customEmojiManager().registerInternalEmoji(
+			*icon.first,
+			icon.second));
+}
+
+TextWithEntities Reply::ComposePreviewName(
+		not_null<History*> history,
+		not_null<HistoryItem*> to,
+		bool quote) {
+	const auto sender = [&] {
+		if (const auto from = to->displayFrom()) {
+			return not_null(from);
+		}
+		return to->author();
+	}();
+	const auto toPeer = to->history()->peer;
+	const auto displayAsExternal = (to->history() != history);
+	const auto groupNameAdded = displayAsExternal
+		&& (toPeer != sender)
+		&& (toPeer->isChat() || toPeer->isMegagroup());
+	const auto shorten = groupNameAdded || quote;
+
+	auto nameFull = TextWithEntities();
+	using namespace HistoryView;
+	if (displayAsExternal && !groupNameAdded) {
+		nameFull.append(Reply::PeerEmoji(history, sender));
+	}
+	nameFull.append(shorten ? sender->shortName() : sender->name());
+	if (groupNameAdded) {
+		nameFull.append(' ').append(Reply::PeerEmoji(history, toPeer));
+		nameFull.append(toPeer->name());
+	}
+	return (quote
+		? tr::lng_preview_reply_to_quote
+		: tr::lng_preview_reply_to)(
+			tr::now,
+			lt_name,
+			nameFull,
+			Ui::Text::WithEntities);
+
 }
 
 void Reply::unloadPersistentAnimation() {
