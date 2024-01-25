@@ -360,7 +360,7 @@ void Application::run() {
 	startDomain();
 	startTray();
 
-	_lastActivePrimaryWindow->widget()->show();
+	_lastActivePrimaryWindow->firstShow();
 
 	startMediaView();
 
@@ -428,11 +428,12 @@ void Application::showOpenGLCrashNotification() {
 		Local::writeSettings();
 		Restart();
 	};
-	const auto keepDisabled = [=] {
+	const auto keepDisabled = [=](Fn<void()> close) {
 		Ui::GL::ForceDisable(true);
 		Ui::GL::CrashCheckFinish();
 		settings().setDisableOpenGL(true);
 		Local::writeSettings();
+		close();
 	};
 	_lastActivePrimaryWindow->show(Ui::MakeConfirmBox({
 		.text = ""
@@ -682,7 +683,8 @@ bool Application::eventFilter(QObject *object, QEvent *e) {
 	} break;
 
 	case QEvent::ThemeChange: {
-		if (Platform::IsLinux() && object == QGuiApplication::allWindows().first()) {
+		if (Platform::IsLinux()
+				&& object == QGuiApplication::allWindows().constFirst()) {
 			Core::App().refreshApplicationIcon();
 			Core::App().tray().updateIconCounters();
 		}
@@ -1319,7 +1321,7 @@ Window::Controller *Application::ensureSeparateWindowForPeer(
 		std::make_unique<Window::Controller>(peer, showAtMsgId)
 	).first->second.get();
 	processCreatedWindow(result);
-	result->widget()->show();
+	result->firstShow();
 	result->finishFirstShow();
 	return activate(result);
 }
@@ -1339,7 +1341,7 @@ Window::Controller *Application::ensureSeparateWindowForAccount(
 		std::make_unique<Window::Controller>(account)
 	).first->second.get();
 	processCreatedWindow(result);
-	result->widget()->show();
+	result->firstShow();
 	result->finishFirstShow();
 	return activate(result);
 }

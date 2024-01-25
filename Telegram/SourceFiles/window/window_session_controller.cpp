@@ -623,6 +623,7 @@ void SessionNavigation::resolveBoostState(not_null<ChannelData*> channel) {
 		channel->input
 	)).done([=](const MTPpremium_BoostsStatus &result) {
 		_boostStateResolving = nullptr;
+		channel->updateLevelHint(result.data().vlevel().v);
 		const auto submit = [=](Fn<void(Ui::BoostCounters)> done) {
 			applyBoost(channel, done);
 		};
@@ -730,6 +731,7 @@ void SessionNavigation::applyBoostsChecked(
 		_api.request(MTPpremium_GetBoostsStatus(
 			channel->input
 		)).done([=](const MTPpremium_BoostsStatus &result) {
+			channel->updateLevelHint(result.data().vlevel().v);
 			done(ParseBoostCounters(result));
 		}).fail([=](const MTP::Error &error) {
 			showToast(u"Error: "_q + error.type());
@@ -1216,21 +1218,54 @@ void SessionController::showGiftPremiumBox(UserData *user) {
 	}
 }
 
-void SessionController::init() {
-	if (session().supportMode()) {
-		initSupportMode();
-	}
+void SessionController::showGiftPremiumsBox(const QString &ref) {
+	_giftPremiumValidator.showChoosePeerBox(ref);
 }
 
-void SessionController::initSupportMode() {
-	session().supportHelper().registerWindow(this);
+void SessionController::init() {
+	if (session().supportMode()) {
+		session().supportHelper().registerWindow(this);
+	}
+	setupShortcuts();
+}
 
+void SessionController::setupShortcuts() {
 	Shortcuts::Requests(
 	) | rpl::filter([=] {
-		return (Core::App().activeWindow() == &window());
+		return (Core::App().activeWindow() == &window())
+			&& !isLayerShown()
+			&& !window().locked();
 	}) | rpl::start_with_next([=](not_null<Shortcuts::Request*> request) {
 		using C = Shortcuts::Command;
 
+		const auto app = &Core::App();
+		const auto accountsCount = int(app->domain().accounts().size());
+		auto &&accounts = ranges::views::zip(
+			Shortcuts::kShowAccount,
+			ranges::views::ints(0, accountsCount));
+		for (const auto &[command, index] : accounts) {
+			request->check(command) && request->handle([=] {
+				const auto list = app->domain().orderedAccounts();
+				if (index >= list.size()) {
+					return false;
+				}
+				const auto account = list[index];
+				if (account == &session().account()) {
+					return false;
+				}
+				const auto window = app->separateWindowForAccount(account);
+				if (window) {
+					window->activate();
+				} else {
+					app->domain().maybeActivate(account);
+				}
+				return true;
+			});
+		}
+
+		if (!session().supportMode()) {
+			return;
+		}
 		request->check(C::SupportHistoryBack) && request->handle([=] {
 			return chatEntryHistoryMove(-1);
 		});
@@ -2707,7 +2742,7 @@ void SessionController::openPeerStories(
 HistoryView::PaintContext SessionController::preparePaintContext(
 		PaintContextArgs &&args) {
 	const auto visibleAreaTopLocal = content()->mapFromGlobal(
-		QPoint(0, args.visibleAreaTopGlobal)).y();
+		args.visibleAreaPositionGlobal).y();
 	const auto viewport = QRect(
 		0,
 		args.visibleAreaTop - visibleAreaTopLocal,

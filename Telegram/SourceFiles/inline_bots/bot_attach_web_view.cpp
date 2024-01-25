@@ -32,6 +32,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/painter.h"
 #include "window/themes/window_theme.h"
 #include "window/window_controller.h"
+#include "window/window_peer_menu.h"
 #include "window/window_session_controller.h"
 #include "webview/webview_interface.h"
 #include "core/application.h"
@@ -1458,6 +1459,10 @@ void AttachWebView::show(
 			: attached->inMainMenu
 			? Button::RemoveFromMainMenu
 			: Button::RemoveFromMenu);
+	if (attached != end(_attachBots)
+		&& (attached->inAttachMenu || attached->inMainMenu)) {
+		allowClipboardRead = true;
+	}
 
 	_lastShownUrl = url;
 	_lastShownQueryId = queryId;
@@ -1655,6 +1660,28 @@ std::unique_ptr<Ui::DropdownMenu> MakeAttachBotsMenu(
 		raw->addAction(tr::lng_attach_document(tr::now), [=] {
 			attach(false);
 		}, &st::menuIconFile);
+	}
+	if (peer->canCreatePolls()) {
+		++minimal;
+		raw->addAction(tr::lng_polls_create(tr::now), [=] {
+			const auto action = actionFactory();
+			const auto source = action.options.scheduled
+				? Api::SendType::Scheduled
+				: Api::SendType::Normal;
+			const auto sendMenuType = action.replyTo.topicRootId
+				? SendMenu::Type::SilentOnly
+				: SendMenu::Type::Scheduled;
+			const auto flag = PollData::Flags();
+			const auto replyTo = action.replyTo;
+			Window::PeerMenuCreatePoll(
+				controller,
+				peer,
+				replyTo,
+				flag,
+				flag,
+				source,
+				sendMenuType);
+		}, &st::menuIconCreatePoll);
 	}
 	for (const auto &bot : bots->attachBots()) {
 		if (!bot.inAttachMenu

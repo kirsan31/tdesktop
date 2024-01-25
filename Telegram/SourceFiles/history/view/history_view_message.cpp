@@ -182,7 +182,7 @@ void KeyboardStyle::paintButtonBg(
 			const auto &small = sti->msgServiceBgCornersSmall;
 			const auto &large = sti->msgServiceBgCornersLarge;
 			auto corners = Ui::CornersPixmaps();
-            int radiuses[4];
+			int radiuses[4];
 			for (auto i = 0; i != 4; ++i) {
 				const auto isLarge = (rounding[i] == Corner::Large);
 				corners.p[i] = (isLarge ? large : small).p[i];
@@ -403,6 +403,11 @@ Message::Message(
 , _bottomInfo(
 		&data->history()->owner().reactions(),
 		BottomInfoDataFromMessage(this)) {
+	if (const auto media = data->media()) {
+		if (media->giveawayResults()) {
+			_hideReply = 1;
+		}
+	}
 	initLogEntryOriginal();
 	initPsa();
 	refreshReactions();
@@ -620,7 +625,7 @@ QSize Message::performCountOptimalSize() {
 	refreshInfoSkipBlock();
 
 	const auto media = this->media();
-	const auto botTop = item->isFakeBotAbout()
+	const auto botTop = item->isFakeAboutView()
 		? Get<FakeBotAboutTop>()
 		: nullptr;
 	if (botTop) {
@@ -733,7 +738,7 @@ QSize Message::performCountOptimalSize() {
 				validateFromNameText(from);
 				const auto &name = from
 					? _fromName
-					: item->hiddenSenderInfo()->nameText();
+					: item->displayHiddenSenderInfo()->nameText();
 				auto namew = st::msgPadding.left()
 					+ name.maxWidth()
 					+ (_fromNameStatus
@@ -1181,7 +1186,9 @@ void Message::draw(Painter &p, const PaintContext &context) const {
 				(g.height() - size->height()) / 2,
 				0,
 				st::historyFastShareBottom);
-			const auto fastShareLeft = g.left() + g.width() + st::historyFastShareLeft;
+			const auto fastShareLeft = hasRightLayout()
+				? (g.left() - size->width() - st::historyFastShareLeft)
+				: (g.left() + g.width() + st::historyFastShareLeft);
 			const auto fastShareTop = data()->isSponsored()
 				? g.top() + fastShareSkip
 				: g.top() + g.height() - fastShareSkip - size->height();
@@ -1384,7 +1391,7 @@ void Message::paintFromName(
 
 	const auto stm = context.messageStyle();
 	const auto from = item->displayFrom();
-	const auto info = from ? nullptr : item->hiddenSenderInfo();
+	const auto info = from ? nullptr : item->displayHiddenSenderInfo();
 	Assert(from || info);
 	const auto nameFg = !context.outbg
 		? FromNameFg(context, colorIndex())
@@ -1405,13 +1412,12 @@ void Message::paintFromName(
 		const auto y = trect.top();
 		auto color = nameFg;
 		color.setAlpha(115);
-		const auto user = from->asUser();
-		const auto id = user ? user->emojiStatusId() : 0;
+		const auto id = from ? from->emojiStatusId() : 0;
 		if (_fromNameStatus->id != id) {
 			const auto that = const_cast<Message*>(this);
 			_fromNameStatus->custom = id
 				? std::make_unique<Ui::Text::LimitedLoopsEmoji>(
-					user->owner().customEmojiManager().create(
+					history()->owner().customEmojiManager().create(
 						id,
 						[=] { that->customEmojiRepaint(); }),
 					kPlayStatusLimit)
@@ -1664,7 +1670,7 @@ void Message::paintText(
 		.availableWidth = trect.width(),
 		.palette = &stm->textPalette,
 		.pre = stm->preCache.get(),
-		.blockquote = context.quoteCache(colorIndex()),
+		.blockquote = context.quoteCache(contentColorIndex()),
 		.colors = context.st->highlightColors(),
 		.spoiler = Ui::Text::DefaultSpoilerCache(),
 		.now = context.now,
@@ -1970,13 +1976,6 @@ void Message::unloadHeavyPart() {
 	}
 }
 
-bool Message::showForwardsFromSender(
-		not_null<HistoryMessageForwarded*> forwarded) const {
-	const auto peer = data()->history()->peer;
-	return !forwarded->story
-		&& (peer->isSelf() || peer->isRepliesChat() || forwarded->imported);
-}
-
 bool Message::hasFromPhoto() const {
 	if (isHidden()) {
 		return false;
@@ -1985,8 +1984,10 @@ bool Message::hasFromPhoto() const {
 	case Context::AdminLog:
 		return true;
 	case Context::History:
+	case Context::TTLViewer:
 	case Context::Pinned:
-	case Context::Replies: {
+	case Context::Replies:
+	case Context::SavedSublist: {
 		const auto item = data();
 		if (item->isPost()) {
 			return false;
@@ -1999,7 +2000,7 @@ bool Message::hasFromPhoto() const {
 		} else if (const auto forwarded = item->Get<HistoryMessageForwarded>()) {
 			const auto peer = item->history()->peer;
 			if (peer->isSelf() || peer->isRepliesChat()) {
-				return true;
+				return !hasOutLayout();
 			}
 		}
 		return !item->out() && !item->history()->peer->isUser();
@@ -2201,7 +2202,9 @@ TextState Message::textState(
 				(g.height() - size->height()) / 2,
 				0,
 				st::historyFastShareBottom);
-			const auto fastShareLeft = g.left() + g.width() + st::historyFastShareLeft;
+			const auto fastShareLeft = hasRightLayout()
+				? (g.left() - size->width() - st::historyFastShareLeft)
+				: (g.left() + g.width() + st::historyFastShareLeft);
 			const auto fastShareTop = data()->isSponsored()
 				? g.top() + fastShareSkip
 				: g.top() + g.height() - fastShareSkip - size->height();
@@ -2324,7 +2327,7 @@ bool Message::getStateFromName(
 			if (from) {
 				validateFromNameText(from);
 				return &_fromName;
-			} else if (const auto info = item->hiddenSenderInfo()) {
+			} else if (const auto info = item->displayHiddenSenderInfo()) {
 				return &info->nameText();
 			} else {
 				Unexpected("Corrupt forwarded information in message.");
@@ -2763,11 +2766,10 @@ Reactions::ButtonParameters Message::reactionButtonParameters(
 		const TextState &reactionState) const {
 	using namespace Reactions;
 	auto result = ButtonParameters{ .context = data()->fullId() };
-	const auto outbg = hasOutLayout();
 	const auto outsideBubble = (!_comments && !embedReactionsInBubble());
 	const auto geometry = countGeometry();
 	result.pointer = position;
-	const auto onTheLeft = (outbg && !delegate()->elementIsChatWide());
+	const auto onTheLeft = hasRightLayout();
 
 	const auto keyboard = data()->inlineReplyKeyboard();
 	const auto keyboardHeight = keyboard
@@ -2916,8 +2918,12 @@ bool Message::isSignedAuthorElided() const {
 bool Message::embedReactionsInBottomInfo() const {
 	const auto item = data();
 	const auto user = item->history()->peer->asUser();
-	if (!user || user->isPremium() || user->session().premium()) {
+	if (!user
+		|| user->isPremium()
+		|| user->isSelf()
+		|| user->session().premium()) {
 		// Only in messages of a non premium user with a non premium user.
+		// In saved messages we use reactions for tags, we don't embed them.
 		return false;
 	}
 	auto seenMy = false;
@@ -2960,8 +2966,14 @@ void Message::refreshReactions() {
 	if (!_reactions) {
 		const auto handlerFactory = [=](ReactionId id) {
 			const auto weak = base::make_weak(this);
-			return std::make_shared<LambdaClickHandler>([=] {
+			return std::make_shared<LambdaClickHandler>([=](
+					ClickContext context) {
 				if (const auto strong = weak.get()) {
+					if (strong->data()->reactionsAreTags()) {
+						const auto tag = Data::SearchTagToQuery(id);
+						HashtagClickHandler(tag).onClick(context);
+						return;
+					}
 					strong->data()->toggleReaction(
 						id,
 						HistoryItem::ReactionSource::Existing);
@@ -3012,7 +3024,10 @@ void Message::validateFromNameText(PeerData *from) const {
 			from->name(),
 			Ui::NameTextOptions());
 	}
-	if (from->isPremium()) {
+	if (from->isPremium()
+		|| (from->isChannel()
+			&& from->emojiStatusId()
+			&& from != history()->peer)) {
 		if (!_fromNameStatus) {
 			_fromNameStatus = std::make_unique<FromNameStatus>();
 			const auto size = st::emojiSize;
@@ -3156,11 +3171,19 @@ bool Message::hasFromName() const {
 	case Context::AdminLog:
 		return true;
 	case Context::History:
+	case Context::TTLViewer:
 	case Context::Pinned:
-	case Context::Replies: {
+	case Context::Replies:
+	case Context::SavedSublist: {
 		const auto item = data();
 		const auto peer = item->history()->peer;
 		if (hasOutLayout() && !item->from()->isChannel()) {
+			if (peer->isSelf()) {
+				if (const auto forwarded = item->Get<HistoryMessageForwarded>()) {
+					return forwarded->savedFromSender
+						&& forwarded->savedFromSender->isChannel();
+				}
+			}
 			return false;
 		} else if (!peer->isUser()) {
 			if (const auto media = this->media()) {
@@ -3172,7 +3195,7 @@ bool Message::hasFromName() const {
 			if (forwarded->imported
 				&& peer.get() == forwarded->originalSender) {
 				return false;
-			} else if (showForwardsFromSender(forwarded)) {
+			} else if (item->showForwardsFromSender(forwarded)) {
 				return true;
 			}
 		}
@@ -3181,7 +3204,7 @@ bool Message::hasFromName() const {
 	case Context::ContactPreview:
 		return false;
 	}
-	Unexpected("Context in Message::hasFromPhoto.");
+	Unexpected("Context in Message::hasFromName.");
 }
 
 bool Message::displayFromName() const {
@@ -3196,8 +3219,9 @@ bool Message::displayForwardedFrom() const {
 	if (const auto forwarded = item->Get<HistoryMessageForwarded>()) {
 		if (forwarded->story) {
 			return true;
-		} else if (showForwardsFromSender(forwarded)) {
-			return false;
+		} else if (item->showForwardsFromSender(forwarded)) {
+			return forwarded->savedFromSender
+				&& (forwarded->savedFromSender != forwarded->originalSender);
 		}
 		if (const auto sender = item->discussionPostOriginalSender()) {
 			if (sender == forwarded->originalSender) {
@@ -3213,12 +3237,21 @@ bool Message::displayForwardedFrom() const {
 bool Message::hasOutLayout() const {
 	const auto item = data();
 	if (item->history()->peer->isSelf()) {
-		return !item->Has<HistoryMessageForwarded>();
+		if (const auto forwarded = item->Get<HistoryMessageForwarded>()) {
+			return (context() == Context::SavedSublist)
+				&& (!forwarded->forwardOfForward()
+					? (forwarded->originalSender
+						&& forwarded->originalSender->isSelf())
+					: ((forwarded->savedFromSender
+						&& forwarded->savedFromSender->isSelf())
+						|| forwarded->savedFromOutgoing));
+		}
+		return true;
 	} else if (const auto forwarded = item->Get<HistoryMessageForwarded>()) {
 		if (!forwarded->imported
 			|| !forwarded->originalSender
 			|| !forwarded->originalSender->isSelf()) {
-			if (showForwardsFromSender(forwarded)) {
+			if (item->showForwardsFromSender(forwarded)) {
 				return false;
 			}
 		}
@@ -3230,7 +3263,7 @@ bool Message::drawBubble() const {
 	const auto item = data();
 	if (isHidden()) {
 		return false;
-	} else if (logEntryOriginal() || item->isFakeBotAbout()) {
+	} else if (logEntryOriginal() || item->isFakeAboutView()) {
 		return true;
 	}
 	const auto media = this->media();
@@ -3320,6 +3353,7 @@ bool Message::displayFastReply() const {
 
 bool Message::displayRightActionComments() const {
 	return !isPinnedContext()
+		&& (context() != Context::SavedSublist)
 		&& data()->repliesAreComments()
 		&& media()
 		&& media()->isDisplayed()
@@ -3354,11 +3388,10 @@ bool Message::displayFastShare() const {
 		return !peer->isMegagroup();
 	} else if (const auto user = peer->asUser()) {
 		if (const auto forwarded = item->Get<HistoryMessageForwarded>()) {
-			return !showForwardsFromSender(forwarded)
-				&& !item->out()
+			return !item->out()
 				&& forwarded->originalSender
-				&& forwarded->originalSender->isChannel()
-				&& !forwarded->originalSender->isMegagroup();
+				&& forwarded->originalSender->isBroadcast()
+				&& !item->showForwardsFromSender(forwarded);
 		} else if (user->isBot() && !item->out()) {
 			if (const auto media = this->media()) {
 				return media->allowsFastShare();
@@ -3377,7 +3410,7 @@ bool Message::displayGoToOriginal() const {
 		return forwarded->savedFromPeer
 			&& forwarded->savedFromMsgId
 			&& (!item->externalReply() || !hasBubble())
-			&& !(context() == Context::Replies);
+			&& (context() != Context::Replies);
 	}
 	return false;
 }
@@ -3446,7 +3479,9 @@ void Message::drawRightAction(
 	} else {
 		const auto &icon = data()->isSponsored()
 			? st->historyFastCloseIcon()
-			: (displayFastShare() && !isPinnedContext())
+			: (displayFastShare()
+				&& !isPinnedContext()
+				&& this->context() != Context::SavedSublist)
 			? st->historyFastShareIcon()
 			: st->historyGoToOriginalIcon();
 		icon.paintInCenter(p, { left, top, size->width(), size->height() });
@@ -3478,7 +3513,8 @@ ClickHandlerPtr Message::prepareRightActionLink() const {
 		return HideSponsoredClickHandler();
 	} else if (isPinnedContext()) {
 		return JumpToMessageClickHandler(data());
-	} else if (displayRightActionComments()) {
+	} else if ((context() != Context::SavedSublist)
+		&& displayRightActionComments()) {
 		return createGoToCommentsLink();
 	}
 	const auto sessionId = data()->history()->session().uniqueId();
@@ -3650,7 +3686,7 @@ void Message::fromNameUpdated(int width) const {
 			const auto nameText = [&]() -> const Ui::Text::String * {
 				if (from) {
 					return &_fromName;
-				} else if (const auto info	= item->hiddenSenderInfo()) {
+				} else if (const auto info= item->originalHiddenSenderInfo()) {
 					return &info->nameText();
 				} else {
 					Unexpected("Corrupted forwarded information in message.");
@@ -3724,7 +3760,7 @@ QRect Message::innerGeometry() const {
 
 QRect Message::countGeometry() const {
 	const auto item = data();
-	const auto centeredView = item->isFakeBotAbout()
+	const auto centeredView = item->isFakeAboutView()
 		|| (context() == Context::Replies && item->isDiscussionPost());
 	const auto media = this->media();
 	const auto mediaWidth = (media && media->isDisplayed())
@@ -3734,7 +3770,7 @@ QRect Message::countGeometry() const {
 	const auto availableWidth = width()
 		- st::msgMargin.left()
 		- (centeredView ? st::msgMargin.left() : st::msgMargin.right());
-	auto contentLeft = (outbg && !delegate()->elementIsChatWide())
+	auto contentLeft = hasRightLayout()
 		? st::msgMargin.right()
 		: st::msgMargin.left();
 	auto contentWidth = availableWidth;
@@ -3785,9 +3821,9 @@ Ui::BubbleRounding Message::countMessageRounding() const {
 	const auto skipTail = smallBottom
 		|| (media && media->skipBubbleTail())
 		|| (keyboard != nullptr)
-		|| item->isFakeBotAbout()
+		|| item->isFakeAboutView()
 		|| (context() == Context::Replies && item->isDiscussionPost());
-	const auto right = !delegate()->elementIsChatWide() && hasOutLayout();
+	const auto right = hasRightLayout();
 	using Corner = Ui::BubbleCornerRounding;
 	return Ui::BubbleRounding{
 		.topLeft = (smallTop && !right) ? Corner::Small : Corner::Large,
@@ -3833,15 +3869,17 @@ int Message::resizeContentGetHeight(int newWidth) {
 	}
 
 	const auto item = data();
-	const auto botTop = item->isFakeBotAbout()
+	const auto botTop = item->isFakeAboutView()
 		? Get<FakeBotAboutTop>()
 		: nullptr;
 	const auto media = this->media();
 	const auto mediaDisplayed = media ? media->isDisplayed() : false;
 	const auto bubble = drawBubble();
 
+	item->resolveDependent();
+
 	// This code duplicates countGeometry() but also resizes media.
-	const auto centeredView = item->isFakeBotAbout()
+	const auto centeredView = item->isFakeAboutView()
 		|| (context() == Context::Replies && item->isDiscussionPost());
 	auto contentWidth = newWidth
 		- st::msgMargin.left()
@@ -3985,7 +4023,7 @@ int Message::resizeContentGetHeight(int newWidth) {
 			: contentWidth;
 		newHeight += st::mediaInBubbleSkip
 			+ _reactions->resizeGetHeight(reactionsWidth);
-		if (hasOutLayout() && !delegate()->elementIsChatWide()) {
+		if (hasRightLayout()) {
 			_reactions->flipToRight();
 		}
 	}

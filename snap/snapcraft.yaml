@@ -7,12 +7,6 @@ grade: stable
 confinement: strict
 compression: lzo
 
-architectures:
-  - build-on: amd64
-  - build-on: arm64
-  - build-on: armhf
-  - build-on: ppc64el
-
 apps:
   telegram-desktop:
     command: usr/bin/telegram-desktop
@@ -296,6 +290,7 @@ parts:
       - -Dbuild-examples=false
       - -Dsigc++-3.0:build-documentation=false
       - -Dsigc++-3.0:build-examples=false
+      - -Dsigc++-3.0:build-tests=false
       - -Dsigc++-3.0:validation=false
     prime:
       - -./usr/include
@@ -496,6 +491,7 @@ parts:
       - libxkbcommon0
       - libxkbcommon-x11-0
       - zlib1g
+      - mesa-vulkan-drivers
     override-pull: |
       QT=6.6.1
 

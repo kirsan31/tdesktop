@@ -51,8 +51,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 namespace {
 
 constexpr auto kPremiumShift = 21. / 240;
-constexpr auto kReactionsPerRow = 5;
-constexpr auto kDisabledOpacity = 0.5;
 constexpr auto kToggleStickerTimeout = 2 * crl::time(1000);
 constexpr auto kStarOpacityOff = 0.1;
 constexpr auto kStarOpacityOn = 1.;
@@ -66,6 +64,7 @@ struct Descriptor {
 	bool fromSettings = false;
 	Fn<void()> hiddenCallback;
 	Fn<void(not_null<Ui::BoxContent*>)> shownCallback;
+	bool hideSubscriptionButton = false;
 };
 
 bool operator==(const Descriptor &a, const Descriptor &b) {
@@ -1025,7 +1024,8 @@ void PreviewBox(
 			state->preload();
 		}
 	};
-	if (descriptor.fromSettings && show->session().premium()) {
+	if ((descriptor.fromSettings && show->session().premium())
+		|| descriptor.hideSubscriptionButton) {
 		box->setShowFinishedCallback(showFinished);
 		box->addButton(tr::lng_close(), [=] { box->closeBox(); });
 	} else {
@@ -1151,7 +1151,7 @@ void DecorateListPromoBox(
 		box->boxClosing() | rpl::start_with_next(hidden, box->lifetime());
 	}
 
-	if (session->premium()) {
+	if (session->premium() || descriptor.hideSubscriptionButton) {
 		box->addButton(tr::lng_close(), [=] {
 			box->closeBox();
 		});
@@ -1286,10 +1286,12 @@ void ShowPremiumPreviewBox(
 void ShowPremiumPreviewBox(
 		std::shared_ptr<ChatHelpers::Show> show,
 		PremiumPreview section,
-		Fn<void(not_null<Ui::BoxContent*>)> shown) {
+		Fn<void(not_null<Ui::BoxContent*>)> shown,
+		bool hideSubscriptionButton) {
 	Show(std::move(show), Descriptor{
 		.section = section,
 		.shownCallback = std::move(shown),
+		.hideSubscriptionButton = hideSubscriptionButton,
 	});
 }
 
