@@ -765,7 +765,7 @@ HistoryItem::HistoryItem(
 : id(id)
 , _history(history)
 , _from(from ? history->owner().peer(from) : history->peer)
-, _flags(FinalizeMessageFlags(flags))
+, _flags(FinalizeMessageFlags(history, flags))
 , _date(date) {
 	if (isHistoryEntry() && IsClientMsgId(id)) {
 		_history->registerClientSideMessage(this);
@@ -2481,8 +2481,7 @@ const std::vector<Data::MessageReaction> &HistoryItem::reactions() const {
 }
 
 bool HistoryItem::reactionsAreTags() const {
-	// Disable reactions as tags for now.
-	return false;// _flags & MessageFlag::ReactionsAreTags;
+	return _flags & MessageFlag::ReactionsAreTags;
 }
 
 auto HistoryItem::recentReactions() const
