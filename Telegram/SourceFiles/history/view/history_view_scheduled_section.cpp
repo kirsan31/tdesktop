@@ -10,49 +10,38 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/view/controls/history_view_compose_controls.h"
 #include "history/view/history_view_empty_list_bubble.h"
 #include "history/view/history_view_top_bar_widget.h"
-#include "history/view/history_view_list_widget.h"
 #include "history/view/history_view_schedule_box.h"
 #include "history/view/history_view_sticker_toast.h"
 #include "history/history.h"
 #include "history/history_drag_area.h"
-#include "history/history_item.h"
 #include "history/history_item_helpers.h" // GetErrorTextForSending.
 #include "menu/menu_send.h" // SendMenu::Type.
 #include "ui/widgets/scroll_area.h"
 #include "ui/widgets/shadow.h"
-#include "ui/layers/generic_box.h"
-#include "ui/item_text_options.h"
 #include "ui/chat/chat_style.h"
-#include "ui/chat/attach/attach_prepare.h"
-#include "ui/chat/attach/attach_send_files_way.h"
-#include "ui/ui_utility.h"
 #include "ui/text/text_utilities.h"
-#include "api/api_common.h"
 #include "api/api_editing.h"
 #include "api/api_sending.h"
 #include "apiwrap.h"
-#include "ui/boxes/confirm_box.h"
 #include "boxes/delete_messages_box.h"
-#include "boxes/edit_caption_box.h"
 #include "boxes/send_files_box.h"
 #include "boxes/premium_limits_box.h"
-#include "window/window_adaptive.h"
 #include "window/window_session_controller.h"
 #include "window/window_peer_menu.h"
-#include "base/event_filter.h"
 #include "base/call_delayed.h"
 #include "base/qt/qt_key_modifiers.h"
-#include "core/file_utilities.h"
 #include "core/mime_type.h"
 #include "chat_helpers/tabbed_selector.h"
 #include "main/main_session.h"
-#include "data/data_chat_participant_status.h"
+#include "data/data_forum.h"
+#include "data/data_forum_topic.h"
 #include "data/data_session.h"
 #include "data/data_changes.h"
 #include "data/data_scheduled_messages.h"
 #include "data/data_user.h"
 #include "data/data_message_reactions.h"
 #include "data/data_peer_values.h"
+#include "data/data_premium_limits.h"
 #include "storage/storage_media_prepare.h"
 #include "storage/storage_account.h"
 #include "storage/localimageloader.h"
@@ -60,13 +49,21 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "lang/lang_keys.h"
 #include "styles/style_chat.h"
 #include "styles/style_chat_helpers.h"
-#include "styles/style_window.h"
-#include "styles/style_info.h"
 #include "styles/style_boxes.h"
 
 #include <QtCore/QMimeData>
 
 namespace HistoryView {
+
+ScheduledMemento::ScheduledMemento(not_null<History*> history)
+: _history(history)
+, _forumTopic(nullptr) {
+}
+
+ScheduledMemento::ScheduledMemento(not_null<Data::ForumTopic*> forumTopic)
+: _history(forumTopic->owningHistory())
+, _forumTopic(forumTopic) {
+}
 
 object_ptr<Window::SectionWidget> ScheduledMemento::createWidget(
 		QWidget *parent,
@@ -76,7 +73,11 @@ object_ptr<Window::SectionWidget> ScheduledMemento::createWidget(
 	if (column == Window::Column::Third) {
 		return nullptr;
 	}
-	auto result = object_ptr<ScheduledWidget>(parent, controller, _history);
+	auto result = object_ptr<ScheduledWidget>(
+		parent,
+		controller,
+		_history,
+		_forumTopic);
 	result->setInternalState(geometry, this);
 	return result;
 }
@@ -84,9 +85,11 @@ object_ptr<Window::SectionWidget> ScheduledMemento::createWidget(
 ScheduledWidget::ScheduledWidget(
 	QWidget *parent,
 	not_null<Window::SessionController*> controller,
-	not_null<History*> history)
+	not_null<History*> history,
+	const Data::ForumTopic *forumTopic)
 : Window::SectionWidget(parent, controller, history->peer)
 , _history(history)
+, _forumTopic(forumTopic)
 , _scroll(
 	this,
 	controller->chatStyle()->value(lifetime(), st::historyScroll),
@@ -95,10 +98,16 @@ ScheduledWidget::ScheduledWidget(
 , _topBarShadow(this)
 , _composeControls(std::make_unique<ComposeControls>(
 	this,
-	controller,
-	[=](not_null<DocumentData*> emoji) { listShowPremiumToast(emoji); },
-	ComposeControls::Mode::Scheduled,
-	SendMenu::Type::Disabled))
+	ComposeControlsDescriptor{
+		.show = controller->uiShow(),
+		.unavailableEmojiPasted = [=](not_null<DocumentData*> emoji) {
+			listShowPremiumToast(emoji);
+		},
+		.mode = ComposeControls::Mode::Scheduled,
+		.sendMenuType = SendMenu::Type::Disabled,
+		.regularWindow = controller,
+		.stickerOrEmojiChosen = controller->stickerOrEmojiChosen(),
+	}))
 , _cornerButtons(
 		_scroll.data(),
 		controller->chatStyle(),
@@ -163,7 +172,9 @@ ScheduledWidget::ScheduledWidget(
 		if (const auto item = session().data().message(fullId)) {
 			const auto media = item->media();
 			if (!media || media->webpage() || media->allowsEditCaption()) {
-				_composeControls->editMessage(fullId);
+				_composeControls->editMessage(
+					fullId,
+					_inner->getSelectedTextRange(item));
 			}
 		}
 	}, _inner->lifetime());
@@ -184,30 +195,81 @@ ScheduledWidget::ScheduledWidget(
 ScheduledWidget::~ScheduledWidget() = default;
 
 void ScheduledWidget::setupComposeControls() {
-	auto writeRestriction = rpl::combine(
-		session().changes().peerFlagsValue(
-			_history->peer,
-			Data::PeerUpdate::Flag::Rights),
-		Data::CanSendAnythingValue(_history->peer)
-	) | rpl::map([=] {
-		const auto allWithoutPolls = Data::AllSendRestrictions()
-			& ~ChatRestriction::SendPolls;
-		const auto canSendAnything = Data::CanSendAnyOf(
-			_history->peer,
-			allWithoutPolls);
-		const auto restriction = Data::RestrictionError(
-			_history->peer,
-			ChatRestriction::SendOther);
-		auto text = !canSendAnything
-			? (restriction
-				? restriction
-				: tr::lng_group_not_accessible(tr::now))
-			: std::optional<QString>();
-		return text ? Controls::WriteRestriction{
-			.text = std::move(*text),
-			.type = Controls::WriteRestrictionType::Rights,
-		} : Controls::WriteRestriction();
-	});
+	auto writeRestriction = _forumTopic
+		? [&] {
+			auto topicWriteRestrictions = rpl::single(
+			) | rpl::then(session().changes().topicUpdates(
+				Data::TopicUpdate::Flag::Closed
+			) | rpl::filter([=](const Data::TopicUpdate &update) {
+				return (update.topic->history() == _history)
+					&& (update.topic->rootId() == _forumTopic->rootId());
+			}) | rpl::to_empty) | rpl::map([=] {
+				return (!_forumTopic
+						|| _forumTopic->canToggleClosed()
+						|| !_forumTopic->closed())
+					? std::optional<QString>()
+					: tr::lng_forum_topic_closed(tr::now);
+			});
+			return rpl::combine(
+				session().changes().peerFlagsValue(
+					_history->peer,
+					Data::PeerUpdate::Flag::Rights),
+				Data::CanSendAnythingValue(_history->peer),
+				std::move(topicWriteRestrictions)
+			) | rpl::map([=](
+					auto,
+					auto,
+					std::optional<QString> topicRestriction) {
+				const auto allWithoutPolls = Data::AllSendRestrictions()
+					& ~ChatRestriction::SendPolls;
+				const auto canSendAnything = Data::CanSendAnyOf(
+					_forumTopic,
+					allWithoutPolls);
+				const auto restriction = Data::RestrictionError(
+					_history->peer,
+					ChatRestriction::SendOther);
+				auto text = !canSendAnything
+					? (restriction
+						? restriction
+						: topicRestriction
+						? std::move(topicRestriction)
+						: tr::lng_group_not_accessible(tr::now))
+					: topicRestriction
+					? std::move(topicRestriction)
+					: std::optional<QString>();
+				return text ? Controls::WriteRestriction{
+					.text = std::move(*text),
+					.type = Controls::WriteRestrictionType::Rights,
+				} : Controls::WriteRestriction();
+			}) | rpl::type_erased();
+		}()
+		: [&] {
+			return rpl::combine(
+				session().changes().peerFlagsValue(
+					_history->peer,
+					Data::PeerUpdate::Flag::Rights),
+				Data::CanSendAnythingValue(_history->peer)
+			) | rpl::map([=] {
+				const auto allWithoutPolls = Data::AllSendRestrictions()
+					& ~ChatRestriction::SendPolls;
+				const auto canSendAnything = Data::CanSendAnyOf(
+					_history->peer,
+					allWithoutPolls,
+					false);
+				const auto restriction = Data::RestrictionError(
+					_history->peer,
+					ChatRestriction::SendOther);
+				auto text = !canSendAnything
+					? (restriction
+						? restriction
+						: tr::lng_group_not_accessible(tr::now))
+					: std::optional<QString>();
+				return text ? Controls::WriteRestriction{
+					.text = std::move(*text),
+					.type = Controls::WriteRestrictionType::Rights,
+				} : Controls::WriteRestriction();
+			}) | rpl::type_erased();
+		}();
 	_composeControls->setHistory({
 		.history = _history.get(),
 		.writeRestriction = std::move(writeRestriction),
@@ -415,8 +477,7 @@ bool ScheduledWidget::confirmSendingFiles(
 		controller(),
 		std::move(list),
 		_composeControls->getTextWithAppliedMarkdown(),
-		DefaultLimitsForPeer(_history->peer),
-		DefaultCheckForPeer(controller(), _history->peer),
+		_history->peer,
 		(CanScheduleUntilOnline(_history->peer)
 			? Api::SendType::ScheduledToUser
 			: Api::SendType::Scheduled),
@@ -574,19 +635,29 @@ Api::SendAction ScheduledWidget::prepareSendAction(
 		Api::SendOptions options) const {
 	auto result = Api::SendAction(_history, options);
 	result.options.sendAs = _composeControls->sendAsPeer();
+	if (_forumTopic) {
+		result.replyTo.topicRootId = _forumTopic->topicRootId();
+		result.replyTo.messageId = FullMsgId(
+			history()->peer->id,
+			_forumTopic->topicRootId());
+	}
 	return result;
 }
 
 void ScheduledWidget::send() {
 	const auto textWithTags = _composeControls->getTextWithAppliedMarkdown();
-	if (textWithTags.text.isEmpty()) {
+	if (textWithTags.text.isEmpty() && !_composeControls->readyToForward()) {
 		return;
 	}
 
 	const auto error = GetErrorTextForSending(
 		_history->peer,
 		{
-			.topicRootId = MsgId(),
+			.topicRootId = _forumTopic
+				? _forumTopic->topicRootId()
+				: history()->isForum()
+				? MsgId(1)
+				: MsgId(),
 			.forward = nullptr,
 			.text = &textWithTags,
 			.ignoreSlowmodeCountdown = true,
@@ -608,6 +679,7 @@ void ScheduledWidget::send(Api::SendOptions options) {
 
 	session().api().sendMessage(std::move(message));
 
+	_composeControls->cancelForward();
 	_composeControls->clear();
 	//_saveDraftText = true;
 	//_saveDraftStart = crl::now();
@@ -649,32 +721,30 @@ void ScheduledWidget::edit(
 	if (*saveEditMsgRequestId) {
 		return;
 	}
-	const auto textWithTags = _composeControls->getTextWithAppliedMarkdown();
 	const auto webpage = _composeControls->webPageDraft();
-	const auto prepareFlags = Ui::ItemTextOptions(
-		_history,
-		session().user()).flags;
-	auto sending = TextWithEntities();
-	auto left = TextWithEntities {
-		textWithTags.text,
-		TextUtilities::ConvertTextTagsToEntities(textWithTags.tags) };
-	TextUtilities::PrepareForSending(left, prepareFlags);
+	const auto sending = _composeControls->prepareTextForEditMsg();
 
-	if (!TextUtilities::CutPart(sending, left, MaxMessageSize)
-		&& (!item
-			|| !item->media()
-			|| !item->media()->allowsEditCaption())) {
+	const auto hasMediaWithCaption = item
+		&& item->media()
+		&& item->media()->allowsEditCaption();
+	if (sending.text.isEmpty() && !hasMediaWithCaption) {
 		if (item) {
 			controller()->show(Box<DeleteMessagesBox>(item, false));
 		} else {
 			_composeControls->focus();
 		}
 		return;
-	} else if (!left.text.isEmpty()) {
-		const auto remove = left.text.size();
-		controller()->showToast(
-			tr::lng_edit_limit_reached(tr::now, lt_count, remove));
-		return;
+	} else {
+		const auto maxCaptionSize = !hasMediaWithCaption
+			? MaxMessageSize
+			: Data::PremiumLimits(&session()).captionLengthCurrent();
+		const auto remove = _composeControls->fieldCharacterCount()
+			- maxCaptionSize;
+		if (remove > 0) {
+			controller()->showToast(
+				tr::lng_edit_limit_reached(tr::now, lt_count, remove));
+			return;
+		}
 	}
 
 	lifetime().add([=] {
@@ -954,6 +1024,16 @@ bool ScheduledWidget::returnTabbedSelector() {
 }
 
 std::shared_ptr<Window::SectionMemento> ScheduledWidget::createMemento() {
+	if (_forumTopic) {
+		if (const auto forum = history()->asForum()) {
+			const auto rootId = _forumTopic->topicRootId();
+			if (const auto topic = forum->topicFor(rootId)) {
+				auto result = std::make_shared<ScheduledMemento>(topic);
+				saveState(result.get());
+				return result;
+			}
+		}
+	}
 	auto result = std::make_shared<ScheduledMemento>(history());
 	saveState(result.get());
 	return result;
@@ -1070,11 +1150,13 @@ QRect ScheduledWidget::floatPlayerAvailableRect() {
 }
 
 Context ScheduledWidget::listContext() {
-	return Context::History;
+	return _forumTopic ? Context::ScheduledTopic : Context::History;
 }
 
 bool ScheduledWidget::listScrollTo(int top, bool syntetic) {
-	top = std::clamp(top, 0, _scroll->scrollTopMax());
+	top = (top == ScrollMax && syntetic)
+		? 0
+		: std::clamp(top, 0, _scroll->scrollTopMax());
 	if (_scroll->scrollTop() == top) {
 		updateInnerVisibleArea();
 		return false;
@@ -1109,7 +1191,9 @@ rpl::producer<Data::MessagesSlice> ScheduledWidget::listSource(
 	return rpl::single(rpl::empty) | rpl::then(
 		data->scheduledMessages().updates(_history)
 	) | rpl::map([=] {
-		return data->scheduledMessages().list(_history);
+		return _forumTopic
+			? data->scheduledMessages().list(_forumTopic)
+			: data->scheduledMessages().list(_history);
 	}) | rpl::after_next([=](const Data::MessagesSlice &slice) {
 		highlightSingleNewMessage(slice);
 	});
@@ -1198,6 +1282,9 @@ void ScheduledWidget::listUpdateDateLink(
 }
 
 bool ScheduledWidget::listElementHideReply(not_null<const Element*> view) {
+	if (const auto root = view->data()->topicRootId()) {
+		return root == view->data()->replyTo().messageId.msg;
+	}
 	return false;
 }
 

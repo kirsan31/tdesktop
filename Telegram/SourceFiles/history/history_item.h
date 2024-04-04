@@ -15,17 +15,23 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 class HiddenSenderInfo;
 class History;
+
 struct HistoryMessageReply;
 struct HistoryMessageViews;
 struct HistoryMessageMarkupData;
 struct HistoryMessageReplyMarkup;
 struct HistoryMessageTranslation;
 struct HistoryMessageForwarded;
+struct HistoryMessageSavedMediaData;
 struct HistoryServiceDependentData;
 enum class HistorySelfDestructType;
 struct PreparedServiceText;
 class ReplyKeyboard;
 struct LanguageId;
+
+namespace Api {
+struct SendOptions;
+} // namespace Api
 
 namespace base {
 template <typename Enum>
@@ -85,6 +91,19 @@ class Service;
 class ServiceMessagePainter;
 } // namespace HistoryView
 
+struct HistoryItemCommonFields {
+	MsgId id = 0;
+	MessageFlags flags = 0;
+	PeerId from = 0;
+	FullReplyTo replyTo;
+	TimeId date = 0;
+	BusinessShortcutId shortcutId = 0;
+	UserId viaBotId = 0;
+	QString postAuthor;
+	uint64 groupedId = 0;
+	HistoryMessageMarkupData markup;
+};
+
 class HistoryItem final : public RuntimeComposer<HistoryItem> {
 public:
 	[[nodiscard]] static std::unique_ptr<Data::Media> CreateMedia(
@@ -113,73 +132,39 @@ public:
 		Data::SponsoredFrom from,
 		const TextWithEntities &textWithEntities,
 		HistoryItem *injectedAfter);
+	HistoryItem( // Story wrap.
+		not_null<History*> history,
+		MsgId id,
+		not_null<Data::Story*> story);
 
 	HistoryItem( // Local message.
 		not_null<History*> history,
-		MsgId id,
-		MessageFlags flags,
-		FullReplyTo replyTo,
-		UserId viaBotId,
-		TimeId date,
-		PeerId from,
-		const QString &postAuthor,
+		HistoryItemCommonFields &&fields,
 		const TextWithEntities &textWithEntities,
-		const MTPMessageMedia &media,
-		HistoryMessageMarkupData &&markup,
-		uint64 groupedId);
+		const MTPMessageMedia &media);
 	HistoryItem( // Local service message.
 		not_null<History*> history,
-		MsgId id,
-		MessageFlags flags,
-		TimeId date,
+		HistoryItemCommonFields &&fields,
 		PreparedServiceText &&message,
-		PeerId from = 0,
 		PhotoData *photo = nullptr);
 	HistoryItem( // Local forwarded.
 		not_null<History*> history,
-		MsgId id,
-		MessageFlags flags,
-		TimeId date,
-		PeerId from,
-		const QString &postAuthor,
-		not_null<HistoryItem*> original,
-		MsgId topicRootId);
+		HistoryItemCommonFields &&fields,
+		not_null<HistoryItem*> original);
 	HistoryItem( // Local photo.
 		not_null<History*> history,
-		MsgId id,
-		MessageFlags flags,
-		FullReplyTo replyTo,
-		UserId viaBotId,
-		TimeId date,
-		PeerId from,
-		const QString &postAuthor,
+		HistoryItemCommonFields &&fields,
 		not_null<PhotoData*> photo,
-		const TextWithEntities &caption,
-		HistoryMessageMarkupData &&markup);
+		const TextWithEntities &caption);
 	HistoryItem( // Local document.
 		not_null<History*> history,
-		MsgId id,
-		MessageFlags flags,
-		FullReplyTo replyTo,
-		UserId viaBotId,
-		TimeId date,
-		PeerId from,
-		const QString &postAuthor,
+		HistoryItemCommonFields &&fields,
 		not_null<DocumentData*> document,
-		const TextWithEntities &caption,
-		HistoryMessageMarkupData &&markup);
+		const TextWithEntities &caption);
 	HistoryItem( // Local game.
 		not_null<History*> history,
-		MsgId id,
-		MessageFlags flags,
-		FullReplyTo replyTo,
-		UserId viaBotId,
-		TimeId date,
-		PeerId from,
-		const QString &postAuthor,
-		not_null<GameData*> game,
-		HistoryMessageMarkupData &&markup);
-	HistoryItem(not_null<History*> history, not_null<Data::Story*> story);
+		HistoryItemCommonFields &&fields,
+		not_null<GameData*> game);
 	~HistoryItem();
 
 	struct Destroyer {
@@ -209,6 +194,10 @@ public:
 	[[nodiscard]] bool isSponsored() const;
 	[[nodiscard]] bool skipNotification() const;
 	[[nodiscard]] bool isUserpicSuggestion() const;
+	[[nodiscard]] BusinessShortcutId shortcutId() const;
+	[[nodiscard]] bool isBusinessShortcut() const;
+	void setRealShortcutId(BusinessShortcutId id);
+	void setCustomServiceLink(ClickHandlerPtr link);
 
 	void addLogEntryOriginal(
 		WebPageId localId,
@@ -466,6 +455,8 @@ public:
 	[[nodiscard]] TimeId date() const;
 
 	[[nodiscard]] static TimeId NewMessageDate(TimeId scheduled);
+	[[nodiscard]] static TimeId NewMessageDate(
+		const Api::SendOptions &options);
 
 	[[nodiscard]] Data::Media *media() const {
 		return _media.get();
@@ -536,29 +527,20 @@ public:
 		return _ttlDestroyAt;
 	}
 
+	[[nodiscard]] int boostsApplied() const {
+		return _boostsApplied;
+	}
+
 	MsgId id;
 
 private:
 	struct CreateConfig;
 
-	struct SavedMediaData {
-		TextWithEntities text;
-		std::unique_ptr<Data::Media> media;
-	};
-
 	HistoryItem(
 		not_null<History*> history,
-		MsgId id,
-		MessageFlags flags,
-		TimeId date,
-		PeerId from);
+		const HistoryItemCommonFields &fields);
 
-	void createComponentsHelper(
-		MessageFlags flags,
-		FullReplyTo replyTo,
-		UserId viaBotId,
-		const QString &postAuthor,
-		HistoryMessageMarkupData &&markup);
+	void createComponentsHelper(HistoryItemCommonFields &&fields);
 	void createComponents(CreateConfig &&config);
 	void setupForwardedComponent(const CreateConfig &config);
 
@@ -655,13 +637,14 @@ private:
 
 	TextWithEntities _text;
 
-	std::unique_ptr<SavedMediaData> _savedLocalEditMediaData;
 	std::unique_ptr<Data::Media> _media;
 	std::unique_ptr<Data::MessageReactions> _reactions;
 	crl::time _reactionsLastRefreshed = 0;
 
 	TimeId _date = 0;
 	TimeId _ttlDestroyAt = 0;
+	int _boostsApplied = 0;
+	BusinessShortcutId _shortcutId = 0;
 
 	HistoryView::Element *_mainView = nullptr;
 	MessageGroupId _groupId = MessageGroupId();
@@ -672,3 +655,5 @@ private:
 	friend class HistoryView::ServiceMessagePainter;
 
 };
+
+constexpr auto kSize = int(sizeof(HistoryItem));

@@ -11,6 +11,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/event_filter.h"
 #include "base/platform/base_platform_info.h"
 #include "base/qt_signal_producer.h"
+#include "base/timer_rpl.h"
 #include "base/unixtime.h"
 #include "boxes/edit_caption_box.h"
 #include "chat_helpers/compose/compose_show.h"
@@ -36,6 +37,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_forum_topic.h"
 #include "data/data_peer_values.h"
 #include "data/data_photo_media.h"
+#include "data/data_premium_limits.h" // Data::PremiumLimits.
 #include "data/stickers/data_stickers.h"
 #include "data/stickers/data_custom_emoji.h"
 #include "data/data_web_page.h"
@@ -47,6 +49,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/power_saving.h"
 #include "history/history.h"
 #include "history/history_item.h"
+#include "history/view/controls/history_view_characters_limit.h"
 #include "history/view/controls/history_view_forward_panel.h"
 #include "history/view/controls/history_view_draft_options.h"
 #include "history/view/controls/history_view_voice_record_bar.h"
@@ -63,6 +66,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "media/audio/media_audio_capture.h"
 #include "media/audio/media_audio.h"
 #include "settings/settings_premium.h"
+#include "ui/item_text_options.h"
 #include "ui/text/text_options.h"
 #include "ui/text/text_utilities.h"
 #include "ui/ui_utility.h"
@@ -92,6 +96,7 @@ constexpr auto kMouseEvents = {
 	QEvent::MouseButtonPress,
 	QEvent::MouseButtonRelease
 };
+constexpr auto kRefreshSlowmodeLabelTimeout = crl::time(200);
 
 constexpr auto kCommonModifiers = 0
 	| Qt::ShiftModifier
@@ -108,6 +113,9 @@ using VoiceRecordBar = Controls::VoiceRecordBar;
 using ForwardPanel = Controls::ForwardPanel;
 
 } // namespace
+
+const ChatHelpers::PauseReason kDefaultPanelsLevel
+	= ChatHelpers::PauseReason::TabbedPanel;
 
 class FieldHeader final : public Ui::RpWidget {
 public:
@@ -755,24 +763,11 @@ MessageToEdit FieldHeader::queryToEdit() {
 	}
 	return {
 		.fullId = item->fullId(),
-		.options = { .scheduled = item->isScheduled() ? item->date() : 0 },
+		.options = {
+			.scheduled = item->isScheduled() ? item->date() : 0,
+			.shortcutId = item->shortcutId(),
+		},
 	};
-}
-
-ComposeControls::ComposeControls(
-	not_null<Ui::RpWidget*> parent,
-	not_null<Window::SessionController*> controller,
-	Fn<void(not_null<DocumentData*>)> unavailableEmojiPasted,
-	Mode mode,
-	SendMenu::Type sendMenuType)
-: ComposeControls(parent, ComposeControlsDescriptor{
-	.show = controller->uiShow(),
-	.unavailableEmojiPasted = std::move(unavailableEmojiPasted),
-	.mode = mode,
-	.sendMenuType = sendMenuType,
-	.regularWindow = controller,
-	.stickerOrEmojiChosen = controller->stickerOrEmojiChosen(),
-}) {
 }
 
 ComposeControls::ComposeControls(
@@ -783,21 +778,24 @@ ComposeControls::ComposeControls(
 	: st::defaultComposeControls)
 , _features(descriptor.features)
 , _parent(parent)
+, _panelsParent(descriptor.panelsParent
+	? descriptor.panelsParent
+	: _parent.get())
 , _show(std::move(descriptor.show))
 , _session(&_show->session())
 , _regularWindow(descriptor.regularWindow)
-, _ownedSelector(_regularWindow
+, _ownedSelector((_regularWindow && _features.commonTabbedPanel)
 	? nullptr
 	: std::make_unique<ChatHelpers::TabbedSelector>(
-		_parent,
+		_panelsParent,
 		ChatHelpers::TabbedSelectorDescriptor{
 			.show = _show,
 			.st = _st.tabbed,
-			.level = Window::GifPauseReason::TabbedPanel,
+			.level = descriptor.panelsLevel,
 			.mode = ChatHelpers::TabbedSelector::Mode::Full,
 			.features = _features,
 		}))
-, _selector(_regularWindow
+, _selector((_regularWindow && _features.commonTabbedPanel)
 	? _regularWindow->tabbedSelector()
 	: not_null(_ownedSelector.get()))
 , _mode(descriptor.mode)
@@ -852,7 +850,34 @@ ComposeControls::ComposeControls(
 			descriptor.stickerOrEmojiChosen
 		) | rpl::start_to_stream(_stickerOrEmojiChosen, _wrap->lifetime());
 	}
+	if (descriptor.scheduledToggleValue) {
+		std::move(
+			descriptor.scheduledToggleValue
+		) | rpl::start_with_next([=](bool hasScheduled) {
+			if (!_scheduled && hasScheduled) {
+				_scheduled = base::make_unique_q<Ui::IconButton>(
+					_wrap.get(),
+					st::historyScheduledToggle);
+				_scheduled->show();
+				_scheduled->clicks(
+				) | rpl::filter(
+					rpl::mappers::_1 == Qt::LeftButton
+				) | rpl::to_empty | rpl::start_to_stream(
+					_showScheduledRequests,
+					_scheduled->lifetime());
+				orderControls(); // Raise drag areas to the top.
+				updateControlsVisibility();
+				updateControlsGeometry(_wrap->size());
+			} else if (_scheduled && !hasScheduled) {
+				_scheduled = nullptr;
+			}
+		}, _wrap->lifetime());
+	}
 	init();
+}
+
+rpl::producer<> ComposeControls::showScheduledRequests() const {
+	return _showScheduledRequests.events();
 }
 
 ComposeControls::~ComposeControls() {
@@ -869,6 +894,12 @@ Main::Session &ComposeControls::session() const {
 void ComposeControls::updateTopicRootId(MsgId topicRootId) {
 	_topicRootId = topicRootId;
 	_header->updateTopicRootId(_topicRootId);
+}
+
+void ComposeControls::updateShortcutId(BusinessShortcutId shortcutId) {
+	unregisterDraftSources();
+	_shortcutId = shortcutId;
+	registerDraftSource();
 }
 
 void ComposeControls::setHistory(SetHistoryArgs &&args) {
@@ -1204,6 +1235,8 @@ void ComposeControls::setFieldText(
 	_field->setTextCursor(cursor);
 	_textUpdateEvents = TextUpdateEvent::SaveDraft
 		| TextUpdateEvent::SendTyping;
+
+	checkCharsLimitation();
 
 	if (_preview) {
 		_preview->checkNow(false);
@@ -1567,7 +1600,8 @@ void ComposeControls::initField() {
 	}, _field->lifetime());
 #endif // Q_OS_MAC
 	InitMessageField(_show, _field, [=](not_null<DocumentData*> emoji) {
-		if (_history && Data::AllowEmojiWithoutPremium(_history->peer)) {
+		if (_history
+			&& Data::AllowEmojiWithoutPremium(_history->peer, emoji)) {
 			return true;
 		}
 		if (_unavailableEmojiPasted) {
@@ -1575,14 +1609,16 @@ void ComposeControls::initField() {
 		}
 		return false;
 	});
+	InitMessageFieldFade(_field, _st.field.textBg);
 	_field->setEditLinkCallback(
 		DefaultEditLinkCallback(_show, _field, &_st.boxField));
 	initAutocomplete();
-	const auto allow = [=](const auto &) {
-		return _history && Data::AllowEmojiWithoutPremium(_history->peer);
+	const auto allow = [=](not_null<DocumentData*> emoji) {
+		return _history
+			&& Data::AllowEmojiWithoutPremium(_history->peer, emoji);
 	};
 	const auto suggestions = Ui::Emoji::SuggestionsController::Init(
-		_parent,
+		_panelsParent,
 		_field,
 		_session,
 		{
@@ -1787,6 +1823,8 @@ void ComposeControls::fieldChanged() {
 		}
 	});
 
+	checkCharsLimitation();
+
 	_saveCloudDraftTimer.cancel();
 	if (!(_textUpdateEvents & TextUpdateEvent::SaveDraft)) {
 		return;
@@ -1816,6 +1854,10 @@ Data::DraftKey ComposeControls::draftKey(DraftType type) const {
 		return (type == DraftType::Edit)
 			? Key::ScheduledEdit()
 			: Key::Scheduled();
+	case Section::ShortcutMessages:
+		return (type == DraftType::Edit)
+			? Key::ShortcutEdit(_shortcutId)
+			: Key::Shortcut(_shortcutId);
 	}
 	return Key::None();
 }
@@ -2020,6 +2062,7 @@ void ComposeControls::applyDraft(FieldHistoryAction fieldHistoryAction) {
 			_preview->setDisabled(false);
 		}
 	}
+	checkCharsLimitation();
 }
 
 void ComposeControls::cancelForward() {
@@ -2040,7 +2083,9 @@ rpl::producer<SendActionUpdate> ComposeControls::sendActionUpdates() const {
 }
 
 void ComposeControls::initTabbedSelector() {
-	if (!_regularWindow || _regularWindow->hasTabbedSelectorOwnership()) {
+	if (!_regularWindow
+		|| !_features.commonTabbedPanel
+		|| _regularWindow->hasTabbedSelectorOwnership()) {
 		createTabbedPanel();
 	} else {
 		setTabbedPanel(nullptr);
@@ -2078,7 +2123,9 @@ void ComposeControls::initTabbedSelector() {
 			if (data.document->isPremiumEmoji()
 				&& !session().premium()
 				&& (!_history
-					|| !Data::AllowEmojiWithoutPremium(_history->peer))) {
+					|| !Data::AllowEmojiWithoutPremium(
+						_history->peer,
+						data.document))) {
 				if (_unavailableEmojiPasted) {
 					_unavailableEmojiPasted(data.document);
 				}
@@ -2311,6 +2358,7 @@ void SetupRestrictionView(
 			});
 			state->label = makeLabel(value.text, st->premiumRequired.label);
 		}
+		state->updateGeometries();
 	}, widget->lifetime());
 
 	widget->sizeValue(
@@ -2476,7 +2524,7 @@ void ComposeControls::finishAnimating() {
 
 void ComposeControls::updateControlsGeometry(QSize size) {
 	// (_attachToggle|_replaceMedia) (_sendAs) -- _inlineResults ------ _tabbedPanel -- _fieldBarCancel
-	// (_attachDocument|_attachPhoto) _field (_ttlInfo) (_silent|_botCommandStart) _tabbedSelectorToggle _send
+	// (_attachDocument|_attachPhoto) _field (_ttlInfo) (_scheduled) (_silent|_botCommandStart) _tabbedSelectorToggle _send
 
 	const auto fieldWidth = size.width()
 		- _attachToggle->width()
@@ -2487,6 +2535,7 @@ void ComposeControls::updateControlsGeometry(QSize size) {
 		- (_likeShown ? _like->width() : 0)
 		- (_botCommandShown ? _botCommandStart->width() : 0)
 		- (_silent ? _silent->width() : 0)
+		- (_scheduled ? _scheduled->width() : 0)
 		- (_ttlInfo ? _ttlInfo->width() : 0);
 	{
 		const auto oldFieldHeight = _field->height();
@@ -2545,6 +2594,10 @@ void ComposeControls::updateControlsGeometry(QSize size) {
 		_silent->moveToRight(right, buttonsTop);
 		right += _silent->width();
 	}
+	if (_scheduled) {
+		_scheduled->moveToRight(right, buttonsTop);
+		right += _scheduled->width();
+	}
 	if (_ttlInfo) {
 		_ttlInfo->move(size.width() - right - _ttlInfo->width(), buttonsTop);
 	}
@@ -2573,6 +2626,9 @@ void ComposeControls::updateControlsVisibility() {
 		_attachToggle->hide();
 	} else {
 		_attachToggle->show();
+	}
+	if (_scheduled) {
+		_scheduled->setVisible(!isEditingMessage());
 	}
 }
 
@@ -2671,7 +2727,7 @@ void ComposeControls::updateAttachBotsMenu() {
 		return;
 	}
 	_attachBotsMenu = InlineBots::MakeAttachBotsMenu(
-		_parent,
+		_panelsParent,
 		_regularWindow,
 		_history->peer,
 		_sendActionFactory,
@@ -2714,7 +2770,7 @@ void ComposeControls::escape() {
 bool ComposeControls::pushTabbedSelectorToThirdSection(
 		not_null<Data::Thread*> thread,
 		const Window::SectionShow &params) {
-	if (!_tabbedPanel || !_regularWindow) {
+	if (!_tabbedPanel || !_regularWindow || !_features.commonTabbedPanel) {
 		return true;
 	//} else if (!_canSendMessages) {
 	//	Core::App().settings().setTabbedReplacedWithInfo(true);
@@ -2749,7 +2805,7 @@ void ComposeControls::createTabbedPanel() {
 		.nonOwnedSelector = _ownedSelector ? nullptr : _selector.get(),
 	};
 	setTabbedPanel(std::make_unique<TabbedPanel>(
-		_parent,
+		_panelsParent,
 		std::move(descriptor)));
 	_tabbedPanel->setDesiredHeightValues(
 		st::emojiPanHeightRatio,
@@ -2772,7 +2828,7 @@ void ComposeControls::setTabbedPanel(
 }
 
 void ComposeControls::toggleTabbedSelectorMode() {
-	if (!_history || !_regularWindow) {
+	if (!_history || !_regularWindow || !_features.commonTabbedPanel) {
 		return;
 	}
 	if (_tabbedPanel) {
@@ -2801,9 +2857,12 @@ void ComposeControls::updateHeight() {
 	}
 }
 
-void ComposeControls::editMessage(FullMsgId id) {
+void ComposeControls::editMessage(
+		FullMsgId id,
+		const TextSelection &selection) {
 	if (const auto item = session().data().message(id)) {
 		editMessage(item);
+		SelectTextInFieldWithMargins(_field, selection);
 	}
 }
 
@@ -3135,6 +3194,10 @@ not_null<Ui::RpWidget*> ComposeControls::likeAnimationTarget() const {
 	return _like;
 }
 
+int ComposeControls::fieldCharacterCount() const {
+	return Ui::FieldCharacterCount(_field);
+}
+
 bool ComposeControls::preventsClose(Fn<void()> &&continueCallback) const {
 	if (_voiceRecordBar->isActive()) {
 		_voiceRecordBar->showDiscardBox(std::move(continueCallback));
@@ -3229,7 +3292,7 @@ void ComposeControls::applyInlineBotQuery(
 		}
 		if (!_inlineResults) {
 			_inlineResults = std::make_unique<InlineBots::Layout::Widget>(
-				_parent,
+				_panelsParent,
 				_regularWindow);
 			_inlineResults->setResultSelectedCallback([=](
 					InlineBots::ResultSelected result) {
@@ -3281,6 +3344,99 @@ Fn<void()> ComposeControls::restoreTextCallback(
 			_field->textCursor().insertText(insertTextOnCancel);
 		}
 	});
+}
+
+TextWithEntities ComposeControls::prepareTextForEditMsg() const {
+	if (!_history) {
+		return {};
+	}
+	const auto textWithTags = getTextWithAppliedMarkdown();
+	const auto prepareFlags = Ui::ItemTextOptions(
+		_history,
+		session().user()).flags;
+	auto left = TextWithEntities {
+		textWithTags.text,
+		TextUtilities::ConvertTextTagsToEntities(textWithTags.tags) };
+	TextUtilities::PrepareForSending(left, prepareFlags);
+	return left;
+}
+
+void ComposeControls::checkCharsLimitation() {
+	if (!_history || !isEditingMessage()) {
+		_charsLimitation = nullptr;
+		return;
+	}
+	const auto item = _history->owner().message(_header->editMsgId());
+	if (!item) {
+		_charsLimitation = nullptr;
+		return;
+	}
+	const auto hasMediaWithCaption = item->media()
+		&& item->media()->allowsEditCaption();
+	const auto maxCaptionSize = !hasMediaWithCaption
+		? MaxMessageSize
+		: Data::PremiumLimits(&session()).captionLengthCurrent();
+	const auto remove = Ui::FieldCharacterCount(_field) - maxCaptionSize;
+	if (remove > 0) {
+		if (!_charsLimitation) {
+			using namespace Controls;
+			_charsLimitation = base::make_unique_q<CharactersLimitLabel>(
+				_wrap.get(),
+				_send.get(),
+				style::al_bottom);
+			_charsLimitation->show();
+			Data::AmPremiumValue(
+				&session()
+			) | rpl::start_with_next([=] {
+				checkCharsLimitation();
+			}, _charsLimitation->lifetime());
+		}
+		_charsLimitation->setLeft(remove);
+	} else {
+		_charsLimitation = nullptr;
+	}
+}
+
+rpl::producer<int> SlowmodeSecondsLeft(not_null<PeerData*> peer) {
+	return peer->session().changes().peerFlagsValue(
+		peer,
+		Data::PeerUpdate::Flag::Slowmode
+	) | rpl::map([=] {
+		return peer->slowmodeSecondsLeft();
+	}) | rpl::map([=](int delay) -> rpl::producer<int> {
+		auto start = rpl::single(delay);
+		if (!delay) {
+			return start;
+		}
+		return std::move(
+			start
+		) | rpl::then(base::timer_each(
+			kRefreshSlowmodeLabelTimeout
+		) | rpl::map([=] {
+			return peer->slowmodeSecondsLeft();
+		}) | rpl::take_while([=](int delay) {
+			return delay > 0;
+		})) | rpl::then(rpl::single(0));
+	}) | rpl::flatten_latest();
+}
+
+rpl::producer<bool> SendDisabledBySlowmode(not_null<PeerData*> peer) {
+	const auto history = peer->owner().history(peer);
+	auto hasSendingMessage = peer->session().changes().historyFlagsValue(
+		history,
+		Data::HistoryUpdate::Flag::ClientSideMessages
+	) | rpl::map([=] {
+		return history->latestSendingMessage() != nullptr;
+	}) | rpl::distinct_until_changed();
+
+	using namespace rpl::mappers;
+	const auto channel = peer->asChannel();
+	return (!channel || channel->amCreator())
+		? (rpl::single(false) | rpl::type_erased())
+		: rpl::combine(
+			channel->slowmodeAppliedValue(),
+			std::move(hasSendingMessage),
+			_1 && _2);
 }
 
 } // namespace HistoryView

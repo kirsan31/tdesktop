@@ -608,7 +608,7 @@ defaultComposeIcons: ComposeIcons {
 
 	stripBubble: icon{
 		{ "chat/reactions_bubble_shadow", windowShadowFg },
-		{ "chat/reactions_bubble", windowBg },
+		{ "chat/reactions_bubble", emojiPanBg },
 	};
 	stripExpandPanel: icon{
 		{ "chat/reactions_round_big", windowBgRipple },
@@ -857,6 +857,31 @@ historyEmojiStatusInfoLabel: FlatLabel(historyContactStatusLabel) {
 }
 historyContactStatusMinSkip: 16px;
 
+historyBusinessBotPhoto: UserpicButton(defaultUserpicButton) {
+	size: size(46px, 46px);
+	photoSize: 46px;
+	photoPosition: point(0px, 0px);
+}
+historyBusinessBotName: FlatLabel(defaultFlatLabel) {
+	style: semiboldTextStyle;
+}
+historyBusinessBotStatus: FlatLabel(historyContactStatusLabel) {
+	textFg: windowSubTextFg;
+}
+historyBusinessBotToggle: defaultActiveButton;
+historyBusinessBotSettings: IconButton(defaultIconButton) {
+	icon: icon{{ "menu/customize", menuIconFg }};
+	iconOver: icon{{ "menu/customize", menuIconFgOver }};
+	iconPosition: point(-1px, -1px);
+	rippleAreaSize: 40px;
+	rippleAreaPosition: point(4px, 9px);
+	ripple: RippleAnimation(defaultRippleAnimation) {
+		color: windowBgOver;
+	}
+	height: 58px;
+	width: 48px;
+}
+
 historyReplyCancelIcon: icon {{ "box_button_close", historyReplyCancelFg }};
 historyReplyCancelIconOver: icon {{ "box_button_close", historyReplyCancelFgOver }};
 
@@ -968,6 +993,7 @@ historyComposeField: InputField(defaultInputField) {
 	duration: 100;
 }
 historyComposeFieldMaxHeight: 224px;
+historyComposeFieldFadeHeight: 6px;
 // historyMinHeight: 56px;
 
 historyAttach: IconButton(defaultIconButton) {
@@ -1068,6 +1094,13 @@ historyMessagesTTLLabel: FlatLabel(defaultFlatLabel) {
 	minWidth: 200px;
 	align: align(topleft);
 	textFg: windowSubTextFg;
+}
+
+historyCharsLimitationLabel: FlatLabel(defaultFlatLabel) {
+	// The same as a width of the historySendSize.
+	minWidth: 44px;
+	align: align(center);
+	textFg: attentionButtonFg;
 }
 
 historyRecordVoiceFg: historyComposeIconFg;

@@ -94,6 +94,10 @@ void ShowTagInListMenu(
 	not_null<QWidget*> context,
 	const Data::ReactionId &id,
 	not_null<Window::SessionController*> controller);
+void AddCopyFilename(
+	not_null<Ui::PopupMenu*> menu,
+	not_null<DocumentData*> document,
+	Fn<bool()> showCopyRestrictionForSelected);
 
 enum class EmojiPacksSource {
 	Message,
@@ -118,5 +122,7 @@ void AddEmojiPacksAction(
 [[nodiscard]] TextWithEntities TransribedText(not_null<HistoryItem*> item);
 
 [[nodiscard]] bool ItemHasTtl(HistoryItem *item);
+
+void AddLengthLimitLabel(not_null<Ui::InputField*> field, int limit);
 
 } // namespace HistoryView

@@ -18,6 +18,9 @@ class SessionController;
 
 namespace Ui {
 class ChatStyle;
+namespace Toast {
+class Instance;
+} // namespace Toast
 } // namespace Ui
 
 namespace Settings {
@@ -27,7 +30,7 @@ public:
 	explicit BlockedBoxController(
 		not_null<Window::SessionController*> window);
 
-	Main::Session &session() const override;
+	::Main::Session &session() const override;
 	void prepare() override;
 	void rowClicked(not_null<PeerListRow*> row) override;
 	void rowRightActionClicked(not_null<PeerListRow*> row) override;
@@ -146,6 +149,7 @@ public:
 	rpl::producer<QString> exceptionBoxTitle(
 		Exception exception) const override;
 	rpl::producer<QString> exceptionsDescription() const override;
+	bool allowPremiumsToggle(Exception exception) const override;
 
 };
 
@@ -212,6 +216,7 @@ public:
 	rpl::producer<QString> exceptionsDescription() const override;
 
 	object_ptr<Ui::RpWidget> setupAboveWidget(
+		not_null<Window::SessionController*> controller,
 		not_null<QWidget*> parent,
 		rpl::producer<Option> optionValue,
 		not_null<QWidget*> outerContainer) override;
@@ -246,6 +251,7 @@ public:
 		rpl::producer<int> value) override;
 
 	object_ptr<Ui::RpWidget> setupAboveWidget(
+		not_null<Window::SessionController*> controller,
 		not_null<QWidget*> parent,
 		rpl::producer<Option> optionValue,
 		not_null<QWidget*> outerContainer) override;
@@ -280,8 +286,16 @@ public:
 	rpl::producer<QString> exceptionBoxTitle(
 		Exception exception) const override;
 	rpl::producer<QString> exceptionsDescription() const override;
+	object_ptr<Ui::RpWidget> setupBelowWidget(
+		not_null<Window::SessionController*> controller,
+		not_null<QWidget*> parent,
+		rpl::producer<Option> option) override;
+	Fn<void()> premiumClickedCallback(
+		Option option,
+		not_null<Window::SessionController*> controller) override;
 
 private:
+	base::weak_ptr<Ui::Toast::Instance> _toastInstance;
 	rpl::lifetime _lifetime;
 
 };
@@ -300,6 +314,29 @@ public:
 	rpl::producer<QString> exceptionBoxTitle(
 		Exception exception) const override;
 	rpl::producer<QString> exceptionsDescription() const override;
+
+};
+
+class BirthdayPrivacyController final : public EditPrivacyController {
+public:
+	using Option = EditPrivacyBox::Option;
+	using Exception = EditPrivacyBox::Exception;
+
+	Key key() const override;
+
+	rpl::producer<QString> title() const override;
+	rpl::producer<QString> optionsTitleKey() const override;
+	rpl::producer<QString> exceptionButtonTextKey(
+		Exception exception) const override;
+	rpl::producer<QString> exceptionBoxTitle(
+		Exception exception) const override;
+	rpl::producer<QString> exceptionsDescription() const override;
+
+	object_ptr<Ui::RpWidget> setupAboveWidget(
+		not_null<Window::SessionController*> controller,
+		not_null<QWidget*> parent,
+		rpl::producer<Option> optionValue,
+		not_null<QWidget*> outerContainer) override;
 
 };
 

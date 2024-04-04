@@ -216,6 +216,9 @@ ChatAdminRightsInfo EditAdminBox::defaultRights() const {
 		: peer()->isMegagroup()
 		? ChatAdminRightsInfo{ (Flag::ChangeInfo
 			| Flag::DeleteMessages
+			| Flag::PostStories
+			| Flag::EditStories
+			| Flag::DeleteStories
 			| Flag::BanUsers
 			| Flag::InviteByLinkOrAdd
 			| Flag::ManageTopics
@@ -225,6 +228,9 @@ ChatAdminRightsInfo EditAdminBox::defaultRights() const {
 			| Flag::PostMessages
 			| Flag::EditMessages
 			| Flag::DeleteMessages
+			| Flag::PostStories
+			| Flag::EditStories
+			| Flag::DeleteStories
 			| Flag::InviteByLinkOrAdd
 			| Flag::ManageCall) };
 }
@@ -381,11 +387,12 @@ void EditAdminBox::prepare() {
 				_rank ? _rank->getLastText().trimmed() : QString());
 		};
 		_save = [=] {
+			const auto show = uiShow();
 			if (!_saveCallback) {
 				return;
 			} else if (_addAsAdmin && !_addAsAdmin->checked()) {
 				const auto weak = Ui::MakeWeak(this);
-				AddBotToGroup(user(), peer(), _addingBot->token);
+				AddBotToGroup(show, user(), peer(), _addingBot->token);
 				if (const auto strong = weak.data()) {
 					strong->closeBox();
 				}
@@ -662,8 +669,8 @@ void EditAdminBox::sendTransferRequestFrom(
 		}();
 		const auto recoverable = [&] {
 			return (type == u"PASSWORD_MISSING"_q)
-				|| (type == u"PASSWORD_TOO_FRESH_XXX"_q)
-				|| (type == u"SESSION_TOO_FRESH_XXX"_q);
+				|| type.startsWith(u"PASSWORD_TOO_FRESH_"_q)
+				|| type.startsWith(u"SESSION_TOO_FRESH_"_q);
 		}();
 		const auto weak = Ui::MakeWeak(this);
 		getDelegate()->show(Ui::MakeInformBox(problem));
@@ -840,7 +847,7 @@ void EditRestrictedBox::createUntilGroup() {
 
 void EditRestrictedBox::createUntilVariants() {
 	auto addVariant = [&](int value, const QString &text) {
-		if (!canSave() && _untilGroup->value() != value) {
+		if (!canSave() && _untilGroup->current() != value) {
 			return;
 		}
 		_untilVariants.emplace_back(

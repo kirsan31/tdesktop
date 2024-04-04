@@ -34,6 +34,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/widgets/menu/menu_multiline_action.h"
 #include "ui/image/image.h"
 #include "ui/toast/toast.h"
+#include "ui/text/format_song_document_name.h"
 #include "ui/text/text_utilities.h"
 #include "ui/controls/delete_message_context_action.h"
 #include "ui/controls/who_reacted_context_action.h"
@@ -101,7 +102,10 @@ bool HasEditMessageAction(
 		|| item->hasFailed()
 		|| item->isEditingMedia()
 		|| !request.selectedItems.empty()
-		|| (context != Context::History && context != Context::Replies)) {
+		|| (context != Context::History
+			&& context != Context::Replies
+			&& context != Context::ShortcutMessages
+			&& context != Context::ScheduledTopic)) {
 		return false;
 	}
 	const auto peer = item->history()->peer;
@@ -326,6 +330,10 @@ void AddDocumentActions(
 		AddSaveSoundForNotifications(menu, item, document, controller);
 	}
 	AddSaveDocumentAction(menu, item, document, list);
+	AddCopyFilename(
+		menu,
+		document,
+		[=] { return list->showCopyRestrictionForSelected(); });
 }
 
 void AddPostLinkAction(
@@ -1011,14 +1019,8 @@ void EditTagBox(
 	struct State {
 		std::unique_ptr<Ui::Text::CustomEmoji> custom;
 		QImage image;
-		rpl::variable<int> length;
 	};
 	const auto state = field->lifetime().make_state<State>();
-	state->length = rpl::single(
-		int(title.size())
-	) | rpl::then(field->changes() | rpl::map([=] {
-		return int(field->getLastText().size());
-	}));
 
 	if (const auto customId = id.custom()) {
 		state->custom = owner->customEmojiManager().create(
@@ -1051,28 +1053,8 @@ void EditTagBox(
 			}
 		}
 	}, field->lifetime());
-	const auto warning = Ui::CreateChild<Ui::FlatLabel>(
-		field,
-		state->length.value() | rpl::map([](int count) {
-			return (count > kTagNameLimit / 2)
-				? QString::number(kTagNameLimit - count)
-				: QString();
-			}),
-		st::editTagLimit);
-	state->length.value() | rpl::map(
-		rpl::mappers::_1 > kTagNameLimit
-	) | rpl::start_with_next([=](bool exceeded) {
-		warning->setTextColorOverride(exceeded
-			? st::attentionButtonFg->c
-			: std::optional<QColor>());
-	}, warning->lifetime());
-	rpl::combine(
-		field->sizeValue(),
-		warning->sizeValue()
-	) | rpl::start_with_next([=] {
-		warning->moveToRight(0, st::editTagField.textMargins.top());
-	}, warning->lifetime());
-	warning->setAttribute(Qt::WA_TransparentForMouseEvents);
+
+	AddLengthLimitLabel(field, kTagNameLimit);
 
 	const auto save = [=] {
 		const auto text = field->getLastText();
@@ -1333,7 +1315,8 @@ void AddPollActions(
 	}
 	if ((context != Context::History)
 		&& (context != Context::Replies)
-		&& (context != Context::Pinned)) {
+		&& (context != Context::Pinned)
+		&& (context != Context::ScheduledTopic)) {
 		return;
 	}
 	if (poll->closed()) {
@@ -1553,6 +1536,33 @@ void ShowTagInListMenu(
 	AddTagPackAction(menu->get(), id, controller);
 
 	(*menu)->popup(position);
+}
+
+void AddCopyFilename(
+		not_null<Ui::PopupMenu*> menu,
+		not_null<DocumentData*> document,
+		Fn<bool()> showCopyRestrictionForSelected) {
+	const auto filenameToCopy = [&] {
+		if (document->isAudioFile()) {
+			return TextForMimeData().append(
+				Ui::Text::FormatSongNameFor(document).string());
+		} else if (document->sticker()
+			|| document->isAnimation()
+			|| document->isVideoMessage()
+			|| document->isVideoFile()
+			|| document->isVoiceMessage()) {
+			return TextForMimeData();
+		} else {
+			return TextForMimeData().append(document->filename());
+		}
+	}();
+	if (!filenameToCopy.empty()) {
+		menu->addAction(tr::lng_context_copy_filename(tr::now), [=] {
+			if (!showCopyRestrictionForSelected()) {
+				TextUtilities::SetClipboardText(filenameToCopy);
+			}
+		}, &st::menuIconCopy);
+	}
 }
 
 void ShowWhoReactedMenu(
@@ -1802,6 +1812,42 @@ bool ItemHasTtl(HistoryItem *item) {
 	return (item && item->media())
 		? (item->media()->ttlSeconds() > 0)
 		: false;
+}
+
+void AddLengthLimitLabel(not_null<Ui::InputField*> field, int limit) {
+	struct State {
+		rpl::variable<int> length;
+	};
+	const auto state = field->lifetime().make_state<State>();
+	state->length = rpl::single(
+		rpl::empty
+	) | rpl::then(field->changes()) | rpl::map([=] {
+		return int(field->getLastText().size());
+	});
+	auto warningText = state->length.value() | rpl::map([=](int count) {
+		const auto threshold = std::min(limit / 2, 9);
+		const auto left = limit - count;
+		return (left < threshold) ? QString::number(left) : QString();
+	});
+	const auto warning = Ui::CreateChild<Ui::FlatLabel>(
+		field.get(),
+		std::move(warningText),
+		st::editTagLimit);
+	state->length.value() | rpl::map(
+		rpl::mappers::_1 > limit
+	) | rpl::start_with_next([=](bool exceeded) {
+		warning->setTextColorOverride(exceeded
+			? st::attentionButtonFg->c
+			: std::optional<QColor>());
+	}, warning->lifetime());
+	rpl::combine(
+		field->sizeValue(),
+		warning->sizeValue()
+	) | rpl::start_with_next([=] {
+		warning->moveToRight(0, 0);
+	}, warning->lifetime());
+	warning->setAttribute(Qt::WA_TransparentForMouseEvents);
+
 }
 
 } // namespace HistoryView

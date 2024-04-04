@@ -78,7 +78,8 @@ struct HistoryMessageViews : public RuntimeComponent<HistoryMessageViews, Histor
 };
 
 struct HistoryMessageSigned : public RuntimeComponent<HistoryMessageSigned, HistoryItem> {
-	QString postAuthor;
+	QString author;
+	UserData *viaBusinessBot = nullptr;
 	bool isAnonymousRank = false;
 };
 
@@ -147,6 +148,11 @@ struct HistoryMessageForwarded : public RuntimeComponent<HistoryMessageForwarded
 	bool savedFromOutgoing = false;
 	bool imported = false;
 	bool story = false;
+};
+
+struct HistoryMessageSavedMediaData : public RuntimeComponent<HistoryMessageSavedMediaData, HistoryItem> {
+	TextWithEntities text;
+	std::unique_ptr<Data::Media> media;
 };
 
 struct HistoryMessageSaved : public RuntimeComponent<HistoryMessageSaved, HistoryItem> {
@@ -621,6 +627,11 @@ struct HistoryServiceSameBackground
 struct HistoryServiceGiveawayResults
 : public RuntimeComponent<HistoryServiceGiveawayResults, HistoryItem>
 , public HistoryServiceDependentData {
+};
+
+struct HistoryServiceCustomLink
+: public RuntimeComponent<HistoryServiceCustomLink, HistoryItem> {
+	ClickHandlerPtr link;
 };
 
 enum class HistorySelfDestructType {

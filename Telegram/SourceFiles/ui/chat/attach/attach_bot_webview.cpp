@@ -494,6 +494,7 @@ bool Panel::showWebview(
 		const QString &url,
 		const Webview::ThemeParams &params,
 		rpl::producer<QString> bottomText) {
+	_bottomText = std::move(bottomText);
 	if (!_webview && !createWebview(params)) {
 		return false;
 	}
@@ -503,24 +504,6 @@ bool Panel::showWebview(
 	updateThemeParams(params);
 	_webview->window.navigate(url);
 	_widget->setBackAllowed(allowBack);
-	if (bottomText) {
-		const auto &padding = st::paymentsPanelPadding;
-		const auto label = CreateChild<FlatLabel>(
-			_webviewBottom.get(),
-			std::move(bottomText),
-			st::paymentsWebviewBottom);
-		const auto height = padding.top()
-			+ label->heightNoMargins()
-			+ padding.bottom();
-		rpl::combine(
-			_webviewBottom->widthValue(),
-			label->widthValue()
-		) | rpl::start_with_next([=](int outerWidth, int width) {
-			label->move((outerWidth - width) / 2, padding.top());
-		}, label->lifetime());
-		label->show();
-		_webviewBottom->resize(_webviewBottom->width(), height);
-	}
 	_widget->setMenuAllowed([=](const Ui::Menu::MenuCallback &callback) {
 		if (_hasSettingsButton) {
 			callback(tr::lng_bot_settings(tr::now), [=] {
@@ -533,7 +516,7 @@ bool Panel::showWebview(
 			}, &st::menuIconLeave);
 		}
 		callback(tr::lng_bot_reload_page(tr::now), [=] {
-			if (_webview) {
+			if (_webview && _webview->window.widget()) {
 				_webview->window.reload();
 			} else if (const auto params = _delegate->botThemeParams()
 				; createWebview(params)) {
@@ -542,6 +525,9 @@ bool Panel::showWebview(
 				_webview->window.navigate(url);
 			}
 		}, &st::menuIconRestore);
+		callback(tr::lng_bot_terms(tr::now), [=] {
+			File::OpenUrl(tr::lng_mini_apps_tos_url(tr::now));
+		}, &st::menuIconGroupLog);
 		const auto main = (_menuButtons & MenuButton::RemoveFromMainMenu);
 		if (main || (_menuButtons & MenuButton::RemoveFromMenu)) {
 			const auto handler = [=] {
@@ -562,15 +548,27 @@ bool Panel::showWebview(
 	return true;
 }
 
-bool Panel::createWebview(const Webview::ThemeParams &params) {
-	auto outer = base::make_unique_q<RpWidget>(_widget.get());
-	const auto container = outer.get();
-	_widget->showInner(std::move(outer));
-	_webviewParent = container;
-
+void Panel::createWebviewBottom() {
 	_webviewBottom = std::make_unique<RpWidget>(_widget.get());
 	const auto bottom = _webviewBottom.get();
 	bottom->show();
+
+	const auto &padding = st::paymentsPanelPadding;
+	const auto label = CreateChild<FlatLabel>(
+		_webviewBottom.get(),
+		_bottomText.value(),
+		st::paymentsWebviewBottom);
+	const auto height = padding.top()
+		+ label->heightNoMargins()
+		+ padding.bottom();
+	rpl::combine(
+		_webviewBottom->widthValue(),
+		label->widthValue()
+	) | rpl::start_with_next([=](int outerWidth, int width) {
+		label->move((outerWidth - width) / 2, padding.top());
+	}, label->lifetime());
+	label->show();
+	_webviewBottom->resize(_webviewBottom->width(), height);
 
 	bottom->heightValue(
 	) | rpl::start_with_next([=](int height) {
@@ -579,11 +577,22 @@ bool Panel::createWebview(const Webview::ThemeParams &params) {
 			height = _mainButton->height();
 		}
 		bottom->move(inner.x(), inner.y() + inner.height() - height);
-		container->resize(inner.width(), inner.height() - height);
+		if (const auto container = _webviewParent.data()) {
+			container->setFixedSize(inner.width(), inner.height() - height);
+		}
 		bottom->resizeToWidth(inner.width());
 	}, bottom->lifetime());
-	container->show();
+}
 
+bool Panel::createWebview(const Webview::ThemeParams &params) {
+	auto outer = base::make_unique_q<RpWidget>(_widget.get());
+	const auto container = outer.get();
+	_widget->showInner(std::move(outer));
+	_webviewParent = container;
+
+	createWebviewBottom();
+
+	container->show();
 	_webview = std::make_unique<WebviewWithLifetime>(
 		container,
 		Webview::WindowConfig{
@@ -592,6 +601,7 @@ bool Panel::createWebview(const Webview::ThemeParams &params) {
 		});
 	const auto raw = &_webview->window;
 
+	const auto bottom = _webviewBottom.get();
 	QObject::connect(container, &QObject::destroyed, [=] {
 		if (_webview && &_webview->window == raw) {
 			base::take(_webview);
@@ -702,6 +712,10 @@ postEvent: function(eventType, eventData) {
 	}
 }
 };)");
+
+	if (!_webview) {
+		return false;
+	}
 
 	setupProgressGeometry();
 
@@ -1062,7 +1076,7 @@ void Panel::closeWithConfirmation() {
 	});
 	if (!weak) {
 		return;
-	} else if (result.id != "cancel") {
+	} else if (result.id == "close") {
 		_delegate->botClose();
 	} else {
 		_closeWithConfirmationScheduled = false;
@@ -1177,7 +1191,7 @@ void Panel::createMainButton() {
 		}
 		button->move(inner.x(), inner.y() + inner.height() - height);
 		if (const auto raw = _webviewParent.data()) {
-			raw->resize(inner.width(), inner.height() - height);
+			raw->setFixedSize(inner.width(), inner.height() - height);
 		}
 		button->resizeToWidth(inner.width());
 		_webviewBottom->setVisible(!shown);

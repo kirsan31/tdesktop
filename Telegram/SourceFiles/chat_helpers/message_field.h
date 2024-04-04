@@ -79,6 +79,10 @@ void InitSpellchecker(
 
 bool HasSendText(not_null<const Ui::InputField*> field);
 
+void InitMessageFieldFade(
+	not_null<Ui::InputField*> field,
+	const style::color &bg);
+
 struct InlineBotQuery {
 	QString query;
 	QString username;
@@ -150,3 +154,7 @@ private:
 	QWidget *parent,
 	not_null<UserData*> user,
 	not_null<Window::SessionController*> controller);
+
+void SelectTextInFieldWithMargins(
+	not_null<Ui::InputField*> field,
+	const TextSelection &selection);

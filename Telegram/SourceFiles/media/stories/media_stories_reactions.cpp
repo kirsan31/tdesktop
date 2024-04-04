@@ -131,23 +131,12 @@ private:
 		not_null<History*> history) {
 	Expects(history->peer->isUser());
 
-	const auto flags = MessageFlag::FakeHistoryItem
-		| MessageFlag::HasFromId;
-	const auto replyTo = FullReplyTo();
-	const auto viaBotId = UserId();
-	const auto groupedId = uint64();
-	const auto item = history->makeMessage(
-		history->nextNonHistoryEntryId(),
-		flags,
-		replyTo,
-		viaBotId,
-		base::unixtime::now(),
-		peerToUser(history->peer->id),
-		QString(),
-		TextWithEntities(),
-		MTP_messageMediaEmpty(),
-		HistoryMessageMarkupData(),
-		groupedId);
+	const auto item = history->makeMessage({
+		.id = history->nextNonHistoryEntryId(),
+		.flags = MessageFlag::FakeHistoryItem | MessageFlag::HasFromId,
+		.from = history->peer->id,
+		.date = base::unixtime::now(),
+	}, TextWithEntities(), MTP_messageMediaEmpty());
 	return AdminLog::OwnedItem(delegate, item);
 }
 
@@ -793,7 +782,7 @@ Reactions::Reactions(not_null<Controller*> controller)
 : _controller(controller)
 , _panel(std::make_unique<Panel>(_controller)) {
 	_panel->chosen() | rpl::start_with_next([=](Chosen &&chosen) {
-		animateAndProcess(std::move(chosen));
+		_chosen.fire(std::move(chosen));
 	}, _lifetime);
 }
 
@@ -887,7 +876,7 @@ auto Reactions::attachToMenu(
 
 	selector->chosen() | rpl::start_with_next([=](ChosenReaction reaction) {
 		menu->hideMenu();
-		animateAndProcess({ reaction, ReactionsMode::Reaction });
+		_chosen.fire({ reaction, ReactionsMode::Reaction });
 	}, selector->lifetime());
 
 	return AttachSelectorResult::Attached;
@@ -933,7 +922,7 @@ void Reactions::toggleLiked() {
 
 void Reactions::applyLike(Data::ReactionId id) {
 	if (_liked.current() != id) {
-		animateAndProcess({ { .id = id }, ReactionsMode::Reaction });
+		_chosen.fire({ { .id = id }, ReactionsMode::Reaction });
 	}
 }
 
@@ -971,8 +960,6 @@ void Reactions::animateAndProcess(Chosen &&chosen) {
 			.scaleOutTarget = scaleOutTarget,
 		}, target, std::move(done));
 	}
-
-	_chosen.fire(std::move(chosen));
 }
 
 void Reactions::assignLikedId(Data::ReactionId id) {

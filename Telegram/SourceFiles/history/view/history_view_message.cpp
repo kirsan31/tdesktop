@@ -358,6 +358,11 @@ QString FastReplyText() {
 	});
 }
 
+struct SecondRightAction final {
+	std::unique_ptr<Ui::RippleAnimation> ripple;
+	ClickHandlerPtr link;
+};
+
 } // namespace
 
 struct Message::CommentsButton {
@@ -379,6 +384,7 @@ struct Message::RightAction {
 	std::unique_ptr<Ui::RippleAnimation> ripple;
 	ClickHandlerPtr link;
 	QPoint lastPoint;
+	std::unique_ptr<SecondRightAction> second;
 };
 
 LogEntryOriginal::LogEntryOriginal() = default;
@@ -428,6 +434,16 @@ Message::Message(
 			_bottomInfo.continueReactionAnimations(std::move(animations));
 		}
 	}
+	if (data->isSponsored()) {
+		const auto &messages = data->history()->owner().sponsoredMessages();
+		const auto details = messages.lookupDetails(data->fullId());
+		if (details.canReport) {
+			_rightAction = std::make_unique<RightAction>();
+			_rightAction->second = std::make_unique<SecondRightAction>();
+
+			_rightAction->second->link = ReportSponsoredClickHandler(data);
+		}
+	}
 }
 
 Message::~Message() {
@@ -454,19 +470,22 @@ void Message::setReactions(std::unique_ptr<Reactions::InlineList> list) {
 }
 
 void Message::refreshRightBadge() {
+	const auto item = data();
 	const auto text = [&] {
-		if (data()->isDiscussionPost()) {
+		if (item->isDiscussionPost()) {
 			return (delegate()->elementContext() == Context::Replies)
 				? QString()
 				: tr::lng_channel_badge(tr::now);
-		} else if (data()->author()->isMegagroup()) {
-			if (const auto msgsigned = data()->Get<HistoryMessageSigned>()) {
-				Assert(msgsigned->isAnonymousRank);
-				return msgsigned->postAuthor;
+		} else if (item->author()->isMegagroup()) {
+			if (const auto msgsigned = item->Get<HistoryMessageSigned>()) {
+				if (!msgsigned->viaBusinessBot) {
+					Assert(msgsigned->isAnonymousRank);
+					return msgsigned->author;
+				}
 			}
 		}
-		const auto channel = data()->history()->peer->asMegagroup();
-		const auto user = data()->author()->asUser();
+		const auto channel = item->history()->peer->asMegagroup();
+		const auto user = item->author()->asUser();
 		if (!channel || !user) {
 			return QString();
 		}
@@ -485,13 +504,41 @@ void Message::refreshRightBadge() {
 			? tr::lng_admin_badge(tr::now)
 			: QString();
 	}();
-	const auto badge = text.isEmpty()
-		? delegate()->elementAuthorRank(this)
-		: TextUtilities::RemoveEmoji(TextUtilities::SingleLine(text));
-	if (badge.isEmpty()) {
+	auto badge = TextWithEntities{
+		(text.isEmpty()
+			? delegate()->elementAuthorRank(this)
+			: TextUtilities::RemoveEmoji(TextUtilities::SingleLine(text)))
+	};
+	_rightBadgeHasBoosts = 0;
+	if (const auto boosts = item->boostsApplied()) {
+		_rightBadgeHasBoosts = 1;
+
+		const auto many = (boosts > 1);
+		const auto &icon = many
+			? st::boostsMessageIcon
+			: st::boostMessageIcon;
+		const auto padding = many
+			? st::boostsMessageIconPadding
+			: st::boostMessageIconPadding;
+		const auto owner = &item->history()->owner();
+		auto added = Ui::Text::SingleCustomEmoji(
+			owner->customEmojiManager().registerInternalEmoji(icon, padding)
+		).append(many ? QString::number(boosts) : QString());
+		badge.append(' ').append(Ui::Text::Colorized(added, 1));
+	}
+	if (badge.empty()) {
 		_rightBadge.clear();
 	} else {
-		_rightBadge.setText(st::defaultTextStyle, badge);
+		const auto context = Core::MarkedTextContext{
+			.session = &item->history()->session(),
+			.customEmojiRepaint = [] {},
+			.customEmojiLoopLimit = 1,
+		};
+		_rightBadge.setMarkedText(
+			st::defaultTextStyle,
+			badge,
+			Ui::NameTextOptions(),
+			context);
 	}
 }
 
@@ -1482,20 +1529,30 @@ void Message::paintFromName(
 	}
 	if (rightWidth) {
 		p.setPen(stm->msgDateFg);
-		p.setFont(ClickHandler::showAsActive(_fastReplyLink)
-			? st::msgFont->underline()
-			: st::msgFont);
 		if (replyWidth) {
+			p.setFont(ClickHandler::showAsActive(_fastReplyLink)
+				? st::msgFont->underline()
+				: st::msgFont);
 			p.drawText(
 				trect.left() + trect.width() - rightWidth,
 				trect.top() + st::msgFont->ascent,
 				FastReplyText());
 		} else {
-			_rightBadge.draw(
-				p,
-				trect.left() + trect.width() - rightWidth,
-				trect.top(),
-				rightWidth);
+			const auto shift = QPoint(trect.width() - rightWidth, 0);
+			const auto pen = !_rightBadgeHasBoosts
+				? QPen()
+				: !context.outbg
+				? QPen(FromNameFg(context, colorIndex()))
+				: stm->msgServiceFg->p;
+			auto colored = std::array<Ui::Text::SpecialColor, 1>{
+				{ { &pen, &pen } },
+			};
+			_rightBadge.draw(p, {
+				.position = trect.topLeft() + shift,
+				.availableWidth = rightWidth,
+				.colors = colored,
+				.now = context.now,
+			});
 		}
 	}
 	trect.setY(trect.y() + st::msgNameFont->height);
@@ -1785,8 +1842,28 @@ void Message::clickHandlerPressedChanged(
 	Element::clickHandlerPressedChanged(handler, pressed);
 	if (!handler) {
 		return;
-	} else if (_rightAction && (handler == _rightAction->link)) {
-		toggleRightActionRipple(pressed);
+	} else if (_rightAction) {
+		if (_rightAction->second && (handler == _rightAction->second->link)) {
+			const auto rightSize = rightActionSize();
+			Assert(rightSize != std::nullopt);
+			if (pressed) {
+				if (!_rightAction->second->ripple) {
+					// Create a ripple.
+					_rightAction->second->ripple =
+						std::make_unique<Ui::RippleAnimation>(
+							st::defaultRippleAnimation,
+							Ui::RippleAnimation::RoundRectMask(
+								Size(rightSize->width()),
+								rightSize->width() / 2),
+							[=] { repaint(); });
+				}
+				_rightAction->second->ripple->add(_rightAction->lastPoint);
+			} else if (_rightAction->second->ripple) {
+				_rightAction->second->ripple->lastStop();
+			}
+		} else if (handler == _rightAction->link) {
+			toggleRightActionRipple(pressed);
+		}
 	} else if (_comments && (handler == _comments->link)) {
 		toggleCommentsButtonRipple(pressed);
 	} else if (_topicButton && (handler == _topicButton->link)) {
@@ -1818,15 +1895,18 @@ void Message::toggleCommentsButtonRipple(bool pressed) {
 void Message::toggleRightActionRipple(bool pressed) {
 	Expects(_rightAction != nullptr);
 
-	const auto size = rightActionSize();
-	Assert(size != std::nullopt);
+	const auto rightSize = rightActionSize();
+	Assert(rightSize != std::nullopt);
 
 	if (pressed) {
 		if (!_rightAction->ripple) {
 			// Create a ripple.
+			const auto size = _rightAction->second
+				? Size(rightSize->width())
+				: *rightSize;
 			_rightAction->ripple = std::make_unique<Ui::RippleAnimation>(
 				st::defaultRippleAnimation,
-				Ui::RippleAnimation::RoundRectMask(*size, size->width() / 2),
+				Ui::RippleAnimation::RoundRectMask(size, size.width() / 2),
 				[=] { repaint(); });
 		}
 		_rightAction->ripple->add(_rightAction->lastPoint);
@@ -2003,7 +2083,8 @@ bool Message::hasFromPhoto() const {
 	case Context::TTLViewer:
 	case Context::Pinned:
 	case Context::Replies:
-	case Context::SavedSublist: {
+	case Context::SavedSublist:
+	case Context::ScheduledTopic: {
 		const auto item = data();
 		if (item->isPost()) {
 			return false;
@@ -2022,6 +2103,7 @@ bool Message::hasFromPhoto() const {
 		return !item->out() && !item->history()->peer->isUser();
 	} break;
 	case Context::ContactPreview:
+	case Context::ShortcutMessages:
 		return false;
 	}
 	Unexpected("Context in Message::hasFromPhoto.");
@@ -2991,7 +3073,7 @@ void Message::refreshReactions() {
 							= ExtractController(context)) {
 							ShowPremiumPreviewBox(
 								controller,
-								PremiumPreview::TagsForMessages);
+								PremiumFeature::TagsForMessages);
 						}
 						return;
 					}
@@ -3201,7 +3283,8 @@ bool Message::hasFromName() const {
 	case Context::TTLViewer:
 	case Context::Pinned:
 	case Context::Replies:
-	case Context::SavedSublist: {
+	case Context::SavedSublist:
+	case Context::ScheduledTopic: {
 		const auto item = data();
 		const auto peer = item->history()->peer;
 		if (hasOutLayout() && !item->from()->isChannel()) {
@@ -3229,6 +3312,7 @@ bool Message::hasFromName() const {
 		return false;
 	} break;
 	case Context::ContactPreview:
+	case Context::ShortcutMessages:
 		return false;
 	}
 	Unexpected("Context in Message::hasFromName.");
@@ -3247,8 +3331,10 @@ bool Message::displayForwardedFrom() const {
 		if (forwarded->story) {
 			return true;
 		} else if (item->showForwardsFromSender(forwarded)) {
-			return forwarded->savedFromSender
-				&& (forwarded->savedFromSender != forwarded->originalSender);
+			return forwarded->savedFromHiddenSenderInfo
+				|| (forwarded->savedFromSender
+					&& (forwarded->savedFromSender
+						!= forwarded->originalSender));
 		}
 		if (const auto sender = item->discussionPostOriginalSender()) {
 			if (sender == forwarded->originalSender) {
@@ -3265,6 +3351,9 @@ bool Message::hasOutLayout() const {
 	const auto item = data();
 	if (item->history()->peer->isSelf()) {
 		if (const auto forwarded = item->Get<HistoryMessageForwarded>()) {
+			if (context() == Context::ShortcutMessages) {
+				return true;
+			}
 			return (context() == Context::SavedSublist)
 				&& (!forwarded->forwardOfForward()
 					? (forwarded->originalSender
@@ -3400,7 +3489,9 @@ std::optional<QSize> Message::rightActionSize() const {
 			: QSize(st::historyFastShareSize, st::historyFastShareSize);
 	}
 	return data()->isSponsored()
-		? QSize(st::historyFastCloseSize, st::historyFastCloseSize)
+		? ((_rightAction && _rightAction->second)
+			? QSize(st::historyFastCloseSize, st::historyFastCloseSize * 2)
+			: QSize(st::historyFastCloseSize, st::historyFastCloseSize))
 		: (displayFastShare() || displayGoToOriginal())
 		? QSize(st::historyFastShareSize, st::historyFastShareSize)
 		: std::optional<QSize>();
@@ -3466,6 +3557,19 @@ void Message::drawRightAction(
 			_rightAction->ripple.reset();
 		}
 	}
+	if (_rightAction->second && _rightAction->second->ripple) {
+		const auto &stm = context.messageStyle();
+		const auto colorOverride = &stm->msgWaveformInactive->c;
+		_rightAction->second->ripple->paint(
+			p,
+			left,
+			top + st::historyFastCloseSize,
+			size->width(),
+			colorOverride);
+		if (_rightAction->second->ripple->empty()) {
+			_rightAction->second->ripple.reset();
+		}
+	}
 
 	p.setPen(Qt::NoPen);
 	p.setBrush(st->msgServiceBg());
@@ -3503,6 +3607,13 @@ void Message::drawRightAction(
 				views->repliesSmall.text,
 				views->repliesSmall.textWidth);
 		}
+	} else if (_rightAction->second) {
+		st->historyFastCloseIcon().paintInCenter(
+			p,
+			{ left, top, size->width(), size->width() });
+		st->historyFastMoreIcon().paintInCenter(
+			p,
+			{ left, size->width() + top, size->width(), size->width() });
 	} else {
 		const auto &icon = data()->isSponsored()
 			? st->historyFastCloseIcon()
@@ -3523,6 +3634,10 @@ ClickHandlerPtr Message::rightActionLink(
 	}
 	if (pressPoint) {
 		_rightAction->lastPoint = *pressPoint;
+	}
+	if (_rightAction->second
+		&& (_rightAction->lastPoint.y() > st::historyFastCloseSize)) {
+		return _rightAction->second->link;
 	}
 	return _rightAction->link;
 }

@@ -1,3 +1,81 @@
+4.16.1 (02.04.24)
+
+- Show information about Fragment phone numbers and usernames.
+- Fix jump to original story from a story repost.
+- Fix old image display in viewer in some cases.
+- Fix several crashes.
+
+4.16 (01.04.24)
+
+- Instant View on Windows 10+ and macOS.
+- Allow scheduling messages in topics.
+- Telegram Business: Links to Chats.
+- Telegram Business: Custom Intro.
+- Telegram Business: Chatbots.
+- Sharing Revenue with Channel Owners.
+
+4.15.7 beta (01.04.24)
+
+- Test crashfix on Linux.
+
+4.15.6 beta (25.03.24)
+
+- Save the Instant View window geometry.
+- Fix jump to anchors with accents in the Instant View.
+- Fix possible crash in the ElasticScroll destructor.
+
+4.15.5 beta (16.03.24)
+
+- Fix a crash in Instant View article parsing.
+- Support AirPods Mute/Unmute toggle in calls on macOS.
+- Disable system proxy on Linux to check if it fixes crashes.
+
+4.15.4 beta (14.03.24)
+
+- Fix initial text color in dark mode Instant View on macOS.
+- Fix non-English symbols encoding in Instant View on macOS.
+- Fix sharing from Instant View on macOS.
+- Fix crash with long messages on Linux.
+
+4.15.3 beta (13.03.24)
+
+- Instant View on Windows (with WebView2) and macOS.
+- Allow scheduling messages in topics.
+- Fix system proxy support on Linux.
+
+4.15.2 (12.03.24)
+
+- Telegram Business: Greeting Message.
+- Telegram Business: Away Message.
+- Telegram Business: Quick Replies.
+- Telegram Business: Working Hours.
+- Close the ongoing call window without hanging up the call.
+- Fast scroll through chats list with Ctrl or Shift pressed.
+- Several bugfixes.
+
+4.15.1 (08.03.24)
+
+- Telegram Business features.
+
+4.15 (18.02.24)
+
+- Stories from groups.
+- Group appearance settings.
+- Group emoji pack.
+- Boost groups to unlock features.
+
+4.14.16 (16.02.24)
+
+- Boost groups.
+
+4.14.15 (10.02.24)
+
+- Fix webview regression on Linux X11. (2nd attempt)
+
+4.14.14 (09.02.24)
+
+- Fix webview regression on Linux X11.
+
 4.14.13 (02.02.24)
 
 - Fix display of statistics for single posts.

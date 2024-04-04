@@ -16,7 +16,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_session.h"
 #include "data/data_message_reactions.h"
 #include "main/main_session.h"
-#include "main/main_account.h"
 #include "main/main_app_config.h"
 #include "ui/image/image_prepare.h"
 #include "base/unixtime.h"
@@ -267,11 +266,13 @@ inline auto DefaultRestrictionValue(
 			AdminRightValue(
 				channel,
 				ChatAdminRight::PostMessages),
+			channel->unrestrictedByBoostsValue(),
 			RestrictionsValue(channel, rights),
 			DefaultRestrictionsValue(channel, rights),
 			[=](
 					ChannelDataFlags flags,
 					bool postMessagesRight,
+					bool unrestrictedByBoosts,
 					ChatRestrictions sendRestriction,
 					ChatRestrictions defaultSendRestriction) {
 				const auto notAmInFlags = Flag::Left | Flag::Forbidden;
@@ -281,7 +282,7 @@ inline auto DefaultRestrictionValue(
 					|| ((flags & Flag::HasLink)
 						&& !(flags & Flag::JoinToWrite));
 				const auto restricted = sendRestriction
-					| defaultSendRestriction;
+					| (defaultSendRestriction && !unrestrictedByBoosts);
 				return allowed
 					&& !forumRestriction
 					&& (postMessagesRight
@@ -566,12 +567,12 @@ int UniqueReactionsLimit(not_null<Main::AppConfig*> config) {
 }
 
 int UniqueReactionsLimit(not_null<PeerData*> peer) {
-	return UniqueReactionsLimit(&peer->session().account().appConfig());
+	return UniqueReactionsLimit(&peer->session().appConfig());
 }
 
 rpl::producer<int> UniqueReactionsLimitValue(
 		not_null<PeerData*> peer) {
-	const auto config = &peer->session().account().appConfig();
+	const auto config = &peer->session().appConfig();
 	return config->value(
 	) | rpl::map([=] {
 		return UniqueReactionsLimit(config);
