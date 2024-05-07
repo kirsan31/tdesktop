@@ -19,6 +19,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "boxes/send_files_box.h"
 #include "boxes/share_box.h"
 #include "boxes/edit_caption_box.h"
+#include "boxes/moderate_messages_box.h"
 #include "boxes/premium_limits_box.h"
 #include "boxes/premium_preview_box.h"
 #include "boxes/peers/edit_peer_permissions_box.h" // ShowAboutGigagroup.
@@ -810,7 +811,7 @@ HistoryWidget::HistoryWidget(
 				const auto account = &_peer->account();
 				closeCurrent();
 				if (const auto primary = Core::App().windowFor(account)) {
-					controller->showToast(unavailable);
+					primary->showToast(unavailable);
 				}
 				return;
 			}
@@ -1836,7 +1837,8 @@ void HistoryWidget::setInnerFocus() {
 			_composeSearch->setInnerFocus();
 		} else if (_chooseTheme && _chooseTheme->shouldBeShown()) {
 			_chooseTheme->setFocus();
-		} else if (_nonEmptySelection
+		} else if (_showAnimation
+			|| _nonEmptySelection
 			|| (_list && _list->wasSelectedText())
 			|| isRecording()
 			|| isBotStart()
@@ -3315,7 +3317,7 @@ void HistoryWidget::messagesFailed(const MTP::Error &error, int requestId) {
 		auto was = _peer;
 		closeCurrent();
 		if (const auto primary = Core::App().windowFor(&was->account())) {
-			controller()->showToast((was && was->isMegagroup())
+			primary->showToast((was && was->isMegagroup())
 				? tr::lng_group_not_accessible(tr::now)
 				: tr::lng_channel_not_accessible(tr::now));
 		}
@@ -6551,6 +6553,14 @@ bool HistoryWidget::cornerButtonsHas(HistoryView::CornerButtonType type) {
 }
 
 void HistoryWidget::mousePressEvent(QMouseEvent *e) {
+	if (!_list) {
+		// Remove focus from the chats list search.
+		setFocus();
+
+		// Set it back to the chats list so that typing filter chats.
+		controller()->widget()->setInnerFocus();
+		return;
+	}
 	const auto isReadyToForward = readyToForward();
 	if (_inPhotoEdit && _photoEditMedia) {
 		EditCaptionBox::StartPhotoEdit(
@@ -7944,15 +7954,23 @@ void HistoryWidget::forwardSelected() {
 void HistoryWidget::confirmDeleteSelected() {
 	if (!_list) return;
 
-	auto items = _list->getSelectedItems();
-	if (items.empty()) {
+	auto ids = _list->getSelectedItems();
+	if (ids.empty()) {
 		return;
 	}
-	auto box = Box<DeleteMessagesBox>(&session(), std::move(items));
-	box->setDeleteConfirmedCallback(crl::guard(this, [=] {
-		clearSelected();
-	}));
-	controller()->show(std::move(box));
+	const auto items = session().data().idsToItems(ids);
+	if (CanCreateModerateMessagesBox(items)) {
+		controller()->show(Box(
+			CreateModerateMessagesBox,
+			items,
+			crl::guard(this, [=] { clearSelected(); })));
+	} else {
+		auto box = Box<DeleteMessagesBox>(&session(), std::move(ids));
+		box->setDeleteConfirmedCallback(crl::guard(this, [=] {
+			clearSelected();
+		}));
+		controller()->show(std::move(box));
+	}
 }
 
 void HistoryWidget::escape() {

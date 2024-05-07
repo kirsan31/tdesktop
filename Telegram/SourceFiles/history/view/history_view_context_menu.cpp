@@ -47,6 +47,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/widgets/fields/input_field.h"
 #include "ui/power_saving.h"
 #include "boxes/delete_messages_box.h"
+#include "boxes/moderate_messages_box.h"
 #include "boxes/report_messages_box.h"
 #include "boxes/sticker_set_box.h"
 #include "boxes/stickers_box.h"
@@ -552,10 +553,17 @@ bool AddRescheduleAction(
 		}
 		const auto callback = [=](Api::SendOptions options) {
 			list->cancelSelection();
+			auto groupedIds = std::vector<MessageGroupId>();
 			for (const auto &id : ids) {
 				const auto item = owner->message(id);
 				if (!item || !item->isScheduled()) {
 					continue;
+				}
+				if (const auto groupId = item->groupId()) {
+					if (ranges::contains(groupedIds, groupId)) {
+						continue;
+					}
+					groupedIds.push_back(groupId);
 				}
 				Api::RescheduleMessage(item, options);
 				// Increase the scheduled date by 1s to keep the order.
@@ -828,9 +836,15 @@ bool AddDeleteMessageAction(
 				controller->cancelUploadLayer(item);
 				return;
 			}
-			const auto suggestModerateActions = true;
-			controller->show(
-				Box<DeleteMessagesBox>(item, suggestModerateActions));
+			const auto list = HistoryItemsList{ item };
+			if (CanCreateModerateMessagesBox(list)) {
+				controller->show(
+					Box(CreateModerateMessagesBox, list, nullptr));
+			} else {
+				const auto suggestModerateActions = false;
+				controller->show(
+					Box<DeleteMessagesBox>(item, suggestModerateActions));
+			}
 		}
 	});
 	if (item->isUploading()) {
@@ -1300,15 +1314,15 @@ void AddPollActions(
 		const auto radio = QString::fromUtf8(kRadio);
 		auto text = poll->question;
 		for (const auto &answer : poll->answers) {
-			text += '\n' + radio + answer.text;
+			text.append('\n').append(radio).append(answer.text);
 		}
-		if (!Ui::SkipTranslate({ text })) {
+		if (!Ui::SkipTranslate(text)) {
 			menu->addAction(tr::lng_context_translate(tr::now), [=] {
 				controller->show(Box(
 					Ui::TranslateBox,
 					item->history()->peer,
 					MsgId(),
-					TextWithEntities{ .text = text },
+					std::move(text),
 					item->forbidsForward()));
 			}, &st::menuIconTranslate);
 		}
