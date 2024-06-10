@@ -157,7 +157,7 @@ QImage PrepareWithBlurredBackground(
 QSize CountDesiredMediaSize(QSize original) {
 	return DownscaledSize(
 		style::ConvertScale(original),
-		{ style::ConvertScale(original.width()), st::maxMediaSize });
+		{ st::maxMediaSize, st::maxMediaSize });
 }
 
 QSize CountMediaSize(QSize desired, int newWidth) {
