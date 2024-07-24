@@ -23,6 +23,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/text/format_values.h"
 #include "ui/text/text_isolated_emoji.h"
 #include "ui/text/text_utilities.h"
+#include "settings/settings_credits_graphics.h" // ShowRefundInfoBox.
 #include "storage/file_upload.h"
 #include "storage/storage_shared_media.h"
 #include "main/main_account.h"
@@ -211,59 +212,13 @@ std::unique_ptr<Data::Media> HistoryItem::CreateMedia(
 		const MTPMessageMedia &media) {
 	using Result = std::unique_ptr<Data::Media>;
 	return media.match([&](const MTPDmessageMediaContact &media) -> Result {
-
-		const auto vcardItems = [&] {
-			using Type = Data::SharedContact::VcardItemType;
-			auto items = Data::SharedContact::VcardItems();
-			for (const auto &item : qs(media.vvcard()).split('\n')) {
-				const auto parts = item.split(':');
-				if (parts.size() == 2) {
-					const auto &type = parts.front();
-					const auto &value = parts[1];
-
-					if (type.startsWith("TEL")) {
-						const auto telType = type.contains("PREF")
-							? Type::PhoneMain
-							: type.contains("HOME")
-							? Type::PhoneHome
-							: type.contains("WORK")
-							? Type::PhoneWork
-							: (type.contains("CELL")
-								|| type.contains("MOBILE"))
-							? Type::PhoneMobile
-							: type.contains("OTHER")
-							? Type::PhoneOther
-							: Type::Phone;
-						items[telType] = value;
-					} else if (type.startsWith("EMAIL")) {
-						items[Type::Email] = value;
-					} else if (type.startsWith("URL")) {
-						items[Type::Url] = value;
-					} else if (type.startsWith("NOTE")) {
-						items[Type::Note] = value;
-					} else if (type.startsWith("ORG")) {
-						items[Type::Organization] = value;
-						items[Type::Organization].replace(';', ' ');
-					} else if (type.startsWith("ADR")) {
-						items[Type::Address] = value;
-					} else if (type.startsWith("BDAY")) {
-						items[Type::Birthday] = value;
-					} else if (type.startsWith("N")) {
-						items[Type::Name] = value;
-						items[Type::Name].replace(';', ' ');
-					}
-				}
-			}
-			return items;
-		}();
-
 		return std::make_unique<Data::MediaContact>(
 			item,
 			media.vuser_id().v,
 			qs(media.vfirst_name()),
 			qs(media.vlast_name()),
 			qs(media.vphone_number()),
-			vcardItems);
+			Data::SharedContact::ParseVcard(qs(media.vvcard())));
 	}, [&](const MTPDmessageMediaGeo &media) -> Result {
 		return media.vgeo().match([&](const MTPDgeoPoint &point) -> Result {
 			return std::make_unique<Data::MediaLocation>(
@@ -395,6 +350,10 @@ std::unique_ptr<Data::Media> HistoryItem::CreateMedia(
 		return std::make_unique<Data::MediaGiveawayResults>(
 			item,
 			Data::ComputeGiveawayResultsData(item, media));
+	}, [&](const MTPDmessageMediaPaidMedia &media) -> Result {
+		return std::make_unique<Data::MediaInvoice>(
+			item,
+			Data::ComputeInvoiceData(item, media));
 	}, [](const MTPDmessageMediaEmpty &) -> Result {
 		return nullptr;
 	}, [](const MTPDmessageMediaUnsupported &) -> Result {
@@ -1859,7 +1818,8 @@ void HistoryItem::applyEdition(const MTPDmessageService &message) {
 	}
 }
 
-void HistoryItem::applyEdition(const MTPMessageExtendedMedia &media) {
+void HistoryItem::applyEdition(
+		const QVector<MTPMessageExtendedMedia> &media) {
 	if (const auto existing = this->media()) {
 		if (existing->updateExtendedMedia(this, media)) {
 			checkBuyButton();
@@ -2287,7 +2247,7 @@ bool HistoryItem::forbidsSaving() const {
 	if (forbidsForward()) {
 		return true;
 	} else if (const auto invoice = _media ? _media->invoice() : nullptr) {
-		return (invoice->extendedMedia != nullptr);
+		return HasExtendedMedia(*invoice);
 	}
 	return false;
 }
@@ -2430,6 +2390,13 @@ std::optional<QString> HistoryItem::errorTextForForward(
 		&& _media->poll()->publicVotes()
 		&& peer->isBroadcast()) {
 		return tr::lng_restricted_send_public_polls(tr::now);
+	} else if (_media
+		&& _media->invoice()
+		&& _media->invoice()->isPaidMedia
+		&& peer->isBroadcast()
+		&& peer->isFullLoaded()
+		&& !peer->asBroadcast()->canPostPaidMedia()) {
+		return tr::lng_restricted_send_paid_media(tr::now);
 	} else if (!Data::CanSend(to, requiredRight, false)) {
 		return tr::lng_forward_cant(tr::now);
 	}
@@ -3037,10 +3004,10 @@ bool HistoryItem::externalReply() const {
 	return false;
 }
 
-bool HistoryItem::hasExtendedMediaPreview() const {
+bool HistoryItem::hasUnpaidContent() const {
 	if (const auto media = _media.get()) {
 		if (const auto invoice = media->invoice()) {
-			return (invoice->extendedPreview && !invoice->extendedMedia);
+			return HasUnpaidMedia(*invoice);
 		}
 	}
 	return false;
@@ -3824,7 +3791,7 @@ void HistoryItem::createComponents(const MTPDmessage &data) {
 void HistoryItem::refreshMedia(const MTPMessageMedia *media) {
 	const auto was = (_media != nullptr);
 	if (const auto invoice = was ? _media->invoice() : nullptr) {
-		if (invoice->extendedMedia) {
+		if (HasExtendedMedia(*invoice)) {
 			return;
 		}
 	}
@@ -4062,6 +4029,22 @@ void HistoryItem::createServiceFromMtp(const MTPDmessageService &message) {
 		}
 	} else if (type == mtpc_messageActionGiveawayResults) {
 		UpdateComponents(HistoryServiceGiveawayResults::Bit());
+	} else if (type == mtpc_messageActionPaymentRefunded) {
+		const auto &data = action.c_messageActionPaymentRefunded();
+		UpdateComponents(HistoryServicePaymentRefund::Bit());
+		const auto refund = Get<HistoryServicePaymentRefund>();
+		refund->peer = _history->owner().peer(peerFromMTP(data.vpeer()));
+		refund->amount = data.vtotal_amount().v;
+		refund->currency = qs(data.vcurrency());
+		refund->transactionId = qs(data.vcharge().data().vid());
+		const auto id = fullId();
+		refund->link = std::make_shared<LambdaClickHandler>([=](
+				ClickContext context) {
+			const auto my = context.other.value<ClickHandlerContext>();
+			if (const auto window = my.sessionWindow.get()) {
+				Settings::ShowRefundInfoBox(window, id);
+			}
+		});
 	}
 	if (const auto replyTo = message.vreply_to()) {
 		replyTo->match([&](const MTPDmessageReplyHeader &data) {
@@ -4975,6 +4958,25 @@ void HistoryItem::setServiceMessageByAction(const MTPmessageAction &action) {
 		return result;
 	};
 
+	auto preparePaymentRefunded = [&](const MTPDmessageActionPaymentRefunded &action) {
+		auto result = PreparedServiceText();
+		const auto refund = Get<HistoryServicePaymentRefund>();
+		Assert(refund != nullptr);
+		Assert(refund->peer != nullptr);
+
+		const auto amount = refund->amount;
+		const auto currency = refund->currency;
+		result.links.push_back(refund->peer->createOpenLink());
+		result.text = tr::lng_action_payment_refunded(
+			tr::now,
+			lt_peer,
+			Ui::Text::Link(refund->peer->name(), 1), // Link 1.
+			lt_amount,
+			{ Ui::FillAmountAndCurrency(amount, currency) },
+			Ui::Text::WithEntities);
+		return result;
+	};
+
 	setServiceText(action.match(
 		prepareChatAddUserText,
 		prepareChatJoinedByLink,
@@ -5017,6 +5019,7 @@ void HistoryItem::setServiceMessageByAction(const MTPmessageAction &action) {
 		prepareGiveawayLaunch,
 		prepareGiveawayResults,
 		prepareBoostApply,
+		preparePaymentRefunded,
 		PrepareEmptyText<MTPDmessageActionRequestedPeerSentMe>,
 		PrepareErrorText<MTPDmessageActionEmpty>));
 
@@ -5594,4 +5597,10 @@ void HistoryItem::clearDependencyMessage() {
 			dependent->msgId = 0;
 		}
 	}
+}
+
+void HistoryItem::overrideMedia(std::unique_ptr<Data::Media> media) {
+	Expects(!media || media->parent() == this);
+
+	_media = std::move(media);
 }

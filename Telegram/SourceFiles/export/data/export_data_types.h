@@ -182,6 +182,18 @@ struct Invoice {
 	int32 receiptMsgId = 0;
 };
 
+struct Media;
+struct PaidMedia {
+	PaidMedia() = default;
+	PaidMedia(PaidMedia &&) = default;
+	PaidMedia &operator=(PaidMedia &&) = default;
+	PaidMedia(const PaidMedia &) = delete;
+	PaidMedia &operator=(const PaidMedia &) = delete;
+
+	uint64 stars = 0;
+	std::vector<std::unique_ptr<Media>> extended;
+};
+
 struct Poll {
 	struct Answer {
 		Utf8String text;
@@ -337,6 +349,7 @@ struct Media {
 		Invoice,
 		Poll,
 		GiveawayStart,
+		PaidMedia,
 		UnsupportedMedia> content;
 	TimeId ttl = 0;
 
@@ -563,6 +576,13 @@ struct ActionBoostApply {
 	int boosts = 0;
 };
 
+struct ActionPaymentRefunded {
+	PeerId peerId = 0;
+	Utf8String currency;
+	uint64 amount = 0;
+	Utf8String transactionId;
+};
+
 struct ServiceAction {
 	std::variant<
 		v::null_t,
@@ -604,7 +624,8 @@ struct ServiceAction {
 		ActionGiftCode,
 		ActionGiveawayLaunch,
 		ActionGiveawayResults,
-		ActionBoostApply> content;
+		ActionBoostApply,
+		ActionPaymentRefunded> content;
 };
 
 ServiceAction ParseServiceAction(

@@ -9,6 +9,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "api/api_blocked_peers.h"
 #include "api/api_common.h"
+#include "base/qthelp_url.h"
+#include "boxes/share_box.h"
 #include "core/click_handler_types.h"
 #include "data/data_bot_app.h"
 #include "data/data_changes.h"
@@ -18,6 +20,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_document_media.h"
 #include "data/data_session.h"
 #include "data/data_web_page.h"
+#include "main/main_app_config.h"
 #include "main/main_session.h"
 #include "main/main_domain.h"
 #include "storage/storage_domain.h"
@@ -664,6 +667,19 @@ void AttachWebView::botHandleMenuButton(Ui::BotWebView::MenuButton button) {
 	}
 }
 
+bool AttachWebView::botValidateExternalLink(QString uri) {
+	const auto lower = uri.toLower();
+	const auto allowed = _session->appConfig().get<std::vector<QString>>(
+		"web_app_allowed_protocols",
+		std::vector{ u"http"_q, u"https"_q });
+	for (const auto &protocol : allowed) {
+		if (lower.startsWith(protocol + u"://"_q)) {
+			return true;
+		}
+	}
+	return false;
+}
+
 void AttachWebView::botOpenIvLink(QString uri) {
 	const auto window = _context ? _context->controller.get() : nullptr;
 	if (window) {
@@ -787,6 +803,16 @@ void AttachWebView::botInvokeCustomMethod(
 	}).send();
 }
 
+void AttachWebView::botShareGameScore() {
+	if (!_panel || !_gameContext) {
+		return;
+	} else if (const auto item = _session->data().message(_gameContext)) {
+		FastShareMessage(uiShow(), item);
+	} else {
+		_panel->showToast({ tr::lng_message_not_found(tr::now) });
+	}
+}
+
 void AttachWebView::botClose() {
 	crl::on_main(this, [=] { cancel(); });
 }
@@ -895,7 +921,7 @@ void AttachWebView::request(const WebViewButton &button) {
 		_requestId = 0;
 		const auto &data = result.data();
 		show(
-			data.vquery_id().v,
+			data.vquery_id().value_or_empty(),
 			qs(data.vurl()),
 			button.text,
 			button.fromAttachMenu || button.url.isEmpty());
@@ -1208,25 +1234,61 @@ void AttachWebView::requestSimple(const WebViewButton &button) {
 		MTP_string(button.startCommand),
 		MTP_dataJSON(MTP_bytes(Window::Theme::WebViewParams().json)),
 		MTP_string("tdesktop")
-	)).done([=](const MTPSimpleWebViewResult &result) {
+	)).done([=](const MTPWebViewResult &result) {
 		_requestId = 0;
-		result.match([&](const MTPDsimpleWebViewResultUrl &data) {
-			show(
-				uint64(),
-				qs(data.vurl()),
-				button.text,
-				false,
-				nullptr,
-				button.fromMainMenu);
-		});
+		const auto &data = result.data();
+		const auto queryId = uint64();
+		show(
+			queryId,
+			qs(data.vurl()),
+			button.text,
+			false,
+			nullptr,
+			button.fromMainMenu);
 	}).fail([=](const MTP::Error &error) {
 		_requestId = 0;
 	}).send();
 }
 
-void AttachWebView::requestMenu(
+bool AttachWebView::openAppFromMenuLink(
 		not_null<Window::SessionController*> controller,
 		not_null<UserData*> bot) {
+	Expects(bot->botInfo != nullptr);
+
+	const auto &url = bot->botInfo->botMenuButtonUrl;
+	const auto local = Core::TryConvertUrlToLocal(url);
+	const auto prefix = u"tg://resolve?"_q;
+	if (!local.startsWith(prefix)) {
+		return false;
+	}
+	const auto params = qthelp::url_parse_params(
+		local.mid(prefix.size()),
+		qthelp::UrlParamNameTransform::ToLower);
+	const auto domainParam = params.value(u"domain"_q);
+	const auto appnameParam = params.value(u"appname"_q);
+	const auto webChannelPreviewLink = (domainParam == u"s"_q)
+		&& !appnameParam.isEmpty();
+	const auto appname = webChannelPreviewLink ? QString() : appnameParam;
+	if (appname.isEmpty()) {
+		return false;
+	}
+	requestApp(
+		controller,
+		Api::SendAction(bot->owner().history(bot)),
+		bot,
+		appname,
+		params.value(u"startapp"_q),
+		true);
+	return true;
+}
+
+void AttachWebView::requestMenu(
+	not_null<Window::SessionController*> controller,
+		not_null<UserData*> bot) {
+	if (openAppFromMenuLink(controller, bot)) {
+		return;
+	}
+
 	cancel();
 	_bot = bot;
 	_context = std::make_unique<Context>(LookupContext(
@@ -1257,7 +1319,7 @@ void AttachWebView::requestMenu(
 		)).done([=](const MTPWebViewResult &result) {
 			_requestId = 0;
 			const auto &data = result.data();
-			show(data.vquery_id().v, qs(data.vurl()), text);
+			show(data.vquery_id().value_or_empty(), qs(data.vurl()), text);
 		}).fail([=](const MTP::Error &error) {
 			_requestId = 0;
 			if (error.type() == u"BOT_INVALID"_q) {
@@ -1380,7 +1442,7 @@ void AttachWebView::requestAppView(bool allowWrite) {
 		MTP_string(_startCommand),
 		MTP_dataJSON(MTP_bytes(Window::Theme::WebViewParams().json)),
 		MTP_string("tdesktop")
-	)).done([=](const MTPAppWebViewResult &result) {
+	)).done([=](const MTPWebViewResult &result) {
 		_requestId = 0;
 		const auto &data = result.data();
 		const auto queryId = uint64();
@@ -1496,6 +1558,7 @@ void AttachWebView::show(
 	_lastShownUrl = url;
 	_lastShownQueryId = queryId;
 	_lastShownButtonText = buttonText;
+	_gameContext = {};
 	base::take(_panel);
 	_catchingCancelInShowCall = true;
 	_panel = Ui::BotWebView::Show({
@@ -1509,6 +1572,24 @@ void AttachWebView::show(
 	});
 	_catchingCancelInShowCall = false;
 	started(queryId);
+}
+
+void AttachWebView::showGame(ShowGameParams &&params) {
+	ActiveWebViews().emplace(this);
+
+	base::take(_panel);
+	_gameContext = params.context;
+
+	_catchingCancelInShowCall = true;
+	_panel = Ui::BotWebView::Show({
+		.url = params.url,
+		.storageId = _session->local().resolveStorageIdBots(),
+		.title = rpl::single(params.title),
+		.bottom = rpl::single('@' + params.bot->username()),
+		.delegate = static_cast<Ui::BotWebView::Delegate*>(this),
+		.menuButtons = Ui::BotWebView::MenuButton::ShareGame,
+	});
+	_catchingCancelInShowCall = false;
 }
 
 void AttachWebView::started(uint64 queryId) {
@@ -1548,6 +1629,57 @@ void AttachWebView::started(uint64 queryId) {
 			_prolongId = 0;
 		}).send();
 	}, _panel->lifetime());
+}
+
+std::shared_ptr<Main::SessionShow> AttachWebView::uiShow() {
+	class Show final : public Main::SessionShow {
+	public:
+		explicit Show(not_null<AttachWebView*> that) : _that(that) {
+		}
+
+		void showOrHideBoxOrLayer(
+				std::variant<
+				v::null_t,
+				object_ptr<Ui::BoxContent>,
+				std::unique_ptr<Ui::LayerWidget>> &&layer,
+				Ui::LayerOptions options,
+				anim::type animated) const override {
+			using UniqueLayer = std::unique_ptr<Ui::LayerWidget>;
+			using ObjectBox = object_ptr<Ui::BoxContent>;
+			const auto panel = _that ? _that->_panel.get() : nullptr;
+			if (auto layerWidget = std::get_if<UniqueLayer>(&layer)) {
+				Unexpected("Layers in AttachWebView are not implemented.");
+			} else if (auto box = std::get_if<ObjectBox>(&layer)) {
+				if (panel) {
+					panel->showBox(std::move(*box), options, animated);
+				}
+			} else if (panel) {
+				panel->hideLayer(animated);
+			}
+		}
+		[[nodiscard]] not_null<QWidget*> toastParent() const override {
+			const auto panel = _that ? _that->_panel.get() : nullptr;
+
+			Ensures(panel != nullptr);
+			return panel->toastParent();
+		}
+		[[nodiscard]] bool valid() const override {
+			return _that && (_that->_panel != nullptr);
+		}
+		operator bool() const override {
+			return valid();
+		}
+
+		[[nodiscard]] Main::Session &session() const override {
+			Expects(_that.get() != nullptr);
+			return *_that->_session;
+		}
+
+	private:
+		const base::weak_ptr<AttachWebView> _that;
+
+	};
+	return std::make_shared<Show>(this);
 }
 
 void AttachWebView::showToast(

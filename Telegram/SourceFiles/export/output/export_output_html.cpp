@@ -1315,6 +1315,12 @@ auto HtmlWriter::Wrap::pushMessage(
 			+ " boosted the group "
 			+ QByteArray::number(data.boosts)
 			+ (data.boosts > 1 ? " times" : " time");
+	}, [&](const ActionPaymentRefunded &data) {
+		const auto amount = FormatMoneyAmount(data.amount, data.currency);
+		auto result = peers.wrapPeerName(data.peerId)
+			+ " refunded back "
+			+ amount;
+		return result;
 	}, [](v::null_t) { return QByteArray(); });
 
 	if (!serviceText.isEmpty()) {
@@ -2092,6 +2098,9 @@ MediaData HtmlWriter::Wrap::prepareMediaData(
 		result.status = Data::FormatMoneyAmount(data.amount, data.currency);
 	}, [](const Poll &data) {
 	}, [](const GiveawayStart &data) {
+	}, [&](const PaidMedia &data) {
+		result.classes = "media_invoice";
+		result.status = Data::FormatMoneyAmount(data.stars, "XTR");
 	}, [](const UnsupportedMedia &data) {
 		Unexpected("Unsupported message.");
 	}, [](v::null_t) {});
