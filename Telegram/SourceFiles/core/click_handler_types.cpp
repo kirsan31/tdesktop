@@ -122,7 +122,9 @@ void HiddenUrlClickHandler::Open(QString url, QVariant context) {
 			return result;
 		}()));
 	} else {
-		const auto parsedUrl = QUrl::fromUserInput(url);
+		const auto parsedUrl = url.startsWith(u"tonsite://"_q)
+			? QUrl(url)
+			: QUrl::fromUserInput(url);
 		if (UrlRequiresConfirmation(parsedUrl) && !base::IsCtrlPressed()) {
 			const auto my = context.value<ClickHandlerContext>();
 			if (!my.show) {
@@ -191,11 +193,13 @@ void BotGameUrlClickHandler::onClick(ClickContext context) const {
 	const auto title = game->title;
 	const auto itemId = my.itemId;
 	const auto openGame = [=] {
-		bot->session().attachWebView().showGame({
+		bot->session().attachWebView().open({
 			.bot = bot,
-			.context = itemId,
-			.url = url,
-			.title = title,
+			.button = {.url = url.toUtf8() },
+			.source = InlineBots::WebViewSourceGame{
+				.messageId = itemId,
+				.title = title,
+			},
 		});
 	};
 	if (_bot->isVerified()

@@ -156,6 +156,7 @@ parts:
       craftctl default
       rm -rf "$CRAFT_PART_INSTALL/usr/share/icons"
     after:
+      - ada
       - ffmpeg
       - libjxl
       - qt
@@ -165,7 +166,7 @@ parts:
   patches:
     source: https://github.com/desktop-app/patches.git
     source-depth: 1
-    source-commit: 20a7c5ffd8265fc6e45203ea2536f7b1965be19a
+    source-commit: 85a1c4ec327ed390a27e85f2162c31525220a50d
     plugin: dump
     override-pull: |
       craftctl default
@@ -208,6 +209,24 @@ parts:
       GTK_PATH=$PWD/usr/lib/$CRAFT_ARCH_TRIPLET_BUILD_FOR/gtk-3.0 /usr/lib/$CRAFT_ARCH_TRIPLET_BUILD_FOR/libgtk-3-0t64/gtk-query-immodules-3.0 > usr/lib/$CRAFT_ARCH_TRIPLET_BUILD_FOR/gtk-3.0/3.0.0/immodules/immodules.cache
     after:
       - telegram
+
+  ada:
+    source: https://github.com/ada-url/ada.git
+    source-depth: 1
+    source-tag: v2.9.0
+    plugin: cmake
+    build-environment:
+      - LDFLAGS: ${LDFLAGS:+$LDFLAGS} -s
+    cmake-generator: Ninja
+    cmake-parameters:
+      - -DCMAKE_BUILD_TYPE=Release
+      - -DCMAKE_INSTALL_PREFIX=/usr
+      - -DADA_TESTING=OFF
+      - -DADA_TOOLS=OFF
+    prime:
+      - -./usr/include
+      - -./usr/lib/$CRAFT_ARCH_TRIPLET_BUILD_FOR/cmake
+      - -./usr/lib/$CRAFT_ARCH_TRIPLET_BUILD_FOR/*.a
 
   ffmpeg:
     plugin: nil
@@ -433,7 +452,7 @@ parts:
   webrtc:
     source: https://github.com/desktop-app/tg_owt.git
     source-depth: 1
-    source-commit: c9cc4390ab951f2cbc103ff783a11f398b27660b
+    source-commit: 4a60ce1ab9fdb962004c6a959f682ace3db50cbd
     plugin: cmake
     build-environment:
       - LDFLAGS: ${LDFLAGS:+$LDFLAGS} -s
