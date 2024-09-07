@@ -176,7 +176,7 @@ settingLocalPasscodeInputField: InputField(defaultInputField) {
 settingLocalPasscodeDescription: FlatLabel(changePhoneDescription) {
 	minWidth: 256px;
 }
-settingLocalPasscodeDescriptionHeight: 52px;
+settingLocalPasscodeDescriptionHeight: 53px;
 settingLocalPasscodeError: FlatLabel(changePhoneError) {
 	minWidth: 256px;
 }
@@ -531,7 +531,7 @@ filterInviteBox: Box(defaultBox) {
 	button: RoundButton(defaultActiveButton) {
 		height: 42px;
 		textTop: 12px;
-		font: font(13px semibold);
+		style: semiboldTextStyle;
 	}
 }
 filterInviteButtonStyle: TextStyle(defaultTextStyle) {

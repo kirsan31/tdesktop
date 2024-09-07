@@ -780,6 +780,7 @@ void GenerateItems(
 	using LogChangeWallpaper = MTPDchannelAdminLogEventActionChangeWallpaper;
 	using LogChangeEmojiStatus = MTPDchannelAdminLogEventActionChangeEmojiStatus;
 	using LogToggleSignatureProfiles = MTPDchannelAdminLogEventActionToggleSignatureProfiles;
+	using LogParticipantSubExtend = MTPDchannelAdminLogEventActionParticipantSubExtend;
 
 	const auto session = &history->session();
 	const auto id = event.vid().v;
@@ -1922,13 +1923,22 @@ void GenerateItems(
 	};
 
 	const auto createChangeProfilePeerColor = [&](const LogChangeProfilePeerColor &data) {
+		const auto group = channel->isMegagroup();
 		createColorChange(
 			data.vprev_value(),
 			data.vnew_value(),
-			tr::lng_admin_log_change_profile_color,
-			tr::lng_admin_log_set_profile_background_emoji,
-			tr::lng_admin_log_removed_profile_background_emoji,
-			tr::lng_admin_log_change_profile_background_emoji);
+			(group
+				? tr::lng_admin_log_change_profile_color_group
+				: tr::lng_admin_log_change_profile_color),
+			(group
+				? tr::lng_admin_log_set_profile_background_emoji_group
+				: tr::lng_admin_log_set_profile_background_emoji),
+			(group
+				? tr::lng_admin_log_removed_profile_background_emoji_group
+				: tr::lng_admin_log_removed_profile_background_emoji),
+			(group
+				? tr::lng_admin_log_change_profile_background_emoji_group
+				: tr::lng_admin_log_change_profile_background_emoji));
 	};
 
 	const auto createChangeWallpaper = [&](const LogChangeWallpaper &data) {
@@ -2028,6 +2038,29 @@ void GenerateItems(
 		addSimpleServiceMessage(text);
 	};
 
+	const auto createParticipantSubExtend = [&](const LogParticipantSubExtend &action) {
+		const auto participant = Api::ChatParticipant(
+			action.vnew_participant(),
+			channel);
+		if (participant.subscriptionDate().isNull()) {
+			return;
+		}
+		const auto participantPeer = channel->owner().peer(participant.id());
+		const auto participantPeerLink = participantPeer->createOpenLink();
+		const auto participantPeerLinkText = Ui::Text::Link(
+			participantPeer->name(),
+			QString());
+		addServiceMessageWithLink(
+			tr::lng_admin_log_subscription_extend(
+				tr::now,
+				lt_name,
+				participantPeerLinkText,
+				lt_date,
+				{ langDateTimeFull(participant.subscriptionDate()) },
+				Ui::Text::WithEntities),
+			participantPeerLink);
+	};
+
 	action.match(
 		createChangeTitle,
 		createChangeAbout,
@@ -2077,7 +2110,8 @@ void GenerateItems(
 		createChangeProfilePeerColor,
 		createChangeWallpaper,
 		createChangeEmojiStatus,
-		createToggleSignatureProfiles);
+		createToggleSignatureProfiles,
+		createParticipantSubExtend);
 }
 
 } // namespace AdminLog
