@@ -5786,7 +5786,7 @@ bool HistoryWidget::canSendFiles(not_null<const QMimeData*> data) const {
 	} else if (data->hasImage()) {
 		return true;
 	} else if (const auto urls = Core::ReadMimeUrls(data); !urls.empty()) {
-		if (ranges::all_of(urls, Core::UrlIsLocal)) {
+		if (ranges::all_of(urls, &QUrl::isLocalFile)) {
 			return true;
 		}
 	}
@@ -8017,12 +8017,17 @@ void HistoryWidget::handlePeerUpdate() {
 		}
 	}
 	if (!_showAnimation) {
-		if (_unblock->isHidden() == isBlocked()
+		const auto blockChanged = (_unblock->isHidden() == isBlocked());
+		if (blockChanged
 			|| (!isBlocked() && _joinChannel->isHidden() == isJoinChannel())) {
 			resize = true;
 		}
 		if (updateCanSendMessage()) {
 			resize = true;
+		}
+		if (blockChanged) {
+			_list->refreshAboutView(true);
+			_list->updateBotInfo();
 		}
 		updateControlsVisibility();
 		if (resize) {
