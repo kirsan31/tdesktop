@@ -70,12 +70,18 @@ enum class OnlyEmojiAndSpaces : char {
 	No,
 };
 
+struct SelectionModeResult {
+	bool inSelectionMode = false;
+	float64 progress = 0.0;
+};
+
 class Element;
 class ElementDelegate {
 public:
 	virtual Context elementContext() = 0;
 	virtual bool elementUnderCursor(not_null<const Element*> view) = 0;
-	virtual bool elementInSelectionMode() = 0;
+	virtual SelectionModeResult elementInSelectionMode(
+		const Element *view) = 0;
 	virtual bool elementIntersectsRange(
 		not_null<const Element*> view,
 		int from,
@@ -131,7 +137,7 @@ public:
 class DefaultElementDelegate : public ElementDelegate {
 public:
 	bool elementUnderCursor(not_null<const Element*> view) override;
-	bool elementInSelectionMode() override;
+	SelectionModeResult elementInSelectionMode(const Element *view) override;
 	bool elementIntersectsRange(
 		not_null<const Element*> view,
 		int from,
@@ -294,6 +300,7 @@ struct SelectedQuote {
 	HistoryItem *item = nullptr;
 	TextWithEntities text;
 	int offset = 0;
+	bool overflown = false;
 
 	explicit operator bool() const {
 		return item && !text.empty();
@@ -569,6 +576,10 @@ public:
 	void overrideMedia(std::unique_ptr<Media> media);
 
 	[[nodiscard]] not_null<PurchasedTag*> enforcePurchasedTag();
+
+	[[nodiscard]] static int AdditionalSpaceForSelectionCheckbox(
+		not_null<const Element*> view,
+		QRect countedGeometry = QRect());
 
 	virtual bool consumeHorizontalScroll(QPoint position, int delta) {
 		return false;

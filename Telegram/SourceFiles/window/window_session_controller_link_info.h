@@ -19,6 +19,7 @@ enum class ResolveType {
 	BotStart,
 	AddToGroup,
 	AddToChannel,
+	HashtagSearch,
 	ShareGame,
 	Mention,
 	Boost,
@@ -48,6 +49,7 @@ struct PeerByLinkInfo {
 	bool joinChannel = false;
 	QString botAppName;
 	bool botAppForceConfirmation = false;
+	bool botAppFullScreen = false;
 	QString attachBotUsername;
 	std::optional<QString> attachBotToggleCommand;
 	bool attachBotMainOpen = false;

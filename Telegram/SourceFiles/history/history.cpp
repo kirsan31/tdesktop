@@ -175,6 +175,15 @@ void History::itemVanished(not_null<HistoryItem*> item) {
 		&& unreadCount() > 0) {
 		setUnreadCount(unreadCount() - 1);
 	}
+	if (const auto media = item->media()) {
+		if (const auto gift = media->gift()) {
+			using GiftAction = Data::GiftUpdate::Action;
+			owner().notifyGiftUpdate({
+				.itemId = item->fullId(),
+				.action = GiftAction::Delete,
+			});
+		}
+	}
 }
 
 void History::takeLocalDraft(not_null<History*> from) {
@@ -450,8 +459,15 @@ std::vector<not_null<HistoryItem*>> History::createItems(
 	const auto detachExistingItem = true;
 	for (auto i = data.cend(), e = data.cbegin(); i != e;) {
 		const auto &data = *--i;
+		const auto id = IdFromMessage(data);
+		if ((id.bare == 1) && (data.type() == mtpc_messageEmpty)) {
+			// The first message of channels should be a service message
+			// about its creation. But if channel auto-cleaning is enabled,
+			// the first message comes empty and is displayed incorrectly.
+			continue;
+		}
 		result.emplace_back(createItem(
-			IdFromMessage(data),
+			id,
 			data,
 			localFlags,
 			detachExistingItem));
@@ -701,6 +717,14 @@ not_null<HistoryItem*> History::addNewLocalMessage(
 	return addNewItem(
 		makeMessage(WithLocalFlag(std::move(fields)), game),
 		true);
+}
+
+not_null<HistoryItem*> History::addNewLocalMessage(
+		not_null<HistoryItem*> item) {
+	Expects(item->history() == this);
+	Expects(item->isLocal());
+
+	return addNewItem(item, true);
 }
 
 not_null<HistoryItem*> History::addSponsoredMessage(

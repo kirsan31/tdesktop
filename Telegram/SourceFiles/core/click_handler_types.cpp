@@ -189,6 +189,7 @@ void BotGameUrlClickHandler::onClick(ClickContext context) const {
 	const auto game = media ? media->game() : nullptr;
 	if (url.startsWith(u"tg://"_q, Qt::CaseInsensitive) || !_bot || !game) {
 		openLink();
+		return;
 	}
 	const auto bot = _bot;
 	const auto title = game->title;
@@ -367,17 +368,6 @@ void MonospaceClickHandler::onClick(ClickContext context) const {
 	}
 	const auto my = context.other.value<ClickHandlerContext>();
 	if (const auto controller = my.sessionWindow.get()) {
-		auto &data = controller->session().data();
-		const auto item = data.message(my.itemId);
-		const auto hasCopyRestriction = item
-			&& (!item->history()->peer->allowsForwarding()
-				|| item->forbidsForward());
-		if (hasCopyRestriction) {
-			controller->showToast(item->history()->peer->isBroadcast()
-				? tr::lng_error_nocopy_channel(tr::now)
-				: tr::lng_error_nocopy_group(tr::now));
-			return;
-		}
 		controller->showToast(tr::lng_text_copied(tr::now));
 	}
 	TextUtilities::SetClipboardText(TextForMimeData::Simple(_text.trimmed()));

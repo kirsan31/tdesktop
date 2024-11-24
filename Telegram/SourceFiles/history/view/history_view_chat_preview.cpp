@@ -161,6 +161,8 @@ private:
 	bool listShowReactPremiumError(
 		not_null<HistoryItem*> item,
 		const Data::ReactionId &id) override;
+	base::unique_qptr<Ui::PopupMenu> listFillSenderUserpicMenu(
+		PeerId userpicPeerId) override;
 	void listWindowSetInnerFocus() override;
 	bool listAllowsDragForward() override;
 	void listLaunchDrag(
@@ -480,6 +482,11 @@ void Item::setupHistory() {
 	using Type = Ui::ElasticScroll::OverscrollType;
 	_scroll->setOverscrollTypes(Type::Real, Type::Real);
 
+	_inner->scrollKeyEvents(
+	) | rpl::start_with_next([=](not_null<QKeyEvent*> e) {
+		_scroll->keyPressEvent(e);
+	}, lifetime());
+
 	_scroll->events() | rpl::start_with_next([=](not_null<QEvent*> e) {
 		if (e->type() == QEvent::MouseButtonDblClick) {
 			const auto button = static_cast<QMouseEvent*>(e.get())->button();
@@ -504,6 +511,10 @@ void Item::setupHistory() {
 	_inner->refreshViewer();
 
 	_inner->setAttribute(Qt::WA_TransparentForMouseEvents);
+
+	crl::on_main(this, [=] {
+		_inner->setFocus();
+	});
 }
 
 void Item::paintEvent(QPaintEvent *e) {
@@ -532,6 +543,7 @@ bool Item::listScrollTo(int top, bool syntetic) {
 }
 
 void Item::listCancelRequest() {
+	_actions.fire({ .cancel = true });
 }
 
 void Item::listDeleteRequest() {
@@ -816,6 +828,11 @@ bool Item::listShowReactPremiumError(
 		not_null<HistoryItem*> item,
 		const Data::ReactionId &id) {
 	return false;
+}
+
+base::unique_qptr<Ui::PopupMenu> Item::listFillSenderUserpicMenu(
+		PeerId userpicPeerId) {
+	return nullptr;
 }
 
 void Item::listWindowSetInnerFocus() {

@@ -70,11 +70,33 @@ class Chatbots;
 class BusinessInfo;
 struct ReactionId;
 struct UnavailableReason;
+struct CreditsStatusSlice;
 
 struct RepliesReadTillUpdate {
 	FullMsgId id;
 	MsgId readTillId;
 	bool out = false;
+};
+
+struct GiftUpdate {
+	enum class Action : uchar {
+		Save,
+		Unsave,
+		Convert,
+		Delete,
+	};
+
+	FullMsgId itemId;
+	Action action = {};
+};
+
+struct SentToScheduled {
+	not_null<History*> history;
+	MsgId scheduledId = 0;
+};
+struct SentFromScheduled {
+	not_null<HistoryItem*> item;
+	MsgId sentId = 0;
 };
 
 class Session final {
@@ -281,6 +303,8 @@ public:
 	[[nodiscard]] rpl::producer<not_null<const ViewElement*>> viewLayoutChanged() const;
 	void notifyNewItemAdded(not_null<HistoryItem*> item);
 	[[nodiscard]] rpl::producer<not_null<HistoryItem*>> newItemAdded() const;
+	void notifyGiftUpdate(GiftUpdate &&update);
+	[[nodiscard]] rpl::producer<GiftUpdate> giftUpdates() const;
 	void requestItemRepaint(not_null<const HistoryItem*> item);
 	[[nodiscard]] rpl::producer<not_null<const HistoryItem*>> itemRepaintRequest() const;
 	void requestViewRepaint(not_null<const ViewElement*> view);
@@ -313,6 +337,11 @@ public:
 
 	void notifyPinnedDialogsOrderUpdated();
 	[[nodiscard]] rpl::producer<> pinnedDialogsOrderUpdated() const;
+
+	using CreditsSubsRebuilder = rpl::event_stream<Data::CreditsStatusSlice>;
+	using CreditsSubsRebuilderPtr = std::shared_ptr<CreditsSubsRebuilder>;
+	[[nodiscard]] CreditsSubsRebuilderPtr createCreditsSubsRebuilder();
+	[[nodiscard]] CreditsSubsRebuilderPtr activeCreditsSubsRebuilder() const;
 
 	void registerRestricted(
 		not_null<const HistoryItem*> item,
@@ -544,8 +573,12 @@ public:
 		const ImageLocation &thumbnailLocation);
 
 	[[nodiscard]] not_null<DocumentData*> document(DocumentId id);
-	not_null<DocumentData*> processDocument(const MTPDocument &data);
-	not_null<DocumentData*> processDocument(const MTPDdocument &data);
+	not_null<DocumentData*> processDocument(
+		const MTPDocument &data,
+		const MTPVector<MTPDocument> *qualities = nullptr);
+	not_null<DocumentData*> processDocument(
+		const MTPDdocument &data,
+		const MTPVector<MTPDocument> *qualities = nullptr);
 	not_null<DocumentData*> processDocument(
 		const MTPdocument &data,
 		const ImageWithLocation &thumbnail);
@@ -773,6 +806,11 @@ public:
 		std::vector<ReactionId> &&was,
 		std::vector<ReactionId> &&now);
 
+	void sentToScheduled(SentToScheduled value);
+	[[nodiscard]] rpl::producer<SentToScheduled> sentToScheduled() const;
+	void sentFromScheduled(SentFromScheduled value);
+	[[nodiscard]] rpl::producer<SentFromScheduled> sentFromScheduled() const;
+
 	void clearLocalStorage();
 
 private:
@@ -924,6 +962,7 @@ private:
 	rpl::event_stream<not_null<const HistoryItem*>> _itemLayoutChanges;
 	rpl::event_stream<not_null<const ViewElement*>> _viewLayoutChanges;
 	rpl::event_stream<not_null<HistoryItem*>> _newItemAdded;
+	rpl::event_stream<GiftUpdate> _giftUpdates;
 	rpl::event_stream<not_null<const HistoryItem*>> _itemRepaintRequest;
 	rpl::event_stream<not_null<const ViewElement*>> _viewRepaintRequest;
 	rpl::event_stream<not_null<const HistoryItem*>> _itemResizeRequest;
@@ -944,6 +983,8 @@ private:
 	rpl::event_stream<ChatListEntryRefresh> _chatListEntryRefreshes;
 	rpl::event_stream<> _unreadBadgeChanges;
 	rpl::event_stream<RepliesReadTillUpdate> _repliesReadTillUpdates;
+	rpl::event_stream<SentToScheduled> _sentToScheduled;
+	rpl::event_stream<SentFromScheduled> _sentFromScheduled;
 
 	Dialogs::MainList _chatsList;
 	Dialogs::IndexedList _contactsList;
@@ -1059,6 +1100,8 @@ private:
 	std::unordered_map<PeerId, std::unique_ptr<PeerData>> _peers;
 
 	MessageIdsList _mimeForwardIds;
+
+	std::weak_ptr<CreditsSubsRebuilder> _creditsSubsRebuilder;
 
 	using CredentialsWithGeneration = std::pair<
 		const Passport::SavedCredentials,

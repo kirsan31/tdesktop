@@ -26,17 +26,22 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "settings/settings_credits_graphics.h"
 #include "ui/boxes/confirm_box.h"
 #include "ui/controls/userpic_button.h"
+#include "ui/effects/credits_graphics.h"
 #include "ui/effects/premium_graphics.h"
 #include "ui/effects/premium_top_bar.h" // Ui::Premium::ColorizedSvg.
 #include "ui/image/image_prepare.h"
 #include "ui/layers/generic_box.h"
+#include "ui/painter.h"
 #include "ui/rect.h"
 #include "ui/text/text_utilities.h"
 #include "ui/vertical_list.h"
 #include "ui/widgets/buttons.h"
+#include "ui/widgets/peer_bubble.h"
 #include "styles/style_boxes.h"
+#include "styles/style_chat.h"
 #include "styles/style_credits.h"
 #include "styles/style_giveaway.h"
+#include "styles/style_info.h" // inviteLinkSubscribeBoxTerms
 #include "styles/style_layers.h"
 #include "styles/style_premium.h"
 #include "styles/style_settings.h"
@@ -90,6 +95,44 @@ struct PaidMediaData {
 		.photos = photos,
 		.videos = videos,
 	};
+}
+
+void AddTerms(
+		not_null<Ui::BoxContent*> box,
+		not_null<Ui::RpWidget*> button,
+		const style::Box &stBox) {
+	const auto terms = Ui::CreateChild<Ui::FlatLabel>(
+		button->parentWidget(),
+		tr::lng_channel_invite_subscription_terms(
+			lt_link,
+			rpl::combine(
+				tr::lng_paid_react_agree_link(),
+				tr::lng_group_invite_subscription_about_url()
+			) | rpl::map([](const QString &text, const QString &url) {
+				return Ui::Text::Link(text, url);
+			}),
+			Ui::Text::RichLangValue),
+		st::inviteLinkSubscribeBoxTerms);
+	const auto &buttonPadding = stBox.buttonPadding;
+	const auto style = box->lifetime().make_state<style::Box>(style::Box{
+		.buttonPadding = buttonPadding + QMargins(0, 0, 0, terms->height()),
+		.buttonHeight = stBox.buttonHeight,
+		.button = stBox.button,
+		.margin = stBox.margin,
+		.title = stBox.title,
+		.bg = stBox.bg,
+		.titleAdditionalFg = stBox.titleAdditionalFg,
+		.shadowIgnoreTopSkip = stBox.shadowIgnoreTopSkip,
+		.shadowIgnoreBottomSkip = stBox.shadowIgnoreBottomSkip,
+	});
+	button->geometryValue() | rpl::start_with_next([=](const QRect &rect) {
+		terms->resizeToWidth(box->width()
+			- rect::m::sum::h(st::boxRowPadding));
+		terms->moveToLeft(
+			rect.x() + (rect.width() - terms->width()) / 2,
+			rect::bottom(rect) + buttonPadding.bottom() / 2);
+	}, terms->lifetime());
+	box->setStyle(*style);
 }
 
 [[nodiscard]] rpl::producer<TextWithEntities> SendCreditsConfirmText(
@@ -150,6 +193,18 @@ struct PaidMediaData {
 	}
 
 	const auto bot = session->data().user(form->botId);
+	if (form->invoice.subscriptionPeriod) {
+		return (bot->botInfo
+				? tr::lng_credits_box_out_subscription_bot
+				: tr::lng_credits_box_out_subscription_business)(
+			lt_count,
+			rpl::single(form->invoice.amount) | tr::to_count(),
+			lt_title,
+			rpl::single(TextWithEntities{ form->title }),
+			lt_recipient,
+			rpl::single(TextWithEntities{ bot->name() }),
+			Ui::Text::RichLangValue);
+	}
 	return tr::lng_credits_box_out_sure(
 		lt_count,
 		rpl::single(form->invoice.amount) | tr::to_count(),
@@ -190,6 +245,57 @@ struct PaidMediaData {
 		st::defaultUserpicButton);
 }
 
+[[nodiscard]] not_null<Ui::RpWidget*> SendCreditsBadge(
+		not_null<Ui::RpWidget*> parent,
+		int credits) {
+	const auto widget = Ui::CreateChild<Ui::RpWidget>(parent);
+	const auto &font = st::chatGiveawayBadgeFont;
+	const auto text = QString::number(credits);
+	const auto iconHeight = font->ascent - font->descent;
+	const auto iconWidth = iconHeight + st::lineWidth;
+	const auto width = font->width(text) + iconWidth + st::lineWidth;
+	const auto inner = QRect(0, 0, width, font->height);
+	const auto rect = inner + st::subscriptionCreditsBadgePadding;
+	const auto size = rect.size();
+	const auto svg = widget->lifetime().make_state<QSvgRenderer>(
+		Ui::Premium::Svg());
+	const auto half = st::chatGiveawayBadgeStroke / 2.;
+	const auto left = st::subscriptionCreditsBadgePadding.left();
+	const auto smaller = QRectF(rect.translated(-rect.topLeft()))
+		- Margins(half);
+	const auto radius = smaller.height() / 2.;
+	widget->resize(size);
+
+	widget->paintRequest() | rpl::start_with_next([=] {
+		auto p = QPainter(widget);
+		auto hq = PainterHighQualityEnabler(p);
+		p.setPen(QPen(st::premiumButtonFg, st::chatGiveawayBadgeStroke * 1.));
+		p.setBrush(st::creditsBg3);
+		p.drawRoundedRect(smaller, radius, radius);
+
+		p.translate(0, font->descent / 2);
+
+		p.setPen(st::premiumButtonFg);
+		p.setBrush(st::premiumButtonFg);
+		svg->render(
+			&p,
+			QRect(
+				left,
+				half + (inner.height() - iconHeight) / 2,
+				iconHeight,
+				iconHeight));
+
+		p.setFont(font);
+		p.drawText(
+			left + iconWidth,
+			st::subscriptionCreditsBadgePadding.top() + font->ascent,
+			text);
+
+	}, widget->lifetime());
+
+	return widget;
+}
+
 } // namespace
 
 void SendCreditsBox(
@@ -203,7 +309,8 @@ void SendCreditsBox(
 		rpl::variable<bool> confirmButtonBusy = false;
 	};
 	const auto state = box->lifetime().make_state<State>();
-	box->setStyle(st::giveawayGiftCodeBox);
+	const auto &stBox = st::giveawayGiftCodeBox;
+	box->setStyle(stBox);
 	box->setNoContentMargin(true);
 
 	const auto session = form->invoice.session;
@@ -245,14 +352,36 @@ void SendCreditsBox(
 		content,
 		SendCreditsThumbnail(content, session, form.get(), photoSize)));
 	thumb->setAttribute(Qt::WA_TransparentForMouseEvents);
+	if (form->invoice.subscriptionPeriod) {
+		const auto badge = SendCreditsBadge(content, form->invoice.amount);
+		thumb->geometryValue() | rpl::start_with_next([=](const QRect &r) {
+			badge->moveToLeft(
+				r.x() + (r.width() - badge->width()) / 2,
+				rect::bottom(r) - badge->height() / 2);
+		}, badge->lifetime());
+		Ui::AddSkip(content);
+		Ui::AddSkip(content);
+	}
 
 	Ui::AddSkip(content);
 	box->addRow(object_ptr<Ui::CenterWrap<>>(
 		box,
 		object_ptr<Ui::FlatLabel>(
 			box,
-			tr::lng_credits_box_out_title(),
+			form->invoice.subscriptionPeriod
+				? rpl::single(form->title)
+				: tr::lng_credits_box_out_title(),
 			st::settingsPremiumUserTitle)));
+	if (form->invoice.subscriptionPeriod && form->botId && form->photo) {
+		Ui::AddSkip(content);
+		Ui::AddSkip(content);
+		const auto bot = session->data().user(form->botId);
+		box->addRow(
+			object_ptr<Ui::CenterWrap<>>(
+				box,
+				Ui::CreatePeerBubble(box, bot)));
+		Ui::AddSkip(content);
+	}
 	Ui::AddSkip(content);
 	box->addRow(object_ptr<Ui::CenterWrap<>>(
 		box,
@@ -272,10 +401,13 @@ void SendCreditsBox(
 		state->confirmButtonBusy = true;
 		session->api().request(
 			MTPpayments_SendStarsForm(
-				MTP_flags(0),
 				MTP_long(form->formId),
 				form->inputInvoice)
-		).done([=](auto result) {
+		).done([=](const MTPpayments_PaymentResult &result) {
+			result.match([&](const MTPDpayments_paymentResult &data) {
+				session->api().applyUpdates(data.vupdates());
+			}, [](const MTPDpayments_paymentVerificationNeeded &data) {
+			});
 			if (weak) {
 				state->confirmButtonBusy = false;
 				box->closeBox();
@@ -303,6 +435,9 @@ void SendCreditsBox(
 			}
 		}).send();
 	});
+	if (form->invoice.subscriptionPeriod) {
+		AddTerms(box, button, stBox);
+	}
 	{
 		using namespace Info::Statistics;
 		const auto loadingAnimation = InfiniteRadialAnimationWidget(
@@ -311,44 +446,27 @@ void SendCreditsBox(
 		AddChildToWidgetCenter(button.data(), loadingAnimation);
 		loadingAnimation->showOn(state->confirmButtonBusy.value());
 	}
-	{
-		auto buttonText = tr::lng_credits_box_out_confirm(
-			lt_count,
-			rpl::single(form->invoice.amount) | tr::to_count(),
-			lt_emoji,
-			rpl::single(CreditsEmojiSmall(session)),
-			Ui::Text::RichLangValue);
-		const auto buttonLabel = Ui::CreateChild<Ui::FlatLabel>(
-			button,
-			rpl::single(QString()),
-			st::creditsBoxButtonLabel);
-		std::move(
-			buttonText
-		) | rpl::start_with_next([=](const TextWithEntities &text) {
-			buttonLabel->setMarkedText(
-				text,
-				Core::MarkedTextContext{
-					.session = session,
-					.customEmojiRepaint = [=] { buttonLabel->update(); },
-				});
-		}, buttonLabel->lifetime());
-		buttonLabel->setTextColorOverride(
-			box->getDelegate()->style().button.textFg->c);
-		button->sizeValue(
-		) | rpl::start_with_next([=](const QSize &size) {
-			buttonLabel->moveToLeft(
-				(size.width() - buttonLabel->width()) / 2,
-				(size.height() - buttonLabel->height()) / 2);
-		}, buttonLabel->lifetime());
-		buttonLabel->setAttribute(Qt::WA_TransparentForMouseEvents);
-		state->confirmButtonBusy.value(
-		) | rpl::start_with_next([=](bool busy) {
-			buttonLabel->setVisible(!busy);
-		}, buttonLabel->lifetime());
-	}
+	SetButtonMarkedLabel(
+		button,
+		rpl::combine(
+			(form->invoice.subscriptionPeriod
+				? tr::lng_credits_box_out_subscription_confirm
+				: tr::lng_credits_box_out_confirm)(
+					lt_count,
+					rpl::single(form->invoice.amount) | tr::to_count(),
+					lt_emoji,
+					rpl::single(CreditsEmojiSmall(session)),
+					Ui::Text::RichLangValue),
+			state->confirmButtonBusy.value()
+		) | rpl::map([](TextWithEntities &&text, bool busy) {
+			return busy ? TextWithEntities() : std::move(text);
+		}),
+		session,
+		st::creditsBoxButtonLabel,
+		box->getDelegate()->style().button.textFg->c);
 
 	const auto buttonWidth = st::boxWidth
-		- rect::m::sum::h(st::giveawayGiftCodeBox.buttonPadding);
+		- rect::m::sum::h(stBox.buttonPadding);
 	button->widthValue() | rpl::filter([=] {
 		return (button->widthNoMargins() != buttonWidth);
 	}) | rpl::start_with_next([=] {
@@ -357,15 +475,11 @@ void SendCreditsBox(
 
 	{
 		const auto close = Ui::CreateChild<Ui::IconButton>(
-			box.get(),
+			content,
 			st::boxTitleClose);
-		close->setClickedCallback([=] {
-			box->closeBox();
-		});
-		box->widthValue(
-		) | rpl::start_with_next([=](int width) {
+		close->setClickedCallback([=] { box->closeBox(); });
+		content->widthValue() | rpl::start_with_next([=](int) {
 			close->moveToRight(0, 0);
-			close->raise();
 		}, close->lifetime());
 	}
 
@@ -403,6 +517,75 @@ TextWithEntities CreditsEmojiSmall(not_null<Main::Session*> session) {
 			st::starIconSmallPadding,
 			true),
 		QString(QChar(0x2B50)));
+}
+
+not_null<FlatLabel*> SetButtonMarkedLabel(
+		not_null<RpWidget*> button,
+		rpl::producer<TextWithEntities> text,
+		Fn<std::any(Fn<void()> update)> context,
+		const style::FlatLabel &st,
+		std::optional<QColor> textFg) {
+	const auto buttonLabel = Ui::CreateChild<Ui::FlatLabel>(
+		button,
+		rpl::single(QString()),
+		st);
+	rpl::duplicate(
+		text
+	) | rpl::filter([=](const TextWithEntities &text) {
+		return !text.text.isEmpty();
+	}) | rpl::start_with_next([=](const TextWithEntities &text) {
+		buttonLabel->setMarkedText(
+			text,
+			context([=] { buttonLabel->update(); }));
+	}, buttonLabel->lifetime());
+	if (textFg) {
+		buttonLabel->setTextColorOverride(textFg);
+	}
+	button->sizeValue(
+	) | rpl::start_with_next([=](const QSize &size) {
+		buttonLabel->moveToLeft(
+			(size.width() - buttonLabel->width()) / 2,
+			(size.height() - buttonLabel->height()) / 2);
+	}, buttonLabel->lifetime());
+	buttonLabel->setAttribute(Qt::WA_TransparentForMouseEvents);
+	buttonLabel->showOn(std::move(
+		text
+	) | rpl::map([=](const TextWithEntities &text) {
+		return !text.text.isEmpty();
+	}));
+	return buttonLabel;
+}
+
+not_null<FlatLabel*> SetButtonMarkedLabel(
+		not_null<RpWidget*> button,
+		rpl::producer<TextWithEntities> text,
+		not_null<Main::Session*> session,
+		const style::FlatLabel &st,
+		std::optional<QColor> textFg) {
+	return SetButtonMarkedLabel(button, text, [=](Fn<void()> update) {
+		return Core::MarkedTextContext{
+			.session = session,
+			.customEmojiRepaint = update,
+		};
+	}, st, textFg);
+}
+
+void SendStarGift(
+		not_null<Main::Session*> session,
+		std::shared_ptr<Payments::CreditsFormData> data,
+		Fn<void(std::optional<QString>)> done) {
+	session->api().request(MTPpayments_SendStarsForm(
+		MTP_long(data->formId),
+		data->inputInvoice
+	)).done([=](const MTPpayments_PaymentResult &result) {
+		result.match([&](const MTPDpayments_paymentResult &data) {
+			session->api().applyUpdates(data.vupdates());
+		}, [](const MTPDpayments_paymentVerificationNeeded &data) {
+		});
+		done(std::nullopt);
+	}).fail([=](const MTP::Error &error) {
+		done(error.type());
+	}).send();
 }
 
 } // namespace Ui

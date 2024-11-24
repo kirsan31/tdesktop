@@ -46,28 +46,43 @@ struct CreditsHistoryEntry final {
 		Unsupported,
 		PremiumBot,
 		Ads,
+		API,
 	};
 
 	QString id;
 	QString title;
-	QString description;
+	TextWithEntities description;
 	QDateTime date;
+	QDateTime firstSaleDate;
+	QDateTime lastSaleDate;
 	PhotoId photoId = 0;
 	std::vector<CreditsHistoryMedia> extended;
 	uint64 credits = 0;
 	uint64 bareMsgId = 0;
 	uint64 barePeerId = 0;
 	uint64 bareGiveawayMsgId = 0;
+	uint64 bareGiftStickerId = 0;
+	uint64 bareActorId = 0;
 	PeerType peerType;
 	QDateTime subscriptionUntil;
 	QDateTime successDate;
 	QString successLink;
-	bool reaction = false;
-	bool refunded = false;
-	bool pending = false;
-	bool failed = false;
-	bool in = false;
-	bool gift = false;
+	int limitedCount = 0;
+	int limitedLeft = 0;
+	int starsConverted = 0;
+	int floodSkip = 0;
+	bool converted : 1 = false;
+	bool anonymous : 1 = false;
+	bool stargift : 1 = false;
+	bool savedToProfile : 1 = false;
+	bool fromGiftsList : 1 = false;
+	bool soldOutInfo : 1 = false;
+	bool reaction : 1 = false;
+	bool refunded : 1 = false;
+	bool pending : 1 = false;
+	bool failed : 1 = false;
+	bool in : 1 = false;
+	bool gift : 1 = false;
 };
 
 struct CreditsStatusSlice final {

@@ -8,8 +8,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #pragma once
 
 #include "base/unique_qptr.h"
-#include "ui/text/text_block.h"
 #include "ui/widgets/menu/menu_item_base.h"
+#include "ui/text/text_custom_emoji.h"
 
 namespace Ui {
 
@@ -36,6 +36,7 @@ enum class WhoReadType {
 	Listened,
 	Watched,
 	Reacted,
+	Edited,
 };
 
 enum class WhoReadState : uchar {
@@ -65,7 +66,7 @@ struct WhoReadContent {
 [[nodiscard]] base::unique_qptr<Menu::ItemBase> WhenReadContextAction(
 	not_null<PopupMenu*> menu,
 	rpl::producer<WhoReadContent> content,
-	Fn<void()> showOrPremium);
+	Fn<void()> showOrPremium = nullptr);
 
 enum class WhoReactedType : uchar {
 	Viewed,

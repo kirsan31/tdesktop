@@ -7,7 +7,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "boxes/filters/edit_filter_chats_list.h"
 
+#include "data/data_chat_filters.h"
 #include "data/data_premium_limits.h"
+#include "data/data_session.h"
 #include "history/history.h"
 #include "window/window_session_controller.h"
 #include "lang/lang_keys.h"
@@ -125,16 +127,27 @@ Flag TypeRow::flag() const {
 }
 
 ExceptionRow::ExceptionRow(not_null<History*> history) : Row(history) {
-	if (peer()->isSelf()) {
+	auto filters = QStringList();
+	for (const auto &filter : history->owner().chatsFilters().list()) {
+		if (filter.contains(history) && filter.id()) {
+			filters << filter.title();
+		}
+	}
+	if (!filters.isEmpty()) {
+		setCustomStatus(filters.join(", "));
+	} else if (peer()->isSelf()) {
 		setCustomStatus(tr::lng_saved_forward_here(tr::now));
 	}
 }
 
 QString ExceptionRow::generateName() {
-	return peer()->isSelf()
+	const auto peer = this->peer();
+	return peer->isSelf()
 		? tr::lng_saved_messages(tr::now)
-		: peer()->isRepliesChat()
+		: peer->isRepliesChat()
 		? tr::lng_replies_messages(tr::now)
+		: peer->isVerifyCodes()
+		? tr::lng_verification_codes(tr::now)
 		: Row::generateName();
 }
 
@@ -152,10 +165,11 @@ PaintRoundImageCallback ExceptionRow::generatePaintUserpicCallback(
 		return ForceRoundUserpicCallback(peer);
 	}
 	return [=](Painter &p, int x, int y, int outerWidth, int size) mutable {
+		using namespace Ui;
 		if (saved) {
-			Ui::EmptyUserpic::PaintSavedMessages(p, x, y, outerWidth, size);
+			EmptyUserpic::PaintSavedMessages(p, x, y, outerWidth, size);
 		} else if (replies) {
-			Ui::EmptyUserpic::PaintRepliesMessages(p, x, y, outerWidth, size);
+			EmptyUserpic::PaintRepliesMessages(p, x, y, outerWidth, size);
 		} else {
 			peer->paintUserpicLeft(p, userpic, x, y, outerWidth, size);
 		}

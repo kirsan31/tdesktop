@@ -13,12 +13,15 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/effects/ripple_animation.h"
 #include "ui/chat/group_call_userpics.h"
 #include "ui/text/text_custom_emoji.h"
+#include "ui/emoji_config.h"
 #include "ui/painter.h"
 #include "ui/ui_utility.h"
 #include "lang/lang_keys.h"
 #include "styles/style_chat.h"
 #include "styles/style_chat_helpers.h"
 #include "styles/style_menu_icons.h"
+
+#include <QtCore/QLocale>
 
 namespace Lang {
 namespace {
@@ -597,7 +600,9 @@ void WhenAction::paint(Painter &p) {
 		p.fillRect(0, 0, width(), _height, _st.itemBg);
 	}
 	p.fillRect(0, 0, width(), _height, _st.itemBg);
-	const auto &icon = loading
+	const auto &icon = (_content.type == WhoReadType::Edited)
+		? (selected ? st::whenEditedOver : st::whenEdited)
+		: loading
 		? st::whoReadChecksDisabled
 		: selected
 		? st::whoReadChecksOver

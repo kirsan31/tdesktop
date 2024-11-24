@@ -12,10 +12,16 @@ class object_ptr;
 
 class PeerData;
 
+namespace Api {
+struct UserStarGift;
+} // namespace Api
+
 namespace Data {
 struct Boost;
 struct CreditsHistoryEntry;
 struct SubscriptionEntry;
+struct GiftCode;
+struct CreditTopupOption;
 } // namespace Data
 
 namespace Main {
@@ -53,12 +59,15 @@ void FillCreditOptions(
 	not_null<Ui::VerticalLayout*> container,
 	not_null<PeerData*> peer,
 	int minCredits,
-	Fn<void()> paid);
+	Fn<void()> paid,
+	rpl::producer<QString> subtitle,
+	std::vector<Data::CreditTopupOption> preloadedTopupOptions);
 
 [[nodiscard]] not_null<Ui::RpWidget*> AddBalanceWidget(
 	not_null<Ui::RpWidget*> parent,
 	rpl::producer<uint64> balanceValue,
-	bool rightAlign);
+	bool rightAlign,
+	rpl::producer<float64> opacityValue = nullptr);
 
 void AddWithdrawalWidget(
 	not_null<Ui::VerticalLayout*> container,
@@ -86,6 +95,20 @@ void GiftedCreditsBox(
 	not_null<PeerData*> to,
 	int count,
 	TimeId date);
+void CreditsPrizeBox(
+	not_null<Ui::GenericBox*> box,
+	not_null<Window::SessionController*> controller,
+	const Data::GiftCode &data,
+	TimeId date);
+void UserStarGiftBox(
+	not_null<Ui::GenericBox*> box,
+	not_null<Window::SessionController*> controller,
+	const Api::UserStarGift &data);
+void StarGiftViewBox(
+	not_null<Ui::GenericBox*> box,
+	not_null<Window::SessionController*> controller,
+	const Data::GiftCode &data,
+	not_null<HistoryItem*> item);
 void ShowRefundInfoBox(
 	not_null<Window::SessionController*> controller,
 	FullMsgId refundItemId);
@@ -107,6 +130,11 @@ void ShowRefundInfoBox(
 	int totalCount,
 	int photoSize);
 
+[[nodiscard]] object_ptr<Ui::RpWidget> SubscriptionUserpic(
+	not_null<Ui::RpWidget*> parent,
+	not_null<PeerData*> peer,
+	int photoSize);
+
 struct SmallBalanceBot {
 	UserId botId = 0;
 };
@@ -119,11 +147,15 @@ struct SmallBalanceSubscription {
 struct SmallBalanceDeepLink {
 	QString purpose;
 };
+struct SmallBalanceStarGift {
+	UserId userId = 0;
+};
 struct SmallBalanceSource : std::variant<
 	SmallBalanceBot,
 	SmallBalanceReaction,
 	SmallBalanceSubscription,
-	SmallBalanceDeepLink> {
+	SmallBalanceDeepLink,
+	SmallBalanceStarGift> {
 	using variant::variant;
 };
 

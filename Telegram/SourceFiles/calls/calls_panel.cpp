@@ -203,7 +203,9 @@ void Panel::initWindow() {
 			return Flag::None | Flag(0);
 		}
 #ifndef Q_OS_MAC
-		if (_controls->controls.geometry().contains(widgetPoint)) {
+		using Result = Ui::Platform::HitTestResult;
+		const auto windowPoint = widget()->mapTo(window(), widgetPoint);
+		if (_controls->controls.hitTest(windowPoint) != Result::None) {
 			return Flag::None | Flag(0);
 		}
 #endif // !Q_OS_MAC
@@ -996,7 +998,12 @@ void Panel::paint(QRect clip) {
 
 bool Panel::handleClose() const {
 	if (_call) {
-		window()->hide();
+		if (_call->state() == Call::State::WaitingUserConfirmation
+			|| _call->state() == Call::State::Busy) {
+			_call->hangup();
+		} else {
+			window()->hide();
+		}
 		return true;
 	}
 	return false;
@@ -1031,6 +1038,7 @@ void Panel::stateChanged(State state) {
 			_startVideo = base::make_unique_q<Ui::CallButton>(
 				widget(),
 				st::callStartVideo);
+			_startVideo->show();
 			_startVideo->setText(tr::lng_call_start_video());
 			_startVideo->clicks() | rpl::map_to(true) | rpl::start_to_stream(
 				_startOutgoingRequests,

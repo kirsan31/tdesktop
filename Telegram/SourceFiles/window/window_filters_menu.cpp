@@ -15,14 +15,15 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_session.h"
 #include "data/data_session.h"
 #include "data/data_chat_filters.h"
-#include "data/data_folder.h"
 #include "data/data_user.h"
 #include "data/data_peer_values.h"
 #include "data/data_premium_limits.h"
+#include "data/data_unread_value.h"
 #include "lang/lang_keys.h"
 #include "ui/filter_icons.h"
 #include "ui/wrap/vertical_layout.h"
 #include "ui/wrap/vertical_layout_reorder.h"
+#include "ui/widgets/menu/menu_add_action_callback_factory.h"
 #include "ui/widgets/popup_menu.h"
 #include "ui/boxes/confirm_box.h"
 #include "ui/ui_utility.h"
@@ -38,42 +39,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_menu_icons.h"
 
 namespace Window {
-namespace {
-
-[[nodiscard]] Dialogs::UnreadState MainListMapUnreadState(
-		not_null<Main::Session*> session,
-		const Dialogs::UnreadState &state) {
-	const auto folderId = Data::Folder::kId;
-	if (const auto folder = session->data().folderLoaded(folderId)) {
-		return state - folder->chatsList()->unreadState();
-	}
-	return state;
-}
-
-[[nodiscard]] rpl::producer<Dialogs::UnreadState> MainListUnreadState(
-		not_null<Dialogs::MainList*> list) {
-	return rpl::single(rpl::empty) | rpl::then(
-		list->unreadStateChanges() | rpl::to_empty
-	) | rpl::map([=] {
-		return list->unreadState();
-	});
-}
-
-[[nodiscard]] rpl::producer<Dialogs::UnreadState> UnreadStateValue(
-		not_null<Main::Session*> session,
-		FilterId filterId) {
-	if (filterId > 0) {
-		const auto filters = &session->data().chatsFilters();
-		return MainListUnreadState(filters->chatsList(filterId));
-	}
-	return MainListUnreadState(
-		session->data().chatsList()
-	) | rpl::map([=](const Dialogs::UnreadState &state) {
-		return MainListMapUnreadState(session, state);
-	});
-}
-
-} // namespace
 
 FiltersMenu::FiltersMenu(
 	not_null<Ui::RpWidget*> parent,
@@ -86,6 +51,7 @@ FiltersMenu::FiltersMenu(
 , _container(
 	_scroll.setOwnedWidget(
 		object_ptr<Ui::VerticalLayout>(&_scroll))) {
+
 	_drag.timer.setCallback([=] {
 		if (_drag.filterId >= 0) {
 			_session->setActiveChatsFilter(_drag.filterId);
@@ -160,6 +126,7 @@ void FiltersMenu::setup() {
 
 void FiltersMenu::setupMainMenuIcon() {
 	OtherAccountsUnreadState(
+		&_session->session().account()
 	) | rpl::start_with_next([=](const OthersUnreadState &state) {
 		const auto icon = !state.count
 			? nullptr
@@ -254,7 +221,7 @@ void FiltersMenu::setupList() {
 	_reorder = std::make_unique<Ui::VerticalLayoutReorder>(_list, &_scroll);
 
 	_reorder->updates(
-		) | rpl::start_with_next([=](Ui::VerticalLayoutReorder::Single data) {
+	) | rpl::start_with_next([=](Ui::VerticalLayoutReorder::Single data) {
 		using State = Ui::VerticalLayoutReorder::State;
 		if (data.state == State::Started) {
 			++_reordering;
@@ -297,18 +264,21 @@ base::unique_qptr<Ui::SideBarButton> FiltersMenu::prepareButton(
 		: Ui::FilterIcon::All);
 	raw->setIconOverride(icons.normal, icons.active);
 	if (id >= 0) {
-		UnreadStateValue(
-			&_session->session(),
-			id
-		) | rpl::start_with_next([=](const Dialogs::UnreadState &state) {
-			const auto count = (state.chats + state.marks);
+		rpl::combine(
+			Data::UnreadStateValue(&_session->session(), id),
+			Data::IncludeMutedCounterFoldersValue()
+		) | rpl::start_with_next([=](
+				const Dialogs::UnreadState &state,
+				bool includeMuted) {
 			const auto muted = (state.chatsMuted + state.marksMuted);
+			const auto count = (state.chats + state.marks)
+				- (includeMuted ? 0 : muted);
 			const auto string = !count
 				? QString()
 				: (count > 99)
 				? "99+"
 				: QString::number(count);
-			raw->setBadge(string, count == muted);
+			raw->setBadge(string, includeMuted && (count == muted));
 		}, raw->lifetime());
 	}
 	raw->setActive(_session->activeChatsFilterCurrent() == id);
@@ -387,18 +357,11 @@ void FiltersMenu::showMenu(QPoint position, FilterId id) {
 	_popupMenu = base::make_unique_q<Ui::PopupMenu>(
 		i->second.get(),
 		st::popupMenuWithIcons);
-	const auto addAction = Window::PeerMenuCallback([&](
-			Window::PeerMenuCallback::Args args) {
-		return _popupMenu->addAction(
-			args.text,
-			crl::guard(&_outer, std::move(args.handler)),
-			args.icon);
-	});
-
+	const auto addAction = Ui::Menu::CreateAddActionCallback(_popupMenu);
 	if (id) {
 		addAction(
 			tr::lng_filters_context_edit(tr::now),
-			[=] { showEditBox(id); },
+			crl::guard(&_outer, [=] { EditExistingFilter(_session, id); }),
 			&st::menuIconEdit);
 
 		auto filteredChats = [=] {
@@ -409,14 +372,18 @@ void FiltersMenu::showMenu(QPoint position, FilterId id) {
 			std::move(filteredChats),
 			addAction);
 
-		addAction(
-			tr::lng_filters_context_remove(tr::now),
-			[=] { showRemoveBox(id); },
-			&st::menuIconDelete);
+		addAction({
+			.text = tr::lng_filters_context_remove(tr::now),
+			.handler = crl::guard(&_outer, [=, this] {
+				_removeApi.request(Ui::MakeWeak(&_outer), _session, id);
+			}),
+			.icon = &st::menuIconDeleteAttention,
+			.isAttention = true,
+		});
 	} else {
 		auto customUnreadState = [=] {
 			const auto session = &_session->session();
-			return MainListMapUnreadState(
+			return Data::MainListMapUnreadState(
 				session,
 				session->data().chatsList()->unreadState());
 		};
@@ -428,7 +395,7 @@ void FiltersMenu::showMenu(QPoint position, FilterId id) {
 
 		addAction(
 			tr::lng_filters_setup_menu(tr::now),
-			[=] { openFiltersSettings(); },
+			crl::guard(&_outer, [=] { openFiltersSettings(); }),
 			&st::menuIconEdit);
 	}
 	if (_popupMenu->empty()) {
@@ -436,105 +403,6 @@ void FiltersMenu::showMenu(QPoint position, FilterId id) {
 		return;
 	}
 	_popupMenu->popup(position);
-}
-
-void FiltersMenu::showEditBox(FilterId id) {
-	EditExistingFilter(_session, id);
-}
-
-void FiltersMenu::showRemoveBox(FilterId id) {
-	const auto session = &_session->session();
-	const auto &list = session->data().chatsFilters().list();
-	const auto i = ranges::find(list, id, &Data::ChatFilter::id);
-	const auto filter = (i != end(list)) ? *i : Data::ChatFilter();
-	const auto has = filter.hasMyLinks();
-	const auto confirm = [=](Fn<void()> action, bool onlyWhenHas = false) {
-		if (!has && onlyWhenHas) {
-			action();
-			return;
-		}
-		_session->window().show(Ui::MakeConfirmBox({
-			.text = (has
-				? tr::lng_filters_delete_sure()
-				: tr::lng_filters_remove_sure()),
-			.confirmed = [=](Fn<void()> &&close) { close(); action(); },
-			.confirmText = (has
-				? tr::lng_box_delete()
-				: tr::lng_filters_remove_yes()),
-			.confirmStyle = &st::attentionBoxButton,
-		}));
-	};
-	const auto simple = [=] {
-		confirm([=] { remove(id); });
-	};
-	const auto suggestRemoving = Api::ExtractSuggestRemoving(filter);
-	if (suggestRemoving.empty()) {
-		simple();
-		return;
-	} else if (_removingRequestId) {
-		if (_removingId == id) {
-			return;
-		}
-		session->api().request(_removingRequestId).cancel();
-	}
-	_removingId = id;
-	_removingRequestId = session->api().request(
-		MTPchatlists_GetLeaveChatlistSuggestions(
-			MTP_inputChatlistDialogFilter(
-				MTP_int(id)))
-	).done(crl::guard(&_outer, [=](const MTPVector<MTPPeer> &result) {
-		_removingRequestId = 0;
-		const auto suggestRemovePeers = ranges::views::all(
-			result.v
-		) | ranges::views::transform([=](const MTPPeer &peer) {
-			return session->data().peer(peerFromMTP(peer));
-		}) | ranges::to_vector;
-		const auto chosen = crl::guard(&_outer, [=](
-				std::vector<not_null<PeerData*>> peers) {
-			remove(id, std::move(peers));
-		});
-		confirm(crl::guard(&_outer, [=] {
-			Api::ProcessFilterRemove(
-				_session,
-				filter.title(),
-				filter.iconEmoji(),
-				suggestRemoving,
-				suggestRemovePeers,
-				chosen);
-		}), true);
-	})).fail(crl::guard(&_outer, [=] {
-		_removingRequestId = 0;
-		simple();
-	})).send();
-}
-
-void FiltersMenu::remove(
-		FilterId id,
-		std::vector<not_null<PeerData*>> leave) {
-	const auto session = &_session->session();
-	const auto api = &session->api();
-	session->data().chatsFilters().apply(MTP_updateDialogFilter(
-		MTP_flags(MTPDupdateDialogFilter::Flag(0)),
-		MTP_int(id),
-		MTPDialogFilter()));
-	if (leave.empty()) {
-		api->request(MTPmessages_UpdateDialogFilter(
-			MTP_flags(MTPmessages_UpdateDialogFilter::Flag(0)),
-			MTP_int(id),
-			MTPDialogFilter()
-		)).send();
-	} else {
-		api->request(MTPchatlists_LeaveChatlist(
-			MTP_inputChatlistDialogFilter(MTP_int(id)),
-			MTP_vector<MTPInputPeer>(ranges::views::all(
-				leave
-			) | ranges::views::transform([](not_null<PeerData*> peer) {
-				return MTPInputPeer(peer->input);
-			}) | ranges::to<QVector<MTPInputPeer>>())
-		)).done([=](const MTPUpdates &result) {
-			api->applyUpdates(result);
-		}).send();
-	}
 }
 
 void FiltersMenu::applyReorder(
