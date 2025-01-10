@@ -286,13 +286,20 @@ std::unique_ptr<Ui::Text::CustomEmoji> UiIntegration::createCustomEmoji(
 		return std::make_unique<Ui::Text::LimitedLoopsEmoji>(
 			std::move(result),
 			my->customEmojiLoopLimit);
+	} else if (my->customEmojiLoopLimit) {
+		return std::make_unique<Ui::Text::FirstFrameEmoji>(
+			std::move(result));
 	}
 	return result;
 }
 
 Fn<void()> UiIntegration::createSpoilerRepaint(const std::any &context) {
 	const auto my = std::any_cast<MarkedTextContext>(&context);
-	return my ? my->customEmojiRepaint : nullptr;
+	if (my) {
+		return my->customEmojiRepaint;
+	}
+	const auto common = std::any_cast<CommonTextContext>(&context);
+	return common ? common->repaint : nullptr;
 }
 
 rpl::producer<> UiIntegration::forcePopupMenuHideRequests() {

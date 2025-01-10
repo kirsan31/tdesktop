@@ -120,6 +120,9 @@ void PeerListBox::createMultiSelect() {
 		content()->submitted();
 	});
 	_select->entity()->setQueryChangedCallback([=](const QString &query) {
+		if (_customQueryChangedCallback) {
+			_customQueryChangedCallback(query);
+		}
 		searchQueryChanged(query);
 	});
 	_select->entity()->setItemRemovedCallback([=](uint64 itemId) {
@@ -136,6 +139,10 @@ void PeerListBox::createMultiSelect() {
 	});
 	_select->resizeToWidth(_controller->contentWidth());
 	_select->moveToLeft(0, 0);
+}
+
+void PeerListBox::appendQueryChangedCallback(Fn<void(QString)> callback) {
+	_customQueryChangedCallback = std::move(callback);
 }
 
 void PeerListBox::setAddedTopScrollSkip(int skip) {
@@ -217,19 +224,7 @@ void PeerListBox::keyPressEvent(QKeyEvent *e) {
 
 void PeerListBox::searchQueryChanged(const QString &query) {
 	scrollToY(0);
-	const auto isEmpty = content()->searchQueryChanged(query);
-	if (_specialTabsMode.enabled) {
-		const auto was = _specialTabsMode.searchIsActive;
-		_specialTabsMode.searchIsActive = !isEmpty;
-		if (was != _specialTabsMode.searchIsActive) {
-			if (_specialTabsMode.searchIsActive) {
-				_specialTabsMode.topSkip = _addedTopScrollSkip;
-				setAddedTopScrollSkip(0);
-			} else {
-				setAddedTopScrollSkip(_specialTabsMode.topSkip);
-			}
-		}
-	}
+	content()->searchQueryChanged(query);
 }
 
 void PeerListBox::resizeEvent(QResizeEvent *e) {
@@ -486,7 +481,7 @@ void PeerListBox::addSelectItem(
 void PeerListBox::addSelectItem(
 		uint64 itemId,
 		const QString &text,
-		Ui::MultiSelect::PaintRoundImage paintUserpic,
+		PaintRoundImageCallback paintUserpic,
 		anim::type animated) {
 	if (!_select) {
 		createMultiSelect();
@@ -561,13 +556,8 @@ rpl::producer<int> PeerListBox::multiSelectHeightValue() const {
 	return _select ? _select->heightValue() : rpl::single(0);
 }
 
-void PeerListBox::setSpecialTabMode(bool value) {
-	content()->setIgnoreHiddenRowsOnSearch(value);
-	if (value) {
-		_specialTabsMode.enabled = true;
-	} else {
-		_specialTabsMode = {};
-	}
+rpl::producer<> PeerListBox::noSearchSubmits() const {
+	return content()->noSearchSubmits();
 }
 
 PeerListRow::PeerListRow(not_null<PeerData*> peer)
@@ -798,31 +788,29 @@ int PeerListRow::paintNameIconGetWidth(
 		|| _isVerifyCodesChat) {
 		return 0;
 	}
-	return _badge.drawGetWidth(
-		p,
-		QRect(
+	return _badge.drawGetWidth(p, {
+		.peer = peer(),
+		.rectForName = QRect(
 			nameLeft,
 			nameTop,
 			availableWidth,
 			st::semiboldFont->height),
-		nameWidth,
-		outerWidth,
-		{
-			.peer = peer(),
-			.verified = &(selected
-				? st::dialogsVerifiedIconOver
-				: st::dialogsVerifiedIcon),
-			.premium = &(selected
-				? st::dialogsPremiumIcon.over
-				: st::dialogsPremiumIcon.icon),
-			.scam = &(selected ? st::dialogsScamFgOver : st::dialogsScamFg),
-			.premiumFg = &(selected
-				? st::dialogsVerifiedIconBgOver
-				: st::dialogsVerifiedIconBg),
-			.customEmojiRepaint = repaint,
-			.now = now,
-			.paused = false,
-		});
+		.nameWidth = nameWidth,
+		.outerWidth = outerWidth,
+		.verified = &(selected
+			? st::dialogsVerifiedIconOver
+			: st::dialogsVerifiedIcon),
+		.premium = &(selected
+			? st::dialogsPremiumIcon.over
+			: st::dialogsPremiumIcon.icon),
+		.scam = &(selected ? st::dialogsScamFgOver : st::dialogsScamFg),
+		.premiumFg = &(selected
+			? st::dialogsVerifiedIconBgOver
+			: st::dialogsVerifiedIconBg),
+		.customEmojiRepaint = repaint,
+		.now = now,
+		.paused = false,
+	});
 }
 
 void PeerListRow::paintStatusText(
@@ -1291,6 +1279,9 @@ void PeerListContent::clearAllContent() {
 		= _normalizedSearchQuery
 		= _mentionHighlight
 		= QString();
+	if (_controller->hasComplexSearch()) {
+		_controller->search(QString());
+	}
 }
 
 void PeerListContent::convertRowToSearchResult(not_null<PeerListRow*> row) {
@@ -1689,6 +1680,10 @@ void PeerListContent::mousePressReleased(Qt::MouseButton button) {
 				_controller->rowClicked(row);
 			}
 		}
+	} else if (button == Qt::MiddleButton && pressed == _selected) {
+		if (auto row = getRow(pressed.index)) {
+			_controller->rowMiddleClicked(row);
+		}
 	}
 }
 
@@ -2079,7 +2074,7 @@ void PeerListContent::checkScrollForPreload() {
 	}
 }
 
-PeerListContent::IsEmpty PeerListContent::searchQueryChanged(QString query) {
+void PeerListContent::searchQueryChanged(QString query) {
 	const auto searchWordsList = TextUtilities::PrepareSearchWords(query);
 	const auto normalizedQuery = searchWordsList.join(' ');
 	if (_ignoreHiddenRowsOnSearch && !normalizedQuery.isEmpty()) {
@@ -2136,7 +2131,6 @@ PeerListContent::IsEmpty PeerListContent::searchQueryChanged(QString query) {
 		}
 		refreshRows();
 	}
-	return _normalizedSearchQuery.isEmpty();
 }
 
 std::unique_ptr<PeerListState> PeerListContent::saveState() const {
@@ -2211,6 +2205,9 @@ bool PeerListContent::submitted() {
 			_controller->rowClicked(row);
 			return true;
 		}
+	} else {
+		_noSearchSubmits.fire({});
+		return true;
 	}
 	return false;
 }

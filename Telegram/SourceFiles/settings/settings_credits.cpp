@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "settings/settings_credits.h"
 
 #include "api/api_credits.h"
+#include "base/call_delayed.h"
 #include "boxes/star_gift_box.h"
 #include "boxes/gift_credits_box.h"
 #include "boxes/gift_premium_box.h"
@@ -17,9 +18,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_photo_media.h"
 #include "data/data_session.h"
 #include "data/data_user.h"
+#include "info/bot/starref/info_bot_starref_common.h"
+#include "info/bot/starref/info_bot_starref_join_widget.h"
 #include "info/channel_statistics/boosts/giveaway/boost_badge.h" // InfiniteRadialAnimationWidget.
 #include "info/settings/info_settings_widget.h" // SectionCustomTopBarData.
 #include "info/statistics/info_statistics_list_controllers.h"
+#include "info/info_memento.h"
 #include "lang/lang_keys.h"
 #include "main/main_session.h"
 #include "settings/settings_common_session.h"
@@ -40,6 +44,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/wrap/slide_wrap.h"
 #include "ui/wrap/vertical_layout.h"
 #include "window/window_session_controller.h"
+#include "styles/style_chat_helpers.h"
 #include "styles/style_credits.h"
 #include "styles/style_giveaway.h"
 #include "styles/style_info.h"
@@ -74,7 +79,7 @@ private:
 	void setupContent();
 	void setupHistory(not_null<Ui::VerticalLayout*> container);
 	void setupSubscriptions(not_null<Ui::VerticalLayout*> container);
-
+	void setupStarRefPromo(not_null<Ui::VerticalLayout*> container);
 	const not_null<Window::SessionController*> _controller;
 
 	QWidget *_parent = nullptr;
@@ -206,6 +211,25 @@ void Credits::setupSubscriptions(not_null<Ui::VerticalLayout*> container) {
 	}
 }
 
+void Credits::setupStarRefPromo(not_null<Ui::VerticalLayout*> container) {
+	const auto self = _controller->session().user();
+	if (!Info::BotStarRef::Join::Allowed(self)) {
+		return;
+	}
+	Ui::AddSkip(container);
+	const auto button = Info::BotStarRef::AddViewListButton(
+		container,
+		tr::lng_credits_summary_earn_title(),
+		tr::lng_credits_summary_earn_about(),
+		true);
+	button->setClickedCallback([=] {
+		_controller->showSection(Info::BotStarRef::Join::Make(self));
+	});
+	Ui::AddSkip(container);
+	Ui::AddDivider(container);
+	Ui::AddSkip(container);
+}
+
 void Credits::setupHistory(not_null<Ui::VerticalLayout*> container) {
 	const auto history = container->add(
 		object_ptr<Ui::SlideWrap<Ui::VerticalLayout>>(
@@ -235,14 +259,10 @@ void Credits::setupHistory(not_null<Ui::VerticalLayout*> container) {
 		const auto outTabText = tr::lng_credits_summary_history_tab_out(
 			tr::now);
 		if (hasOneTab) {
-			Ui::AddSkip(inner);
-			const auto header = inner->add(
-				object_ptr<Statistic::Header>(inner),
-				st::statisticsLayerMargins
-					+ st::boostsChartHeaderPadding);
-			header->resizeToWidth(header->width());
-			header->setTitle(fullTabText);
-			header->setSubTitle({});
+			Ui::AddSubsectionTitle(
+				inner,
+				tr::lng_credits_summary_history_tab_full(),
+				{ 0, 0, 0, -st::defaultSubsectionTitlePadding.bottom() });
 		}
 
 		const auto slider = inner->add(
@@ -384,7 +404,7 @@ void Credits::setupContent() {
 	const auto balanceAmount = Ui::CreateChild<Ui::FlatLabel>(
 		balanceLine,
 		_controller->session().credits().balanceValue(
-		) | rpl::map(Lang::FormatCountDecimal),
+		) | rpl::map(Lang::FormatStarsAmountDecimal),
 		st::creditsSettingsBigBalance);
 	balanceAmount->sizeValue() | rpl::start_with_next([=] {
 		balanceLine->resize(
@@ -434,7 +454,8 @@ void Credits::setupContent() {
 		const auto options = state->api
 			? state->api->options()
 			: Data::CreditTopupOptions();
-		FillCreditOptions(show, inner, self, 0, paid, nullptr, options);
+		const auto amount = StarsAmount();
+		FillCreditOptions(show, inner, self, amount, paid, nullptr, options);
 
 		const auto button = box->addButton(tr::lng_close(), [=] {
 			box->closeBox();
@@ -481,21 +502,52 @@ void Credits::setupContent() {
 
 	Ui::AddSkip(content);
 
-	const auto gift = content->add(
-		object_ptr<Ui::RoundButton>(
-			content,
-			tr::lng_credits_gift_button(),
-			st::creditsSettingsBigBalanceButtonGift),
-		st::boxRowPadding);
-	gift->setTextTransform(Ui::RoundButton::TextTransform::NoTransform);
-	gift->setClickedCallback([=, controller = _controller] {
-		Ui::ShowGiftCreditsBox(controller, paid);
-	});
+	{
+		const auto &giftSt = st::creditsSettingsBigBalanceButtonGift;
+		const auto giftDelay = giftSt.ripple.hideDuration * 2;
+		const auto fakeLoading
+			= content->lifetime().make_state<rpl::variable<bool>>(false);
+		const auto gift = content->add(
+			object_ptr<Ui::RoundButton>(
+				content,
+				rpl::conditional(
+					fakeLoading->value(),
+					rpl::single(QString()),
+					tr::lng_credits_gift_button()),
+				giftSt),
+			st::boxRowPadding);
+		gift->setTextTransform(Ui::RoundButton::TextTransform::NoTransform);
+		gift->setClickedCallback([=, controller = _controller] {
+			if (fakeLoading->current()) {
+				return;
+			}
+			*fakeLoading = true;
+			base::call_delayed(giftDelay, crl::guard(gift, [=] {
+				*fakeLoading = false;
+				Ui::ShowGiftCreditsBox(controller, paid);
+			}));
+		});
+		{
+			using namespace Info::Statistics;
+			const auto loadingAnimation = InfiniteRadialAnimationWidget(
+				gift,
+				gift->height() / 2,
+				&st::editStickerSetNameLoading);
+			AddChildToWidgetCenter(gift, loadingAnimation);
+			loadingAnimation->showOn(fakeLoading->value());
+		}
+		gift->widthValue() | rpl::filter([=] {
+			return (gift->widthNoMargins() != (content->width() - paddings));
+		}) | rpl::start_with_next([=] {
+			gift->resizeToWidth(content->width() - paddings);
+		}, gift->lifetime());
+	}
 
 	Ui::AddSkip(content);
 	Ui::AddSkip(content);
 	Ui::AddDivider(content);
 
+	setupStarRefPromo(content);
 	setupSubscriptions(content);
 	setupHistory(content);
 

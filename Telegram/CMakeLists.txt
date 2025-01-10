@@ -246,6 +246,8 @@ PRIVATE
     boxes/peers/prepare_short_info_box.h
     boxes/peers/replace_boost_box.cpp
     boxes/peers/replace_boost_box.h
+    boxes/peers/verify_peers_box.cpp
+    boxes/peers/verify_peers_box.h
     boxes/about_box.cpp
     boxes/about_box.h
     boxes/about_sponsored_box.cpp
@@ -322,8 +324,6 @@ PRIVATE
     boxes/send_gif_with_caption_box.h
     boxes/send_files_box.cpp
     boxes/send_files_box.h
-    boxes/sessions_box.cpp
-    boxes/sessions_box.h
     boxes/share_box.cpp
     boxes/share_box.h
     boxes/star_gift_box.cpp
@@ -332,6 +332,8 @@ PRIVATE
     boxes/sticker_set_box.h
     boxes/stickers_box.cpp
     boxes/stickers_box.h
+    boxes/transfer_gift_box.cpp
+    boxes/transfer_gift_box.h
     boxes/translate_box.cpp
     boxes/translate_box.h
     boxes/url_auth_box.cpp
@@ -470,6 +472,7 @@ PRIVATE
     core/sandbox.h
     core/shortcuts.cpp
     core/shortcuts.h
+    core/stars_amount.h
     core/ui_integration.cpp
     core/ui_integration.h
     core/update_checker.cpp
@@ -627,6 +630,7 @@ PRIVATE
     data/data_shared_media.h
     data/data_sparse_ids.cpp
     data/data_sparse_ids.h
+    data/data_star_gift.h
     data/data_statistics.h
     data/data_stories.cpp
     data/data_stories.h
@@ -797,6 +801,8 @@ PRIVATE
     history/view/media/history_view_story_mention.h
     history/view/media/history_view_theme_document.cpp
     history/view/media/history_view_theme_document.h
+    history/view/media/history_view_unique_gift.cpp
+    history/view/media/history_view_unique_gift.h
     history/view/media/history_view_userpic_suggestion.cpp
     history/view/media/history_view_userpic_suggestion.h
     history/view/media/history_view_web_page.cpp
@@ -919,6 +925,12 @@ PRIVATE
     info/bot/earn/info_bot_earn_list.h
     info/bot/earn/info_bot_earn_widget.cpp
     info/bot/earn/info_bot_earn_widget.h
+    info/bot/starref/info_bot_starref_common.cpp
+    info/bot/starref/info_bot_starref_common.h
+    info/bot/starref/info_bot_starref_join_widget.cpp
+    info/bot/starref/info_bot_starref_join_widget.h
+    info/bot/starref/info_bot_starref_setup_widget.cpp
+    info/bot/starref/info_bot_starref_setup_widget.h
     info/channel_statistics/boosts/create_giveaway_box.cpp
     info/channel_statistics/boosts/create_giveaway_box.h
     info/channel_statistics/boosts/giveaway/giveaway_list_controllers.cpp
@@ -941,6 +953,12 @@ PRIVATE
     info/downloads/info_downloads_provider.h
     info/downloads/info_downloads_widget.cpp
     info/downloads/info_downloads_widget.h
+    info/global_media/info_global_media_widget.cpp
+    info/global_media/info_global_media_widget.h
+    info/global_media/info_global_media_inner_widget.cpp
+    info/global_media/info_global_media_inner_widget.h
+    info/global_media/info_global_media_provider.cpp
+    info/global_media/info_global_media_provider.h
     info/media/info_media_buttons.h
     info/media/info_media_common.cpp
     info/media/info_media_common.h
@@ -1391,8 +1409,6 @@ PRIVATE
     settings/business/settings_recipients_helper.h
     settings/business/settings_working_hours.cpp
     settings/business/settings_working_hours.h
-    settings/cloud_password/settings_cloud_password_common.cpp
-    settings/cloud_password/settings_cloud_password_common.h
     settings/cloud_password/settings_cloud_password_email.cpp
     settings/cloud_password/settings_cloud_password_email.h
     settings/cloud_password/settings_cloud_password_email_confirm.cpp
@@ -1405,6 +1421,10 @@ PRIVATE
     settings/cloud_password/settings_cloud_password_manage.h
     settings/cloud_password/settings_cloud_password_start.cpp
     settings/cloud_password/settings_cloud_password_start.h
+    settings/cloud_password/settings_cloud_password_step.cpp
+    settings/cloud_password/settings_cloud_password_step.h
+    settings/settings_active_sessions.cpp
+    settings/settings_active_sessions.h
     settings/settings_advanced.cpp
     settings/settings_advanced.h
     settings/settings_blocked_peers.cpp
@@ -1566,8 +1586,6 @@ PRIVATE
     ui/item_text_options.cpp
     ui/item_text_options.h
     ui/resize_area.h
-    ui/search_field_controller.cpp
-    ui/search_field_controller.h
     ui/unread_badge.cpp
     ui/unread_badge.h
     window/main_window.cpp

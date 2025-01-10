@@ -52,6 +52,15 @@ namespace Info::Statistics {
 struct Tag;
 } // namespace Info::Statistics
 
+namespace Info::BotStarRef {
+enum class Type : uchar;
+struct Tag;
+} // namespace Info::BotStarRef
+
+namespace Info::GlobalMedia {
+struct Tag;
+} // namespace Info::GlobalMedia
+
 namespace Info {
 
 class ContentMemento;
@@ -110,6 +119,7 @@ public:
 	virtual void checkBeforeClose(Fn<void()> close) {
 		close();
 	}
+	virtual void checkBeforeCloseByEscape(Fn<void()> close);
 	[[nodiscard]] virtual rpl::producer<QString> title() = 0;
 	[[nodiscard]] virtual rpl::producer<QString> subtitle() {
 		return nullptr;
@@ -191,6 +201,8 @@ public:
 	explicit ContentMemento(Downloads::Tag downloads);
 	explicit ContentMemento(Stories::Tag stories);
 	explicit ContentMemento(Statistics::Tag statistics);
+	explicit ContentMemento(BotStarRef::Tag starref);
+	explicit ContentMemento(GlobalMedia::Tag global);
 	ContentMemento(not_null<PollData*> poll, FullMsgId contextId)
 	: _poll(poll)
 	, _pollReactionsContextId(contextId) {
@@ -226,6 +238,12 @@ public:
 	Statistics::Tag statisticsTag() const {
 		return _statisticsTag;
 	}
+	PeerData *starrefPeer() const {
+		return _starrefPeer;
+	}
+	BotStarRef::Type starrefType() const {
+		return _starrefType;
+	}
 	PollData *poll() const {
 		return _poll;
 	}
@@ -240,6 +258,9 @@ public:
 	}
 	FullMsgId reactionsContextId() const {
 		return _reactionsWhoReadIds ? _pollReactionsContextId : FullMsgId();
+	}
+	UserData *globalMediaSelf() const {
+		return _globalMediaSelf;
 	}
 	Key key() const;
 
@@ -280,10 +301,13 @@ private:
 	PeerData * const _storiesPeer = nullptr;
 	Stories::Tab _storiesTab = {};
 	Statistics::Tag _statisticsTag;
+	PeerData * const _starrefPeer = nullptr;
+	BotStarRef::Type _starrefType = {};
 	PollData * const _poll = nullptr;
 	std::shared_ptr<Api::WhoReadList> _reactionsWhoReadIds;
 	Data::ReactionId _reactionsSelected;
 	const FullMsgId _pollReactionsContextId;
+	UserData * const _globalMediaSelf = nullptr;
 
 	int _scrollTop = 0;
 	QString _searchFieldQuery;

@@ -356,7 +356,8 @@ void ShareBox::prepare() {
 			[this](FilterId id) {
 				_inner->applyChatFilter(id);
 				scrollToY(0);
-			});
+			},
+			Window::GifPauseReason::Layer);
 		chatsFilters->lower();
 		chatsFilters->heightValue() | rpl::start_with_next([this](int h) {
 			updateScrollSkips();
@@ -1507,26 +1508,11 @@ ShareBox::SubmitCallback ShareBox::DefaultForwardCallback(
 			return;
 		}
 
-		const auto error = [&] {
-			for (const auto thread : result) {
-				const auto error = GetErrorTextForSending(
-					thread,
-					{ .forward = &items, .text = &comment });
-				if (!error.isEmpty()) {
-					return std::make_pair(error, thread);
-				}
-			}
-			return std::make_pair(QString(), result.front());
-		}();
-		if (!error.first.isEmpty()) {
-			auto text = TextWithEntities();
-			if (result.size() > 1) {
-				text.append(
-					Ui::Text::Bold(error.second->chatListName())
-				).append("\n\n");
-			}
-			text.append(error.first);
-			show->showBox(Ui::MakeInformBox(text));
+		const auto error = GetErrorForSending(
+			result,
+			{ .forward = &items, .text = &comment });
+		if (error.error) {
+			show->showBox(MakeSendErrorBox(error, result.size() > 1));
 			return;
 		}
 
@@ -1736,30 +1722,13 @@ void FastShareLink(
 			return;
 		}
 
-		const auto error = [&] {
-			for (const auto thread : result) {
-				const auto error = GetErrorTextForSending(
-					thread,
-					{ .text = &comment });
-				if (!error.isEmpty()) {
-					return std::make_pair(error, thread);
-				}
-			}
-			return std::make_pair(QString(), result.front());
-		}();
-		if (!error.first.isEmpty()) {
-			auto text = TextWithEntities();
-			if (result.size() > 1) {
-				text.append(
-					Ui::Text::Bold(error.second->chatListName())
-				).append("\n\n");
-			}
-			text.append(error.first);
+		const auto error = GetErrorForSending(
+			result,
+			{ .text = &comment });
+		if (error.error) {
 			if (const auto weak = *box) {
-				weak->getDelegate()->show(Ui::MakeConfirmBox({
-					.text = text,
-					.inform = true,
-				}));
+				weak->getDelegate()->show(
+					MakeSendErrorBox(error, result.size() > 1));
 			}
 			return;
 		}

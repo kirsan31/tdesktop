@@ -37,7 +37,7 @@ creditsLowBalancePremiumCover: PremiumCover(creditsPremiumCover) {
 	starSize: size(64px, 62px);
 	starTopSkip: 30px;
 }
-creditsLowBalancePremiumCoverHeight: 180px;
+creditsLowBalancePremiumCoverHeight: 162px;
 creditsTopupButton: SettingsButton(settingsButton) {
 	style: semiboldTextStyle;
 }
@@ -109,10 +109,12 @@ giftBoxTabStyle: semiboldTextStyle;
 giftBoxTabFg: windowSubTextFg;
 giftBoxTabFgActive: windowBoldFg;
 giftBoxTabBgActive: windowBgRipple;
-giftBoxPadding: margins(20px, 4px, 20px, 24px);
+giftBoxPadding: margins(11px, 4px, 11px, 24px);
 giftBoxGiftSkip: point(10px, 8px);
 giftBoxGiftHeight: 164px;
+giftBoxGiftSmall: 108px;
 giftBoxGiftRadius: 12px;
+giftBoxGiftBadgeFont: font(10px semibold);
 giftBoxPremiumIconSize: 64px;
 giftBoxPremiumIconTop: 10px;
 giftBoxPremiumTextTop: 84px;
@@ -120,9 +122,11 @@ giftBoxButtonBottom: 12px;
 giftBoxButtonPadding: margins(8px, 4px, 8px, 4px);
 giftBoxPreviewStickerPadding: margins(10px, 12px, 10px, 16px);
 giftBoxPreviewTitlePadding: margins(12px, 4px, 12px, 4px);
-giftBoxPreviewTextPadding: margins(12px, 4px, 12px, 24px);
+giftBoxPreviewTextPadding: margins(12px, 4px, 12px, 4px);
+giftBoxButtonMargin: margins(12px, 8px, 12px, 12px);
 giftBoxStickerTop: 0px;
 giftBoxStickerStarTop: 24px;
+giftBoxSmallStickerTop: 16px;
 giftBoxStickerSize: size(80px, 80px);
 giftBoxUserpicSize: 24px;
 giftBoxUserpicSkip: 2px;
@@ -173,3 +177,25 @@ creditsHistoryEntriesList: PeerList(defaultPeerList) {
 }
 
 subscriptionCreditsBadgePadding: margins(10px, 1px, 8px, 3px);
+
+uniqueGiftModelTop: 20px;
+uniqueGiftTitle: FlatLabel(boxTitle) {
+	align: align(top);
+}
+uniqueGiftTitleTop: 140px;
+uniqueGiftSubtitle: FlatLabel(defaultFlatLabel) {
+	minWidth: 256px;
+	align: align(top);
+}
+uniqueGiftSubtitleTop: 170px;
+uniqueGiftBottom: 20px;
+uniqueCloseButton: IconButton(boxTitleClose) {
+	icon: icon {{ "box_button_close", videoPlayIconFg }};
+	iconOver: icon {{ "box_button_close", videoPlayIconFg }};
+	ripple: RippleAnimation(defaultRippleAnimation) {
+		color: shadowFg;
+	}
+}
+upgradeGiftBox: Box(giftBox) {
+	buttonPadding: margins(22px, 3px, 22px, 22px);
+}

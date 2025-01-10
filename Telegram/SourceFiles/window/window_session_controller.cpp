@@ -392,7 +392,7 @@ void SessionNavigation::showPeerByLink(const PeerByLinkInfo &info) {
 			} else {
 				showPeerByLinkResolved(peer, info);
 			}
-		});
+		}, info.referral);
 	} else if (const auto id = std::get_if<ChannelId>(&info.usernameOrId)) {
 		resolveChannelById(*id, [=](not_null<ChannelData*> channel) {
 			showPeerByLinkResolved(channel, info);
@@ -454,19 +454,27 @@ void SessionNavigation::resolveChatLink(
 
 void SessionNavigation::resolveUsername(
 		const QString &username,
-		Fn<void(not_null<PeerData*>)> done) {
-	if (const auto peer = _session->data().peerByUsername(username)) {
-		done(peer);
-		return;
+		Fn<void(not_null<PeerData*>)> done,
+		const QString &referral) {
+	if (referral.isEmpty()) {
+		if (const auto peer = _session->data().peerByUsername(username)) {
+			done(peer);
+			return;
+		}
 	}
 	_api.request(base::take(_resolveRequestId)).cancel();
+	using Flag = MTPcontacts_ResolveUsername::Flag;
 	_resolveRequestId = _api.request(MTPcontacts_ResolveUsername(
-		MTP_string(username)
+		MTP_flags(referral.isEmpty() ? Flag() : Flag::f_referer),
+		MTP_string(username),
+		MTP_string(referral)
 	)).done([=](const MTPcontacts_ResolvedPeer &result) {
 		resolveDone(result, done);
 	}).fail([=](const MTP::Error &error) {
 		_resolveRequestId = 0;
-		if (error.code() == 400) {
+		if (error.type() == u"STARREF_EXPIRED"_q) {
+			parentController()->showToast(tr::lng_star_ref_stopped(tr::now));
+		} else if (error.code() == 400) {
 			parentController()->show(
 				Ui::MakeInformBox(
 					tr::lng_username_not_found(tr::now, lt_user, username)),
@@ -682,6 +690,8 @@ void SessionNavigation::showPeerByLinkResolved(
 			? info.messageId
 			: info.startAutoSubmit
 			? ShowAndStartBotMsgId
+			: (bot && !info.startToken.isEmpty())
+			? ShowAndMaybeStartBotMsgId
 			: ShowAtUnreadMsgId;
 		const auto attachBotUsername = info.attachBotUsername;
 		if (bot && bot->botInfo->startToken != info.startToken) {
@@ -754,7 +764,10 @@ void SessionNavigation::showPeerByLinkResolved(
 	}
 }
 
-void SessionNavigation::resolveBoostState(not_null<ChannelData*> channel) {
+void SessionNavigation::resolveBoostState(
+		not_null<ChannelData*> channel,
+		int boostsToLift) {
+	_boostsToLift = boostsToLift;
 	if (_boostStateResolving == channel) {
 		return;
 	}
@@ -762,18 +775,33 @@ void SessionNavigation::resolveBoostState(not_null<ChannelData*> channel) {
 	_api.request(MTPpremium_GetBoostsStatus(
 		channel->input
 	)).done([=](const MTPpremium_BoostsStatus &result) {
-		_boostStateResolving = nullptr;
+		if (base::take(_boostStateResolving) != channel) {
+			return;
+		}
+		const auto boosted = std::make_shared<bool>();
 		channel->updateLevelHint(result.data().vlevel().v);
 		const auto submit = [=](Fn<void(Ui::BoostCounters)> done) {
-			applyBoost(channel, done);
+			applyBoost(channel, [=](Ui::BoostCounters counters) {
+				*boosted = true;
+				done(counters);
+			});
 		};
-		uiShow()->show(Box(Ui::BoostBox, Ui::BoostBoxData{
+		const auto lifting = base::take(_boostsToLift);
+		const auto box = uiShow()->show(Box(Ui::BoostBox, Ui::BoostBoxData{
 			.name = channel->name(),
 			.boost = ParseBoostCounters(result),
 			.features = LookupBoostFeatures(channel),
+			.lifting = lifting,
 			.allowMulti = (BoostsForGift(_session) > 0),
 			.group = channel->isMegagroup(),
 		}, submit));
+		if (lifting) {
+			box->boxClosing() | rpl::start_with_next([=] {
+				if (*boosted) {
+					channel->updateFullForced();
+				}
+			}, box->lifetime());
+		}
 	}).fail([=](const MTP::Error &error) {
 		_boostStateResolving = nullptr;
 		showToast(u"Error: "_q + error.type());
@@ -1321,24 +1349,28 @@ SessionController::SessionController(
 		closeFolder();
 	}, lifetime());
 
+	const auto processFiltersMenu = [this] {
+		if (SessionNavigation::session().data().chatsFilters().has()) {
+			const auto isHorizontal
+				= Core::App().settings().chatFiltersHorizontal()
+					|| !enoughSpaceForFilters();
+			content()->toggleFiltersMenu(isHorizontal);
+			toggleFiltersMenu(!isHorizontal);
+		} else {
+			content()->toggleFiltersMenu(false);
+			toggleFiltersMenu(false);
+		}
+	};
 	rpl::merge(
 		enoughSpaceForFiltersValue() | rpl::skip(1) | rpl::to_empty,
 		Core::App().settings().chatFiltersHorizontalChanges() | rpl::to_empty,
 		session->data().chatsFilters().changed()
 	) | rpl::start_with_next([=] {
+		if (!_filtersActivated) {
+			processFiltersMenu();
+		}
 		checkOpenedFilter();
-		crl::on_main(this, [this] {
-			if (SessionNavigation::session().data().chatsFilters().has()) {
-				const auto isHorizontal
-					= Core::App().settings().chatFiltersHorizontal()
-						|| !enoughSpaceForFilters();
-				content()->toggleFiltersMenu(isHorizontal);
-				toggleFiltersMenu(!isHorizontal);
-			} else {
-				content()->toggleFiltersMenu(false);
-				toggleFiltersMenu(false);
-			}
-		});
+		crl::on_main(this, processFiltersMenu);
 	}, lifetime());
 
 	session->data().itemIdChanged(
@@ -1833,13 +1865,18 @@ bool SessionController::jumpToChatListEntry(Dialogs::RowDescriptor row) {
 	return false;
 }
 
-void SessionController::setCurrentDialogsEntryState(
+void SessionController::setDialogsEntryState(
 		Dialogs::EntryState state) {
-	_currentDialogsEntryState = state;
+	_dialogsEntryState = state;
 }
 
-Dialogs::EntryState SessionController::currentDialogsEntryState() const {
-	return _currentDialogsEntryState;
+Dialogs::EntryState SessionController::dialogsEntryStateCurrent() const {
+	return _dialogsEntryState.current();
+}
+
+auto SessionController::dialogsEntryStateValue() const
+-> rpl::producer<Dialogs::EntryState> {
+	return _dialogsEntryState.value();
 }
 
 bool SessionController::switchInlineQuery(

@@ -383,7 +383,8 @@ MTPInputInvoice Form::inputInvoice() const {
 		using Flag = MTPDinputInvoiceStarGift::Flag;
 		return MTP_inputInvoiceStarGift(
 			MTP_flags((gift->anonymous ? Flag::f_hide_name : Flag(0))
-				| (gift->message.empty() ? Flag(0) : Flag::f_message)),
+				| (gift->message.empty() ? Flag(0) : Flag::f_message)
+				| (gift->upgraded ? Flag::f_include_upgrade : Flag(0))),
 			gift->user->inputUser,
 			MTP_long(gift->giftId),
 			MTP_textWithEntities(
@@ -611,7 +612,7 @@ void Form::processReceipt(const MTPDpayments_paymentReceiptStars &data) {
 				ImageLocation())
 			: nullptr,
 		.peerId = peerFromUser(data.vbot_id().v),
-		.credits = data.vtotal_amount().v,
+		.credits = StarsAmount(data.vtotal_amount().v),
 		.date = data.vdate().v,
 	};
 	_updates.fire(CreditsReceiptReady{ .data = receiptData });

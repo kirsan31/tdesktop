@@ -61,7 +61,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "api/api_updates.h"
 #include "mtproto/mtproto_config.h"
 #include "history/history.h"
-#include "history/history_item_helpers.h" // GetErrorTextForSending.
+#include "history/history_item_helpers.h" // GetErrorForSending.
 #include "history/view/history_view_context_menu.h"
 #include "window/window_separate_id.h"
 #include "window/window_session_controller.h"
@@ -276,7 +276,7 @@ private:
 	void addInfo();
 	void addStoryArchive();
 	void addNewWindow();
-	void addToggleFolder(bool onlyForChannels);
+	void addToggleFolder();
 	void addToggleUnreadMark();
 	void addToggleArchive();
 	void addClearHistory();
@@ -615,14 +615,13 @@ void Filler::addStoryArchive() {
 	}, &st::menuIconStoriesArchiveSection);
 }
 
-void Filler::addToggleFolder(bool onlyForChannels) {
+void Filler::addToggleFolder() {
 	const auto controller = _controller;
 	const auto history = _request.key.history();
-	if (_topic || !history || !history->owner().chatsFilters().has()) {
-		return;
-	}
-	if (onlyForChannels
-		&& (!history->peer->isChannel() || !history->inChatList())) {
+	if (_topic
+		|| !history
+		|| !history->owner().chatsFilters().has()
+		|| !history->inChatList()) {
 		return;
 	}
 	_addAction(PeerMenuCallback::Args{
@@ -1364,6 +1363,7 @@ void Filler::fillChatsListActions() {
 	}
 	addManageChat();
 	addNewMembers();
+	addBoostChat();
 	addVideoChat();
 	_addAction(PeerMenuCallback::Args{ .isSeparator = true });
 	addReport();
@@ -1408,7 +1408,7 @@ void Filler::fillContextMenuActions() {
 	addToggleMuteSubmenu(false);
 	addToggleUnreadMark();
 	addToggleTopicClosed();
-	addToggleFolder(false);
+	addToggleFolder();
 	if (const auto user = _peer->asUser()) {
 		if (!user->isContact()) {
 			addBlockUser();
@@ -1456,7 +1456,7 @@ void Filler::fillProfileActions() {
 	addToggleTopicClosed();
 	addViewDiscussion();
 	addExportChat();
-	addToggleFolder(true);
+	addToggleFolder();
 	addBlockUser();
 	addReport();
 	addLeaveChat();
@@ -1469,6 +1469,7 @@ void Filler::fillRepliesActions() {
 		addInfo();
 		addManageTopic();
 	}
+	addBoostChat();
 	addCreatePoll();
 	addToggleTopicClosed();
 	addDeleteTopic();
@@ -2235,14 +2236,30 @@ QPointer<Ui::BoxContent> ShowForwardMessagesBox(
 		auto init = [=](not_null<ListBox*> box) {
 			controllerRaw->setSearchNoResultsText(
 				tr::lng_bot_chats_not_found(tr::now));
-			box->setSpecialTabMode(true);
+			const auto lastFilterId = box->lifetime().make_state<FilterId>(0);
 			const auto chatsFilters = Ui::AddChatFiltersTabsStrip(
 				box,
 				session,
-				[=](FilterId id) { applyFilter(box, id); });
+				[=](FilterId id) {
+					*lastFilterId = id;
+					applyFilter(box, id);
+				},
+				Window::GifPauseReason::Layer);
 			chatsFilters->lower();
-			chatsFilters->heightValue() | rpl::start_with_next([box](int h) {
-				box->setAddedTopScrollSkip(h);
+			rpl::combine(
+				chatsFilters->heightValue(),
+				rpl::producer<bool>([=](auto consumer) {
+					auto lifetime = rpl::lifetime();
+					consumer.put_next(false);
+					box->appendQueryChangedCallback([=](const QString &q) {
+						const auto hasQuery = !q.isEmpty();
+						applyFilter(box, hasQuery ? 0 : (*lastFilterId));
+						consumer.put_next_copy(hasQuery);
+					});
+					return lifetime;
+				})
+			) | rpl::start_with_next([box](int h, bool hasQuery) {
+				box->setAddedTopScrollSkip(hasQuery ? 0 : h);
 			}, box->lifetime());
 			box->multiSelectHeightValue() | rpl::start_with_next([=](int h) {
 				chatsFilters->moveToLeft(0, h);
@@ -2580,11 +2597,11 @@ QPointer<Ui::BoxContent> ShowSendNowMessagesBox(
 		: tr::lng_scheduled_send_now(tr::now);
 
 	const auto list = session->data().idsToItems(items);
-	const auto error = GetErrorTextForSending(
+	const auto error = GetErrorForSending(
 		history->peer,
 		{ .forward = &list });
-	if (!error.isEmpty()) {
-		navigation->showToast(error);
+	if (error) {
+		Data::ShowSendErrorToast(navigation, history->peer, error);
 		return { nullptr };
 	}
 	auto done = [
@@ -2769,10 +2786,10 @@ void UnpinAllMessages(
 }
 
 void MenuAddMarkAsReadAllChatsAction(
-		not_null<Window::SessionController*> controller,
+		not_null<Main::Session*> session,
+		std::shared_ptr<Ui::Show> show,
 		const PeerMenuCallback &addAction) {
-	// There is no async to make weak from controller.
-	auto callback = [=, owner = &controller->session().data()] {
+	auto callback = [=, owner = &session->data()] {
 		auto boxCallback = [=](Fn<void()> &&close) {
 			close();
 
@@ -2781,10 +2798,37 @@ void MenuAddMarkAsReadAllChatsAction(
 				MarkAsReadChatList(folder->chatsList());
 			}
 		};
-		controller->show(
-			Ui::MakeConfirmBox({
-				tr::lng_context_mark_read_all_sure(),
-				std::move(boxCallback)
+		show->show(
+			Box([=](not_null<Ui::GenericBox*> box) {
+				Ui::AddSkip(box->verticalLayout());
+				Ui::AddSkip(box->verticalLayout());
+				const auto userpic = Ui::CreateChild<Ui::UserpicButton>(
+					box->verticalLayout(),
+					session->user(),
+					st::mainMenuUserpic);
+				Ui::IconWithTitle(
+					box->verticalLayout(),
+					userpic,
+					Ui::CreateChild<Ui::FlatLabel>(
+						box->verticalLayout(),
+						Info::Profile::NameValue(session->user()),
+						box->getDelegate()->style().title));
+				auto text = rpl::combine(
+					tr::lng_context_mark_read_all_sure(),
+					tr::lng_context_mark_read_all_sure_2(
+						Ui::Text::RichLangValue)
+				) | rpl::map([](QString t1, TextWithEntities t2) {
+					return TextWithEntities()
+						.append(std::move(t1))
+						.append('\n')
+						.append('\n')
+						.append(std::move(t2));
+				});
+				Ui::ConfirmBox(box, {
+					.text = std::move(text),
+					.confirmed = std::move(boxCallback),
+					.confirmStyle = &st::attentionBoxButton,
+				});
 			}),
 			Ui::LayerOption::CloseOther);
 	};

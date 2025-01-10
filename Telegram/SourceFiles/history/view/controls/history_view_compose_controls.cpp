@@ -146,6 +146,7 @@ public:
 	[[nodiscard]] bool isEditingMessage() const;
 	[[nodiscard]] bool readyToForward() const;
 	[[nodiscard]] const HistoryItemsList &forwardItems() const;
+	[[nodiscard]] const Data::ResolvedForwardDraft &forwardDraft() const;
 	[[nodiscard]] FullReplyTo replyingToMessage() const;
 	[[nodiscard]] FullMsgId editMsgId() const;
 	[[nodiscard]] rpl::producer<FullMsgId> editMsgIdValue() const;
@@ -281,23 +282,23 @@ void FieldHeader::init() {
 			st::historyLinkIcon.paint(p, position, width());
 		} else if (isEditingMessage()) {
 			st::historyEditIcon.paint(p, position, width());
-		} else if (readyToForward()) {
-			st::historyForwardIcon.paint(p, position, width());
 		} else if (const auto reply = replyingToMessage()) {
 			if (!reply.quote.empty()) {
 				st::historyQuoteIcon.paint(p, position, width());
 			} else {
 				st::historyReplyIcon.paint(p, position, width());
 			}
+		} else if (readyToForward()) {
+			st::historyForwardIcon.paint(p, position, width());
 		}
 
 		if (_preview.parsed) {
 			paintWebPage(
 				p,
 				_history ? _history->peer : _data->session().user());
-		} else if (isEditingMessage() || !readyToForward()) {
+		} else if (isEditingMessage() || replyingToMessage()) {
 			paintEditOrReplyToMessage(p);
-		} else {
+		} else if (readyToForward()) {
 			paintForwardInfo(p);
 		}
 	}, lifetime());
@@ -339,10 +340,10 @@ void FieldHeader::init() {
 			_previewCancelled.fire({});
 		} else if (_editMsgId.current()) {
 			_editCancelled.fire({});
-		} else if (readyToForward()) {
-			_forwardCancelled.fire({});
 		} else if (_replyTo.current()) {
 			_replyCancelled.fire({});
+		} else if (readyToForward()) {
+			_forwardCancelled.fire({});
 		}
 		updateVisible();
 		update();
@@ -403,12 +404,9 @@ void FieldHeader::init() {
 					_jumpToItemRequests.fire(FullReplyTo{
 						.messageId = _editMsgId.current()
 					});
-				} else if (readyToForward()) {
-					_forwardPanel->editOptions(_show);
-				} else if (reply
-					&& (e->modifiers() & Qt::ControlModifier)) {
+				} else if (reply && (e->modifiers() & Qt::ControlModifier)) {
 					_jumpToItemRequests.fire_copy(reply);
-				} else if (reply) {
+				} else if (reply || readyToForward()) {
 					_editOptionsRequests.fire({});
 				}
 			} else if (!isLeftButton) {
@@ -419,6 +417,8 @@ void FieldHeader::init() {
 						_hasSendText());
 				} else if (const auto reply = replyingToMessage()) {
 					_jumpToItemRequests.fire_copy(reply);
+				} else if (readyToForward()) {
+					_forwardPanel->editToNextOption();
 				}
 			}
 		}
@@ -713,6 +713,10 @@ const HistoryItemsList &FieldHeader::forwardItems() const {
 	return _forwardPanel->items();
 }
 
+const Data::ResolvedForwardDraft &FieldHeader::forwardDraft() const {
+	return _forwardPanel->draft();
+}
+
 FullReplyTo FieldHeader::replyingToMessage() const {
 	return _replyTo.current();
 }
@@ -764,9 +768,6 @@ void FieldHeader::updateForwarding(
 		Data::Thread *thread,
 		Data::ResolvedForwardDraft items) {
 	_forwardPanel->update(thread, std::move(items));
-	if (readyToForward()) {
-		replyToMessage({});
-	}
 	updateControlsGeometry(size());
 }
 
@@ -1408,12 +1409,14 @@ void ComposeControls::init() {
 
 		const auto done = [=](
 				FullReplyTo replyTo,
-				Data::WebPageDraft webpage) {
+				Data::WebPageDraft webpage,
+				Data::ForwardDraft forward) {
 			if (replyTo) {
 				replyToMessage(replyTo);
 			} else {
 				cancelReplyMessage();
 			}
+			history->setForwardDraft(topicRootId, std::move(forward));
 			_preview->apply(webpage);
 			_field->setFocus();
 		};
@@ -1428,6 +1431,7 @@ void ComposeControls::init() {
 			.history = history,
 			.draft = Data::Draft(_field, reply, _preview->draft()),
 			.usedLink = _preview->link(),
+			.forward = _header->forwardDraft(),
 			.links = _preview->links(),
 			.resolver = _preview->resolver(),
 			.done = done,
@@ -1960,7 +1964,7 @@ void ComposeControls::applyDraft(FieldHistoryAction fieldHistoryAction) {
 			if (const auto item = _history->owner().message(editingId)) {
 				const auto media = item->media();
 				_canReplaceMedia = item->allowsEditMedia();
-				if (media) {
+				if (media && media->allowsEditMedia()) {
 					_canAddMedia = false;
 				} else {
 					_canAddMedia = base::take(_canReplaceMedia);
@@ -2013,9 +2017,6 @@ void ComposeControls::applyDraft(FieldHistoryAction fieldHistoryAction) {
 		_canReplaceMedia = _canAddMedia = false;
 		_photoEditMedia = nullptr;
 		_header->replyToMessage(draft->reply);
-		if (_header->replyingToMessage()) {
-			cancelForward();
-		}
 		_header->editMessage({});
 		if (_preview) {
 			_preview->setDisabled(false);
@@ -2221,7 +2222,7 @@ void SetupRestrictionView(
 		not_null<Ui::RpWidget*> widget,
 		not_null<const style::ComposeControls*> st,
 		std::shared_ptr<ChatHelpers::Show> show,
-		const QString &name,
+		not_null<PeerData*> peer,
 		rpl::producer<Controls::WriteRestriction> restriction,
 		Fn<void(QPainter &p, QRect clip)> paintBackground) {
 	struct State {
@@ -2233,7 +2234,9 @@ void SetupRestrictionView(
 	};
 	const auto state = widget->lifetime().make_state<State>();
 	state->updateGeometries = [=] {
-		if (!state->label) {
+		if (!state->label && state->button) {
+			state->button->setGeometry(widget->rect());
+		} else if (!state->label) {
 			return;
 		} else if (state->button) {
 			const auto available = widget->width()
@@ -2306,14 +2309,24 @@ void SetupRestrictionView(
 	) | rpl::distinct_until_changed(
 	) | rpl::start_with_next([=](Controls::WriteRestriction value) {
 		using Type = Controls::WriteRestriction::Type;
-		if (value.type == Type::Rights) {
+		if (const auto lifting = value.boostsToLift) {
+			state->button = std::make_unique<Ui::FlatButton>(
+				widget,
+				tr::lng_restricted_boost_group(tr::now),
+				st::historyComposeButton);
+			state->button->setClickedCallback([=] {
+				const auto window = show->resolveWindow(
+					ChatHelpers::WindowUsage::PremiumPromo);
+				window->resolveBoostState(peer->asChannel(), lifting);
+			});
+		} else if (value.type == Type::Rights) {
 			state->icon = nullptr;
 			state->unlock = nullptr;
 			state->button = nullptr;
 			state->label = makeLabel(value.text, st->restrictionLabel);
 		} else if (value.type == Type::PremiumRequired) {
 			state->icon = makeIcon();
-			state->unlock = makeUnlock(value.button, name);
+			state->unlock = makeUnlock(value.button, peer->shortName());
 			state->button = std::make_unique<Ui::AbstractButton>(widget);
 			state->button->setClickedCallback([=] {
 				::Settings::ShowPremiumPromoToast(
@@ -2321,7 +2334,7 @@ void SetupRestrictionView(
 					tr::lng_send_non_premium_message_toast(
 						tr::now,
 						lt_user,
-						TextWithEntities{ name },
+						TextWithEntities{ peer->shortName() },
 						lt_link,
 						Ui::Text::Link(
 							Ui::Text::Bold(
@@ -2372,7 +2385,7 @@ void ComposeControls::initWriteRestriction() {
 		_writeRestricted.get(),
 		&_st,
 		_show,
-		_history->peer->shortName(),
+		_history->peer,
 		_writeRestriction.value(),
 		background);
 
@@ -2404,7 +2417,7 @@ void ComposeControls::initVoiceRecordBar() {
 	}, _wrap->lifetime());
 
 	_voiceRecordBar->setStartRecordingFilter([=] {
-		const auto error = [&]() -> std::optional<QString> {
+		const auto error = [&]() -> Data::SendError {
 			const auto peer = _history ? _history->peer.get() : nullptr;
 			if (peer) {
 				if (const auto error = Data::RestrictionError(
@@ -2413,10 +2426,10 @@ void ComposeControls::initVoiceRecordBar() {
 					return error;
 				}
 			}
-			return std::nullopt;
+			return {};
 		}();
 		if (error) {
-			_show->showToast(*error);
+			Data::ShowSendErrorToast(_show, _history->peer, error);
 			return true;
 		} else if (_showSlowmodeError && _showSlowmodeError()) {
 			return true;
@@ -3018,9 +3031,6 @@ void ComposeControls::replyToMessage(FullReplyTo id) {
 		}
 	} else {
 		_header->replyToMessage(id);
-		if (_header->replyingToMessage()) {
-			cancelForward();
-		}
 	}
 
 	_saveDraftText = true;
@@ -3071,11 +3081,11 @@ bool ComposeControls::handleCancelRequest() {
 	} else if (isEditingMessage()) {
 		maybeCancelEditMessage();
 		return true;
-	} else if (readyToForward()) {
-		cancelForward();
-		return true;
 	} else if (replyingToMessage()) {
 		cancelReplyMessage();
+		return true;
+	} else if (readyToForward()) {
+		cancelForward();
 		return true;
 	}
 	return false;
@@ -3265,7 +3275,10 @@ void ComposeControls::updateInlineBotQuery() {
 			_inlineLookingUpBot = true;
 			const auto username = _inlineBotUsername;
 			_inlineBotResolveRequestId = api.request(
-				MTPcontacts_ResolveUsername(MTP_string(username))
+				MTPcontacts_ResolveUsername(
+					MTP_flags(0),
+					MTP_string(username),
+					MTP_string())
 			).done([=](const MTPcontacts_ResolvedPeer &result) {
 				Expects(result.type() == mtpc_contacts_resolvedPeer);
 

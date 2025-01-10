@@ -1,3 +1,59 @@
+5.10.3 (09.01.25)
+
+- Fix a crash in legacy group opening.
+
+5.10.2 (07.01.25)
+
+- Fix double verification badge in profiles.
+
+5.10.1 (06.01.25)
+
+- Show "Boost group the send messages" information.
+- Fix several gifts bugs and glitches.
+- Fix several crashes.
+
+5.10 (02.01.25)
+
+- Collectible Gifts.
+- Reactions for Service Messages.
+- Verification from Third Parties.
+- Custom Emoji in Folder Names.
+
+5.9.2 beta (24.12.24)
+
+- Fix some jump-to-message highlightings.
+- Fix some long round video messages sending.
+- Fix possible crash in global photos / videos.
+- Fix streaming starting for some large video files.
+- Fix possible drop of top peers / recent chats cache.
+- Fix possible crashes in audio on macOS (rollback OpenAL).
+
+5.9.1 beta (18.12.24)
+
+- Add global media overview tabs in chats search.
+- Add main menu "My Profile" with my stories and gifts access.
+- Highlight some of search query on result message open.
+- Fix highlighting quotes from bottom parts of long messages.
+- Allow forward and reply bars together.
+- Make gift price categories scrollable.
+- Auto-send deep-link /start in existing bot chats.
+
+5.9 (04.12.24)
+
+- Affiliate programs for bots.
+- Add option to show folder tags in chats list.
+
+5.8.5 beta (29.11.24)
+
+- Fix pinned chats in folders.
+- Fix emoji in folder tags.
+- Fix several crashes.
+
+5.8.4 beta (28.11.24)
+
+- Add option to show folder tags in chats list.
+- Count group with topics as one chat in folder unread counter.
+
 5.8.3 (23.11.24)
 
 - Ctrl+Click on Reply in groups to reply in another chat.

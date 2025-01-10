@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "info/peer_gifts/info_peer_gifts_widget.h"
 
+#include "api/api_premium.h"
 #include "data/data_session.h"
 #include "data/data_user.h"
 #include "info/peer_gifts/info_peer_gifts_common.h"
@@ -32,13 +33,13 @@ constexpr auto kPerPage = 50;
 
 [[nodiscard]] GiftDescriptor DescriptorForGift(
 		not_null<UserData*> to,
-		const Api::UserStarGift &gift) {
+		const Data::UserStarGift &gift) {
 	return GiftTypeStars{
 		.info = gift.info,
 		.from = ((gift.anonymous || !gift.fromId)
 			? nullptr
 			: to->owner().peer(gift.fromId).get()),
-		.userpic = true,
+		.userpic = !gift.info.unique,
 		.hidden = gift.hidden,
 		.mine = to->isSelf(),
 	};
@@ -62,7 +63,7 @@ public:
 
 private:
 	struct Entry {
-		Api::UserStarGift gift;
+		Data::UserStarGift gift;
 		GiftDescriptor descriptor;
 	};
 	struct View {
@@ -115,7 +116,7 @@ InnerWidget::InnerWidget(
 	not_null<UserData*> user)
 : BoxContentDivider(parent)
 , _window(controller->parentController())
-, _delegate(_window)
+, _delegate(_window, GiftButtonMode::Minimal)
 , _controller(controller)
 , _about(std::make_unique<Ui::FlatLabel>(
 	this,
@@ -270,6 +271,7 @@ void InnerWidget::validateButtons() {
 	const auto fullw = _perRow * (_single.width() + skipw) - skipw;
 	const auto left = padding.left() + (available - fullw) / 2;
 	const auto oneh = _single.height() + st::giftBoxGiftSkip.y();
+	const auto mode = GiftButton::Mode::Minimal;
 	auto x = left;
 	auto y = vskip + fromRow * oneh;
 	auto views = std::vector<View>();
@@ -300,7 +302,7 @@ void InnerWidget::validateButtons() {
 				.entry = index,
 			});
 		}
-		views.back().button->setDescriptor(descriptor);
+		views.back().button->setDescriptor(descriptor, mode);
 		views.back().button->setClickedCallback(callback);
  	};
 	for (auto j = fromRow; j != tillRow; ++j) {
@@ -325,6 +327,7 @@ void InnerWidget::showGift(int index) {
 	_window->show(Box(
 		::Settings::UserStarGiftBox,
 		_window,
+		_user,
 		_entries[index].gift));
 }
 

@@ -29,6 +29,7 @@ class Error;
 
 namespace Data {
 class PhotoMedia;
+struct SendError;
 } // namespace Data
 
 namespace SendMenu {
@@ -391,6 +392,7 @@ private:
 	void fileChosen(ChatHelpers::FileChosen &&data);
 
 	void updateFieldSubmitSettings();
+	bool clearMaybeSendStart();
 
 	// Checks if we are too close to the top or to the bottom
 	// in the scroll area and preloads history if needed.
@@ -578,7 +580,7 @@ private:
 	void addMessagesToBack(not_null<PeerData*> peer, const QVector<MTPMessage> &messages);
 
 	void updateSendRestriction();
-	[[nodiscard]] QString computeSendRestriction() const;
+	[[nodiscard]] Data::SendError computeSendRestriction() const;
 	void updateHistoryGeometry(bool initial = false, bool loadedDown = false, const ScrollChange &change = { ScrollChangeNone, 0 });
 	void updateListSize();
 	void startItemRevealAnimations();
@@ -726,6 +728,7 @@ private:
 	base::flat_set<MsgId> _topicsRequested;
 	TextWithEntities _showAtMsgHighlightPart;
 	int _showAtMsgHighlightPartOffsetHint = 0;
+	bool _showAndMaybeSendStart = false;
 
 	int _firstLoadRequest = 0; // Not real mtpRequestId.
 	int _preloadRequest = 0; // Not real mtpRequestId.
@@ -744,6 +747,8 @@ private:
 	QPointer<HistoryInner> _list;
 	History *_migrated = nullptr;
 	History *_history = nullptr;
+	rpl::lifetime _historySponsoredPreloading;
+
 	// Initial updateHistoryGeometry() was called.
 	bool _historyInited = false;
 	// If updateListSize() was called without updateHistoryGeometry().

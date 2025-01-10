@@ -180,6 +180,7 @@ struct InvoiceStarGift {
 	not_null<UserData*> user;
 	int limitedCount = 0;
 	bool anonymous = false;
+	bool upgraded = false;
 };
 
 struct InvoiceId {
@@ -210,7 +211,7 @@ struct CreditsReceiptData {
 	QString description;
 	PhotoData *photo = nullptr;
 	PeerId peerId = PeerId(0);
-	uint64 credits = 0;
+	StarsAmount credits;
 	TimeId date = 0;
 };
 

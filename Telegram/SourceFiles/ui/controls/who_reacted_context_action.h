@@ -37,6 +37,7 @@ enum class WhoReadType {
 	Watched,
 	Reacted,
 	Edited,
+	Original,
 };
 
 enum class WhoReadState : uchar {
@@ -74,6 +75,8 @@ enum class WhoReactedType : uchar {
 	Reposted,
 	Forwarded,
 	Preloader,
+	RefRecipient,
+	RefRecipientNow,
 };
 
 struct WhoReactedEntryData {

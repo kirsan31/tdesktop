@@ -1,7 +1,7 @@
 {%- set GIT = "https://github.com" -%}
 {%- set GIT_FREEDESKTOP = GIT ~ "/gitlab-freedesktop-mirrors" -%}
 {%- set GIT_UPDATE_M4 = "git submodule set-url m4 https://gitlab.freedesktop.org/xorg/util/xcb-util-m4 && git config -f .gitmodules submodule.m4.shallow true && git submodule init && git submodule update" -%}
-{%- set QT = "6.8.0" -%}
+{%- set QT = "6.8.1" -%}
 {%- set QT_TAG = "v" ~ QT -%}
 {%- set CFLAGS_DEBUG = "$CFLAGS -O0 -fno-lto -U_FORTIFY_SOURCE" -%}
 {%- set LibrariesPath = "/usr/src/Libraries" -%}
@@ -42,7 +42,7 @@ FROM builder AS patches
 RUN git init patches \
 	&& cd patches \
 	&& git remote add origin {{ GIT }}/desktop-app/patches.git \
-	&& git fetch --depth=1 origin 643b18c2be6424fc6f35a52891ed5a6a42502ac2 \
+	&& git fetch --depth=1 origin 748e206a977d7bd9fb6ed5081515b724e9bc58a0 \
 	&& git reset --hard FETCH_HEAD \
 	&& rm -rf .git
 
@@ -226,7 +226,7 @@ RUN git clone -b v1.0.4 --depth=1 {{ GIT }}/AOMediaCodec/libavif.git \
 FROM builder AS libheif
 COPY --link --from=libde265 {{ LibrariesPath }}/libde265-cache /
 
-RUN git clone -b v1.17.6 --depth=1 {{ GIT }}/strukturag/libheif.git \
+RUN git clone -b v1.18.2 --depth=1 {{ GIT }}/strukturag/libheif.git \
 	&& cd libheif \
 	&& cmake -GNinja -B build . \
 		-DCMAKE_BUILD_TYPE=None \
@@ -252,9 +252,8 @@ COPY --link --from=lcms2 {{ LibrariesPath }}/lcms2-cache /
 COPY --link --from=brotli {{ LibrariesPath }}/brotli-cache /
 COPY --link --from=highway {{ LibrariesPath }}/highway-cache /
 
-RUN git clone -b v0.10.3 --depth=1 {{ GIT }}/libjxl/libjxl.git \
+RUN git clone -b v0.11.1 --depth=1 {{ GIT }}/libjxl/libjxl.git \
 	&& cd libjxl \
-	&& git apply ../patches/libjxl.patch \
 	&& git submodule update --init --recursive --depth=1 third_party/libjpeg-turbo \
 	&& cmake -GNinja -B build . \
 		-DCMAKE_BUILD_TYPE=None \
@@ -639,7 +638,7 @@ RUN git clone -b 0.3.62 --depth=1 {{ GIT }}/PipeWire/pipewire.git \
 FROM builder AS openal
 COPY --link --from=pipewire {{ LibrariesPath }}/pipewire-cache /
 
-RUN git clone -b 1.23.1 --depth=1 {{ GIT }}/kcat/openal-soft.git \
+RUN git clone -b 1.24.1 --depth=1 {{ GIT }}/kcat/openal-soft.git \
 	&& cd openal-soft \
 	&& cmake -GNinja -B build . \
 		-DCMAKE_BUILD_TYPE=None \
@@ -734,6 +733,7 @@ RUN git clone -b {{ QT_TAG }} --depth=1 {{ GIT }}/qt/qt5.git \
 	&& cmake -GNinja -B build . \
 		-DCMAKE_BUILD_TYPE=None \
 		-DBUILD_SHARED_LIBS=OFF \
+		-DQT_GENERATE_SBOM=OFF \
 		-DINPUT_libpng=qt \
 		-DINPUT_harfbuzz=qt \
 		-DINPUT_pcre=qt \
