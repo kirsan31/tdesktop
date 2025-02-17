@@ -9,6 +9,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "api/api_text_entities.h"
 #include "base/qt/qt_key_modifiers.h"
+#include "base/options.h"
 #include "lang/lang_keys.h"
 #include "ui/effects/ripple_animation.h"
 #include "ui/effects/spoiler_mess.h"
@@ -50,6 +51,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_session.h"
 #include "window/window_session_controller.h"
 #include "api/api_bot.h"
+#include "support/support_helper.h"
 #include "styles/style_boxes.h"
 #include "styles/style_chat.h"
 #include "styles/style_dialogs.h" // dialogsMiniReplyStory.
@@ -62,7 +64,19 @@ namespace {
 
 const auto kPsaForwardedPrefix = "cloud_lng_forwarded_psa_";
 
+base::options::toggle FastButtonsModeOption({
+	.id = kOptionFastButtonsMode,
+	.name = "Fast buttons mode",
+	.description = "Trigger inline keyboard buttons by 1-9 keyboard keys.",
+});
+
 } // namespace
+
+const char kOptionFastButtonsMode[] = "fast-buttons-mode";
+
+bool FastButtonsMode() {
+	return FastButtonsModeOption.value();
+}
 
 void HistoryMessageVia::create(
 		not_null<Data::Session*> owner,
@@ -880,12 +894,17 @@ void ReplyKeyboard::paint(
 	Assert(_width > 0);
 
 	_st->startPaint(p, st);
+	auto number = hasFastButtonMode() ? 1 : 0;
 	for (auto y = 0, rowsCount = int(_rows.size()); y != rowsCount; ++y) {
 		for (auto x = 0, count = int(_rows[y].size()); x != count; ++x) {
+			const auto guard = gsl::finally([&] { if (number) ++number; });
 			const auto &button = _rows[y][x];
 			const auto rect = button.rect;
-			if (rect.y() >= clip.y() + clip.height()) return;
-			if (rect.y() + rect.height() < clip.y()) continue;
+			if (rect.y() >= clip.y() + clip.height()) {
+				return;
+			} else if (rect.y() + rect.height() < clip.y()) {
+				continue;
+			}
 
 			// just ignore the buttons that didn't layout well
 			if (rect.x() + rect.width() > _width) break;
@@ -904,8 +923,25 @@ void ReplyKeyboard::paint(
 				? Corner::Large
 				: Corner::Small;
 			_st->paintButton(p, st, outerWidth, button, buttonRounding);
+
+			if (number) {
+				p.setFont(st::dialogsUnreadFont);
+				p.setPen(st->msgServiceFg());
+				p.drawText(
+					rect.x() + st::msgBotKbIconPadding,
+					rect.y() + st::dialogsUnreadFont->ascent,
+					QString::number(number));
+			}
 		}
 	}
+}
+
+bool ReplyKeyboard::hasFastButtonMode() const {
+	return FastButtonsMode()
+		&& _item->inlineReplyKeyboard()
+		&& (_item == _item->history()->lastMessage())
+		&& _item->history()->session().fastButtonsBots().enabled(
+			_item->history()->peer);
 }
 
 ClickHandlerPtr ReplyKeyboard::getLink(QPoint point) const {
@@ -922,6 +958,19 @@ ClickHandlerPtr ReplyKeyboard::getLink(QPoint point) const {
 				_savedCoords = point;
 				return button.link;
 			}
+		}
+	}
+	return ClickHandlerPtr();
+}
+
+ClickHandlerPtr ReplyKeyboard::getLinkByIndex(int index) const {
+	auto number = 1;
+	for (const auto &row : _rows) {
+		for (const auto &button : row) {
+			if (number == index + 1) {
+				return button.link;
+			}
+			++number;
 		}
 	}
 	return ClickHandlerPtr();

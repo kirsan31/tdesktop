@@ -502,9 +502,19 @@ QSize Document::countOptimalSize() {
 	if (const auto named = Get<HistoryDocumentNamed>()) {
 		accumulate_max(maxWidth, tleft + named->name.maxWidth() + tright);
 	}
-	if (voice && voice->transcribe) {
-		maxWidth += st::historyTranscribeSkip
-			+ voice->transcribe->size().width();
+	if (voice) {
+		const auto maxWaveformWidth = ::Media::Player::kWaveformSamplesCount *
+			(st::msgWaveformBar + st::msgWaveformSkip);
+		const auto transcribeWidth = voice->transcribe
+			? (voice->transcribe->size().width() + st::historyTranscribeSkip)
+			: 0;
+		accumulate_max(
+			maxWidth,
+			maxWaveformWidth
+				+ rect::m::sum::h(st.padding)
+				+ st.thumbSize
+				+ st.thumbSkip
+				+ transcribeWidth);
 	}
 
 	auto minHeight = st.padding.top() + st.thumbSize + st.padding.bottom();
