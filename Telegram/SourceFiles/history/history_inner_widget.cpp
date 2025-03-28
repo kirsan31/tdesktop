@@ -29,7 +29,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/view/history_view_emoji_interactions.h"
 #include "history/history_item_components.h"
 #include "history/history_item_text.h"
-#include "history/history_view_swipe.h"
 #include "payments/payments_reaction_process.h"
 #include "ui/widgets/menu/menu_add_action_callback_factory.h"
 #include "ui/widgets/menu/menu_multiline_action.h"
@@ -42,6 +41,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/boxes/edit_factcheck_box.h"
 #include "ui/boxes/report_box_graphics.h"
 #include "ui/controls/delete_message_context_action.h"
+#include "ui/controls/swipe_handler.h"
 #include "ui/inactive_press.h"
 #include "ui/painter.h"
 #include "ui/rect.h"
@@ -440,7 +440,7 @@ HistoryInner::HistoryInner(
 	}, _scroll->lifetime());
 
 	setupSharingDisallowed();
-	setupSwipeReply();
+	setupSwipeReplyAndBack();
 }
 
 void HistoryInner::reactionChosen(const ChosenReaction &reaction) {
@@ -523,12 +523,30 @@ void HistoryInner::setupSharingDisallowed() {
 	}, lifetime());
 }
 
-void HistoryInner::setupSwipeReply() {
-	if (_peer && _peer->isChannel() && !_peer->isMegagroup()) {
+void HistoryInner::setupSwipeReplyAndBack() {
+	if (!_peer) {
 		return;
 	}
-	HistoryView::SetupSwipeHandler(this, _scroll, [=, history = _history](
-			HistoryView::ChatPaintGestureHorizontalData data) {
+	const auto peer = _peer;
+
+	auto update = [=, history = _history](Ui::Controls::SwipeContextData data) {
+		if (data.translation > 0) {
+			if (!_swipeBackData.callback) {
+				_swipeBackData = Ui::Controls::SetupSwipeBack(
+					_widget,
+					[=]() -> std::pair<QColor, QColor> {
+						auto context = preparePaintContext({});
+						return {
+							context.st->msgServiceBg()->c,
+							context.st->msgServiceFg()->c,
+						};
+					});
+			}
+			_swipeBackData.callback(data);
+			return;
+		} else if (_swipeBackData.lifetime) {
+			_swipeBackData = {};
+		}
 		const auto changed = (_gestureHorizontal.msgBareId != data.msgBareId)
 			|| (_gestureHorizontal.translation != data.translation)
 			|| (_gestureHorizontal.reachRatio != data.reachRatio);
@@ -541,9 +559,19 @@ void HistoryInner::setupSwipeReply() {
 				repaintItem(item);
 			}
 		}
-	}, [=, show = _controller->uiShow()](int cursorTop) {
-		auto result = HistoryView::SwipeHandlerFinishData();
-		if (inSelectionMode().inSelectionMode) {
+	};
+
+	auto init = [=, show = _controller->uiShow()](
+			int cursorTop,
+			Qt::LayoutDirection direction) {
+		if (direction == Qt::RightToLeft) {
+			return Ui::Controls::DefaultSwipeBackHandlerFinishData([=] {
+				_controller->showBackFromStack();
+			});
+		}
+		auto result = Ui::Controls::SwipeHandlerFinishData();
+		if (inSelectionMode().inSelectionMode
+			|| (peer->isChannel() && !peer->isMegagroup())) {
 			return result;
 		}
 		enumerateItems<EnumItemsDirection::BottomToTop>([&](
@@ -581,11 +609,21 @@ void HistoryInner::setupSwipeReply() {
 			return false;
 		});
 		return result;
-	}, _touchMaybeSelecting.value());
+	};
+
+	Ui::Controls::SetupSwipeHandler({
+		.widget = this,
+		.scroll = _scroll,
+		.update = std::move(update),
+		.init = std::move(init),
+		.dontStart = _touchMaybeSelecting.value(),
+	});
 }
 
 bool HistoryInner::hasSelectRestriction() const {
-	if (!_sharingDisallowed.current()) {
+	if (session().frozen()) {
+		return true;
+	} else if (!_sharingDisallowed.current()) {
 		return false;
 	} else if (const auto chat = _peer->asChat()) {
 		return !chat->canDeleteMessages();
@@ -1499,6 +1537,11 @@ void HistoryInner::touchEvent(QTouchEvent *e) {
 	} break;
 
 	case QEvent::TouchUpdate: {
+		LOG(("UPDATE: %1,%2 -> %3,%4"
+			).arg(_touchStart.x()
+			).arg(_touchStart.y()
+			).arg(_touchPos.x()
+			).arg(_touchPos.y()));
 		if (!_touchInProgress) {
 			return;
 		} else if (_touchSelect) {
@@ -2136,7 +2179,9 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 	}
 
 	const auto link = ClickHandler::getActive();
-	if (link
+	if (_controller->showFrozenError()) {
+		return;
+	} else if (link
 		&& !link->property(
 			kSendReactionEmojiProperty).value<Data::ReactionId>().empty()
 		&& _reactionsManager->showContextMenu(
@@ -3896,7 +3941,8 @@ auto HistoryInner::reactionButtonParameters(
 }
 
 void HistoryInner::mouseActionUpdate() {
-	if (hasPendingResizedItems() || !_mouseActive) {
+	if (hasPendingResizedItems()
+		|| (!_mouseActive && !window()->isActiveWindow())) {
 		return;
 	}
 
@@ -4338,6 +4384,12 @@ void HistoryInner::refreshAboutView(bool force) {
 			_aboutView = std::make_unique<HistoryView::AboutView>(
 				_history,
 				_history->delegateMixin()->delegate());
+			_aboutView->refreshRequests() | rpl::start_with_next([=] {
+				updateBotInfo();
+			}, _aboutView->lifetime());
+			_aboutView->sendIntroSticker() | rpl::start_to_stream(
+				_sendIntroSticker,
+				_aboutView->lifetime());
 		}
 	};
 	if (const auto user = _peer->asUser()) {
@@ -4346,15 +4398,17 @@ void HistoryInner::refreshAboutView(bool force) {
 			if (!info->inited) {
 				session().api().requestFullPeer(user);
 			}
-		} else if (user->meRequiresPremiumToWrite()
-			&& !user->session().premium()
-			&& !historyHeight()) {
+		} else if (!user->isContact()
+			&& !user->phoneCountryCode().isEmpty()) {
 			refresh();
 		} else if (!historyHeight()) {
-			if (!user->isFullLoaded()) {
-				session().api().requestFullPeer(user);
-			} else {
+			if (user->starsPerMessage() > 0
+				|| (user->requiresPremiumToWrite()
+					&& !user->session().premium())
+				|| user->isFullLoaded()) {
 				refresh();
+			} else {
+				session().api().requestFullPeer(user);
 			}
 		}
 	}
@@ -4765,6 +4819,11 @@ ClickContext HistoryInner::prepareClickContext(
 		button,
 		QVariant::fromValue(prepareClickHandlerContext(itemId)),
 	};
+}
+
+auto HistoryInner::sendIntroSticker() const
+-> rpl::producer<not_null<DocumentData*>> {
+	return _sendIntroSticker.events();
 }
 
 auto HistoryInner::DelegateMixin()
