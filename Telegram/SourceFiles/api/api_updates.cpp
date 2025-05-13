@@ -23,6 +23,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "mtproto/mtproto_dc_options.h"
 #include "data/business/data_shortcut_messages.h"
 #include "data/components/credits.h"
+#include "data/components/promo_suggestions.h"
 #include "data/components/scheduled_messages.h"
 #include "data/components/top_peers.h"
 #include "data/notify/data_notify_settings.h"
@@ -303,14 +304,19 @@ void Updates::feedUpdateVector(
 	auto list = updates.v;
 	const auto hasGroupCallParticipantUpdates = ranges::contains(
 		list,
-		mtpc_updateGroupCallParticipants,
-		&MTPUpdate::type);
+		true,
+		[](const MTPUpdate &update) {
+			return update.type() == mtpc_updateGroupCallParticipants
+				|| update.type() == mtpc_updateGroupCallChainBlocks;
+		});
 	if (hasGroupCallParticipantUpdates) {
 		ranges::stable_sort(list, std::less<>(), [](const MTPUpdate &entry) {
-			if (entry.type() == mtpc_updateGroupCallParticipants) {
+			if (entry.type() == mtpc_updateGroupCallChainBlocks) {
 				return 0;
-			} else {
+			} else if (entry.type() == mtpc_updateGroupCallParticipants) {
 				return 1;
+			} else {
+				return 2;
 			}
 		});
 	} else if (policy == SkipUpdatePolicy::SkipExceptGroupCallParticipants) {
@@ -324,7 +330,8 @@ void Updates::feedUpdateVector(
 		if ((policy == SkipUpdatePolicy::SkipMessageIds
 			&& type == mtpc_updateMessageID)
 			|| (policy == SkipUpdatePolicy::SkipExceptGroupCallParticipants
-				&& type != mtpc_updateGroupCallParticipants)) {
+				&& type != mtpc_updateGroupCallParticipants
+				&& type != mtpc_updateGroupCallChainBlocks)) {
 			continue;
 		}
 		feedUpdate(entry);
@@ -954,7 +961,8 @@ void Updates::applyGroupCallParticipantUpdates(const MTPUpdates &updates) {
 			data.vupdates(),
 			SkipUpdatePolicy::SkipExceptGroupCallParticipants);
 	}, [&](const MTPDupdateShort &data) {
-		if (data.vupdate().type() == mtpc_updateGroupCallParticipants) {
+		if (data.vupdate().type() == mtpc_updateGroupCallParticipants
+			|| data.vupdate().type() == mtpc_updateGroupCallChainBlocks) {
 			feedUpdate(data.vupdate());
 		}
 	}, [](const auto &) {
@@ -1309,7 +1317,7 @@ void Updates::applyUpdateNoPtsCheck(const MTPUpdate &update) {
 							user->madeAction(base::unixtime::now());
 						}
 					}
-					ClearMediaAsExpired(item);
+					item->clearMediaAsExpired();
 				}
 			} else {
 				// Perhaps it was an unread mention!
@@ -2061,6 +2069,7 @@ void Updates::feedUpdate(const MTPUpdate &update) {
 
 	case mtpc_updateConfig: {
 		session().mtp().requestConfig();
+		session().promoSuggestions().invalidate();
 	} break;
 
 	case mtpc_updateUserPhone: {
@@ -2110,6 +2119,7 @@ void Updates::feedUpdate(const MTPUpdate &update) {
 	case mtpc_updatePhoneCall:
 	case mtpc_updatePhoneCallSignalingData:
 	case mtpc_updateGroupCallParticipants:
+	case mtpc_updateGroupCallChainBlocks:
 	case mtpc_updateGroupCallConnection:
 	case mtpc_updateGroupCall: {
 		Core::App().calls().handleUpdate(&session(), update);
