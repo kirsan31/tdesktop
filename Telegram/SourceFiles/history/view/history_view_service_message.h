@@ -64,8 +64,6 @@ private:
 
 };
 
-int WideChatWidth();
-
 class ServiceMessagePainter {
 public:
 	static void PaintDate(
