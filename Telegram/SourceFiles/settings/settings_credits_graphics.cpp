@@ -46,6 +46,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "info/channel_statistics/earn/earn_format.h"
 #include "info/channel_statistics/earn/earn_icons.h"
 #include "info/peer_gifts/info_peer_gifts_common.h"
+#include "info/peer_gifts/info_peer_gifts_widget.h"
 #include "info/settings/info_settings_widget.h" // SectionCustomTopBarData.
 #include "info/statistics/info_statistics_list_controllers.h"
 #include "info/info_controller.h"
@@ -62,6 +63,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "settings/settings_credits.h"
 #include "statistics/widgets/chart_header_widget.h"
 #include "ui/boxes/confirm_box.h"
+#include "ui/controls/button_labels.h"
+#include "ui/controls/ton_common.h"
 #include "ui/controls/userpic_button.h"
 #include "ui/dynamic_image.h"
 #include "ui/dynamic_thumbnails.h"
@@ -74,6 +77,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/layers/generic_box.h"
 #include "ui/painter.h"
 #include "ui/rect.h"
+#include "ui/text/custom_emoji_helper.h"
 #include "ui/text/format_values.h"
 #include "ui/text/text_utilities.h"
 #include "ui/toast/toast.h"
@@ -466,15 +470,15 @@ SubscriptionRightLabel PaintSubscriptionRightLabelCallback(
 		not_null<Main::Session*> session,
 		const style::PeerListItem &st,
 		int amount) {
+	auto helper = Ui::Text::CustomEmojiHelper();
+	auto starIcon = helper.paletteDependent(
+		Ui::Earn::IconCreditsEmoji());
 	const auto text = std::make_shared<Ui::Text::String>();
 	text->setMarkedText(
 		st::semiboldTextStyle,
-		TextWithEntities()
-			.append(session->data().customEmojiManager().creditsEmoji())
-			.append(QChar::Space)
-			.append(Lang::FormatCountDecimal(amount)),
+		starIcon.append(' ').append(Lang::FormatCountDecimal(amount)),
 		kMarkupTextOptions,
-		Core::TextContext({ .session = session }));
+		helper.context());
 	const auto &font = text->style()->font;
 	const auto &statusFont = st::contactsStatusFont;
 	const auto status = tr::lng_group_invite_joined_right(tr::now);
@@ -625,9 +629,9 @@ void FillCreditOptions(
 					.giftPeerId = PeerId(option.giftBarePeerId),
 				};
 
-				const auto weak = Ui::MakeWeak(button);
+				const auto weak = base::make_weak(button);
 				const auto done = [=](Payments::CheckoutResult result) {
-					if (const auto strong = weak.data()) {
+					if (const auto strong = weak.get()) {
 						strong->window()->setFocus();
 						if (result == Payments::CheckoutResult::Paid) {
 							if (const auto onstack = paid) {
@@ -718,19 +722,14 @@ not_null<Ui::RpWidget*> AddBalanceWidget(
 		balanceValue
 	) | rpl::start_with_next([=](CreditsAmount value) {
 		auto text = TextWithEntities();
-		const auto manager = &session->data().customEmojiManager();
+		auto helper = Ui::Text::CustomEmojiHelper();
 		if (value.ton()) {
-			text.append(Ui::Text::SingleCustomEmoji(
-				manager->registerInternalEmoji(
-					Ui::Earn::IconCurrencyColored(
-						st::tonFieldIconSize,
-						st::currencyFg->c),
-					st::channelEarnCurrencyLearnMargins,
-					false))
+			text.append(
+				helper.paletteDependent(Ui::Earn::IconCurrencyEmoji())
 			).append(' ').append(Lang::FormatCreditsAmountDecimal(value));
 		} else {
 			text.append(
-				manager->creditsEmoji()
+				helper.paletteDependent(Ui::Earn::IconCreditsEmoji())
 			).append(' ').append(
 				Lang::FormatCreditsAmountToShort(value).string);
 		}
@@ -738,10 +737,7 @@ not_null<Ui::RpWidget*> AddBalanceWidget(
 			st::semiboldTextStyle,
 			text,
 			kMarkupTextOptions,
-			Core::TextContext({
-				.session = session,
-				.repaint = [=] { balance->update(); },
-			}));
+			helper.context([=] { balance->update(); }));
 		balance->setBalance(value);
 		resize();
 	}, balance->lifetime());
@@ -776,7 +772,6 @@ void BoostCreditsBox(
 	box->setNoContentMargin(true);
 
 	const auto content = box->verticalLayout();
-	const auto session = &controller->session();
 	Ui::AddSkip(content);
 	{
 		const auto &stUser = st::premiumGiftsUserpicButton;
@@ -816,21 +811,16 @@ void BoostCreditsBox(
 				- st::boxRowPadding.right());
 		auto textWithEntities = TextWithEntities();
 		textWithEntities.append(
-			Ui::Text::SingleCustomEmoji(
-				session->data().customEmojiManager().registerInternalEmoji(
-					st::boostsListMiniIcon,
-					{ st.font->descent * 2, st.font->descent / 2, 0, 0 },
-					true)));
-		textWithEntities.append(
+			Ui::Text::IconEmoji(&st::boostsListEntryIcon)
+		).append(
 			tr::lng_boosts_list_title(tr::now, lt_count, b.multiplier));
 		text->setMarkedText(
 			st,
 			std::move(textWithEntities),
 			kMarkupTextOptions,
-			Core::TextContext({
-				.session = session,
+			Ui::Text::MarkedContext{
 				.repaint = [=] { badge->update(); },
-			}));
+			});
 		badge->paintRequest(
 		) | rpl::start_with_next([=] {
 			auto p = QPainter(badge);
@@ -889,10 +879,10 @@ void BoostCreditsBox(
 }
 
 void ProcessReceivedSubscriptions(
-		QPointer<Ui::GenericBox> weak,
+		base::weak_qptr<Ui::GenericBox> weak,
 		not_null<Main::Session*> session) {
 	const auto rebuilder = session->data().activeCreditsSubsRebuilder();
-	if (const auto strong = weak.data()) {
+	if (const auto strong = weak.get()) {
 		if (!rebuilder) {
 			return strong->closeBox();
 		}
@@ -903,7 +893,7 @@ void ProcessReceivedSubscriptions(
 				true);
 		api->requestSubscriptions({}, [=](Data::CreditsStatusSlice first) {
 			rebuilder->fire(std::move(first));
-			if (const auto strong = weak.data()) {
+			if (const auto strong = weak.get()) {
 				strong->closeBox();
 			}
 		});
@@ -939,7 +929,8 @@ void FillUniqueGiftMenu(
 		&& e.id.isEmpty()
 		&& (e.in || (giftChannel && giftChannel->canManageGifts()))
 		&& !e.giftTransferred
-		&& !e.giftRefunded;
+		&& !e.giftRefunded
+		&& !e.converted;
 
 	const auto unique = e.uniqueGift;
 	if (unique
@@ -1065,8 +1056,8 @@ void FillUniqueGiftMenu(
 		}
 	}
 	if (CanResellGift(&show->session(), e)) {
-		const auto resalePrice = unique->starsForResale;
-		const auto editPrice = (resalePrice > 0
+		const auto inResale = (unique->starsForResale > 0);
+		const auto editPrice = (inResale
 			? tr::lng_gift_transfer_update
 			: tr::lng_gift_transfer_sell)(tr::now);
 		menu->addAction(editPrice, [=] {
@@ -1075,12 +1066,12 @@ void FillUniqueGiftMenu(
 				: GiftWearBoxStyleOverride();
 			ShowUniqueGiftSellBox(show, unique, savedId, style);
 		}, st.resell ? st.resell : &st::menuIconTagSell);
-		if (resalePrice > 0) {
+		if (inResale) {
 			menu->addAction(tr::lng_gift_transfer_unlist(tr::now), [=] {
 				const auto name = UniqueGiftName(*unique);
 				const auto confirm = [=](Fn<void()> close) {
 					close();
-					Ui::UpdateGiftSellPrice(show, unique, savedId, 0);
+					Ui::UpdateGiftSellPrice(show, unique, savedId, {});
 				};
 				show->show(Ui::MakeConfirmBox({
 					.text = tr::lng_gift_sell_unlist_sure(),
@@ -1148,7 +1139,6 @@ void GenericCreditsEntryBox(
 	const auto isStarGift = e.stargift || e.soldOutInfo;
 	const auto creditsHistoryStarGift = isStarGift && !e.id.isEmpty();
 	const auto sentStarGift = creditsHistoryStarGift && !e.in;
-	const auto convertedStarGift = creditsHistoryStarGift && e.converted;
 	const auto giftToSelf = isStarGift
 		&& (e.barePeerId == selfPeerId)
 		&& (e.in || e.bareGiftOwnerId == selfPeerId);
@@ -1164,7 +1154,8 @@ void GenericCreditsEntryBox(
 	const auto starGiftCanManage = isStarGift
 		&& !creditsHistoryStarGift
 		&& (e.in || giftToChannelCanManage)
-		&& !e.fromGiftSlug;
+		&& !e.fromGiftSlug
+		&& !e.converted;
 	const auto starGiftCanTransfer = isStarGift
 		&& !creditsHistoryStarGift
 		&& (e.in || giftToChannelCanTransfer);
@@ -1231,14 +1222,17 @@ void GenericCreditsEntryBox(
 		box->setNoContentMargin(true);
 
 		const auto slug = uniqueGift->slug;
+		const auto forceTon = e.giftResaleForceTon;
 		auto price = rpl::single(
 			rpl::empty
 		) | rpl::then(session->data().giftUpdates(
 		) | rpl::filter([=](const Data::GiftUpdate &update) {
 			return (update.action == Data::GiftUpdate::Action::ResaleChange)
 				&& (update.slug == slug);
-		}) | rpl::to_empty) | rpl::map([unique = e.uniqueGift] {
-			return unique->starsForResale;
+		}) | rpl::to_empty) | rpl::map([forceTon, unique = e.uniqueGift] {
+			return forceTon
+				? Data::UniqueGiftResaleTon(*unique)
+				: Data::UniqueGiftResaleAsked(*unique);
 		});
 		auto change = [=] {
 			const auto style = st.giftWearBox
@@ -1250,12 +1244,13 @@ void GenericCreditsEntryBox(
 				EntryToSavedStarGiftId(session, e),
 				style);
 		};
+		const auto canResell = CanResellGift(session, e);
 		AddUniqueGiftCover(
 			content,
 			rpl::single(*uniqueGift),
 			{},
 			std::move(price),
-			CanResellGift(session, e) ? std::move(change) : Fn<void()>());
+			canResell ? std::move(change) : Fn<void()>());
 
 		AddSkip(content, st::defaultVerticalListSkip * 2);
 
@@ -1263,6 +1258,10 @@ void GenericCreditsEntryBox(
 			const auto type = SavedStarGiftMenuType::View;
 			FillUniqueGiftMenu(show, menu, e, type, st);
 		});
+
+		if (canResell) {
+			Ui::PreloadUniqueGiftResellPrices(session);
+		}
 	} else if (const auto callback = Ui::PaintPreviewCallback(session, e)) {
 		const auto thumb = content->add(object_ptr<Ui::CenterWrap<>>(
 			content,
@@ -1419,7 +1418,7 @@ void GenericCreditsEntryBox(
 					? tr::lng_credits_box_history_entry_gift_unavailable(tr::now)
 					: sentStarGift
 					? tr::lng_credits_box_history_entry_gift_sent(tr::now)
-					: convertedStarGift
+					: e.converted
 					? tr::lng_credits_box_history_entry_gift_converted(tr::now)
 					: (isStarGift && !starGiftCanManage)
 					? tr::lng_gift_link_label_gift(tr::now)
@@ -1434,7 +1433,23 @@ void GenericCreditsEntryBox(
 
 		Ui::AddSkip(content);
 	}
-	if (!isStarGift || creditsHistoryStarGift || e.soldOutInfo) {
+	if (e.bareGiftReleasedById && !e.uniqueGift) {
+		const auto peer = owner->peer(PeerId(e.bareGiftReleasedById));
+		const auto released = content->add(
+			object_ptr<Ui::CenterWrap<Ui::FlatLabel>>(
+				box,
+				object_ptr<Ui::FlatLabel>(
+					content,
+					tr::lng_credits_box_history_entry_gift_released(
+						lt_name,
+						rpl::single(Ui::Text::Link('@' + peer->username())),
+						Ui::Text::WithEntities),
+					st::creditsReleasedByLabel)));
+		released->entity()->setClickHandlerFilter([=](const auto &...) {
+			Ui::GiftReleasedByHandler(peer);
+			return false;
+		});
+	} else if (!isStarGift || creditsHistoryStarGift || e.soldOutInfo) {
 		constexpr auto kMinus = QChar(0x2212);
 		auto &lifetime = content->lifetime();
 		const auto text = lifetime.make_state<Ui::Text::String>();
@@ -1456,10 +1471,9 @@ void GenericCreditsEntryBox(
 			object_ptr<Ui::FixedHeightWidget>(
 				content,
 				st::defaultTextStyle.font->height));
-		const auto context = Core::TextContext({
-			.session = session,
-			.repaint = [=] { amount->update(); },
-		});
+		auto helper = Ui::Text::CustomEmojiHelper();
+		const auto starEmoji = helper.paletteDependent(
+			Ui::Earn::IconCreditsEmoji());
 		if (e.soldOutInfo) {
 			text->setText(
 				st::defaultTextStyle,
@@ -1470,12 +1484,12 @@ void GenericCreditsEntryBox(
 				tr::lng_credits_subscription_subtitle(
 					tr::now,
 					lt_emoji,
-					owner->customEmojiManager().creditsEmoji(),
+					starEmoji,
 					lt_cost,
 					{ QString::number(s.subscription.credits) },
 					Ui::Text::WithEntities),
 				kMarkupTextOptions,
-				context);
+				helper.context([=] { amount->update(); }));
 		} else if (e.credits.stars()) {
 			auto t = TextWithEntities()
 				.append((e.in && (creditsHistoryStarGift || !isStarGift))
@@ -1485,12 +1499,12 @@ void GenericCreditsEntryBox(
 					: kMinus)
 				.append(Lang::FormatCreditsAmountDecimal(e.credits.abs()))
 				.append(QChar(' '))
-				.append(owner->customEmojiManager().creditsEmoji());
+				.append(starEmoji);
 			text->setMarkedText(
 				st::semiboldTextStyle,
 				std::move(t),
 				kMarkupTextOptions,
-				context);
+				helper.context([=] { amount->update(); }));
 		} else if (e.credits.ton()) {
 			auto t = TextWithEntities()
 				.append((e.in ? QChar('+') : kMinus))
@@ -1499,27 +1513,18 @@ void GenericCreditsEntryBox(
 				st::channelEarnHistoryMajorLabel.style,
 				std::move(t),
 				kMarkupTextOptions,
-				context);
+				helper.context([=] { amount->update(); }));
 
 			auto minor = TextWithEntities()
 				.append(Info::ChannelEarn::MinorPart(e.credits.abs()))
 				.append(QChar(' '))
-				.append(
-					Ui::Text::SingleCustomEmoji(
-						owner->customEmojiManager().registerInternalEmoji(
-							Ui::Earn::IconCurrencyColored(
-								st::tonFieldIconSize,
-								(e.in
-									? st::boxTextFgGood->c
-									: st::menuIconAttentionColor->c)),
-							QMargins(0, st::lineWidth * 1, 0, 0),
-							false)));
+				.append(Ui::Text::IconEmoji(&st::tonIconEmojiInSmall));
 			minorText = lifetime.make_state<Ui::Text::String>();
 			minorText->setMarkedText(
 				st::channelEarnHistoryMinorLabel.style,
 				std::move(minor),
 				kMarkupTextOptions,
-				context);
+				helper.context([=] { amount->update(); }));
 		}
 		const auto font = text->style()->font;
 		const auto roundedFont = st::defaultTextStyle.font;
@@ -1606,7 +1611,7 @@ void GenericCreditsEntryBox(
 	}
 
 	const auto arrow = Ui::Text::IconEmoji(&st::textMoreIconEmoji);
-	if (!uniqueGift && starGiftCanManage) {
+	if (!uniqueGift && (starGiftCanManage || e.converted)) {
 		Ui::AddSkip(content);
 		const auto about = box->addRow(
 			object_ptr<Ui::CenterWrap<Ui::FlatLabel>>(
@@ -1735,20 +1740,19 @@ void GenericCreditsEntryBox(
 
 	const auto canToggle = starGiftCanManage
 		&& !e.giftTransferred
-		&& !e.giftRefunded;
-	const auto toggleVisibility = [=, weak = Ui::MakeWeak(box)](bool save) {
+		&& !e.giftRefunded
+		&& !e.converted;
+	const auto toggleVisibility = [=, weak = base::make_weak(box)](bool save) {
 		const auto showSection = !e.fromGiftsList;
 		const auto savedId = EntryToSavedStarGiftId(&show->session(), e);
 		const auto done = [=](bool ok) {
 			if (ok && showSection) {
 				if (const auto window = show->resolveWindow()) {
 					window->showSection(
-						std::make_shared<Info::Memento>(
-							window->session().user(),
-							Info::Section::Type::PeerGifts));
+						Info::PeerGifts::Make(window->session().user()));
 				}
 			}
-			if (const auto strong = weak.data()) {
+			if (const auto strong = weak.get()) {
 				if (ok) {
 					strong->closeBox();
 				} else {
@@ -1794,7 +1798,7 @@ void GenericCreditsEntryBox(
 	const auto canUpgradeFree = canUpgrade && (e.starsUpgradedBySender > 0);
 
 	if (isStarGift && e.id.isEmpty()) {
-		const auto convert = [=, weak = Ui::MakeWeak(box)] {
+		const auto convert = [=, weak = base::make_weak(box)] {
 			const auto stars = e.starsConverted;
 			const auto days = canConvert ? ((timeLeft + 86399) / 86400) : 0;
 			auto text = giftToChannelCanManage
@@ -1828,7 +1832,7 @@ void GenericCreditsEntryBox(
 								.action = GiftAction::Convert,
 							});
 						}
-						if (const auto strong = weak.data()) {
+						if (const auto strong = weak.get()) {
 							if (ok) {
 								strong->closeBox();
 							} else {
@@ -1950,7 +1954,7 @@ void GenericCreditsEntryBox(
 				if (button != Qt::LeftButton) {
 					return false;
 				}
-				const auto done = [=, weak = Ui::MakeWeak(box)] {
+				const auto done = [=, weak = base::make_weak(box)] {
 					ProcessReceivedSubscriptions(weak, session);
 				};
 				const auto fail = [=, s = box->uiShow()](const QString &e) {
@@ -2001,7 +2005,7 @@ void GenericCreditsEntryBox(
 				? tr::lng_gift_show_on_channel
 				: tr::lng_gift_show_on_page)()
 			: tr::lng_box_ok()));
-	const auto send = [=, weak = Ui::MakeWeak(box)] {
+	const auto send = [=, weak = base::make_weak(box)] {
 		if (toRejoin && !toRenew) {
 			if (const auto window = show->resolveWindow()) {
 				const auto finish = [=](Payments::CheckoutResult&&) {
@@ -2026,7 +2030,7 @@ void GenericCreditsEntryBox(
 				ProcessReceivedSubscriptions(weak, session);
 			};
 			const auto fail = [=, show = box->uiShow()](const QString &e) {
-				if ([[maybe_unused]] const auto strong = weak.data()) {
+				if ([[maybe_unused]] const auto strong = weak.get()) {
 					state->confirmButtonBusy = false;
 				}
 				show->showToast(e);
@@ -2062,6 +2066,7 @@ void GenericCreditsEntryBox(
 			ShowBuyResaleGiftBox(
 				show,
 				e.uniqueGift,
+				e.giftResaleForceTon,
 				to,
 				crl::guard(box, [=] { box->closeBox(); }));
 		} else if (canUpgradeFree) {
@@ -2073,12 +2078,30 @@ void GenericCreditsEntryBox(
 		}
 	});
 	if (canBuyResold) {
-		button->setText(tr::lng_gift_buy_resale_button(
-			lt_cost,
-			rpl::single(
-				Ui::Text::IconEmoji(&st::starIconEmoji).append(
+		if (uniqueGift->onlyAcceptTon || e.giftResaleForceTon) {
+			button->setText(rpl::single(QString()));
+			Ui::SetButtonTwoLabels(
+				button,
+				tr::lng_gift_buy_resale_button(
+					lt_cost,
+					rpl::single(Data::FormatGiftResaleTon(*uniqueGift)),
+					Ui::Text::WithEntities),
+				tr::lng_gift_buy_resale_equals(
+					lt_cost,
+					rpl::single(Ui::Text::IconEmoji(
+						&st::starIconEmojiSmall
+					).append(Lang::FormatCountDecimal(
+						uniqueGift->starsForResale))),
+					Ui::Text::WithEntities),
+				st::resaleButtonTitle,
+				st::resaleButtonSubtitle);
+		} else {
+			button->setText(tr::lng_gift_buy_resale_button(
+				lt_cost,
+				rpl::single(Ui::Text::IconEmoji(&st::starIconEmoji).append(
 					Lang::FormatCountDecimal(uniqueGift->starsForResale))),
-			Ui::Text::WithEntities));
+				Ui::Text::WithEntities));
+		}
 	}
 	{
 		using namespace Info::Statistics;
@@ -2161,7 +2184,7 @@ void GlobalStarGiftBox(
 		not_null<Ui::GenericBox*> box,
 		std::shared_ptr<ChatHelpers::Show> show,
 		const Data::StarGift &data,
-		PeerId resaleRecipientId,
+		StarGiftResaleInfo resale,
 		CreditsEntryBoxStyleOverrides st) {
 	const auto selfId = show->session().userPeerId();
 	const auto ownerId = data.unique ? data.unique->ownerId.value : 0;
@@ -2172,8 +2195,8 @@ void GlobalStarGiftBox(
 			.credits = CreditsAmount(data.stars),
 			.bareGiftStickerId = data.document->id,
 			.bareGiftOwnerId = ownerId,
-			.bareGiftResaleRecipientId = ((resaleRecipientId != selfId)
-				? resaleRecipientId.value
+			.bareGiftResaleRecipientId = ((resale.recipientId != selfId)
+				? resale.recipientId.value
 				: 0),
 			.stargiftId = data.id,
 			.uniqueGift = data.unique,
@@ -2181,6 +2204,7 @@ void GlobalStarGiftBox(
 			.limitedCount = data.limitedCount,
 			.limitedLeft = data.limitedLeft,
 			.stargift = true,
+			.giftResaleForceTon = resale.forceTon,
 			.fromGiftSlug = true,
 			.in = (ownerId == show->session().userPeerId().value),
 			.gift = true,
@@ -2282,6 +2306,9 @@ void StarGiftViewBox(
 		.bareGiftOwnerId = (data.unique
 			? data.unique->ownerId.value
 			: toId.value),
+		.bareGiftReleasedById = (data.stargiftReleasedBy
+			? data.stargiftReleasedBy->id.value
+			: 0),
 		.bareActorId = (toChannel ? data.channelFrom->id.value : 0),
 		.bareEntryOwnerId = (toChannel ? data.channel->id.value : 0),
 		.giftChannelSavedId = data.channelSavedId,
@@ -2442,7 +2469,7 @@ void SmallBalanceBox(
 		return owner->peer(peerFromChannel(value.channelId))->name();
 	}, [](SmallBalanceSubscription value) {
 		return value.name;
-	}, [](SmallBalanceDeepLink value) {
+	}, [](SmallBalanceDeepLink) {
 		return QString();
 	}, [&](SmallBalanceStarGift value) {
 		return owner->peer(value.recipientId)->shortName();
@@ -2454,6 +2481,8 @@ void SmallBalanceBox(
 		return value.recipientId
 			? owner->peer(value.recipientId)->shortName()
 			: QString();
+	}, [](SmallBalanceForSearch) {
+		return QString();
 	});
 
 	auto needed = show->session().credits().balanceValue(
@@ -2504,6 +2533,9 @@ void SmallBalanceBox(
 					? tr::lng_credits_small_balance_for_suggest(
 						lt_channel,
 						rpl::single(Ui::Text::Bold(name)),
+						Ui::Text::RichLangValue)
+					: v::is<SmallBalanceForSearch>(source)
+					? tr::lng_credits_small_balance_for_search(
 						Ui::Text::RichLangValue)
 					: name.isEmpty()
 					? tr::lng_credits_small_balance_fallback(
@@ -2687,11 +2719,6 @@ void AddWithdrawalWidget(
 		tr::lng_channel_earn_balance_button(tr::now),
 		st::channelEarnSemiboldLabel);
 	const auto processInputChange = [&] {
-		const auto buttonEmoji = Ui::Text::SingleCustomEmoji(
-			session->data().customEmojiManager().registerInternalEmoji(
-				st::settingsPremiumIconStar,
-				{ 0, -st::moderateBoxExpandInnerSkip, 0, 0 },
-				true));
 		using Balance = rpl::variable<CreditsAmount>;
 		const auto currentBalance = input->lifetime().make_state<Balance>(
 			rpl::duplicate(availableBalanceValue));
@@ -2707,9 +2734,8 @@ void AddWithdrawalWidget(
 						lt_count,
 						amount,
 						lt_emoji,
-						buttonEmoji,
-						Ui::Text::RichLangValue),
-					Core::TextContext({ .session = session }));
+						Ui::Text::IconEmoji(&st::starIconEmojiLarge),
+						Ui::Text::RichLangValue));
 			}
 		};
 		QObject::connect(input, &Ui::MaskedInputField::changed, process);
@@ -2777,15 +2803,10 @@ void AddWithdrawalWidget(
 		constexpr auto kDateUpdateInterval = crl::time(250);
 		const auto was = base::unixtime::serialize(dt);
 
-		const auto context = Core::TextContext({
-			.session = session,
+		const auto context = Ui::Text::MarkedContext{
 			.repaint = [=] { lockedLabel->update(); },
-		});
-		const auto emoji = Ui::Text::SingleCustomEmoji(
-			session->data().customEmojiManager().registerInternalEmoji(
-				st::chatSimilarLockedIcon,
-				st::botEarnButtonLockMargins,
-				true));
+		};
+		const auto emoji = Ui::Text::IconEmoji(&st::botEarnButtonLock);
 
 		rpl::single(
 			rpl::empty
@@ -2874,7 +2895,7 @@ void AddWithdrawalWidget(
 						tr::lng_bot_earn_balance_about_url(tr::now));
 				}),
 			Ui::Text::RichLangValue),
-		Core::TextContext({ .session = session }),
+		{},
 		st::boxDividerLabel);
 	Ui::AddSkip(container);
 	container->add(object_ptr<Ui::DividerLabel>(

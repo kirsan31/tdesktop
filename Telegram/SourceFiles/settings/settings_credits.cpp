@@ -38,6 +38,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/effects/premium_graphics.h"
 #include "ui/effects/premium_top_bar.h"
 #include "ui/layers/generic_box.h"
+#include "ui/text/custom_emoji_instance.h"
 #include "ui/text/format_values.h"
 #include "ui/painter.h"
 #include "ui/rect.h"
@@ -73,7 +74,7 @@ public:
 
 	[[nodiscard]] rpl::producer<QString> title() override;
 
-	[[nodiscard]] QPointer<Ui::RpWidget> createPinnedToTop(
+	[[nodiscard]] base::weak_qptr<Ui::RpWidget> createPinnedToTop(
 		not_null<QWidget*> parent) override;
 
 	void showFinished() override;
@@ -444,9 +445,9 @@ void Credits::setupContent() {
 					p.drawEllipse(r);
 					icon.paintInCenter(p, r, st::windowBgActive->c);
 				}
-				return std::make_unique<Ui::Text::StaticCustomEmoji>(
-					std::move(image),
-					u"topup_button"_q);
+				return std::make_unique<Ui::CustomEmoji::Internal>(
+					u"topup_button"_q,
+					std::move(image));
 			};
 			return { .customEmojiFactory = std::move(customEmojiFactory) };
 		}());
@@ -489,11 +490,11 @@ void Credits::setupContent() {
 		auto customEmojiFactory = [=](const auto &...) {
 			return std::make_unique<Ui::Text::ShiftedEmoji>(
 				isCurrency
-					? std::make_unique<Ui::Text::StaticCustomEmoji>(
+					? std::make_unique<Ui::CustomEmoji::Internal>(
+						u"currency_icon:%1"_q.arg(height),
 						Ui::Earn::IconCurrencyColored(
 							st::tonFieldIconSize,
-							st::currencyFg->c),
-						u"currency_icon:%1"_q.arg(height))
+							st::currencyFg->c))
 					: Ui::MakeCreditsIconEmoji(height, 1),
 				isCurrency
 					? QPoint(0, st::lineWidth * 2)
@@ -603,7 +604,7 @@ void Credits::setupContent() {
 	Ui::ResizeFitChild(this, content);
 }
 
-QPointer<Ui::RpWidget> Credits::createPinnedToTop(
+base::weak_qptr<Ui::RpWidget> Credits::createPinnedToTop(
 		not_null<QWidget*> parent) {
 	_parent = parent;
 	const auto isCurrency = _creditsType == CreditsType::Ton;
@@ -722,7 +723,7 @@ QPointer<Ui::RpWidget> Credits::createPinnedToTop(
 		}
 	}, content->lifetime());
 
-	return Ui::MakeWeak(not_null<Ui::RpWidget*>{ content });
+	return base::make_weak(not_null<Ui::RpWidget*>{ content });
 }
 
 void Credits::showFinished() {
@@ -799,9 +800,9 @@ Fn<void()> BuyStarsHandler::handler(
 			? _api->options()
 			: Data::CreditTopupOptions();
 		const auto amount = CreditsAmount();
-		const auto weak = Ui::MakeWeak(box);
+		const auto weak = base::make_weak(box);
 		FillCreditOptions(show, inner, self, amount, [=] {
-			if (const auto strong = weak.data()) {
+			if (const auto strong = weak.get()) {
 				strong->closeBox();
 			}
 			if (const auto onstack = paid) {

@@ -492,10 +492,9 @@ void FieldHeader::setShownMessage(HistoryItem *item) {
 			.customEmojiLoopLimit = 1,
 		});
 		const auto replyTo = _replyTo.current();
-		const auto quote = replyTo && !replyTo.quote.empty();
 		_shownMessageName.setMarkedText(
 			st::fwdTextStyle,
-			HistoryView::Reply::ComposePreviewName(_history, item, quote),
+			HistoryView::Reply::ComposePreviewName(_history, item, replyTo),
 			Ui::NameTextOptions(),
 			context);
 	} else {
@@ -3036,7 +3035,7 @@ void ComposeControls::editMessage(not_null<HistoryItem*> item) {
 		_show->showBox(Ui::MakeInformBox(tr::lng_edit_caption_voice()));
 		return;
 	} else if (const auto media = item->media()) {
-		if (const auto todolist = media->todolist()) {
+		if (media->todolist()) {
 			Assert(_regularWindow != nullptr);
 			Window::PeerMenuEditTodoList(_regularWindow, item);
 			return;

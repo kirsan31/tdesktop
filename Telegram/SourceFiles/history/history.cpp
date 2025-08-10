@@ -1983,13 +1983,17 @@ bool History::unreadCountKnown() const {
 	return _unreadCount.has_value();
 }
 
+bool History::useMyUnreadInParent() const {
+	return !isForum() && !amMonoforumAdmin();
+}
+
 void History::setUnreadCount(int newUnreadCount) {
 	Expects(folderKnown());
 
 	if (_unreadCount == newUnreadCount) {
 		return;
 	}
-	const auto notifier = unreadStateChangeNotifier(!isForum());
+	const auto notifier = unreadStateChangeNotifier(useMyUnreadInParent());
 	_unreadCount = newUnreadCount;
 
 	const auto lastOutgoing = [&] {
@@ -2028,7 +2032,7 @@ void History::setUnreadMark(bool unread) {
 		return;
 	}
 	const auto notifier = unreadStateChangeNotifier(
-		!unreadCount() && !isForum());
+		useMyUnreadInParent() && !unreadCount());
 	Thread::setUnreadMarkFlag(unread);
 }
 
@@ -2060,9 +2064,9 @@ void History::setMuted(bool muted) {
 	if (this->muted() == muted) {
 		return;
 	} else {
-		const auto state = isForum()
-			? Dialogs::BadgesState()
-			: computeBadgesState();
+		const auto state = useMyUnreadInParent()
+			? computeBadgesState()
+			: Dialogs::BadgesState();
 		const auto notify = (state.unread || state.reaction);
 		const auto notifier = unreadStateChangeNotifier(notify);
 		Thread::setMuted(muted);
@@ -2370,7 +2374,7 @@ Dialogs::UnreadState History::chatListUnreadState() const {
 		return AdjustedForumUnreadState(forum->topicsList()->unreadState());
 	} else if (const auto monoforum = peer->monoforum()) {
 		return AdjustedForumUnreadState(
-			monoforum->unreadStateWithParentMuted());
+			withMyMuted(monoforum->chatsList()->unreadState()));;
 	}
 	return computeUnreadState();
 }
@@ -2385,7 +2389,7 @@ Dialogs::BadgesState History::chatListBadgesState() const {
 	} else if (const auto monoforum = peer->monoforum()) {
 		return adjustBadgesStateByFolder(
 			Dialogs::BadgesForUnread(
-				monoforum->unreadStateWithParentMuted(),
+				withMyMuted(monoforum->chatsList()->unreadState()),
 				Dialogs::CountInBadge::Chats,
 				Dialogs::IncludeInBadge::All));
 	}
@@ -2424,6 +2428,16 @@ Dialogs::UnreadState History::computeUnreadState() const {
 	result.reactionsMuted = muted ? result.reactions : 0;
 	result.known = _unreadCount.has_value();
 	return result;
+}
+
+Dialogs::UnreadState History::withMyMuted(Dialogs::UnreadState state) const {
+	if (muted()) {
+		state.chatsMuted = state.chats;
+		state.marksMuted = state.marks;
+		state.messagesMuted = state.messages;
+		state.reactionsMuted = state.reactions;
+	}
+	return state;
 }
 
 void History::allowChatListMessageResolve() {
@@ -3354,7 +3368,8 @@ bool History::isForum() const {
 void History::monoforumChanged(Data::SavedMessages *old) {
 	if (inChatList()) {
 		notifyUnreadStateChange(old
-			? AdjustedForumUnreadState(old->chatsList()->unreadState())
+			? AdjustedForumUnreadState(
+				withMyMuted(old->chatsList()->unreadState()))
 			: computeUnreadState());
 	}
 
@@ -3364,9 +3379,9 @@ void History::monoforumChanged(Data::SavedMessages *old) {
 		monoforum->chatsList()->unreadStateChanges(
 		) | rpl::filter([=] {
 			return (_flags & Flag::IsMonoforumAdmin) && inChatList();
-		}) | rpl::map(
-			AdjustedForumUnreadState
-		) | rpl::start_with_next([=](const Dialogs::UnreadState &old) {
+		}) | rpl::map([=](const Dialogs::UnreadState &was) {
+			return AdjustedForumUnreadState(withMyMuted(was));
+		}) | rpl::start_with_next([=](const Dialogs::UnreadState &old) {
 			notifyUnreadStateChange(old);
 		}, monoforum->lifetime());
 

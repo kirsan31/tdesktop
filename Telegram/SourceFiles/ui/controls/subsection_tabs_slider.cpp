@@ -384,7 +384,7 @@ void SubsectionSlider::activate(int index) {
 			}
 		}
 	};
-	const auto weak = MakeWeak(_bar);
+	const auto weak = base::make_weak(_bar);
 	_sectionActivated.fire_copy(index);
 	if (weak) {
 		const auto duration = st::chatTabsSlider.duration;
@@ -394,7 +394,7 @@ void SubsectionSlider::activate(int index) {
 	}
 }
 
-void SubsectionSlider::setActiveSectionFast(int active) {
+void SubsectionSlider::setActiveSectionFast(int active, bool ignoreScroll) {
 	Expects(active < int(_tabs.size()));
 
 	if (_active == active) {
@@ -403,8 +403,10 @@ void SubsectionSlider::setActiveSectionFast(int active) {
 	_active = active;
 	_activeFrom.stop();
 	_activeSize.stop();
-	const auto now = getFinalActiveRange();
-	_requestShown.fire({ now.from, now.from + now.size });
+	if (_active >= 0 && !ignoreScroll) {
+		const auto now = getFinalActiveRange();
+		_requestShown.fire({ now.from, now.from + now.size });
+	}
 	_bar->update();
 }
 
@@ -425,6 +427,7 @@ rpl::producer<int> SubsectionSlider::sectionContextMenu() const {
 }
 
 int SubsectionSlider::lookupSectionPosition(int index) const {
+	Expects(!_tabs.empty());
 	Expects(index >= 0 && index < _tabs.size());
 
 	return _vertical ? _tabs[index]->y() : _tabs[index]->x();

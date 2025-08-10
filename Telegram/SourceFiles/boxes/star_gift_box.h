@@ -21,6 +21,7 @@ class SavedStarGiftId;
 } // namespace Data
 
 namespace Main {
+class Session;
 class SessionShow;
 } // namespace Main
 
@@ -58,7 +59,7 @@ void AddUniqueGiftCover(
 	not_null<VerticalLayout*> container,
 	rpl::producer<Data::UniqueGift> data,
 	rpl::producer<QString> subtitleOverride = nullptr,
-	rpl::producer<int> resalePrice = nullptr,
+	rpl::producer<CreditsAmount> resalePrice = nullptr,
 	Fn<void()> resaleClick = nullptr);
 void AddWearGiftCover(
 	not_null<VerticalLayout*> container,
@@ -71,16 +72,20 @@ void ShowUniqueGiftWearBox(
 	const Data::UniqueGift &gift,
 	Settings::GiftWearBoxStyleOverride st);
 
+void PreloadUniqueGiftResellPrices(not_null<Main::Session*> session);
+
 void UpdateGiftSellPrice(
 	std::shared_ptr<ChatHelpers::Show> show,
 	std::shared_ptr<Data::UniqueGift> unique,
 	Data::SavedStarGiftId savedId,
-	int price);
+	CreditsAmount price);
 void ShowUniqueGiftSellBox(
 	std::shared_ptr<ChatHelpers::Show> show,
 	std::shared_ptr<Data::UniqueGift> unique,
 	Data::SavedStarGiftId savedId,
 	Settings::GiftWearBoxStyleOverride st);
+
+void GiftReleasedByHandler(not_null<PeerData*> peer);
 
 struct PatternPoint {
 	QPointF position;
@@ -124,12 +129,18 @@ void SubmitStarsForm(
 	uint64 formId,
 	uint64 price,
 	Fn<void(Payments::CheckoutResult, const MTPUpdates *)> done);
-void RequestStarsForm(
+void SubmitTonForm(
+	std::shared_ptr<Main::SessionShow> show,
+	MTPInputInvoice invoice,
+	uint64 formId,
+	CreditsAmount ton,
+	Fn<void(Payments::CheckoutResult, const MTPUpdates *)> done);
+void RequestOurForm(
 	std::shared_ptr<Main::SessionShow> show,
 	MTPInputInvoice invoice,
 	Fn<void(
 		uint64 formId,
-		uint64 price,
+		CreditsAmount price,
 		std::optional<Payments::CheckoutResult> failure)> done);
 void RequestStarsFormAndSubmit(
 	std::shared_ptr<Main::SessionShow> show,

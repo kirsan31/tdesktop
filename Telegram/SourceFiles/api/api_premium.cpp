@@ -45,17 +45,43 @@ namespace {
 	auto options = PremiumSubscriptionOptionsFromTL(tlOptions);
 	for (auto i = 0; i < options.size(); i++) {
 		const auto &tlOption = tlOptions[i].data();
+		const auto currency = qs(tlOption.vcurrency());
 		const auto perUserText = Ui::FillAmountAndCurrency(
 			tlOption.vamount().v / float64(tlOption.vusers().v),
-			qs(tlOption.vcurrency()),
+			currency,
 			false);
 		options[i].costPerMonth = perUserText
 			+ ' '
 			+ QChar(0x00D7)
 			+ ' '
 			+ QString::number(tlOption.vusers().v);
+		options[i].currency = currency;
 	}
 	return options;
+}
+
+[[nodiscard]] int FindStarsForResale(const MTPVector<MTPStarsAmount> *list) {
+	if (!list) {
+		return 0;
+	}
+	for (const auto &amount : list->v) {
+		if (amount.type() == mtpc_starsAmount) {
+			return int(amount.c_starsAmount().vamount().v);
+		}
+	}
+	return 0;
+}
+
+[[nodiscard]] int64 FindTonForResale(const MTPVector<MTPStarsAmount> *list) {
+	if (!list) {
+		return 0;
+	}
+	for (const auto &amount : list->v) {
+		if (amount.type() == mtpc_starsTonAmount) {
+			return int64(amount.c_starsTonAmount().vamount().v);
+		}
+	}
+	return 0;
 }
 
 } // namespace
@@ -589,24 +615,32 @@ std::vector<GiftOptionData> PremiumGiftCodeOptions::optionsForPeer() const {
 	return result;
 }
 
-Data::PremiumSubscriptionOptions PremiumGiftCodeOptions::options(int amount) {
-	const auto it = _subscriptionOptions.find(amount);
+Data::PremiumSubscriptionOptions PremiumGiftCodeOptions::optionsForGiveaway(
+		int usersCount) {
+	const auto skipForStars = [&](Data::PremiumSubscriptionOptions options) {
+		const auto proj = &Data::PremiumSubscriptionOption::currency;
+		options.erase(
+			ranges::remove(options, Ui::kCreditsCurrency, proj),
+			end(options));
+		return options;
+	};
+	const auto it = _subscriptionOptions.find(usersCount);
 	if (it != end(_subscriptionOptions)) {
-		return it->second;
+		return skipForStars(it->second);
 	} else {
 		auto tlOptions = QVector<MTPPremiumGiftCodeOption>();
 		for (auto i = 0; i < _optionsForOnePerson.months.size(); i++) {
 			tlOptions.push_back(MTP_premiumGiftCodeOption(
 				MTP_flags(MTPDpremiumGiftCodeOption::Flags(0)),
-				MTP_int(amount),
+				MTP_int(usersCount),
 				MTP_int(_optionsForOnePerson.months[i]),
 				MTPstring(),
 				MTPint(),
 				MTP_string(_optionsForOnePerson.currencies[i]),
-				MTP_long(_optionsForOnePerson.totalCosts[i] * amount)));
+				MTP_long(_optionsForOnePerson.totalCosts[i] * usersCount)));
 		}
-		_subscriptionOptions[amount] = GiftCodesFromTL(tlOptions);
-		return _subscriptionOptions[amount];
+		_subscriptionOptions[usersCount] = GiftCodesFromTL(tlOptions);
+		return skipForStars(_subscriptionOptions[usersCount]);
 	}
 }
 
@@ -619,6 +653,8 @@ auto PremiumGiftCodeOptions::requestStarGifts()
 			MTP_int(0)
 		)).done([=](const MTPpayments_StarGifts &result) {
 			result.match([&](const MTPDpayments_starGifts &data) {
+				_peer->owner().processUsers(data.vusers());
+				_peer->owner().processChats(data.vchats());
 				_giftsHash = data.vhash().v;
 				const auto &list = data.vgifts().v;
 				const auto session = &_peer->session();
@@ -805,6 +841,12 @@ std::optional<Data::StarGift> FromTL(
 		if (!document->sticker()) {
 			return std::optional<Data::StarGift>();
 		}
+		const auto releasedById = data.vreleased_by()
+			? peerFromMTP(*data.vreleased_by())
+			: PeerId();
+		const auto releasedBy = releasedById
+			? session->data().peer(releasedById).get()
+			: nullptr;
 		return std::optional<Data::StarGift>(Data::StarGift{
 			.id = uint64(data.vid().v),
 			.stars = int64(data.vstars().v),
@@ -812,12 +854,16 @@ std::optional<Data::StarGift> FromTL(
 			.starsToUpgrade = int64(data.vupgrade_stars().value_or_empty()),
 			.starsResellMin = int64(resellPrice),
 			.document = document,
+			.releasedBy = releasedBy,
 			.resellTitle = qs(data.vtitle().value_or_empty()),
 			.resellCount = int(data.vavailability_resale().value_or_empty()),
 			.limitedLeft = remaining.value_or_empty(),
 			.limitedCount = total.value_or_empty(),
+			.perUserTotal = data.vper_user_total().value_or_empty(),
+			.perUserRemains = data.vper_user_remains().value_or_empty(),
 			.firstSaleDate = data.vfirst_sale_date().value_or_empty(),
 			.lastSaleDate = data.vlast_sale_date().value_or_empty(),
+			.requirePremium = data.is_require_premium(),
 			.upgradable = data.vupgrade_stars().has_value(),
 			.birthday = data.is_birthday(),
 			.soldOut = data.is_sold_out(),
@@ -841,6 +887,12 @@ std::optional<Data::StarGift> FromTL(
 			|| !pattern->document->sticker()) {
 			return std::optional<Data::StarGift>();
 		}
+		const auto releasedById = data.vreleased_by()
+			? peerFromMTP(*data.vreleased_by())
+			: PeerId();
+		const auto releasedBy = releasedById
+			? session->data().peer(releasedById).get()
+			: nullptr;
 		auto result = Data::StarGift{
 			.id = uint64(data.vid().v),
 			.unique = std::make_shared<Data::UniqueGift>(Data::UniqueGift{
@@ -852,14 +904,20 @@ std::optional<Data::StarGift> FromTL(
 				.ownerId = (data.vowner_id()
 					? peerFromMTP(*data.vowner_id())
 					: PeerId()),
+				.releasedBy = releasedBy,
+				.nanoTonForResale = FindTonForResale(data.vresell_amount()),
+				.starsForResale = FindStarsForResale(data.vresell_amount()),
 				.number = data.vnum().v,
-				.starsForResale = int(data.vresell_stars().value_or_empty()),
+				.onlyAcceptTon = data.is_resale_ton_only(),
 				.model = *model,
 				.pattern = *pattern,
 			}),
 			.document = model->document,
+			.releasedBy = releasedBy,
 			.limitedLeft = (total - data.vavailability_issued().v),
 			.limitedCount = total,
+			.resellTonOnly = data.is_resale_ton_only(),
+			.requirePremium = data.is_require_premium(),
 		};
 		const auto unique = result.unique.get();
 		for (const auto &attribute : data.vattributes().v) {
@@ -896,6 +954,11 @@ std::optional<Data::SavedStarGift> FromTL(
 		.manageId = (to->isUser()
 			? Id::User(data.vmsg_id().value_or_empty())
 			: Id::Chat(to, data.vsaved_id().value_or_empty())),
+		.collectionIds = (data.vcollection_id()
+			? (data.vcollection_id()->v
+				| ranges::views::transform(&MTPint::v)
+				| ranges::to_vector)
+			: std::vector<int>()),
 		.message = (data.vmessage()
 			? TextWithEntities{
 				.text = qs(data.vmessage()->data().vtext()),

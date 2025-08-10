@@ -143,11 +143,10 @@ template <typename T>
 }
 
 [[nodiscard]] TextWithEntities AmountAndStarCurrency(
-		not_null<Main::Session*> session,
 		int64 amount,
 		const QString &currency) {
 	if (currency == Ui::kCreditsCurrency) {
-		return Ui::CreditsEmojiSmall(session).append(
+		return Ui::CreditsEmojiSmall().append(
 			Lang::FormatCountDecimal(std::abs(amount)));
 	}
 	return { Ui::FillAmountAndCurrency(amount, currency) };
@@ -909,12 +908,26 @@ void HistoryItem::updateServiceDependent(bool force) {
 	}
 
 	if (!dependent->lnk) {
+		auto todoItemId = 0;
+		if (const auto done = Get<HistoryServiceTodoCompletions>()) {
+			const auto &items = !done->completed.empty()
+				? done->completed
+				: done->incompleted;
+			if (items.size() == 1) {
+				todoItemId = items.front();
+			}
+		} else if (const auto append = Get<HistoryServiceTodoAppendTasks>()) {
+			if (append->list.size() == 1) {
+				todoItemId = append->list.front().id;
+			}
+		}
 		dependent->lnk = JumpToMessageClickHandler(
 			(dependent->peerId
 				? _history->owner().peer(dependent->peerId)
 				: _history->peer),
 			dependent->msgId,
-			fullId());
+			fullId(),
+			{ .todoItemId = todoItemId });
 	}
 	auto gotDependencyItem = false;
 	if (!dependent->msg) {
@@ -1620,6 +1633,17 @@ void HistoryItem::setIsPinned(bool pinned) {
 	}
 }
 
+void HistoryItem::setStoryInProfile(bool inProfile) {
+	if (storyInProfile() == inProfile) {
+		return;
+	} else if (inProfile) {
+		_flags |= MessageFlag::StoryInProfile;
+	} else {
+		_flags &= ~MessageFlag::StoryInProfile;
+	}
+	_history->owner().notifyItemDataChange(this);
+}
+
 void HistoryItem::returnSavedMedia() {
 	if (!isEditingMedia()) {
 		return;
@@ -1784,7 +1808,10 @@ bool HistoryItem::isSponsored() const {
 }
 
 bool HistoryItem::canLookupMessageAuthor() const {
-	return isRegular() && _history->amMonoforumAdmin() && _from->isChannel();
+	return isRegular()
+		&& !isService()
+		&& _history->amMonoforumAdmin()
+		&& _from->isChannel();
 }
 
 bool HistoryItem::skipNotification() const {
@@ -1996,6 +2023,11 @@ void HistoryItem::setStoryFields(not_null<Data::Story*> story) {
 		_flags |= MessageFlag::Pinned;
 	} else {
 		_flags &= ~MessageFlag::Pinned;
+	}
+	if (story->inProfile()) {
+		_flags |= MessageFlag::StoryInProfile;
+	} else {
+		_flags &= ~MessageFlag::StoryInProfile;
 	}
 }
 
@@ -4210,6 +4242,7 @@ void HistoryItem::createComponentsHelper(HistoryItemCommonFields &&fields) {
 			: replyTo.monoforumPeerId
 			? replyTo.monoforumPeerId
 			: PeerId();
+		config.reply.todoItemId = replyTo.todoItemId;
 		const auto replyToTop = replyTo.topicRootId
 			? replyTo.topicRootId
 			: LookupReplyToTop(_history, to);
@@ -4568,10 +4601,7 @@ void HistoryItem::createServiceFromMtp(const MTPDmessageService &message) {
 		payment->recurringInit = data.is_recurring_init();
 		payment->recurringUsed = data.is_recurring_used();
 		payment->isCreditsCurrency = (currency == Ui::kCreditsCurrency);
-		payment->amount = AmountAndStarCurrency(
-			&_history->session(),
-			amount,
-			currency);
+		payment->amount = AmountAndStarCurrency(amount, currency);
 		payment->invoiceLink = std::make_shared<LambdaClickHandler>([=](
 				ClickContext context) {
 			using namespace Payments;
@@ -5003,10 +5033,7 @@ void HistoryItem::setServiceMessageByAction(const MTPmessageAction &action) {
 			: tr::lng_action_payment_bot_done)(
 				tr::now,
 				lt_amount,
-				AmountAndStarCurrency(
-					&_history->session(),
-					data.vtotal_amount().v,
-					qs(data.vcurrency())),
+				AmountAndStarCurrency(data.vtotal_amount().v, qs(data.vcurrency())),
 				Ui::Text::WithEntities);
 		return result;
 	};
@@ -5384,7 +5411,7 @@ void HistoryItem::setServiceMessageByAction(const MTPmessageAction &action) {
 		session->giftBoxStickersPacks().load();
 		const auto amount = action.vamount().v;
 		const auto currency = qs(action.vcurrency());
-		const auto cost = AmountAndStarCurrency(session, amount, currency);
+		const auto cost = AmountAndStarCurrency(amount, currency);
 		const auto anonymous = _from->isServiceUser();
 		if (anonymous) {
 			result.text = tr::lng_action_gift_received_anonymous(
@@ -5611,7 +5638,6 @@ void HistoryItem::setServiceMessageByAction(const MTPmessageAction &action) {
 			const auto isSelf = (_from->id == _from->session().userPeerId());
 			const auto peer = isSelf ? _history->peer : _from;
 			const auto cost = AmountAndStarCurrency(
-				&_history->session(),
 				action.vamount().value_or_empty(),
 				qs(action.vcurrency().value_or_empty()));
 			result.links.push_back(peer->createOpenLink());
@@ -5721,7 +5747,7 @@ void HistoryItem::setServiceMessageByAction(const MTPmessageAction &action) {
 			lt_peer,
 			Ui::Text::Link(refund->peer->name(), 1), // Link 1.
 			lt_amount,
-			AmountAndStarCurrency(&_history->session(), amount, currency),
+			AmountAndStarCurrency(amount, currency),
 			Ui::Text::WithEntities);
 		return result;
 	};
@@ -5734,10 +5760,7 @@ void HistoryItem::setServiceMessageByAction(const MTPmessageAction &action) {
 		_history->session().giftBoxStickersPacks().load();
 		const auto amount = action.vamount().v;
 		const auto currency = qs(action.vcurrency());
-		const auto cost = AmountAndStarCurrency(
-			&_history->session(),
-			amount,
-			currency);
+		const auto cost = AmountAndStarCurrency(amount, currency);
 		const auto anonymous = _from->isServiceUser();
 		if (anonymous) {
 			result.text = tr::lng_action_gift_received_anonymous(
@@ -5771,10 +5794,7 @@ void HistoryItem::setServiceMessageByAction(const MTPmessageAction &action) {
 		_history->session().giftBoxStickersPacks().tonLoad();
 		const auto amount = action.vamount().v;
 		const auto currency = qs(action.vcurrency());
-		const auto cost = AmountAndStarCurrency(
-			&_history->session(),
-			amount,
-			currency);
+		const auto cost = AmountAndStarCurrency(amount, currency);
 		const auto anonymous = _from->isServiceUser();
 		if (anonymous) {
 			result.text = tr::lng_action_gift_received_anonymous(
@@ -5913,11 +5933,18 @@ void HistoryItem::setServiceMessageByAction(const MTPmessageAction &action) {
 			const MTPDmessageActionStarGiftUnique &action) {
 		auto result = PreparedServiceText();
 		const auto isSelf = _from->isSelf();
-		const auto resaleStars = action.vresale_stars().value_or_empty();
-		const auto resaleCost = TextWithEntities{ resaleStars
-			? tr::lng_action_gift_for_stars(tr::now, lt_count, resaleStars)
-			: QString()
-		};
+		const auto resale = CreditsAmountFromTL(action.vresale_amount());
+		const auto resaleCost = !resale
+			? TextWithEntities()
+			: resale.stars()
+			? TextWithEntities{ tr::lng_action_gift_for_stars(
+				tr::now,
+				lt_count,
+				resale.value()) }
+			: TextWithEntities{ tr::lng_action_gift_for_ton(
+				tr::now,
+				lt_count,
+				resale.value()) };
 		const auto giftPeer = action.vpeer()
 			? peerFromMTP(*action.vpeer())
 			: PeerId();
@@ -5933,10 +5960,10 @@ void HistoryItem::setServiceMessageByAction(const MTPmessageAction &action) {
 				peerToChannel(giftPeer));
 			if (!from->isServiceUser() && !from->isSelf()) {
 				result.links.push_back(from->createOpenLink());
-				if (resaleStars) {
+				if (resale) {
 					result.links.push_back(channel->createOpenLink());
 				}
-				result.text = resaleStars
+				result.text = resale
 					? tr::lng_action_gift_sent_channel(
 						tr::now,
 						lt_user,
@@ -5956,7 +5983,7 @@ void HistoryItem::setServiceMessageByAction(const MTPmessageAction &action) {
 							Ui::Text::Link(channel->name(), 2),
 							Ui::Text::WithEntities);
 			} else {
-				result.text = resaleStars
+				result.text = resale
 					? tr::lng_action_gift_sent_self_channel(
 						tr::now,
 						lt_name,
@@ -5977,10 +6004,10 @@ void HistoryItem::setServiceMessageByAction(const MTPmessageAction &action) {
 			result.links.push_back(channel->createOpenLink());
 		} else {
 			if (!from->isServiceUser() && !_history->peer->isSelf()) {
-				if (!resaleStars || !isSelf) {
+				if (!resale || !isSelf) {
 					result.links.push_back(from->createOpenLink());
 				}
-				result.text = resaleStars
+				result.text = resale
 					? (isSelf
 						? tr::lng_action_gift_sent(
 							tr::now,
@@ -6006,7 +6033,7 @@ void HistoryItem::setServiceMessageByAction(const MTPmessageAction &action) {
 								Ui::Text::Link(from->shortName(), 1),
 								Ui::Text::WithEntities);
 			} else {
-				result.text = resaleStars
+				result.text = resale
 					? tr::lng_action_gift_self_bought(
 						tr::now,
 						lt_cost,
@@ -6349,6 +6376,7 @@ void HistoryItem::applyAction(const MTPMessageAction &action) {
 			fields.stargiftId = gift->id;
 			fields.starsToUpgrade = gift->starsToUpgrade;
 			fields.document = gift->document;
+			fields.stargiftReleasedBy = gift->releasedBy;
 			fields.limitedCount = gift->limitedCount;
 			fields.limitedLeft = gift->limitedLeft;
 			fields.count = gift->stars;
@@ -6384,6 +6412,7 @@ void HistoryItem::applyAction(const MTPMessageAction &action) {
 		if (auto gift = Api::FromTL(&history()->session(), data.vgift())) {
 			fields.stargiftId = gift->id;
 			fields.document = gift->document;
+			fields.stargiftReleasedBy = gift->releasedBy;
 			fields.limitedCount = gift->limitedCount;
 			fields.limitedLeft = gift->limitedLeft;
 			fields.count = gift->stars;

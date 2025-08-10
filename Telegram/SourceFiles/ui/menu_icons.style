@@ -56,6 +56,7 @@ menuIconDiscussion: icon {{ "menu/discussion", menuIconColor }};
 menuIconStats: icon {{ "menu/stats", menuIconColor }};
 menuIconBoosts: icon {{ "menu/boosts", menuIconColor }};
 menuIconEarn: icon {{ "menu/earn", menuIconColor }};
+menuIconCancelFee: icon {{ "menu/cancel_fee", menuIconColor }};
 menuIconCreatePoll: icon {{ "menu/create_poll", menuIconColor }};
 menuIconCreateTodoList: icon {{ "menu/select", menuIconColor }};
 menuIconQrCode: icon {{ "menu/qr_code", menuIconColor }};
@@ -184,6 +185,11 @@ menuIconPayment: icon {{ "payments/payment_card", menuIconColor }};
 menuIconOrderPrice: icon {{ "menu/order_price", menuIconColor }};
 menuIconOrderDate: icon {{ "menu/order_date", menuIconColor }};
 menuIconOrderNumber: icon {{ "menu/order_number", menuIconColor }};
+menuIconAdd: icon {{ "menu/add", menuIconColor }};
+menuIconRatingGifts: icon {{ "menu/rating_gifts-24x24", menuIconColor }};
+menuIconRatingUsers: icon {{ "menu/users_stars-24x24", menuIconColor }};
+menuIconRatingRefund: icon {{ "menu/rating_refund-24x24", menuIconColor }};
+menuIconTon: icon{{ "payments/ton_emoji-18x18", menuIconColor, point(3px, 2px) }};
 
 menuIconTTLAny: icon {{ "menu/auto_delete_plain", menuIconColor }};
 menuIconTTLAnyTextPosition: point(11px, 22px);
@@ -203,6 +209,7 @@ menuBlueIconGroupCreate: icon {{ "menu/groups_create", lightButtonFg }};
 
 mediaMenuIconStickers: icon {{ "menu/stickers", mediaviewMenuFg }};
 mediaMenuIconCancel: icon {{ "menu/cancel", mediaviewMenuFg }};
+mediaMenuIconChannel: icon {{ "menu/channel", mediaviewMenuFg }};
 mediaMenuIconShowInChat: icon {{ "menu/show_in_chat", mediaviewMenuFg }};
 mediaMenuIconShowInFolder: icon {{ "menu/show_in_folder", mediaviewMenuFg }};
 mediaMenuIconDownload: icon {{ "menu/download", mediaviewMenuFg }};

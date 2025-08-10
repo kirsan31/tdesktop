@@ -397,7 +397,7 @@ void SendCreditsBox(
 			return;
 		}
 		const auto show = box->uiShow();
-		const auto weak = MakeWeak(box.get());
+		const auto weak = base::make_weak(box.get());
 		state->confirmButtonBusy = true;
 		session->api().request(
 			MTPpayments_SendStarsForm(
@@ -422,7 +422,7 @@ void SendCreditsBox(
 				auto error = ::Ui::MakeInformBox(
 					tr::lng_payments_precheckout_stars_failed(tr::now));
 				error->boxClosing() | rpl::start_with_next([=] {
-					if (const auto paybox = weak.data()) {
+					if (const auto paybox = weak.get()) {
 						paybox->closeBox();
 					}
 				}, error->lifetime());
@@ -455,7 +455,7 @@ void SendCreditsBox(
 					lt_count,
 					rpl::single(form->invoice.amount) | tr::to_count(),
 					lt_emoji,
-					rpl::single(CreditsEmojiSmall(session)),
+					rpl::single(CreditsEmojiSmall()),
 					Ui::Text::RichLangValue),
 			state->confirmButtonBusy.value()
 		) | rpl::map([](TextWithEntities &&text, bool busy) {
@@ -502,16 +502,13 @@ void SendCreditsBox(
 	}
 }
 
-TextWithEntities CreditsEmoji(not_null<Main::Session*> session) {
-	return Ui::Text::SingleCustomEmoji(
-		session->data().customEmojiManager().registerInternalEmoji(
-			st::settingsPremiumIconStar,
-			QMargins{ 0, -st::moderateBoxExpandInnerSkip, 0, 0 },
-			true),
+TextWithEntities CreditsEmoji() {
+	return Ui::Text::IconEmoji(
+		&st::starIconEmojiLarge,
 		QString(QChar(0x2B50)));
 }
 
-TextWithEntities CreditsEmojiSmall(not_null<Main::Session*> session) {
+TextWithEntities CreditsEmojiSmall() {
 	return Ui::Text::IconEmoji(
 		&st::starIconEmoji,
 		QString(QChar(0x2B50)));

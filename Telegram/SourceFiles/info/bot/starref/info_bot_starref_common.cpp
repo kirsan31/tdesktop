@@ -549,7 +549,7 @@ object_ptr<Ui::BoxContent> JoinStarRefBox(
 
 		struct State {
 			rpl::variable<not_null<PeerData*>> recipient;
-			QPointer<Ui::GenericBox> weak;
+			base::weak_qptr<Ui::GenericBox> weak;
 			bool sent = false;
 		};
 		const auto state = std::make_shared<State>(State{
@@ -601,8 +601,7 @@ object_ptr<Ui::BoxContent> JoinStarRefBox(
 		Ui::AddSkip(box->verticalLayout(), st::defaultVerticalListSkip * 3);
 		if (const auto average = program.revenuePerUser) {
 			const auto layout = box->verticalLayout();
-			const auto session = &initialRecipient->session();
-			auto text = Ui::Text::Colorized(Ui::CreditsEmoji(session));
+			auto text = Ui::Text::Colorized(Ui::CreditsEmoji());
 			text.append(Lang::FormatCreditsAmountRounded(average));
 			layout->add(
 				object_ptr<Ui::FlatLabel>(
@@ -613,8 +612,7 @@ object_ptr<Ui::BoxContent> JoinStarRefBox(
 							Ui::Text::Wrapped(text, EntityType::Bold)),
 						Ui::Text::WithEntities),
 					st::starrefRevenueText,
-					st::defaultPopupMenu,
-					Core::TextContext({ .session = session })),
+					st::defaultPopupMenu),
 				st::boxRowPadding);
 			Ui::AddSkip(layout, st::defaultVerticalListSkip);
 		}
@@ -709,7 +707,7 @@ object_ptr<Ui::BoxContent> JoinStarRefBox(
 					}
 				}
 				show->show(StarRefLinkBox(info, recipient));
-				if (const auto strong = state->weak.data()) {
+				if (const auto strong = state->weak.get()) {
 					strong->closeBox();
 				}
 			}, [=](const QString &error) {

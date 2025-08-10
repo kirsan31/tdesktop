@@ -485,6 +485,8 @@ void Message::initPaidInformation() {
 			refreshSuggestedInfo(item, suggest, replyData);
 		}
 		return;
+	} else if (!item->history()->peer->isUser()) {
+		return;
 	}
 	const auto media = this->media();
 	const auto mine = PaidInformation{
@@ -574,30 +576,19 @@ void Message::refreshRightBadge() {
 		_rightBadgeHasBoosts = 1;
 
 		const auto many = (boosts > 1);
-		const auto &icon = many
-			? st::boostsMessageIcon
-			: st::boostMessageIcon;
-		const auto padding = many
-			? st::boostsMessageIconPadding
-			: st::boostMessageIconPadding;
-		const auto owner = &item->history()->owner();
-		auto added = Ui::Text::SingleCustomEmoji(
-			owner->customEmojiManager().registerInternalEmoji(icon, padding)
+		auto added = Ui::Text::IconEmoji(many
+			? &st::boostsMessageIcon
+			: &st::boostMessageIcon
 		).append(many ? QString::number(boosts) : QString());
 		badge.append(' ').append(Ui::Text::Colorized(added, 1));
 	}
 	if (badge.empty()) {
 		_rightBadge.clear();
 	} else {
-		const auto context = Core::TextContext({
-			.session = &item->history()->session(),
-			.customEmojiLoopLimit = 1,
-		});
 		_rightBadge.setMarkedText(
 			st::defaultTextStyle,
 			badge,
-			Ui::NameTextOptions(),
-			context);
+			Ui::NameTextOptions());
 	}
 }
 
@@ -3303,7 +3294,7 @@ TextSelection Message::selectionFromQuote(
 		const SelectedQuote &quote) const {
 	Expects(quote.item != nullptr);
 
-	if (quote.text.empty()) {
+	if (quote.highlight.quote.empty()) {
 		return {};
 	}
 	const auto item = quote.item;

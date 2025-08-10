@@ -685,7 +685,7 @@ bool PeerData::canCreatePolls() const {
 }
 
 bool PeerData::canCreateTodoLists() const {
-	if (isMonoforum()) {
+	if (isMonoforum() || isBroadcast()) {
 		return false;
 	}
 	return session().premium()
@@ -707,6 +707,27 @@ bool PeerData::canManageTopics() const {
 				|| (channel->adminRights() & ChatAdminRight::ManageTopics));
 	}
 	return false;
+}
+
+bool PeerData::canPostStories() const {
+	if (const auto channel = asChannel()) {
+		return channel->canPostStories();
+	}
+	return isSelf();
+}
+
+bool PeerData::canEditStories() const {
+	if (const auto channel = asChannel()) {
+		return channel->canEditStories();
+	}
+	return isSelf();
+}
+
+bool PeerData::canDeleteStories() const {
+	if (const auto channel = asChannel()) {
+		return channel->canDeleteStories();
+	}
+	return isSelf();
 }
 
 bool PeerData::canManageGifts() const {
@@ -1688,6 +1709,13 @@ int PeerData::starsPerMessageChecked() const {
 		}
 	}
 	return starsPerMessage();
+}
+
+Data::StarsRating PeerData::starsRating() const {
+	if (const auto user = asUser()) {
+		return user->starsRating();
+	}
+	return {};
 }
 
 Data::GroupCall *PeerData::groupCall() const {

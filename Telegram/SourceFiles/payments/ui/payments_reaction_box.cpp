@@ -236,7 +236,7 @@ void AddArrowDown(not_null<RpWidget*> widget) {
 }
 
 void SelectShownPeer(
-		std::shared_ptr<QPointer<PopupMenu>> menu,
+		std::shared_ptr<base::weak_qptr<PopupMenu>> menu,
 		not_null<QWidget*> parent,
 		const std::vector<PaidReactionTop> &mine,
 		uint64 selected,
@@ -311,7 +311,7 @@ void FillTopReactors(
 		bool chosenChanged = false;
 	};
 	const auto state = wrap->lifetime().make_state<State>();
-	const auto menu = std::make_shared<QPointer<Ui::PopupMenu>>();
+	const auto menu = std::make_shared<base::weak_qptr<Ui::PopupMenu>>();
 
 	rpl::combine(
 		std::move(chosen),
@@ -545,10 +545,8 @@ void PaidReactionsBox(
 			st::creditsBoxButtonLabel);
 		args.submit(
 			state->chosen.value()
-		) | rpl::start_with_next([=](const TextWithContext &text) {
-			buttonLabel->setMarkedText(
-				text.text,
-				text.context);
+		) | rpl::start_with_next([=](const TextWithEntities &text) {
+			buttonLabel->setMarkedText(text);
 		}, buttonLabel->lifetime());
 		buttonLabel->setTextColorOverride(
 			box->getDelegate()->style().button.textFg->c);
