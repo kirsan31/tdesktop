@@ -110,13 +110,23 @@ struct Feature {
 	return data;
 }
 
-[[nodiscard]] Fn<QString(int)> BubbleTextFactory(int countForScale) {
+[[nodiscard]] Fn<Ui::Premium::BubbleText(int)> BubbleTextFactory(
+		int countForScale,
+		int nextLevelCounter) {
 	return [=](int count) {
-		return (countForScale < 10'000)
-			? QString::number(count)
-			: (countForScale < 10'000'000)
-			? (QString::number((count / 100) / 10.) + 'K')
-			: (QString::number((count / 100'000) / 10.) + 'M');
+		const auto counter = [&](int count) {
+			return (countForScale < 10'000)
+				? Lang::FormatCountDecimal(count)
+				: (countForScale < 10'000'000)
+				? (Lang::FormatCountDecimal((count / 100) / 10.) + 'K')
+				: (Lang::FormatCountDecimal((count / 100'000) / 10.) + 'M');
+		};
+		return Ui::Premium::BubbleText{
+			.counter = counter(count),
+			.additional = (nextLevelCounter
+				? (u"/"_q + counter(nextLevelCounter))
+				: QString()),
+		};
 	};
 }
 
@@ -127,6 +137,7 @@ void FillRatingLimit(
 		Premium::BubbleType type,
 		style::margins limitLinePadding,
 		int starsForScale,
+		int nextLevelStars,
 		bool hideCount) {
 	const auto addSkip = [&](int skip) {
 		container->add(object_ptr<Ui::FixedHeightWidget>(container, skip));
@@ -186,13 +197,13 @@ void FillRatingLimit(
 	});
 	Premium::AddBubbleRow(
 		container,
-		(hideCount ? st::iconOnlyPremiumBubble : st::boostBubble),
+		(hideCount ? st::iconOnlyPremiumBubble : st::starRatingBubble),
 		std::move(showFinished),
 		rpl::duplicate(bubbleRowState),
 		type,
 		(hideCount
-			? [](int) { return QString(); }
-			: BubbleTextFactory(starsForScale)),
+			? [](int) { return Ui::Premium::BubbleText(); }
+			: BubbleTextFactory(starsForScale, nextLevelStars)),
 		negative ? &st::levelNegativeBubble : &st::infoStarsCrown,
 		limitLinePadding);
 	addSkip(st::premiumLineTextSkip);
@@ -261,6 +272,7 @@ void AboutRatingBox(
 			: Premium::BubbleType::StarRating),
 		st::boxRowPadding,
 		data.stars,
+		data.nextLevelStars,
 		(data.level < 0 && !data.stars));
 
 	box->setMaxHeight(st::boostBoxMaxHeight);
@@ -288,19 +300,21 @@ void AboutRatingBox(
 				lt_name,
 				rpl::single(TextWithEntities{ name }),
 				Ui::Text::RichLangValue);
-		const auto aboutNegative = box->addRow(
+		box->addRow(
 			object_ptr<Ui::FlatLabel>(
 				box,
 				std::move(text),
 				st::boostTextNegative),
 			(st::boxRowPadding
-				+ QMargins(0, st::boostTextSkip, 0, st::boostBottomSkip)));
-		aboutNegative->setTryMakeSimilarLines(true);
+				+ QMargins(0, st::boostTextSkip, 0, st::boostBottomSkip)),
+			style::al_top
+		)->setTryMakeSimilarLines(true);
 	}
 
 	box->addRow(
 		object_ptr<Ui::FlatLabel>(box, std::move(title), st::infoStarsTitle),
-		st::boxRowPadding + QMargins(0, st::boostTitleSkip / 2, 0, 0));
+		st::boxRowPadding + QMargins(0, st::boostTitleSkip / 2, 0, 0),
+		style::al_top);
 
 	if (pending) {
 		const auto now = base::unixtime::now();
@@ -331,7 +345,8 @@ void AboutRatingBox(
 				std::move(text),
 				st::boostTextPending),
 			(st::boxRowPadding
-				+ QMargins(0, st::boostTextSkip, 0, st::boostBottomSkip)));
+				+ QMargins(0, st::boostTextSkip, 0, st::boostBottomSkip)),
+			style::al_top);
 		aboutPending->setTryMakeSimilarLines(true);
 		aboutPending->setClickHandlerFilter([=](const auto &...) {
 			state->pending = !state->pending.current();
@@ -343,14 +358,15 @@ void AboutRatingBox(
 		});
 	}
 
-	const auto aboutLabel = box->addRow(
+	box->addRow(
 		object_ptr<Ui::FlatLabel>(
 			box,
 			std::move(text),
 			st::boostText),
 		(st::boxRowPadding
-			+ QMargins(0, st::boostTextSkip, 0, st::boostBottomSkip)));
-	aboutLabel->setTryMakeSimilarLines(true);
+			+ QMargins(0, st::boostTextSkip, 0, st::boostBottomSkip)),
+		style::al_top
+	)->setTryMakeSimilarLines(true);
 
 	auto helper = Ui::Text::CustomEmojiHelper();
 	const auto makeBadge = [&](
@@ -494,7 +510,8 @@ void StarsRating::updateData(Data::StarsRating rating) {
 			(rating.level < 0
 				? QString()
 				: Lang::FormatCountDecimal(rating.level)));
-		_widthValue = _shape->icon.width() - st::levelMargin.left();
+		const auto &margin = st::levelMargin;
+		_widthValue = _shape->icon.width() + margin.right() - margin.left();
 	}
 	updateWidth();
 }

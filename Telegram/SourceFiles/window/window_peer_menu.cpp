@@ -9,6 +9,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "base/call_delayed.h"
 #include "menu/menu_check_item.h"
+#include "boxes/about_box.h"
 #include "boxes/share_box.h"
 #include "boxes/star_gift_box.h"
 #include "chat_helpers/compose/compose_show.h"
@@ -18,6 +19,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/wrap/slide_wrap.h"
 #include "ui/widgets/fields/input_field.h"
 #include "api/api_chat_participants.h"
+#include "api/api_global_privacy.h"
 #include "lang/lang_keys.h"
 #include "ui/boxes/confirm_box.h"
 #include "base/random.h"
@@ -235,32 +237,6 @@ void PeerMenuAddMuteSubmenuAction(
 				MuteMenu::FillMuteMenu(menu, thread, show);
 			},
 		});
-	}
-}
-
-void ForwardToSelf(
-		std::shared_ptr<Main::SessionShow> show,
-		const Data::ForwardDraft &draft) {
-	const auto session = &show->session();
-	const auto history = session->data().history(session->user());
-	auto resolved = history->resolveForwardDraft(draft);
-	if (!resolved.items.empty()) {
-		const auto count = resolved.items.size();
-		auto action = Api::SendAction(history);
-		action.clearDraft = false;
-		action.generateLocal = false;
-		session->api().forwardMessages(
-			std::move(resolved),
-			action,
-			[=] {
-				auto phrase = rpl::variable<TextWithEntities>(
-					ChatHelpers::ForwardedMessagePhrase({
-					.toCount = 1,
-					.singleMessage = (count == 1),
-					.to1 = session->user(),
-				})).current();
-				show->showToast(std::move(phrase));
-			});
 	}
 }
 
@@ -1183,6 +1159,9 @@ void Filler::addViewStatistics() {
 }
 
 bool Filler::skipCreateActions() const {
+	if (_peer && _peer->isRepliesChat()) {
+		return true;
+	}
 	const auto isJoinChannel = [&] {
 		if (_request.section != Section::Replies) {
 			if (const auto c = _peer->asChannel(); c && !c->amIn()) {
@@ -1646,9 +1625,23 @@ void Filler::fillArchiveActions() {
 	_addAction({ .isSeparator = true });
 
 	Settings::PreloadArchiveSettings(&controller->session());
-	_addAction(tr::lng_context_archive_settings(tr::now), [=] {
+	const auto openSettings = [=] {
 		controller->show(Box(Settings::ArchiveSettingsBox, controller));
-	}, &st::menuIconManage);
+	};
+	_addAction(
+		tr::lng_context_archive_settings(tr::now),
+		openSettings,
+		&st::menuIconManage);
+	_addAction(tr::lng_context_archive_how_does_it_work(tr::now), [=] {
+		const auto unarchiveOnNewMessage = controller->session().api(
+			).globalPrivacy().unarchiveOnNewMessageCurrent();
+		controller->show(
+			Box(
+				ArchiveHintBox,
+				unarchiveOnNewMessage != Api::UnarchiveOnNewMessage::None,
+				openSettings),
+			Ui::LayerOption::CloseOther);
+	}, &st::menuIconFaq);
 }
 
 void Filler::fillSavedSublistActions() {
@@ -3873,6 +3866,32 @@ void PeerMenuConfirmToggleFee(
 			*paidAmount = result.data().vstars_amount().v;
 		}).send();
 	}));
+}
+
+void ForwardToSelf(
+		std::shared_ptr<Main::SessionShow> show,
+		const Data::ForwardDraft &draft) {
+	const auto session = &show->session();
+	const auto history = session->data().history(session->user());
+	auto resolved = history->resolveForwardDraft(draft);
+	if (!resolved.items.empty()) {
+		const auto count = resolved.items.size();
+		auto action = Api::SendAction(history);
+		action.clearDraft = false;
+		action.generateLocal = false;
+		session->api().forwardMessages(
+			std::move(resolved),
+			action,
+			[=] {
+				auto phrase = rpl::variable<TextWithEntities>(
+					ChatHelpers::ForwardedMessagePhrase({
+					.toCount = 1,
+					.singleMessage = (count == 1),
+					.to1 = session->user(),
+				})).current();
+				show->showToast(std::move(phrase));
+			});
+	}
 }
 
 } // namespace Window

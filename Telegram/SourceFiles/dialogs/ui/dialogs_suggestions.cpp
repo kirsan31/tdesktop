@@ -1886,6 +1886,7 @@ void Suggestions::setupPostsSearch() {
 				nullptr,
 				{ .posts = true, .start = true },
 				state.totalCount);
+			_postsScroll->scrollToY(0);
 			updatePostsSearchVisibleRange();
 		}
 	}, _postsWrap->lifetime());
@@ -2018,6 +2019,10 @@ void Suggestions::setupPostsIntro(const PostsSearchIntroState &intro) {
 				SmallBalanceForSearch{},
 				done);
 		}
+	}, _postsSearchIntro->lifetime());
+
+	_postsScroll->heightValue() | rpl::start_with_next([=](int height) {
+		_postsWrap->resize(_postsWrap->width(), height);
 	}, _postsSearchIntro->lifetime());
 
 	_postsSearchIntro->show();

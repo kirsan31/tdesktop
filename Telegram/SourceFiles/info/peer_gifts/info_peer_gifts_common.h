@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #pragma once
 
 #include "base/qt/qt_compare.h"
+#include "base/timer.h"
 #include "data/data_star_gift.h"
 #include "ui/abstract_button.h"
 #include "ui/effects/premium_stars_colored.h"
@@ -33,6 +34,10 @@ class StickerPlayer;
 namespace Main {
 class Session;
 } // namespace Main
+
+namespace Overview::Layout {
+class Checkbox;
+} // namespace Overview::Layout
 
 namespace Ui {
 class DynamicImage;
@@ -118,9 +123,10 @@ struct GiftBadge {
 		const GiftBadge &) = default;
 };
 
-enum class GiftButtonMode {
+enum class GiftButtonMode : uint8 {
 	Full,
 	Minimal,
+	Selection,
 };
 
 class GiftButtonDelegate {
@@ -171,9 +177,12 @@ private:
 		int width,
 		int height);
 
+	void refreshLocked();
 	void setDocument(not_null<DocumentData*> document);
 	[[nodiscard]] QMargins currentExtend() const;
+	[[nodiscard]] bool small() const;
 
+	void onStateChanged(State was, StateChangeSource source) override;
 	void unsubscribe();
 
 	const not_null<GiftButtonDelegate*> _delegate;
@@ -190,11 +199,16 @@ private:
 	base::flat_map<float64, QImage> _uniquePatternCache;
 	std::optional<Ui::Premium::ColoredMiniStars> _stars;
 	Ui::Animations::Simple _selectedAnimation;
+	std::unique_ptr<Overview::Layout::Checkbox> _check;
 	int _resalePrice = 0;
+	GiftButtonMode _mode = GiftButtonMode::Full;
 	bool _subscribed = false;
 	bool _patterned = false;
 	bool _selected = false;
-	bool _small = false;
+	bool _locked = false;
+
+	base::Timer _lockedTimer;
+	TimeId _lockedUntilDate = 0;
 
 	QRect _button;
 	QMargins _extend;
