@@ -24,6 +24,7 @@ menuIconEmoji: icon {{ "menu/emoji", menuIconColor }};
 menuIconCancel: icon {{ "menu/cancel", menuIconColor }};
 menuIconShowInChat: icon {{ "menu/show_in_chat", menuIconColor }};
 menuIconStealth: icon {{ "menu/stealth", menuIconColor }};
+menuIconStealthLocked: icon {{ "menu/stealth_locked", menuIconColor }};
 menuIconGif: icon {{ "menu/gif", menuIconColor }};
 menuIconShowInFolder: icon {{ "menu/show_in_folder", menuIconColor }};
 menuIconDownload: icon {{ "menu/download", menuIconColor }};
@@ -189,6 +190,9 @@ menuIconAdd: icon {{ "menu/add", menuIconColor }};
 menuIconRatingGifts: icon {{ "menu/rating_gifts-24x24", menuIconColor }};
 menuIconRatingUsers: icon {{ "menu/users_stars-24x24", menuIconColor }};
 menuIconRatingRefund: icon {{ "menu/rating_refund-24x24", menuIconColor }};
+menuIconAuctionDrop: icon {{ "menu/auction_drop", menuIconColor }};
+menuIconStarsRefund: icon {{ "menu/auction_refund", menuIconColor }};
+menuIconStarsCarryover: icon {{ "menu/auction_carry", menuIconColor }};
 menuIconTon: icon{{ "payments/ton_emoji-18x18", menuIconColor, point(3px, 2px) }};
 menuIconReorder: icon{{ "menu/reorder-24x24", menuIconColor }};
 

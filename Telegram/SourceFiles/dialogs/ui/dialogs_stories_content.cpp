@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "dialogs/ui/dialogs_stories_content.h"
 
+#include "base/unixtime.h"
 #include "data/data_changes.h"
 #include "data/data_document.h"
 #include "data/data_document_media.h"
@@ -21,12 +22,15 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "info/info_controller.h"
 #include "info/info_memento.h"
 #include "main/main_session.h"
+#include "media/stories/media_stories_stealth.h"
 #include "lang/lang_keys.h"
 #include "ui/dynamic_image.h"
 #include "ui/dynamic_thumbnails.h"
 #include "ui/painter.h"
 #include "window/window_session_controller.h"
+#include "styles/style_layers.h"
 #include "styles/style_menu_icons.h"
+#include "styles/style_media_stories.h"
 
 namespace Dialogs::Stories {
 namespace {
@@ -75,6 +79,7 @@ Content State::next() {
 			.thumbnail = std::move(userpic),
 			.count = info.count,
 			.unreadCount = info.unreadCount,
+			.hasVideoStream = info.hasVideoStream ? 1U : 0U,
 			.skipSmall = peer->isSelf() ? 1U : 0U,
 		});
 	}
@@ -152,13 +157,16 @@ rpl::producer<Content> LastForPeer(not_null<PeerData*> peer) {
 					const auto maybe = stories->lookup(storyId);
 					if (maybe) {
 						if (!resolving) {
-							const auto unread = (id > state->readTill);
+							const auto stream = (*maybe)->call();
+							const auto unread = stream
+								|| (id > state->readTill);
 							result.elements.reserve(ids.size());
 							result.elements.push_back({
 								.id = uint64(id),
 								.thumbnail = Ui::MakeStoryThumbnail(*maybe),
 								.count = 1U,
 								.unreadCount = unread ? 1U : 0U,
+								.hasVideoStream = stream ? 1U : 0U,
 							});
 							if (unread) {
 								done = false;
@@ -239,6 +247,23 @@ void FillSourceMenu(
 		add(viewProfileText, [=] {
 			controller->showPeerInfo(peer);
 		}, channel ? &st::menuIconInfo : &st::menuIconProfile);
+		if (peer->session().premiumPossible()
+			&& peer->isUser()
+			&& !peer->hasActiveVideoStream()
+			&& peer->hasUnreadStories()) {
+			const auto now = base::unixtime::now();
+			const auto stealth = owner->stories().stealthMode();
+			add(tr::lng_stories_view_anonymously(tr::now), [=] {
+				Media::Stories::SetupStealthMode(
+					controller->uiShow(),
+					Media::Stories::StealthModeDescriptor{
+						[=] { controller->openPeerStories(peer->id); },
+						&st::storiesStealthStyleDefault,
+					});
+			}, ((peer->session().premium() || (stealth.enabledTill > now))
+				? &st::menuIconStealth
+				: &st::menuIconStealthLocked));
+		}
 		const auto in = [&](Data::StorySourcesList list) {
 			return ranges::contains(
 				owner->stories().sources(list),

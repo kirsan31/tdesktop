@@ -76,7 +76,9 @@ namespace {
 constexpr auto kEmojiInteractionSeenDuration = 3 * crl::time(1000);
 
 [[nodiscard]] inline bool HasGroupCallMenu(not_null<PeerData*> peer) {
-	return !peer->groupCall() && peer->canManageGroupCall();
+	return !peer->isUser()
+		&& !peer->groupCall()
+		&& peer->canManageGroupCall();
 }
 
 QString TopBarNameText(
@@ -526,7 +528,9 @@ void TopBarWidget::paintTopBar(Painter &p) {
 			p.drawTextLeft(nameleft, statustop, width(), _customTitleText);
 		}
 	} else if (folder
-		|| (peer && (peer->sharedMediaInfo() || peer->isVerifyCodes()))
+		|| (peer
+			&& (peer->sharedMediaInfo() || peer->isVerifyCodes())
+			&& _activeChat.section != Section::SavedSublist)
 		|| (_activeChat.section == Section::Scheduled)
 		|| (_activeChat.section == Section::Pinned)) {
 		auto text = (_activeChat.section == Section::Scheduled)
@@ -1226,7 +1230,7 @@ void TopBarWidget::updateControlsVisibility() {
 		&& !_chooseForReportReason);
 	const auto groupCallsEnabled = [&] {
 		if (const auto peer = _activeChat.key.peer()) {
-			if (peer->canManageGroupCall()) {
+			if (!peer->isUser() && peer->canManageGroupCall()) {
 				return true;
 			} else if (const auto call = peer->groupCall()) {
 				return (call->fullCount() == 0);

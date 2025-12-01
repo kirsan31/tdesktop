@@ -10,6 +10,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "info/profile/info_profile_widget.h"
 #include "info/profile/info_profile_values.h"
 #include "info/media/info_media_widget.h"
+#include "info/stories/info_stories_widget.h"
 #include "info/info_content_widget.h"
 #include "info/info_controller.h"
 #include "info/info_memento.h"
@@ -65,8 +66,13 @@ const style::InfoTopBar &TopBarStyle(Wrap wrap) {
 [[nodiscard]] bool HasCustomTopBar(not_null<const Controller*> controller) {
 	const auto section = controller->section();
 	return (section.type() == Section::Type::BotStarRef)
+		|| (section.type() == Section::Type::Profile)
 		|| ((section.type() == Section::Type::Settings)
-			&& section.settingsType()->hasCustomTopBar());
+			&& section.settingsType()->hasCustomTopBar())
+		|| (section.type() == Section::Type::Stories
+			&& controller->key().storiesAlbumId() != Stories::ArchiveId()
+			&& controller->key().storiesPeer()
+			&& controller->key().storiesPeer()->isSelf());
 }
 
 [[nodiscard]] Fn<Ui::StringWithNumbers(int)> SelectedTitleForMedia(
@@ -415,8 +421,7 @@ void WrapWidget::setupTopBarMenuToggle() {
 				const auto button = _topBar->addButton(
 					base::make_unique_q<Ui::IconButton>(_topBar, st));
 				button->addClickHandler([show, self] {
-					show->show(
-						Box(Ui::FillPeerQrBox, self, std::nullopt, nullptr));
+					Ui::DefaultShowFillPeerQrBoxCallback(show, self);
 				});
 			}
 		}
@@ -940,7 +945,11 @@ void WrapWidget::showNewContent(
 void WrapWidget::showNewContent(not_null<ContentMemento*> memento) {
 	// Validates contentGeometry().
 	setupTop();
-	showContent(createContent(memento, _controller.get()));
+	auto newContent = createContent(memento, _controller.get());
+	if (!_topBar && hasBackButton()) {
+		newContent->enableBackButton();
+	}
+	showContent(std::move(newContent));
 }
 
 void WrapWidget::resizeEvent(QResizeEvent *e) {
