@@ -24,7 +24,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/wrap/padding_wrap.h"
 #include "main/main_session.h"
 #include "menu/menu_send.h"
-#include "settings/settings_premium.h"
+#include "settings/sections/settings_premium.h"
 #include "styles/style_info.h"
 #include "styles/style_layers.h"
 #include "styles/style_chat.h"
@@ -77,7 +77,8 @@ bool CanScheduleUntilOnline(not_null<PeerData*> peer) {
 		return !user->isSelf()
 			&& !user->isBot()
 			&& !user->lastseen().isHidden()
-			&& !user->starsPerMessageChecked();
+			&& !user->starsPerMessageChecked()
+			&& !user->isNotificationsUser();
 	}
 	return false;
 }
@@ -135,10 +136,10 @@ void ScheduleBox(
 				tr::lng_schedule_repeat_promo(
 					tr::now,
 					lt_link,
-					Ui::Text::Link(
-						Ui::Text::Bold(
+					tr::link(
+						tr::bold(
 							tr::lng_schedule_repeat_promo_link(tr::now))),
-					Ui::Text::RichLangValue),
+					tr::rich),
 				u"schedule_repeat"_q);
 			return true;
 		};
@@ -154,7 +155,7 @@ void ScheduleBox(
 			.changed = [=](TimeId value) { *repeat = value; },
 			.test = session->isTestMode(),
 		}), style::al_top);
-		std::move(descriptor.width) | rpl::start_with_next([=](int width) {
+		std::move(descriptor.width) | rpl::on_next([=](int width) {
 			row->setNaturalWidth(width);
 		}, row->lifetime());
 	}

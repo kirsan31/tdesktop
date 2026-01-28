@@ -233,6 +233,7 @@ settingsBio: InputField(defaultInputField) {
 }
 
 settingsBioMargins: margins(22px, 6px, 22px, 4px);
+settingsBioHighlightMargin: margins(-22px, 0px, -22px, 0px);
 settingsBioCountdown: FlatLabel(defaultFlatLabel) {
 	style: boxTextStyle;
 	textFg: windowSubTextFg;
@@ -427,6 +428,7 @@ websiteBigUserpic: UserpicButton(defaultUserpicButton) {
 settingsPhotoLeft: 22px;
 settingsPhotoTop: 8px;
 settingsPhotoBottom: 16px;
+settingsPhotoHighlightMargin: margins(-4px, -4px, -4px, -4px);
 settingsNameLeft: 112px;
 settingsNameTop: 12px;
 settingsPhoneLeft: settingsNameLeft;
@@ -532,6 +534,21 @@ settingsNotificationType: SettingsButton(settingsButton) {
 settingsNotificationTypeDetails: FlatLabel(defaultFlatLabel) {
 	textFg: windowSubTextFg;
 }
+
+settingsSearchResult: SettingsButton(settingsButton) {
+	height: 40px;
+	padding: margins(60px, 4px, 22px, 4px);
+}
+settingsSearchResultNoIcon: SettingsButton(settingsSearchResult) {
+	padding: margins(22px, 4px, 22px, 4px);
+}
+settingsSearchResultDetails: FlatLabel(settingsNotificationTypeDetails) {
+}
+settingsSearchNoResults: FlatLabel(defaultFlatLabel) {
+	textFg: windowSubTextFg;
+	align: align(center);
+}
+settingsSearchNoResultsPadding: margins(22px, 32px, 22px, 32px);
 
 powerSavingButton: SettingsButton(settingsButton) {
 	style: boxTextStyle;
@@ -714,6 +731,11 @@ settingsCreditsButton: SettingsButton(settingsButton) {
 }
 settingsButtonIconGift: icon {{ "settings/gift", menuIconColor }};
 settingsButtonIconEarn: icon {{ "settings/earn", menuIconColor }};
+
+settingsIconPasskeys: icon {{ "menu/permissions", windowBgActive }};
+settingsIconPasskeysAboutIcon1: icon {{ "menu/permissions", boxTextFg }};
+settingsIconPasskeysAboutIcon2: icon {{ "menu/passcode_winhello", boxTextFg }};
+settingsIconPasskeysAboutIcon3: icon {{ "menu/lock", boxTextFg }};
 
 settingsAgeVerifyBox: Box(filterInviteBox) {
 	buttonPadding: margins(24px, 24px, 24px, 24px);

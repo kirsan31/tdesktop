@@ -176,6 +176,13 @@ public:
 	void setSetupEmailState(Data::SetupEmailState state);
 	[[nodiscard]] Data::SetupEmailState setupEmailState() const;
 
+	void setModerateCommonGroups(std::vector<int32> groups) {
+		_moderateCommonGroups = std::move(groups);
+	}
+	[[nodiscard]] const std::vector<int32> &moderateCommonGroups() const {
+		return _moderateCommonGroups;
+	}
+
 private:
 	static constexpr auto kDefaultSupportChatsLimitSlice = 7 * 24 * 60 * 60;
 	static constexpr auto kPhotoEditorHintMaxShowsCount = 5;
@@ -221,6 +228,8 @@ private:
 	std::vector<Data::UnreviewedAuth> _unreviewed;
 
 	Data::SetupEmailState _setupEmailState;
+
+	std::vector<int32> _moderateCommonGroups;
 
 };
 

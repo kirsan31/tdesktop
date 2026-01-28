@@ -196,7 +196,9 @@ Instance::~Instance() {
 	}
 }
 
-void Instance::startOutgoingCall(not_null<UserData*> user, bool video) {
+void Instance::startOutgoingCall(
+		not_null<UserData*> user,
+		StartOutgoingCallArgs args) {
 	if (activateCurrentCall()) {
 		return;
 	}
@@ -210,8 +212,8 @@ void Instance::startOutgoingCall(not_null<UserData*> user, bool video) {
 		return;
 	}
 	requestPermissionsOrFail(crl::guard(this, [=] {
-		createCall(user, Call::Type::Outgoing, video);
-	}), video);
+		createCall(user, Call::Type::Outgoing, args);
+	}), args.video);
 }
 
 void Instance::startOrJoinGroupCall(
@@ -259,7 +261,7 @@ void Instance::startOrJoinConferenceCall(StartConferenceInfo args) {
 	const auto raw = call.get();
 
 	session->account().sessionChanges(
-	) | rpl::start_with_next([=] {
+	) | rpl::on_next([=] {
 		destroyGroupCall(raw);
 	}, raw->lifetime());
 
@@ -413,7 +415,7 @@ void Instance::destroyCall(not_null<Call*> call) {
 void Instance::createCall(
 		not_null<UserData*> user,
 		CallType type,
-		bool isVideo) {
+		StartOutgoingCallArgs args) {
 	struct Performer final {
 		explicit Performer(Fn<void(bool, bool, const Performer &)> callback)
 		: callback(std::move(callback)) {
@@ -432,7 +434,7 @@ void Instance::createCall(
 		const auto raw = call.get();
 
 		user->session().account().sessionChanges(
-		) | rpl::start_with_next([=] {
+		) | rpl::on_next([=] {
 			destroyCall(raw);
 		}, raw->lifetime());
 
@@ -446,7 +448,7 @@ void Instance::createCall(
 		}
 		if (raw->state() == Call::State::WaitingUserConfirmation) {
 			_currentCallPanel->startOutgoingRequests(
-			) | rpl::start_with_next([=](bool video) {
+			) | rpl::on_next([=](bool video) {
 				repeater.callback(video, true, repeater);
 			}, raw->lifetime());
 		} else {
@@ -455,7 +457,7 @@ void Instance::createCall(
 		}
 		_currentCallChanges.fire_copy(raw);
 	});
-	performer.callback(isVideo, false, performer);
+	performer.callback(args.video, args.isConfirmed, performer);
 }
 
 void Instance::destroyGroupCall(not_null<GroupCall*> call) {
@@ -488,7 +490,7 @@ void Instance::createGroupCall(
 	const auto raw = call.get();
 
 	info.peer->session().account().sessionChanges(
-	) | rpl::start_with_next([=] {
+	) | rpl::on_next([=] {
 		destroyGroupCall(raw);
 	}, raw->lifetime());
 
@@ -702,7 +704,7 @@ void Instance::handleCallUpdate(
 			< base::unixtime::now()) {
 			LOG(("Ignoring too old call."));
 		} else {
-			createCall(user, Call::Type::Incoming, phoneCall.is_video());
+			createCall(user, Call::Type::Incoming, { phoneCall.is_video() });
 			_currentCall->handleUpdate(call);
 		}
 	} else if (!_currentCall
@@ -1182,7 +1184,7 @@ void Instance::showConferenceInvite(
 		const auto raw = call.get();
 
 		user->session().account().sessionChanges(
-		) | rpl::start_with_next([=] {
+		) | rpl::on_next([=] {
 			destroyCall(raw);
 		}, raw->lifetime());
 

@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "calls/calls_panel.h"
 
 #include "boxes/peers/replace_boost_box.h" // CreateUserpicsWithMoreBadge
+#include "calls/calls_panel_background.h"
 #include "data/data_photo.h"
 #include "data/data_session.h"
 #include "data/data_user.h"
@@ -48,6 +49,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/rect.h"
 #include "ui/integration.h"
 #include "core/application.h"
+#include "core/core_settings.h"
 #include "lang/lang_keys.h"
 #include "main/session/session_show.h"
 #include "main/main_session.h"
@@ -58,6 +60,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/power_save_blocker.h"
 #include "media/streaming/media_streaming_utility.h"
 #include "window/main_window.h"
+#include "window/window_controller.h"
 #include "webrtc/webrtc_environment.h"
 #include "webrtc/webrtc_video_track.h"
 #include "styles/style_calls.h"
@@ -171,6 +174,30 @@ bool Panel::isActive() const {
 	return window()->isActiveWindow() && isVisible();
 }
 
+QRect Panel::panelGeometry() const {
+	const auto saved = Core::App().settings().callPanelPosition();
+	const auto adjusted = Core::AdjustToScale(saved, u"Call"_q);
+	const auto center = Core::App().getPointForCallPanelCenter();
+	const auto simple = QRect(0, 0, st::callWidth, st::callHeight);
+	const auto initial = simple.translated(center - simple.center());
+	auto result = initial;
+	if (const auto window = Core::App().activeWindow()) {
+		const auto initialPosition = Core::WindowPosition{
+			.moncrc = 0,
+			.scale = cScale(),
+			.x = initial.x(),
+			.y = initial.y(),
+			.w = initial.width(),
+			.h = initial.height(),
+		};
+		result = window->widget()->countInitialGeometry(
+			adjusted,
+			initialPosition,
+			{ st::callWidthMin, st::callHeightMin });
+	}
+	return result;
+}
+
 ConferencePanelMigration Panel::migrationInfo() const {
 	return ConferencePanelMigration{ .window = _window };
 }
@@ -207,6 +234,41 @@ void Panel::toggleFullScreen() {
 void Panel::replaceCall(not_null<Call*> call) {
 	reinitWithCall(call);
 	updateControlsGeometry();
+}
+
+void Panel::savePanelGeometry() {
+	if (!window()->windowHandle()) {
+		return;
+	}
+	const auto state = window()->windowHandle()->windowState();
+	if (state == Qt::WindowMinimized) {
+		return;
+	}
+	const auto &savedPosition = Core::App().settings().callPanelPosition();
+	auto realPosition = savedPosition;
+	if (state == Qt::WindowMaximized) {
+		realPosition.maximized = 1;
+		realPosition.moncrc = 0;
+	} else {
+		auto r = window()->body()->mapToGlobal(window()->body()->rect());
+		realPosition.x = r.x();
+		realPosition.y = r.y();
+		realPosition.w = r.width();
+		realPosition.h = r.height();
+		realPosition.scale = cScale();
+		realPosition.maximized = 0;
+		realPosition.moncrc = 0;
+	}
+	realPosition = ::Window::PositionWithScreen(
+		realPosition,
+		window(),
+		{ st::callWidthMin, st::callHeightMin });
+	if (realPosition.w >= st::callWidthMin
+		&& realPosition.h >= st::callHeightMin
+		&& realPosition != savedPosition) {
+		Core::App().settings().setCallPanelPosition(realPosition);
+		Core::App().saveSettingsDelayed();
+	}
 }
 
 void Panel::initWindow() {
@@ -277,7 +339,7 @@ void Panel::initWindow() {
 			: Flag::None;
 	});
 
-	_window->maximizeRequests() | rpl::start_with_next([=](bool maximized) {
+	_window->maximizeRequests() | rpl::on_next([=](bool maximized) {
 		toggleFullScreen(maximized);
 	}, lifetime());
 	// Don't do that, it looks awful :(
@@ -311,12 +373,12 @@ void Panel::initWidget() {
 	widget()->setMouseTracking(true);
 
 	widget()->paintRequest(
-	) | rpl::start_with_next([=](QRect clip) {
+	) | rpl::on_next([=](QRect clip) {
 		paint(clip);
 	}, lifetime());
 
 	widget()->sizeValue(
-	) | rpl::skip(1) | rpl::start_with_next([=] {
+	) | rpl::skip(1) | rpl::on_next([=] {
 		updateControlsGeometry();
 	}, lifetime());
 }
@@ -471,7 +533,7 @@ void Panel::initConferenceInvite() {
 		+ padding.right();
 	const auto height = add + userpics->height() + add;
 
-	_status->geometryValue() | rpl::start_with_next([=] {
+	_status->geometryValue() | rpl::on_next([=] {
 		const auto top = _bodyTop + _bodySt->participantsTop;
 		const auto left = (widget()->width() - width) / 2;
 		raw->setGeometry(left, top, width, height);
@@ -479,7 +541,7 @@ void Panel::initConferenceInvite() {
 		label->move(add + userpics->width() + padding.left(), padding.top());
 	}, raw->lifetime());
 
-	raw->paintRequest() | rpl::start_with_next([=] {
+	raw->paintRequest() | rpl::on_next([=] {
 		auto p = QPainter(raw);
 		auto hq = PainterHighQualityEnabler(p);
 		const auto radius = raw->height() / 2.;
@@ -575,8 +637,15 @@ void Panel::reinitWithCall(Call *call) {
 
 	_user = _call->user();
 
+	_background = std::make_unique<PanelBackground>(
+		_user,
+		[=] {
+			updateTextColors();
+			widget()->update();
+		});
+
 	_call->confereceSupportedValue(
-	) | rpl::start_with_next([=](bool supported) {
+	) | rpl::on_next([=](bool supported) {
 		_conferenceSupported = supported;
 		_addPeople->toggle(_conferenceSupported
 			&& (_call->state() != State::WaitingUserConfirmation),
@@ -589,7 +658,7 @@ void Panel::reinitWithCall(Call *call) {
 	) | rpl::map(rpl::mappers::_1 == Call::RemoteAudioState::Muted);
 	rpl::duplicate(
 		remoteMuted
-	) | rpl::start_with_next([=](bool muted) {
+	) | rpl::on_next([=](bool muted) {
 		if (muted) {
 			createRemoteAudioMute();
 		} else {
@@ -598,7 +667,7 @@ void Panel::reinitWithCall(Call *call) {
 		}
 	}, _callLifetime);
 	_call->remoteBatteryStateValue(
-	) | rpl::start_with_next([=](Call::RemoteBatteryState state) {
+	) | rpl::on_next([=](Call::RemoteBatteryState state) {
 		if (state == Call::RemoteBatteryState::Low) {
 			createRemoteLowBattery();
 		} else {
@@ -618,13 +687,13 @@ void Panel::reinitWithCall(Call *call) {
 		_window->backend());
 	_incoming->widget()->hide();
 
-	_incoming->rp()->shownValue() | rpl::start_with_next([=] {
+	_incoming->rp()->shownValue() | rpl::on_next([=] {
 		updateControlsShown();
 	}, _incoming->rp()->lifetime());
 
 	_hideControlsFilter = nullptr;
 	_fullScreenOrMaximized.value(
-	) | rpl::start_with_next([=](bool fullScreenOrMaximized) {
+	) | rpl::on_next([=](bool fullScreenOrMaximized) {
 		if (fullScreenOrMaximized) {
 			class Filter final : public QObject {
 			public:
@@ -664,7 +733,7 @@ void Panel::reinitWithCall(Call *call) {
 	}, _incoming->rp()->lifetime());
 
 	_call->mutedValue(
-	) | rpl::start_with_next([=](bool mute) {
+	) | rpl::on_next([=](bool mute) {
 		_mute->entity()->setProgress(mute ? 1. : 0.);
 		_mute->entity()->setText(mute
 			? tr::lng_call_unmute_audio()
@@ -672,7 +741,7 @@ void Panel::reinitWithCall(Call *call) {
 	}, _callLifetime);
 
 	_call->videoOutgoing()->stateValue(
-	) | rpl::start_with_next([=] {
+	) | rpl::on_next([=] {
 		{
 			const auto active = _call->isSharingCamera();
 			_camera->setProgress(active ? 0. : 1.);
@@ -689,12 +758,12 @@ void Panel::reinitWithCall(Call *call) {
 	}, _callLifetime);
 
 	_call->stateValue(
-	) | rpl::start_with_next([=](State state) {
+	) | rpl::on_next([=](State state) {
 		stateChanged(state);
 	}, _callLifetime);
 
 	_call->videoIncoming()->renderNextFrame(
-	) | rpl::start_with_next([=] {
+	) | rpl::on_next([=] {
 		const auto track = _call->videoIncoming();
 		setIncomingSize(track->state() == Webrtc::VideoState::Active
 			? track->frameSize()
@@ -711,14 +780,14 @@ void Panel::reinitWithCall(Call *call) {
 	}, _callLifetime);
 
 	_call->videoIncoming()->stateValue(
-	) | rpl::start_with_next([=](Webrtc::VideoState state) {
+	) | rpl::on_next([=](Webrtc::VideoState state) {
 		setIncomingSize((state == Webrtc::VideoState::Active)
 			? _call->videoIncoming()->frameSize()
 			: QSize());
 	}, _callLifetime);
 
 	_call->videoOutgoing()->renderNextFrame(
-	) | rpl::start_with_next([=] {
+	) | rpl::on_next([=] {
 		const auto incoming = incomingFrameGeometry();
 		const auto outgoing = outgoingFrameGeometry();
 		widget()->update(outgoing);
@@ -732,7 +801,7 @@ void Panel::reinitWithCall(Call *call) {
 		rpl::single(
 			rpl::empty_value()
 		) | rpl::then(_call->videoOutgoing()->renderNextFrame())
-	) | rpl::start_with_next([=](State state, auto) {
+	) | rpl::on_next([=](State state, auto) {
 		if (state != State::Ended
 			&& state != State::EndedByOtherDevice
 			&& state != State::Failed
@@ -744,7 +813,7 @@ void Panel::reinitWithCall(Call *call) {
 	}, _callLifetime);
 
 	_call->errors(
-	) | rpl::start_with_next([=](Error error) {
+	) | rpl::on_next([=](Error error) {
 		const auto text = [=] {
 			switch (error.type) {
 			case ErrorType::NoCamera:
@@ -768,6 +837,7 @@ void Panel::reinitWithCall(Call *call) {
 
 	_name->setText(_user->name());
 	updateStatusText(_call->state());
+	updateTextColors();
 
 	_answerHangupRedial->raise();
 	_decline->raise();
@@ -798,7 +868,7 @@ void Panel::createRemoteAudioMute() {
 	_remoteAudioMute->setAttribute(Qt::WA_TransparentForMouseEvents);
 
 	_remoteAudioMute->paintRequest(
-	) | rpl::start_with_next([=] {
+	) | rpl::on_next([=] {
 		auto p = QPainter(_remoteAudioMute);
 		const auto r = _remoteAudioMute->rect();
 
@@ -835,7 +905,7 @@ void Panel::createRemoteLowBattery() {
 	_remoteLowBattery->setAttribute(Qt::WA_TransparentForMouseEvents);
 
 	style::PaletteChanged(
-	) | rpl::start_with_next([=] {
+	) | rpl::on_next([=] {
 		_remoteLowBattery = nullptr;
 		createRemoteLowBattery();
 	}, _remoteLowBattery->lifetime());
@@ -861,7 +931,7 @@ void Panel::createRemoteLowBattery() {
 	}();
 
 	_remoteLowBattery->paintRequest(
-	) | rpl::start_with_next([=] {
+	) | rpl::on_next([=] {
 		auto p = QPainter(_remoteLowBattery);
 		const auto r = _remoteLowBattery->rect();
 
@@ -901,7 +971,7 @@ void Panel::initLayout() {
 	) | rpl::filter([=](const Data::PeerUpdate &update) {
 		// _user may change for the same Panel.
 		return (_call != nullptr) && (update.peer == _user);
-	}) | rpl::start_with_next([=](const Data::PeerUpdate &update) {
+	}) | rpl::on_next([=](const Data::PeerUpdate &update) {
 		_name->setText(_call->user()->name());
 		updateControlsGeometry();
 	}, lifetime());
@@ -942,12 +1012,15 @@ rpl::lifetime &Panel::lifetime() {
 }
 
 void Panel::initGeometry() {
-	const auto center = Core::App().getPointForCallPanelCenter();
-	const auto initRect = QRect(0, 0, st::callWidth, st::callHeight);
-	window()->setGeometry(initRect.translated(center - initRect.center()));
+	window()->setGeometry(panelGeometry());
 	window()->setMinimumSize({ st::callWidthMin, st::callHeightMin });
 	window()->show();
 	updateControlsGeometry();
+
+	_geometryLifetime = window()->geometryValue(
+	) | rpl::skip(1) | rpl::on_next([=](QRect r) {
+		savePanelGeometry();
+	});
 }
 
 void Panel::initMediaDeviceToggles() {
@@ -1244,9 +1317,21 @@ void Panel::paint(QRect clip) {
 	if (!_incoming->widget()->isHidden()) {
 		region = region.subtracted(QRegion(_incoming->widget()->geometry()));
 	}
-	for (const auto &rect : region) {
-		p.fillRect(rect, st::callBgOpaque);
+
+	if (_background) {
+		_background->paint(
+			p,
+			widget()->size(),
+			_bodyTop,
+			_bodySt->photoTop,
+			_bodySt->photoSize,
+			region);
+	} else {
+		for (const auto &rect : region) {
+			p.fillRect(rect, st::callBgOpaque);
+		}
 	}
+
 	if (_incoming && _incoming->widget()->isHidden()) {
 		_call->videoIncoming()->markFrameShown();
 	}
@@ -1406,6 +1491,18 @@ void Panel::updateStatusText(State state) {
 	};
 	_status->setText(statusText());
 	updateStatusGeometry();
+}
+
+void Panel::updateTextColors() {
+	if (!_background) {
+		_name->setTextColorOverride(std::nullopt);
+		_status->setTextColorOverride(std::nullopt);
+		return;
+	}
+	_name->setTextColorOverride(
+		_background->textColorOverride(st::callName.textFg));
+	_status->setTextColorOverride(
+		_background->textColorOverride(st::callStatus.textFg));
 }
 
 void Panel::startDurationUpdateTimer(crl::time currentDuration) {
