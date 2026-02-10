@@ -958,13 +958,12 @@ void OverlayWidget::initNormalGeometry() {
 	const auto saved = Core::App().settings().mediaViewPosition();
 	const auto adjusted = Core::AdjustToScale(saved, u"Viewer"_q);
 	const auto initial = DefaultPosition();
-	_normalGeometry = initial.rect();
-	if (const auto active = Core::App().activeWindow()) {
-		_normalGeometry = active->widget()->countInitialGeometry(
-			adjusted,
-			initial,
-			{ st::mediaviewMinWidth, st::mediaviewMinHeight });
-	}
+	_normalGeometry = Window::CountInitialGeometry(
+		_window,
+		adjusted,
+		initial,
+		{ st::mediaviewMinWidth, st::mediaviewMinHeight },
+		u"Viewer"_q);
 }
 
 void OverlayWidget::savePosition() {
@@ -1003,7 +1002,8 @@ void OverlayWidget::savePosition() {
 	realPosition = Window::PositionWithScreen(
 		realPosition,
 		_window,
-		{ st::mediaviewMinWidth, st::mediaviewMinHeight });
+		{ st::mediaviewMinWidth, st::mediaviewMinHeight },
+		u"Viewer"_q);
 	if (realPosition.w >= st::mediaviewMinWidth
 		&& realPosition.h >= st::mediaviewMinHeight
 		&& realPosition != savedPosition) {
@@ -1025,12 +1025,24 @@ void OverlayWidget::updateGeometry(bool inMove) {
 	if (_fullscreen) {
 		updateGeometryToScreen(inMove);
 	} else if (_windowed && _normalGeometryInited) {
-		DEBUG_LOG(("Viewer Pos: Setting %1, %2, %3, %4")
-			.arg(_normalGeometry.x())
-			.arg(_normalGeometry.y())
-			.arg(_normalGeometry.width())
-			.arg(_normalGeometry.height()));
-		_window->setGeometry(_normalGeometry);
+		const auto setGeometry = [=](QRect geometry) {
+			DEBUG_LOG(("Viewer Pos: Setting %1, %2, %3, %4")
+				.arg(geometry.x())
+				.arg(geometry.y())
+				.arg(geometry.width())
+				.arg(geometry.height()));
+			_window->setGeometry(geometry);
+		};
+		const auto geometry = _normalGeometry;
+		setGeometry(geometry);
+		if constexpr (Platform::IsMac()) {
+			// Either macOS or Qt immediately overwrite the geometry for
+			// some time (perhaps until the window is really on screen),
+			// try to set again later in event loop
+			InvokeQueued(_window, [=] {
+				setGeometry(geometry);
+			});
+		}
 	}
 	if constexpr (!Platform::IsMac()) {
 		if (_fullscreen) {
@@ -3438,7 +3450,7 @@ void OverlayWidget::refreshFromLabel() {
 
 void OverlayWidget::refreshCaption() {
 	_caption = Ui::Text::String();
-	const auto caption = [&] {
+	const auto caption = StripQuoteEntities([&] {
 		if (_stories) {
 			return _stories->captionText();
 		} else if (_message) {
@@ -3456,7 +3468,7 @@ void OverlayWidget::refreshCaption() {
 			return _message->translatedText();
 		}
 		return TextWithEntities();
-	}();
+	}());
 	if (caption.text.isEmpty()) {
 		return;
 	}

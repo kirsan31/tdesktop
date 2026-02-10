@@ -3075,7 +3075,7 @@ void Widget::searchReceived(
 			process->queries.erase(i);
 		}
 	}
-	const auto inject = (type.start && !type.posts)
+	const auto inject = (type.start && !type.posts && !type.migrated)
 		? *_singleMessageSearch.lookup(_searchQuery)
 		: nullptr;
 	if (cacheResults && process->requestId) {
@@ -3824,7 +3824,8 @@ void Widget::updateLockUnlockVisibility(anim::type animated) {
 		|| (widthAnimation && !suggestionsAnimation)
 		|| _childList
 		|| !session().domain().local().hasLocalPasscode()
-		|| (!_stories->empty()
+		|| (_stories
+			&& !_stories->empty()
 			&& _scroll->position().overscroll < -st::dialogsFilterSkip);
 	const auto hiddenAnimated = _searchHasFocus
 		|| _searchSuggestionsLocked
