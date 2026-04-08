@@ -387,6 +387,7 @@ void AddStakePresets(
 				wrap,
 				rpl::single(FormatTonAmount(nanoTon).full + diamond),
 				st::stakePresetButton);
+			button->setTextTransform(RoundButtonTextTransform::ToUpper);
 			button->setClickedCallback([=] {
 				callback(nanoTon);
 			});
@@ -402,7 +403,7 @@ void AddStakePresets(
 			const auto cols = int(row.size());
 			const auto singlew = (width - (cols - 1) * xskip) / cols;
 			auto x = 0;
-			for (const auto button : row) {
+			for (const auto &button : row) {
 				button->setFullWidth(singlew);
 				button->move(x, y);
 				x += singlew + xskip;

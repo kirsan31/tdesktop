@@ -281,14 +281,8 @@ QSize Location::countOptimalSize() {
 		}
 		if (!_title.isEmpty() || !_description.isEmpty()) {
 			minHeight += st::mediaInBubbleSkip;
-			if (_live) {
-				if (isBubbleBottom()) {
-					minHeight += st::msgPadding.bottom();
-				}
-			} else {
-				if (isBubbleTop()) {
-					minHeight += st::msgPadding.top();
-				}
+			if (isBubbleBottom()) {
+				minHeight += st::msgPadding.bottom();
 			}
 		}
 	}
@@ -312,6 +306,7 @@ QSize Location::countCurrentSize(int newWidth) {
 		std::min(newWidth, st::maxMediaSize));
 	accumulate_max(newWidth, minWidth);
 	accumulate_max(newHeight, st::minPhotoSize);
+	_thumbnailHeight = newHeight;
 	if (_live) {
 		_live->thumbnailHeight = newHeight;
 	}
@@ -324,14 +319,8 @@ QSize Location::countCurrentSize(int newWidth) {
 		}
 		if (!_title.isEmpty() || !_description.isEmpty()) {
 			newHeight += st::mediaInBubbleSkip;
-			if (_live) {
-				if (isBubbleBottom()) {
-					newHeight += st::msgPadding.bottom();
-				}
-			} else {
-				if (isBubbleTop()) {
-					newHeight += st::msgPadding.top();
-				}
+			if (isBubbleBottom()) {
+				newHeight += st::msgPadding.bottom();
 			}
 		}
 	}
@@ -358,19 +347,14 @@ void Location::draw(Painter &p, const PaintContext &context) const {
 	const auto stm = context.messageStyle();
 
 	const auto hasText = !_title.isEmpty() || !_description.isEmpty();
-	const auto rounding = adjustedBubbleRounding(_live
+	const auto rounding = adjustedBubbleRounding(hasText
 		? RectPart::FullBottom
-		: hasText
-		? RectPart::FullTop
 		: RectPart());
 	const auto paintText = [&] {
-		if (_live) {
-			painty += st::mediaInBubbleSkip;
-		} else if (!hasText) {
+		if (!hasText && !_live) {
 			return;
-		} else if (isBubbleTop()) {
-			painty += st::msgPadding.top();
 		}
+		painty += st::mediaInBubbleSkip;
 
 		auto textw = width() - st::msgPadding.left() - st::msgPadding.right();
 
@@ -386,15 +370,8 @@ void Location::draw(Painter &p, const PaintContext &context) const {
 			_description.drawLeftElided(p, paintx + st::msgPadding.left(), painty, textw, width(), 3, style::al_left, 0, -1, 0, false, toDescriptionSelection(context.selection));
 			painty += qMin(_description.countHeight(textw), 3 * st::webPageDescriptionFont->height);
 		}
-		if (!_live) {
-			painty += st::mediaInBubbleSkip;
-			painth -= painty;
-		}
 	};
-	if (!_live) {
-		paintText();
-	}
-	const auto thumbh = _live ? _live->thumbnailHeight : painth;
+	const auto thumbh = _thumbnailHeight;
 	auto rthumb = QRect(paintx, painty, paintw, thumbh);
 	if (!bubble) {
 		fillImageShadow(p, rthumb, rounding, context);
@@ -444,12 +421,13 @@ void Location::draw(Painter &p, const PaintContext &context) const {
 	if (context.selected()) {
 		fillImageOverlay(p, rthumb, rounding, context);
 	}
+	painty += thumbh;
 	if (_live) {
-		painty += _live->thumbnailHeight;
-		painth -= _live->thumbnailHeight;
+		painth -= thumbh;
 		paintLiveRemaining(p, context, { paintx, painty, paintw, painth });
-		paintText();
-	} else if (_parent->media() == this) {
+	}
+	paintText();
+	if (!_live && !hasText && _parent->media() == this) {
 		auto fullRight = paintx + paintw;
 		auto fullBottom = height();
 		_parent->drawInfo(
@@ -589,17 +567,15 @@ TextState Location::textState(QPoint point, StateRequest request) const {
 	if (width() < st::msgPadding.left() + st::msgPadding.right() + 1) {
 		return result;
 	}
-	auto paintx = 0, painty = 0, paintw = width(), painth = height();
+	auto paintx = 0, painty = 0, paintw = width();
 	bool bubble = _parent->hasBubble();
 
+	const auto hasText = !_title.isEmpty() || !_description.isEmpty();
 	auto checkText = [&] {
-		if (_live) {
-			painty += st::mediaInBubbleSkip;
-		} else if (_title.isEmpty() && _description.isEmpty()) {
+		if (!hasText && !_live) {
 			return false;
-		} else if (isBubbleTop()) {
-			painty += st::msgPadding.top();
 		}
+		painty += st::mediaInBubbleSkip;
 
 		auto textw = width() - st::msgPadding.left() - st::msgPadding.right();
 
@@ -632,26 +608,17 @@ TextState Location::textState(QPoint point, StateRequest request) const {
 			}
 			painty += descriptionh;
 		}
-		if (!_title.isEmpty() || !_description.isEmpty()) {
-			painty += st::mediaInBubbleSkip;
-		}
-		painth -= painty;
 		return false;
 	};
-	if (!_live && checkText()) {
-		return result;
-	}
-	const auto thumbh = _live ? _live->thumbnailHeight : painth;
+	const auto thumbh = _thumbnailHeight;
 	if (QRect(paintx, painty, paintw, thumbh).contains(point) && _data) {
 		result.link = _link;
 	}
-	if (_live) {
-		painty += _live->thumbnailHeight;
-		painth -= _live->thumbnailHeight;
-		if (checkText()) {
-			return result;
-		}
-	} else if (_parent->media() == this) {
+	painty += thumbh;
+	if (checkText()) {
+		return result;
+	}
+	if (!_live && !hasText && _parent->media() == this) {
 		auto fullRight = paintx + paintw;
 		auto fullBottom = height();
 		const auto bottomInfoResult = _parent->bottomInfoTextState(

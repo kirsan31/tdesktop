@@ -28,7 +28,8 @@ constexpr auto kRadialLoadingOffset = kNotchOffset + 4;
 constexpr auto kThemePreviewOffset = kRadialLoadingOffset + 4;
 constexpr auto kDocumentBubbleOffset = kThemePreviewOffset + 4;
 constexpr auto kSaveMsgOffset = kDocumentBubbleOffset + 4;
-constexpr auto kFooterOffset = kSaveMsgOffset + 4;
+constexpr auto kChapterOffset = kSaveMsgOffset + 4;
+constexpr auto kFooterOffset = kChapterOffset + 4;
 constexpr auto kCaptionOffset = kFooterOffset + 4;
 constexpr auto kGroupThumbsOffset = kCaptionOffset + 4;
 constexpr auto kControlsOffset = kGroupThumbsOffset + 4;
@@ -724,6 +725,13 @@ void OverlayWidget::RendererGL::paintSaveMsg(QRect outer) {
 	}, kSaveMsgOffset, true);
 }
 
+void OverlayWidget::RendererGL::paintChapter(QRect outer) {
+	paintUsingRaster(_chapterImage, outer, [&](Painter &&p) {
+		const auto newOuter = QRect(QPoint(), outer.size());
+		_owner->paintChapterContent(p, newOuter, newOuter);
+	}, kChapterOffset, true);
+}
+
 void OverlayWidget::RendererGL::paintControlsStart() {
 	validateControls();
 	_f->glActiveTexture(GL_TEXTURE0);
@@ -819,7 +827,8 @@ auto OverlayWidget::RendererGL::controlMeta(Over control) const -> Control {
 	case Over::Share: return { 3, &st::mediaviewShare };
 	case Over::Rotate: return { 4, &st::mediaviewRotate };
 	case Over::More: return { 5, &st::mediaviewMore };
-	case Over::Recognize: return { 6, &st::mediaviewRecognize };
+	case Over::Draw: return { 6, &st::mediaviewDraw };
+	case Over::Recognize: return { 7, &st::mediaviewRecognize };
 	}
 	Unexpected("Control value in OverlayWidget::RendererGL::ControlIndex.");
 }
@@ -835,6 +844,7 @@ void OverlayWidget::RendererGL::validateControls() {
 		controlMeta(Over::Share),
 		controlMeta(Over::Rotate),
 		controlMeta(Over::More),
+		controlMeta(Over::Draw),
 		controlMeta(Over::Recognize),
 	};
 	auto maxWidth = 0;

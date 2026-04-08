@@ -128,7 +128,7 @@ rpl::producer<int> ListController::unlockHeightValue() const {
 void ListController::rebuild() {
 	const auto participants = &_peer->session().api().chatParticipants();
 	const auto &list = participants->similar(_peer);
-	for (const auto peer : list.list) {
+	for (const auto &peer : list.list) {
 		if (!delegate()->peerListFindRow(peer->id.value)) {
 			delegate()->peerListAppendRow(createRow(peer));
 		}
@@ -157,6 +157,7 @@ void ListController::setupUnlock() {
 			: tr::lng_similar_bots_show_more()),
 		st::similarChannelsLock,
 		rpl::single(true));
+	button->setTextTransform(Ui::RoundButtonTextTransform::ToUpper);
 	button->setClickedCallback([=] {
 		const auto window = _controller->parentController();
 		::Settings::ShowPremium(window, u"similar_channels"_q);
