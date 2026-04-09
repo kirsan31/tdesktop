@@ -992,12 +992,6 @@ void ServicePreMessage::init(
 
 int ServicePreMessage::resizeToWidth(int newWidth, ElementChatMode mode) {
 	width = newWidth;
-	if (mode == ElementChatMode::Wide) {
-		accumulate_min(
-			width,
-			st::msgMaxWidth + 2 * st::msgPhotoSkip + 2 * st::msgMargin.left());
-	}
-
 	if (media) {
 		media->initDimensions();
 		media->resizeGetHeight(width);
@@ -1469,8 +1463,7 @@ not_null<PurchasedTag*> Element::enforcePurchasedTag() {
 int Element::AdditionalSpaceForSelectionCheckbox(
 		not_null<const Element*> view,
 		QRect countedGeometry) {
-	if (!view->hasOutLayout()
-		|| view->delegate()->elementChatMode() == ElementChatMode::Wide) {
+	if (!view->hasOutLayout()) {
 		return 0;
 	}
 	if (countedGeometry.isEmpty()) {

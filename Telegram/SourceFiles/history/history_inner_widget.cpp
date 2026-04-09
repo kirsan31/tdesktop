@@ -4715,11 +4715,7 @@ void HistoryInner::mouseActionUpdate() {
 						barWidth = _forumThreadBarWidth;
 					}
 					auto barLeft = st::msgServiceMargin.left();
-					auto maxwidth = _contentWidth;
-					if (_isChatWide) {
-						maxwidth = qMin(maxwidth, int32(st::msgMaxWidth + 2 * st::msgPhotoSkip + 2 * st::msgMargin.left()));
-					}
-					auto widthForBar = maxwidth - st::msgServiceMargin.left() - st::msgServiceMargin.left();
+					auto widthForBar = _contentWidth - st::msgServiceMargin.left() - st::msgServiceMargin.left();
 
 					barLeft += (widthForBar - barWidth) / 2;
 
