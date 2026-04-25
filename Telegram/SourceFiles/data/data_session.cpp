@@ -30,6 +30,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/history.h"
 #include "history/history_item.h"
 #include "history/history_item_components.h"
+#include "history/history_streamed_drafts.h"
 #include "history/view/media/history_view_media.h"
 #include "history/view/history_view_element.h"
 #include "inline_bots/inline_bot_layout_item.h"
@@ -2094,20 +2095,17 @@ void Session::requestItemTextRefresh(not_null<HistoryItem*> item) {
 			view->itemTextUpdated();
 		});
 		requestItemResize(item);
+		if (item->textAppearing()) {
+			enumerateItemViews(item, [&](not_null<ViewElement*> view) {
+				view->skipInactiveTextAppearing();
+			});
+		}
 	};
 	if (const auto group = groups().find(item)) {
 		call(group->items.front());
 	} else {
 		call(item);
 	}
-}
-
-void Session::requestItemTextRefreshStreaming(
-		not_null<HistoryItem*> item) {
-	enumerateItemViews(item, [&](not_null<ViewElement*> view) {
-		view->itemTextUpdatedStreaming();
-	});
-	requestItemResize(item);
 }
 
 void Session::registerRestricted(
@@ -3113,6 +3111,20 @@ HistoryItem *Session::addNewMessage(
 	const auto peerId = PeerFromMessage(data);
 	if (!peerId || data.type() == mtpc_messageEmpty) {
 		return nullptr;
+	}
+
+	if (data.type() == mtpc_message) {
+		if (const auto h = historyLoaded(peerId)) {
+			if (const auto streamed = h->streamedDraftsIfExists()) {
+				if (const auto adopted = streamed->adoptIncoming(
+						data.c_message())) {
+					if (type == NewMessageType::Unread) {
+						CheckForSwitchInlineButton(adopted);
+					}
+					return adopted;
+				}
+			}
+		}
 	}
 
 	const auto result = history(peerId)->addNewMessage(
@@ -4142,6 +4154,21 @@ void Session::webpageApplyFields(
 	auto iv = (data.vcached_page() && !IgnoreIv(type))
 		? std::make_unique<Iv::Data>(data, *data.vcached_page())
 		: nullptr;
+	const auto resolvedPhoto = story
+		? story->photo()
+		: photo
+		? processPhoto(*photo).get()
+		: nullptr;
+	const auto resolvedDocument = story
+		? story->document()
+		: document
+		? processDocument(*document).get()
+		: lookupThemeDocument();
+	const auto photoIsVideoCover = data.is_video_cover_photo()
+		|| (resolvedDocument
+			&& resolvedPhoto
+			&& resolvedDocument->isVideoFile()
+			&& !resolvedDocument->hasThumbnail());
 	webpageApplyFields(
 		page,
 		type,
@@ -4151,16 +4178,8 @@ void Session::webpageApplyFields(
 		qs(data.vtitle().value_or_empty()),
 		(story ? story->caption() : description),
 		storyId,
-		(story
-			? story->photo()
-			: photo
-			? processPhoto(*photo).get()
-			: nullptr),
-		(story
-			? story->document()
-			: document
-			? processDocument(*document).get()
-			: lookupThemeDocument()),
+		resolvedPhoto,
+		resolvedDocument,
 		WebPageCollage(this, data),
 		std::move(iv),
 		lookupStickerSet(),
@@ -4169,7 +4188,7 @@ void Session::webpageApplyFields(
 		data.vduration().value_or_empty(),
 		qs(data.vauthor().value_or_empty()),
 		data.is_has_large_media(),
-		data.is_video_cover_photo(),
+		photoIsVideoCover,
 		pendingTill);
 }
 

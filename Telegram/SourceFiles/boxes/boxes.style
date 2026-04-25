@@ -59,6 +59,7 @@ boxPhotoTitlePosition: point(28px, 20px);
 boxPhotoPadding: margins(28px, 28px, 28px, 18px);
 boxPhotoCompressedSkip: 20px;
 boxPhotoCaptionSkip: 8px;
+boxPhotoCaptionReplyOverlap: 5px;
 
 defaultChangeUserpicIcon: icon {{ "new_chat_photo", activeButtonFg }};
 defaultUploadUserpicIcon: icon {{ "upload_chat_photo", msgDateImgFg }};
@@ -92,7 +93,7 @@ restoreUserpicIcon: UserpicButton(defaultUserpicButton) {
 }
 
 confirmInviteTitle: FlatLabel(defaultFlatLabel) {
-	align: align(center);
+	align: align(top);
 	minWidth: 320px;
 	maxHeight: 24px;
 	textFg: windowBoldFg;
@@ -101,9 +102,8 @@ confirmInviteTitle: FlatLabel(defaultFlatLabel) {
 	}
 }
 confirmInviteAbout: FlatLabel(boxLabel) {
-	align: align(center);
+	align: align(top);
 	minWidth: 320px;
-	maxHeight: 60px;
 	style: TextStyle(boxLabelStyle) {
 		lineHeight: 19px;
 	}

@@ -94,6 +94,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "apiwrap.h"
 #include "api/api_attached_stickers.h"
 #include "api/api_suggest_post.h"
+#include "api/api_stickers_creator.h"
 #include "api/api_toggling_media.h"
 #include "api/api_who_reacted.h"
 #include "api/api_views.h"
@@ -2978,6 +2979,7 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 						[=] {
 							const auto cur
 								= HistoryView::CurrentVoiceTimecode(msgId);
+							_widget->replyToMessage({ .messageId = msgId });
 							_widget->insertTextAtCursor(cur.value_or(*t));
 						});
 				}
@@ -3183,6 +3185,11 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 							_menu->addAction(document->isStickerSetInstalled() ? tr::lng_context_pack_info(tr::now) : tr::lng_context_pack_add(tr::now), [=] {
 								showStickerPackInfo(document);
 							}, &st::menuIconStickers);
+						} else {
+							Api::AddAddToOwnedSetAction(
+								Ui::Menu::CreateAddActionCallback(_menu),
+								_controller->uiShow(),
+								document);
 						}
 						{
 							const auto isFaved = session->data().stickers().isFaved(document);
@@ -3424,6 +3431,7 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 				&session->data(),
 				pollItemId,
 				pollOptionLink,
+				_controller,
 				[=] {
 					_widget->replyToMessage({
 						.messageId = pollItemId,

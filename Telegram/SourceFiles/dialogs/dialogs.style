@@ -540,16 +540,17 @@ dialogsScamFont: font(9px semibold);
 dialogsScamSkip: 4px;
 dialogsScamRadius: 2px;
 
-dialogsUnreadMediaSize: 5px;
-dialogsUnreadMediaSkip: 4px;
-dialogsUnreadMediaTop: 7px;
-
 dialogsMiniPreviewTop: 1px;
 dialogsMiniPreview: 16px;
 dialogsMiniPreviewRadius: 2px;
 dialogsMiniPreviewSkip: 2px;
 dialogsMiniPreviewRight: 3px;
 dialogsMiniPlay: icon{{ "dialogs/dialogs_mini_play", videoPlayIconFg }};
+
+dialogsUnreadMediaDotEmoji: IconEmoji {
+	icon: icon{{ "dialogs/dialogs_unread_media_dot", dialogsTextFgService }};
+	padding: margins(1px, 7px, 2px, 0px);
+}
 
 dialogsMiniForward: DialogsMiniIcon {
 	icon: ThreeStateIcon {
