@@ -129,6 +129,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 namespace {
 
 constexpr auto kScrollDateHideTimeout = 1000;
+constexpr auto kScrollDateHideOnDayCrossingTimeout = crl::time(3000);
 constexpr auto kUnloadHeavyPartsPages = 2;
 constexpr auto kClearUserpicsAfter = 50;
 
@@ -912,7 +913,8 @@ bool HistoryInner::canHaveFromUserpics() const {
 		&& !_peer->isSelf()
 		&& !_peer->isRepliesChat()
 		&& !_peer->isVerifyCodes()
-		&& !_isChatWide) {
+		&& !_isChatWide
+		&& !_history->hasGuestChatBotMessages()) {
 		return false;
 	} else if (const auto channel = _peer->asBroadcast()) {
 		return channel->signatureProfiles();
@@ -2411,11 +2413,11 @@ void HistoryInner::mouseDoubleClickEvent(QMouseEvent *e) {
 void HistoryInner::toggleFavoriteReaction(not_null<Element*> view) const {
 	const auto item = view->data();
 	const auto favorite = session().data().reactions().favoriteId();
-	if (!ranges::contains(
+	if (Window::ShowReactPremiumError(_controller, item, favorite)
+		|| !ranges::contains(
 			Data::LookupPossibleReactions(item).recent,
 			favorite,
-			&Data::Reaction::id)
-		|| Window::ShowReactPremiumError(_controller, item, favorite)) {
+			&Data::Reaction::id)) {
 		return;
 	} else if (!ranges::contains(item->chosenReactions(), favorite)) {
 		if (const auto top = itemTop(view); top >= 0) {
@@ -3444,8 +3446,14 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 	if (leaderOrSelf && !_menu->empty()) {
 		const auto media = leaderOrSelf->media();
 		const auto poll = media ? media->poll() : nullptr;
-		if (poll && !poll->closed() && poll->hideResultsUntilClose()) {
-			HistoryView::InsertPollHiddenResultsLabel(_menu.get());
+		if (poll && !poll->closed()) {
+			if (poll->hideResultsUntilClose()) {
+				HistoryView::InsertPollHiddenResultsLabel(_menu.get());
+			}
+			HistoryView::InsertPollVoteRestrictionsLabel(
+				_menu.get(),
+				leaderOrSelf,
+				poll);
 		}
 	}
 
@@ -3935,9 +3943,10 @@ void HistoryInner::visibleAreaUpdated(int top, int bottom) {
 		}
 	}
 	if (scrolledUp) {
+		_scrollDateAfterDayCrossing = false;
 		_scrollDateCheck.call();
 	} else {
-		scrollDateHideByTimer();
+		scrollDateCheckDownward();
 	}
 
 	// Unload userpics.
@@ -3994,8 +4003,42 @@ void HistoryInner::scrollDateCheck() {
 	}
 }
 
+void HistoryInner::scrollDateCheckDownward() {
+	const auto current = _history->scrollTopItem
+		? _history->scrollTopItem
+		: (_migrated ? _migrated->scrollTopItem : nullptr);
+	const auto currentTop = _history->scrollTopItem
+		? _history->scrollTopOffset
+		: (_migrated ? _migrated->scrollTopOffset : 0);
+	const auto previous = _scrollDateLastItem;
+	const auto previousDay = previous
+		? previous->dateTime().date()
+		: QDate();
+	const auto currentDay = current
+		? current->dateTime().date()
+		: QDate();
+	const auto crossedDay = previous
+		&& current
+		&& previousDay.isValid()
+		&& currentDay.isValid()
+		&& (previousDay != currentDay);
+	_scrollDateLastItem = current;
+	_scrollDateLastItemTop = currentTop;
+	if (crossedDay) {
+		if (!_scrollDateShown) {
+			toggleScrollDateShown();
+		}
+		_scrollDateAfterDayCrossing = true;
+		_scrollDateHideTimer.callOnce(
+			kScrollDateHideOnDayCrossingTimeout);
+	} else if (!_scrollDateAfterDayCrossing) {
+		scrollDateHideByTimer();
+	}
+}
+
 void HistoryInner::scrollDateHideByTimer() {
 	_scrollDateHideTimer.cancel();
+	_scrollDateAfterDayCrossing = false;
 	if (!_scrollDateLink || ClickHandler::getPressed() != _scrollDateLink) {
 		scrollDateHide();
 	}
@@ -5255,10 +5298,13 @@ void HistoryInner::deleteItem(not_null<HistoryItem*> item) {
 	const auto list = HistoryItemsList{ item };
 	if (CanCreateModerateMessagesBox(list)) {
 		const auto opt = DefaultModerateMessagesBoxOptions();
-		_controller->show(Box(CreateModerateMessagesBox, list, nullptr, opt));
+		_controller->show(Box(
+			CreateModerateMessagesBox,
+			ModerateMessagesBoxEntry{ .items = list },
+			nullptr,
+			opt));
 	} else {
-		const auto suggestModerate = false;
-		_controller->show(Box<DeleteMessagesBox>(item, suggestModerate));
+		_controller->show(Box<DeleteMessagesBox>(item));
 	}
 }
 
@@ -5275,7 +5321,7 @@ void HistoryInner::deleteAsGroup(FullMsgId itemId) {
 		} else if (CanCreateModerateMessagesBox(group->items)) {
 			_controller->show(Box(
 				CreateModerateMessagesBox,
-				group->items,
+				ModerateMessagesBoxEntry{ .items = group->items },
 				nullptr,
 				ModerateMessagesBoxOptions{}));
 		} else {
