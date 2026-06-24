@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "history/history_widget.h"
 
+#include "api/api_compose_with_ai.h"
 #include "api/api_editing.h"
 #include "api/api_bot.h"
 #include "api/api_chat_participants.h"
@@ -62,6 +63,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/ui_utility.h"
 #include "inline_bots/inline_bot_result.h"
 #include "base/event_filter.h"
+#include "base/options.h"
 #include "base/qt_signal_producer.h"
 #include "base/qt/qt_key_modifiers.h"
 #include "base/unixtime.h"
@@ -105,6 +107,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/history_streamed_drafts.h"
 #include "history/history_unread_things.h"
 #include "history/admin_log/history_admin_log_section.h"
+#include "history/view/controls/compose_controls_common.h"
 #include "history/view/controls/history_view_characters_limit.h"
 #include "history/view/controls/history_view_compose_ai_button.h"
 #include "history/view/controls/history_view_compose_ai_tooltip.h"
@@ -138,6 +141,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/view/history_view_subsection_tabs.h"
 #include "history/view/history_view_translate_bar.h"
 #include "history/view/media/history_view_media.h"
+#ifdef TDESKTOP_IV_EDITOR
+#include "iv/editor/iv_editor_session.h"
+#endif // TDESKTOP_IV_EDITOR
 #include "core/click_handler_types.h"
 #include "chat_helpers/field_autocomplete.h"
 #include "chat_helpers/tabbed_panel.h"
@@ -433,6 +439,11 @@ HistoryWidget::HistoryWidget(
 	) | rpl::on_next([=] {
 		fieldChanged();
 	}, _field->lifetime());
+	Data::AmPremiumValue(&session()) | rpl::on_next([=] {
+		checkCharsLimitation();
+		updateAiButtonVisibility();
+		updateSendAsFileVisibility();
+	}, lifetime());
 #ifdef Q_OS_MAC
 	// Removed an ability to insert text from the menu bar
 	// when the field is hidden.
@@ -539,7 +550,10 @@ HistoryWidget::HistoryWidget(
 	_field->setMimeDataHook(WrappedMessageFieldMimeHook([=](
 			not_null<const QMimeData*> data,
 			Ui::InputField::MimeAction action) {
-		const auto pasteResult = Ui::CheckLargeTextPaste(_field, data);
+		const auto pasteResult = Ui::CheckLargeTextPaste(
+			&session(),
+			_field,
+			data);
 		if (pasteResult.exceeds) {
 			if (action == Ui::InputField::MimeAction::Check) {
 				return true;
@@ -2293,6 +2307,24 @@ void HistoryWidget::setupShortcuts() {
 					std::make_shared<Scheduled>(_history));
 				return true;
 			});
+		_canSendTexts
+			&& _field->isVisible()
+			&& request->check(Command::ComposeAiApplyInPlace, 1)
+			&& request->handle([=] {
+				triggerAiApplyInPlace();
+				return true;
+			});
+		_preview
+			&& (_previewDrawPreview || _preview->draft().removed)
+			&& request->check(Command::ToggleWebPagePreview, 1)
+			&& request->handle([=] {
+				if (_previewDrawPreview) {
+					_preview->apply({ .removed = true });
+				} else {
+					_preview->apply({}, true);
+				}
+				return true;
+			});
 		if (showRecordButton()
 			&& _canSendMessages
 			&& _joinChannel->isHidden()
@@ -3132,6 +3164,7 @@ void HistoryWidget::refreshAttachBotsMenu() {
 		controller(),
 		_history->peer,
 		[=] { return prepareSendAction({}); },
+		[=] { return sendMenuDetails(); },
 		[=](bool compress) { chooseAttach(compress); });
 	if (!_attachBotsMenu) {
 		return;
@@ -4777,6 +4810,22 @@ void HistoryWidget::showAiComposeBox() {
 	});
 }
 
+void HistoryWidget::triggerAiApplyInPlace() {
+	Api::TriggerAiApplyInPlace(
+		&session(),
+		controller()->uiShow(),
+		this,
+		_field,
+		prepareTextForEditMsg(),
+		crl::guard(this, [=](TextWithTags textWithTags, int cursor) {
+			setFieldText(
+				textWithTags,
+				TextUpdateEvent::SaveDraft,
+				Ui::InputField::HistoryAction::NewEntry);
+			_field->setCursorPosition(cursor);
+		}));
+}
+
 void HistoryWidget::saveEditMessage(Api::SendOptions options) {
 	Expects(_history != nullptr);
 
@@ -4805,10 +4854,11 @@ void HistoryWidget::saveEditMessage(Api::SendOptions options) {
 		}
 		return;
 	} else {
-		const auto maxCaptionSize = !hasMediaWithCaption
-			? MaxMessageSize
-			: Data::PremiumLimits(&session()).captionLengthCurrent();
-		const auto remove = _fieldCharsCountManager.count() - maxCaptionSize;
+		const auto limits = Data::PremiumLimits(&session());
+		const auto maxTextSize = hasMediaWithCaption
+			? limits.captionLengthCurrent()
+			: limits.messageLengthCurrent();
+		const auto remove = _fieldCharsCountManager.count() - maxTextSize;
 		if (remove > 0) {
 			controller()->showToast(
 				tr::lng_edit_limit_reached(tr::now, lt_count, remove));
@@ -5158,7 +5208,7 @@ SendMenu::Details HistoryWidget::sendMenuDetails() const {
 }
 
 SendMenu::Details HistoryWidget::saveMenuDetails() const {
-	return (_editMsgId && _replyEditMsg)
+	return (_editMsgId && _replyEditMsg && !_replyEditMsg->richPage())
 		? _mediaEditManager.sendMenuDetails(HasSendText(_field))
 		: SendMenu::Details();
 }
@@ -5553,7 +5603,7 @@ void HistoryWidget::sendButtonClicked() {
 
 void HistoryWidget::leaveEventHook(QEvent *e) {
 	if (hasMouseTracking()) {
-		mouseMoveEvent(nullptr);
+		clearOverStates();
 	}
 }
 
@@ -5604,10 +5654,30 @@ void HistoryWidget::updateOverStates(QPoint pos) {
 	}
 }
 
+void HistoryWidget::clearOverStates() {
+	if (_inPhotoEdit) {
+		_inPhotoEdit = false;
+		if (_photoEditMedia) {
+			_inPhotoEditOver.start(
+				[=] { updateField(); },
+				1.,
+				0.,
+				st::defaultMessageBar.duration);
+		} else {
+			_inPhotoEditOver.stop();
+		}
+	}
+	_inDetails = false;
+	if (_inClickable) {
+		_inClickable = false;
+		setCursor(style::cur_default);
+	}
+}
+
 void HistoryWidget::leaveToChildEvent(QEvent *e, QWidget *child) {
 // e -- from enterEvent() of child RpWidget
 	if (hasMouseTracking()) {
-		updateOverStates(mapFromGlobal(QCursor::pos()));
+		clearOverStates();
 	}
 }
 
@@ -5776,7 +5846,9 @@ bool HistoryWidget::eventFilter(QObject *obj, QEvent *e) {
 			if (k->key() == Qt::Key_Up) {
 #ifdef Q_OS_MAC
 				// Cmd + Up is used instead of Home.
-				if (HasSendText(_field)) {
+				if (HasSendText(_field)
+					&& !base::options::value<bool>(
+						HistoryView::Controls::kOptionMacCmdReplyImmediately)) {
 					return false;
 				}
 #endif
@@ -5784,7 +5856,9 @@ bool HistoryWidget::eventFilter(QObject *obj, QEvent *e) {
 			} else if (k->key() == Qt::Key_Down) {
 #ifdef Q_OS_MAC
 				// Cmd + Down is used instead of End.
-				if (HasSendText(_field)) {
+				if (HasSendText(_field)
+					&& !base::options::value<bool>(
+						HistoryView::Controls::kOptionMacCmdReplyImmediately)) {
 					return false;
 				}
 #endif
@@ -6036,9 +6110,12 @@ bool HistoryWidget::searchInChatEmbedded(
 		Dialogs::Key chat,
 		PeerData *searchFrom) {
 	const auto peer = chat.peer(); // windows todo
+	const auto archiveWindow = (controller()->windowId().type
+		== Window::SeparateType::Archive);
 	if (!peer
 		|| ((Window::SeparateId(peer) != controller()->windowId())
-			&& !controller()->isPrimary())) {
+			&& !controller()->isPrimary()
+			&& !archiveWindow)) {
 		return false;
 	} else if (_peer != peer) {
 		const auto weak = base::make_weak(this);
@@ -6358,7 +6435,8 @@ bool HistoryWidget::hasEnoughLinesForAi() const {
 bool HistoryWidget::textExceedsMaxSize() const {
 	return _history
 		&& !_voiceRecordBar->isActive()
-		&& _field->getLastText().size() > MaxMessageSize;
+		&& (_field->getLastText().size()
+			> Data::PremiumLimits(&session()).messageLengthCurrent());
 }
 
 void HistoryWidget::updateAiButtonVisibility() {
@@ -8568,7 +8646,7 @@ void HistoryWidget::refreshPinnedBarButton(bool many, HistoryItem *item) {
 		this,
 		close ? st::historyReplyCancel : st::historyPinnedShowAll);
 	button->setAccessibleName(close
-		? tr::lng_cancel(tr::now)
+		? tr::lng_pinned_unpin(tr::now)
 		: tr::lng_settings_events_pinned(tr::now));
 	button->clicks(
 	) | rpl::on_next([=] {
@@ -9007,10 +9085,11 @@ void HistoryWidget::checkCharsLimitation() {
 	}
 	const auto hasMediaWithCaption = item->media()
 		&& item->media()->allowsEditCaption();
-	const auto maxCaptionSize = !hasMediaWithCaption
-		? MaxMessageSize
-		: Data::PremiumLimits(&session()).captionLengthCurrent();
-	const auto remove = _fieldCharsCountManager.count() - maxCaptionSize;
+	const auto limits = Data::PremiumLimits(&session());
+	const auto maxTextSize = hasMediaWithCaption
+		? limits.captionLengthCurrent()
+		: limits.messageLengthCurrent();
+	const auto remove = _fieldCharsCountManager.count() - maxTextSize;
 	if (remove > 0) {
 		if (!_charsLimitation) {
 			_charsLimitation = base::make_unique_q<CharactersLimitLabel>(
@@ -9018,11 +9097,6 @@ void HistoryWidget::checkCharsLimitation() {
 				_send.get(),
 				style::al_bottom);
 			_charsLimitation->show();
-			Data::AmPremiumValue(
-				&session()
-			) | rpl::on_next([=] {
-				checkCharsLimitation();
-			}, _charsLimitation->lifetime());
 		}
 		_charsLimitation->setLeft(remove);
 	} else {
@@ -9210,7 +9284,12 @@ void HistoryWidget::setReplyFieldsFromProcessing() {
 void HistoryWidget::editMessage(
 		not_null<HistoryItem*> item,
 		const TextSelection &selection) {
-	if (_chooseTheme) {
+	if (item->richPage()) {
+#ifdef TDESKTOP_IV_EDITOR
+		Iv::Editor::ShowEditBox(controller(), item);
+#endif // TDESKTOP_IV_EDITOR
+		return;
+	} else if (_chooseTheme) {
 		toggleChooseChatTheme(_peer);
 	} else if (_voiceRecordBar->isActive()) {
 		controller()->showToast(tr::lng_edit_caption_voice(tr::now));
@@ -9818,14 +9897,19 @@ void HistoryWidget::updateReplyEditTexts(bool force) {
 		}
 	}
 	if (_replyEditMsg) {
+		const auto richPage = _replyEditMsg->richPage();
 		const auto editMedia = _editMsgId
 			? _replyEditMsg->media()
 			: nullptr;
-		if (_editMsgId && _replyEditMsg) {
+		if (_editMsgId && _replyEditMsg && !richPage) {
 			_mediaEditManager.start(_replyEditMsg);
+		} else {
+			_mediaEditManager.cancel();
 		}
-		_canReplaceMedia = _editMsgId && _replyEditMsg->allowsEditMedia();
-		if (editMedia && editMedia->allowsEditMedia()) {
+		_canReplaceMedia = _editMsgId
+			&& !richPage
+			&& _replyEditMsg->allowsEditMedia();
+		if (_canReplaceMedia && editMedia && editMedia->allowsEditMedia()) {
 			_canAddMedia = false;
 		} else {
 			_canAddMedia = base::take(_canReplaceMedia);

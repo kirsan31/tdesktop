@@ -13,6 +13,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/history_item.h"
 #include "history/history_location_manager.h"
 #include "history/view/history_view_element.h"
+#include "history/view/history_view_message.h"
 #include "history/view/history_view_cursor_state.h"
 #include "lang/lang_keys.h"
 #include "ui/chat/chat_style.h"
@@ -33,6 +34,10 @@ namespace {
 
 constexpr auto kUntilOffPeriod = std::numeric_limits<TimeId>::max();
 constexpr auto kLiveElapsedPartOpacity = 0.2;
+
+[[nodiscard]] bool IsHostedInstantViewMedia(not_null<const Element*> parent) {
+	return parent->Get<InstantViewMediaRuntime>() != nullptr;
+}
 
 [[nodiscard]] TimeId ResolveUpdateDate(not_null<Element*> view) {
 	const auto item = view->data();
@@ -93,13 +98,15 @@ Location::Location(
 	not_null<Data::CloudImage*> data,
 	Data::LocationPoint point,
 	Element *replacing,
-	TimeId livePeriod)
+	TimeId livePeriod,
+	QSize sizeOverride)
 : Media(parent)
 , _data(data)
 , _live(CreateLiveTracker(parent, livePeriod))
 , _title(st::msgMinWidth)
 , _description(st::msgMinWidth)
 , _link(std::make_shared<LocationClickHandler>(point))
+, _sizeOverride(sizeOverride)
 , _liveLocation(livePeriod > 0) {
 	if (_live) {
 		_title.setText(
@@ -287,12 +294,15 @@ void Location::ensureUserpicCreated() const {
 }
 
 QSize Location::countOptimalSize() {
+	const auto hostedInstantView = IsHostedInstantViewMedia(_parent);
 	auto tw = fullWidth();
 	auto th = fullHeight();
-	auto minWidth = std::clamp(
-		_parent->minWidthForMedia(),
-		st::minPhotoSize,
-		st::maxMediaSize);
+	auto minWidth = hostedInstantView
+		? std::max(_parent->minWidthForMedia(), 1)
+		: std::clamp(
+			_parent->minWidthForMedia(),
+			st::minPhotoSize,
+			st::maxMediaSize);
 	auto maxWidth = qMax(tw, minWidth);
 	auto minHeight = qMax(th, st::minPhotoSize);
 
@@ -316,6 +326,7 @@ QSize Location::countOptimalSize() {
 QSize Location::countCurrentSize(int newWidth) {
 	accumulate_min(newWidth, maxWidth());
 
+	const auto hostedInstantView = IsHostedInstantViewMedia(_parent);
 	auto tw = fullWidth();
 	auto th = fullHeight();
 	auto newHeight = th;
@@ -324,10 +335,12 @@ QSize Location::countCurrentSize(int newWidth) {
 	} else {
 		newWidth = tw;
 	}
-	auto minWidth = std::clamp(
-		_parent->minWidthForMedia(),
-		st::minPhotoSize,
-		std::min(newWidth, st::maxMediaSize));
+	auto minWidth = hostedInstantView
+		? std::max(_parent->minWidthForMedia(), 1)
+		: std::clamp(
+			_parent->minWidthForMedia(),
+			st::minPhotoSize,
+			std::min(newWidth, st::maxMediaSize));
 	accumulate_max(newWidth, minWidth);
 	accumulate_max(newHeight, st::minPhotoSize);
 	_thumbnailHeight = newHeight;
@@ -366,14 +379,16 @@ void Location::draw(Painter &p, const PaintContext &context) const {
 		return;
 	}
 	auto paintx = 0, painty = 0, paintw = width(), painth = height();
+	const auto hostedInstantView = IsHostedInstantViewMedia(_parent);
 	bool bubble = _parent->hasBubble();
 	const auto st = context.st;
 	const auto stm = context.messageStyle();
 
 	const auto hasText = !_title.isEmpty() || !_description.isEmpty();
-	const auto rounding = adjustedBubbleRounding(hasText
-		? RectPart::FullBottom
-		: RectPart());
+	const auto square = hasText ? RectPart::FullBottom : RectPart();
+	const auto rounding = hostedInstantView
+		? Ui::BubbleRounding()
+		: adjustedBubbleRounding(square);
 	const auto paintText = [&] {
 		if (!hasText && !_live) {
 			return;
@@ -397,7 +412,7 @@ void Location::draw(Painter &p, const PaintContext &context) const {
 	};
 	const auto thumbh = _thumbnailHeight;
 	auto rthumb = QRect(paintx, painty, paintw, thumbh);
-	if (!bubble) {
+	if (!bubble && !hostedInstantView) {
 		fillImageShadow(p, rthumb, rounding, context);
 	}
 
@@ -780,11 +795,15 @@ QPoint Location::resolveCustomInfoRightBottom() const {
 }
 
 int Location::fullWidth() const {
-	return st::locationSize.width();
+	return (_sizeOverride.width() > 0)
+		? _sizeOverride.width()
+		: st::locationSize.width();
 }
 
 int Location::fullHeight() const {
-	return st::locationSize.height();
+	return (_sizeOverride.height() > 0)
+		? _sizeOverride.height()
+		: st::locationSize.height();
 }
 
 } // namespace HistoryView

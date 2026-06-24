@@ -1363,6 +1363,13 @@ bool Panel::handleClose() const {
 			_call->hangup();
 		} else {
 			window()->hide();
+#ifdef Q_OS_LINUX
+			if (Platform::IsWayland()) {
+				if (const auto handle = window()->windowHandle()) {
+					handle->destroy();
+				}
+			}
+#endif // Q_OS_LINUX
 		}
 		return true;
 	}
