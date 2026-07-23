@@ -7,11 +7,14 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "settings/settings_experimental.h"
 
+#include "settings/settings_common.h"
 #include "data/components/passkeys.h"
+#include "ui/layers/generic_box.h"
 #include "main/main_session.h"
 #include "ui/boxes/confirm_box.h"
 #include "ui/search_field_controller.h"
 #include "ui/text/text_entity.h"
+#include "ui/toast/toast.h"
 #include "ui/widgets/menu/menu_add_action_callback.h"
 #include "ui/widgets/fields/input_field.h"
 #include "ui/wrap/padding_wrap.h"
@@ -30,12 +33,16 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/launcher.h"
 #include "core/sandbox.h"
 #include "chat_helpers/tabbed_panel.h"
+#include "dialogs/dialogs_entry.h"
 #include "dialogs/dialogs_widget.h"
 #include "dialogs/ui/dialogs_layout.h"
+#include "ffmpeg/ffmpeg_utility.h"
 #include "history/history_item_components.h"
 #include "history/view/controls/compose_controls_common.h"
 #include "history/view/history_view_message.h"
 #include "info/profile/info_profile_actions.h"
+#include "info/profile/tabs/adapters/info_profile_tab_media.h"
+#include "info/profile/tabs/info_profile_tabs_host.h"
 #include "lang/lang_keys.h"
 #include "mainwindow.h"
 #include "mainwidget.h"
@@ -43,12 +50,14 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "mtproto/session_private.h"
 #include "webview/webview_embed.h"
 #include "window/main_window.h"
+#include "window/window_filters_favorite.h"
 #include "window/window_peer_menu.h"
 #include "window/window_session_controller.h"
 #include "window/window_controller.h"
 #include "window/notifications_manager.h"
 #include "info/info_flexible_scroll.h"
 #include "chat_helpers/stickers_list_widget.h"
+#include "styles/style_chat_helpers.h"
 #include "styles/style_info.h"
 #include "styles/style_settings.h"
 #include "styles/style_layers.h"
@@ -155,7 +164,11 @@ void AddOption(
 			st::popupMenuWithIcons);
 		(*menu)->addAction(u"Copy deep link"_q, [=] {
 			TextUtilities::SetClipboardText({ link });
-			window->showToast(u"Deep link copied to clipboard."_q);
+			window->showToast({
+				.text = { u"Deep link copied to clipboard."_q },
+				.iconLottie = u"toast/voip_invite"_q,
+				.iconLottieSize = st::toastLottieIconSize,
+			});
 		}, &st::menuIconCopy);
 		(*menu)->popup(QCursor::pos());
 		e->accept();
@@ -187,6 +200,61 @@ void AddOption(
 			restarter->callOnce(st::settingsButtonNoIcon.toggle.duration);
 		}
 	}, inner->lifetime());
+
+	if (!description.isEmpty()) {
+		Ui::AddSkip(inner, st::settingsCheckboxesSkip);
+		Ui::AddDividerText(inner, rpl::single(description));
+		Ui::AddSkip(inner, st::settingsCheckboxesSkip);
+	}
+
+	std::move(
+		query
+	) | rpl::on_next([=](const QString &text) {
+		const auto trimmed = text.trimmed();
+		const auto matches = trimmed.isEmpty()
+			|| name.contains(trimmed, Qt::CaseInsensitive)
+			|| description.contains(trimmed, Qt::CaseInsensitive);
+		wrap->toggle(matches, anim::type::instant);
+	}, wrap->lifetime());
+}
+
+void AddFavoriteLinkButton(
+		not_null<Window::Controller*> window,
+		not_null<Ui::VerticalLayout*> container,
+		rpl::producer<QString> query,
+		Fn<void(const QString&, not_null<QWidget*>)> registerHighlight) {
+	const auto option = &base::options::lookup<QString>(
+		Window::kOptionFolderFavoriteLink);
+	const auto name = option->name().isEmpty()
+		? option->id()
+		: option->name();
+	const auto &description = option->description();
+
+	const auto wrap = container->add(
+		object_ptr<Ui::SlideWrap<Ui::VerticalLayout>>(
+			container,
+			object_ptr<Ui::VerticalLayout>(container)));
+	const auto inner = wrap->entity();
+
+	auto label = rpl::single(
+		rpl::empty
+	) | rpl::then(
+		option->changes()
+	) | rpl::map([option] {
+		return option->value();
+	});
+	const auto button = AddButtonWithLabel(
+		inner,
+		rpl::single(name),
+		std::move(label),
+		st::settingsButtonNoIcon);
+	button->setClickedCallback([=] {
+		window->show(Box(Window::EditFolderFavoriteLinkBox));
+	});
+
+	if (registerHighlight) {
+		registerHighlight(u"experimental/"_q + option->id(), button);
+	}
 
 	if (!description.isEmpty()) {
 		Ui::AddSkip(inner, st::settingsCheckboxesSkip);
@@ -270,6 +338,7 @@ void SetupExperimental(
 
 	addToggle(ChatHelpers::kOptionTabbedPanelShowOnClick);
 	addToggle(Dialogs::kOptionForumHideChatsList);
+	addToggle(Dialogs::kOptionDialogsUnreadOnTop);
 	addToggle(Dialogs::Ui::kOptionDialogsMuteIcon);
 	addToggle(Core::kOptionFractionalScalingEnabled);
 	addToggle(Core::kOptionHighDpiDownscale);
@@ -277,6 +346,8 @@ void SetupExperimental(
 	addToggle(Window::kOptionViewProfileInChatsListContextMenu);
 	addToggle(Info::Profile::kOptionShowPeerIdBelowAbout);
 	addToggle(Info::Profile::kOptionShowChannelJoinedBelowAbout);
+	addToggle(Info::Profile::kOptionProfileMediaTabs);
+	addToggle(Info::Profile::kOptionProfileMediaTabsExpanded);
 	addToggle(Ui::kOptionUseSmallMsgBubbleRadius);
 	addToggle(Media::Player::kOptionDisableAutoplayNext);
 	addToggle(Webview::kOptionWebviewDebugEnabled);
@@ -295,13 +366,21 @@ void SetupExperimental(
 		addToggle(kOptionFastButtonsMode);
 	}
 	addToggle(Window::kOptionDisableTouchbar);
-	addToggle(Info::kAlternativeScrollProcessing);
+	addToggle(Info::kClassicProfileScroll);
 	addToggle(kModerateCommonGroups);
 	addToggle(kForceComposeSearchOneColumn);
 	addToggle(ChatHelpers::kOptionUnlimitedRecentStickers);
 	addToggle(Ui::kOptionHideAiButton);
 	addToggle(HistoryView::kOptionUnlimitedMessageWidth);
 	addToggle(HistoryView::Controls::kOptionMacCmdReplyImmediately);
+	addToggle(Ui::kOptionQScroller);
+	addToggle(FFmpeg::kOptionFFmpegMultiThread);
+
+	AddFavoriteLinkButton(
+		window,
+		container,
+		rpl::duplicate(query),
+		registerHighlight);
 }
 
 } // namespace
@@ -326,7 +405,11 @@ void Experimental::fillTopBarMenu(const Ui::Menu::MenuCallback &addAction) {
 		[=] {
 			TextUtilities::SetClipboardText(
 				{ EncodeOptionsToText(base::options::serialize()) });
-			window->showToast(u"Experimental settings code copied to clipboard."_q);
+			window->showToast({
+				.text = { u"Experimental settings code copied to clipboard."_q },
+				.iconLottie = u"toast/copy"_q,
+				.iconLottieSize = st::toastLottieIconSize,
+			});
 		},
 		&st::menuIconCopy);
 	if (!DecodeOptionsFromText(QGuiApplication::clipboard()->text()).ok) {

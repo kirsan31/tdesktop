@@ -85,6 +85,7 @@ enum class EmojiListMode {
 	BackgroundEmoji,
 	PeerTitle,
 	MessageEffects,
+	CustomOnly,
 };
 
 [[nodiscard]] std::vector<EmojiStatusId> DocumentListToRecent(
@@ -104,6 +105,7 @@ struct EmojiListDescriptor {
 	ComposeFeatures features;
 	QWidget *mediaPreviewParent = nullptr;
 	QMargins mediaPreviewMargins;
+	bool mediaPreviewPanelStyle = true;
 };
 
 class EmojiListWidget final
@@ -128,6 +130,9 @@ public:
 
 	void afterShown() override;
 	void beforeHiding() override;
+	[[nodiscard]] bool canConsumeHorizontalScroll(
+		QPoint position,
+		int delta) override;
 
 	void showSet(uint64 setId);
 	[[nodiscard]] uint64 currentSet(int yOffset) const;
@@ -147,6 +152,10 @@ public:
 	[[nodiscard]] rpl::producer<> escapes() const;
 
 	void provideRecent(const std::vector<EmojiStatusId> &customRecentList);
+
+	void setMarkedCustomIds(base::flat_set<DocumentId> ids);
+
+	void setSearchRightReserved(int value);
 
 	void prepareExpanding();
 	void paintExpanding(
@@ -377,6 +386,7 @@ private:
 	[[nodiscard]] base::unique_qptr<Ui::PopupMenu> fillSetContextMenu(
 		const CustomSet &set);
 
+	[[nodiscard]] bool customMarked(int section, int index) const;
 	[[nodiscard]] EmojiPtr lookupOverEmoji(const OverEmoji *over) const;
 	[[nodiscard]] ResolvedCustom lookupCustomEmoji(
 		const OverEmoji *over) const;
@@ -477,7 +487,7 @@ private:
 		uint64 setId);
 
 	void showPreview();
-	void showPreviewFor(not_null<DocumentData*> document);
+	bool showPreviewFor(not_null<DocumentData*> document);
 	void ensureMediaPreview();
 
 	void applyNextSearchQuery();
@@ -488,6 +498,7 @@ private:
 	Mode _mode = Mode::Full;
 	QWidget *_mediaPreviewParent = nullptr;
 	QMargins _mediaPreviewMargins;
+	bool _mediaPreviewPanelStyle = true;
 	std::unique_ptr<Ui::TabbedSearch> _search;
 	MTP::Sender _api;
 	const int _staticCount = 0;
@@ -521,6 +532,8 @@ private:
 	int _customSingleSize = 0;
 	bool _allowWithoutPremium = false;
 	Ui::RoundRect _overBg;
+	Ui::RoundRect _markedBg;
+	base::flat_set<DocumentId> _markedCustomIds;
 	QImage _searchExpandCache;
 
 	std::unique_ptr<StickerPremiumMark> _premiumMark;

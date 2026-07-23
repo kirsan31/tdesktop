@@ -190,7 +190,7 @@ struct WebViewResultData {
 	const MTPWebViewResult &result);
 
 struct WebViewSourceJoinChat {
-	WebViewResultData result;
+	uint64 queryId = 0;
 
 	friend inline bool operator==(
 		const WebViewSourceJoinChat &,
@@ -264,6 +264,7 @@ private:
 	void requestSimple();
 	void requestMain();
 	void requestApp(bool allowWrite);
+	void requestChatJoin();
 	void requestWithMainMenuDisclaimer();
 	void requestWithMenuAdd();
 	void maybeChooseAndRequestButton(PeerTypes supported);
@@ -494,7 +495,9 @@ private:
 	not_null<PeerData*> peer,
 	Fn<Api::SendAction()> actionFactory,
 	Fn<SendMenu::Details()> sendMenuDetails,
-	Fn<void(bool)> attach);
+	Fn<void(bool)> attach,
+	Fn<TextWithTags()> composeFieldText = nullptr,
+	Fn<void()> composeFieldMigrated = nullptr);
 
 class MenuBotIcon final : public Ui::RpWidget {
 public:
