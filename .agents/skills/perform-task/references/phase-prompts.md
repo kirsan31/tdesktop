@@ -1,17 +1,33 @@
-# Phase Prompts
+# Telegram Task Phase Prompts
 
-Use these templates as Codex subagent messages. Use them as same-session checklists only for Phase 0, intentional current-session build work, Phase 7, or when delegation is unavailable from the start at the current agent depth. Replace every applicable placeholder: `<TASK>`, `<PROJECT>`, `<LETTER>`, `<PREV_LETTER>`, `<BUILD>`, `<N>`, `<OWNED_WRITE_SET>`, `<R>`, `<R-1>`, and `<phase-name>`.
+## Contents
+
+- [Orchestration rules](#orchestration-rules)
+- [Completion checks](#artifact-based-completion-checks)
+- [Context](#phase-1-context)
+- [Plan and assessment](#phase-2-plan)
+- [Implementation and build](#phase-4-implementation)
+- [Review](#phase-6-code-review-loop)
+- [Windows normalization](#phase-7-native-windows-text-normalization)
+- [Prompt delivery](#prompt-delivery-and-logs)
+
+Use these templates as Codex subagent messages. Use them as same-session
+checklists only for intentional current-session build work, Phase 7, or when
+delegation is unavailable from the start at the current agent depth. Replace
+every applicable placeholder: `<TASK>`, `<TASK_ID>`, `<WORK_DIR>`,
+`<PROJECT_FILE>`, `<PREVIOUS_CONTEXT>`, `<BUILD>`, `<N>`,
+`<OWNED_WRITE_SET>`, `<R>`, `<R-1>`, and `<phase-name>`.
 
 ## Orchestration Rules
 
-- Phase 0 runs in the main session.
-- When delegation is available, use a fresh subagent for Phase 1, Phase 2, Phase 3, each Phase 4 implementation unit, and each Phase 6 pass. Do not switch those phases to same-session midstream because of a timeout or missing artifact.
+- When delegation is available, use a fresh subagent for Phase 1, Phase 2, Phase 3, each Phase 4 implementation unit, each Phase 6a lens, each Phase 6s synthesis, and each Phase 6b fix. Do not switch those phases to same-session midstream because of a timeout or missing artifact.
+- The Phase 6a lenses of one iteration are independent and write disjoint report files, so spawn them together when capacity allows. Never let one lens read another's report, and never collapse them into a single combined reviewer: their independence is the point of the phase.
 - Treat delegation as selected only after the first real phase spawn succeeds; tool presence is insufficient. An immediate depth/capacity/policy rejection before phase work selects same-session checklists and is not a delegated retry.
 - Phase 7 runs in the current session on native, non-WSL Windows because it depends on the final local diff and touched-file set. Skip it on WSL and keep files LF/no-BOM there.
-- Write each phase prompt to `.ai/<PROJECT>/<LETTER>/logs/phase-<phase-name>.prompt.md` before execution.
+- Write each phase prompt to `<WORK_DIR>/logs/phase-<phase-name>.prompt.md` before execution.
 - If you delegate a phase, send the prompt file contents as the initial `spawn_agent` message.
 - When writing the phase prompt file, append the standard progress file contract and the standard compact reply block below so the subagent knows how to surface progress before the final artifact.
-- After each phase completes, write `.ai/<PROJECT>/<LETTER>/logs/phase-<phase-name>.result.md` with exact
+- After each phase completes, write `<WORK_DIR>/logs/phase-<phase-name>.result.md` with exact
   `STATUS:`, `ARTIFACTS:`, `TOUCHED:`, `BLOCKER:`, and `NOTES:` fields.
 - Use `fork_turns: "none"` by default. If the phase depends on thread-only context or UI attachments, pass it explicitly or use the smallest positive turn fork needed.
 - Use only fields the current `spawn_agent` schema exposes; do not invent role, model, or reasoning arguments. Inherit the parent model/reasoning selection, or match it if the host explicitly supports overrides.
@@ -32,7 +48,7 @@ Append this verbatim to every delegated phase prompt:
 ```text
 You are a leaf phase worker. Do not spawn or delegate to other agents.
 
-Before deep work, create or update the matching progress file in `.ai/<PROJECT>/<LETTER>/logs/`.
+Before deep work, create or update the matching progress file in `<WORK_DIR>/logs/`.
 
 Use `phase-<phase-name>.progress.md` as a concise heartbeat with:
 - `Heartbeat: <N>` on the first line, incremented on each meaningful update
@@ -64,76 +80,49 @@ Do not restate the full context, plan, diff, or long reasoning in the chat reply
 
 ## Artifact-Based Completion Checks
 
-- Phase 1 is complete only when `about.md` and `context.md` both exist and are non-empty.
+- Phase 1 is complete only when `context.md` exists and is non-empty. For a
+  project task, `project.proposed.md` must also exist and be non-empty.
 - Phase 2 is complete only when `plan.md` exists, contains a `## Status` section, and no unintended source edits were made.
 - Phase 3 is complete only when `plan.md` contains both `Phases:` in the Status section and `Assessed: yes`.
 - Phase 4 is complete only when the target phase checkbox changed to checked and the touched-file list matches the owned write set, or the blocker explains any mismatch.
 - Phase 5 is complete only when the build outcome is known and the build checkbox is updated on success.
-- Phase 6a is complete only when `review<R>.md` exists and contains a verdict line.
+- Phase 6a is complete only when every lens scheduled for iteration `R` wrote `review<R>-<lens>.md` with a `## Verdict:` line and a non-empty `## Checked` section. A lens report that records no checked surfaces is incomplete work: rerun that lens rather than accepting it.
+- Phase 6s is complete only when `review<R>.md` exists with a `## Verdict:` line, a non-empty `## Coverage` section, and a `## Dropped` section.
 - Phase 6b is complete only when the requested fixes were applied and the post-fix build outcome is known.
-- An implement-specific visual design phase is complete only when `visual.md` cites its available
+- A perform-task visual design phase is complete only when `visual.md` cites its available
   design sources (images when supplied; otherwise request facts and repository/baseline anchors),
   records assumptions, and contains desktop anchors, an ordered derivation, tolerances, and
   falsifiable geometry checks. Missing mockups alone never make the phase incomplete.
 
-## Phase 0: Setup
-
-Record the current time now and store it as `$START_TIME`. You will use this at the end to display total elapsed time.
-
-Before running any phase prompts, determine whether this is a new project or a follow-up task.
-
-Follow-up detection:
-1. Extract the first word or token from the task description. Call it `FIRST_TOKEN`.
-2. Check `.ai/` to see existing project names.
-3. Check whether `.ai/<FIRST_TOKEN>/about.md` exists.
-4. If the file exists, this is a follow-up task. The project name is `FIRST_TOKEN`. The task description is everything after `FIRST_TOKEN`.
-5. If the file does not exist, this is a new project. The full input is the task description.
-
-Do not proceed until you have determined follow-up vs new.
-
-For new projects:
-- Using the list of existing projects, pick a unique short name (1-2 lowercase words, hyphen-separated) that does not collide.
-- Create `.ai/<PROJECT>/`, `.ai/<PROJECT>/a/`, and `.ai/<PROJECT>/a/logs/`.
-- Set `<LETTER>` = `a`.
-
-For follow-up tasks:
-- Scan `.ai/<PROJECT>/` for spreadsheet-style task folders (`a/`...`z/`, `aa/`...). Find the latest id.
-- The previous task id = that highest id.
-- The new task id = next spreadsheet-style id; never reuse an existing artifact directory.
-- Create `.ai/<PROJECT>/<LETTER>/` and `.ai/<PROJECT>/<LETTER>/logs/`.
-
-Then proceed to Phase 1. Follow-up tasks do not skip context gathering. They use a modified Phase 1F prompt.
-
-## Phase 1: Context (New Project, letter = `a`)
+## Phase 1: Context
 
 ```text
 You are a context-gathering agent for a large C++ codebase (Telegram Desktop).
 
 TASK: <TASK>
 
-YOUR JOB: Read AGENTS.md, inspect the codebase, find all files and code relevant to this task, and write two documents.
+YOUR JOB: Read AGENTS.md, inspect the codebase, find all files and code relevant to this task, and write self-contained implementation context.
 
 Steps:
 1. Read AGENTS.md for project conventions and build instructions.
-2. Search the codebase for files, classes, functions, and patterns related to the task.
-3. Read all potentially relevant files. Be thorough and prefer reading more rather than less.
-4. For each relevant file, note:
+2. When `<PROJECT_FILE>` is not `none`, read it as the current durable project
+   blueprint and preserve everything still accurate in the proposal.
+3. Search the codebase for files, classes, functions, and patterns related to the task.
+4. Read all potentially relevant files. Be thorough and prefer reading more rather than less.
+5. For each relevant file, note:
    - file path
    - relevant line ranges
    - what the code does and how it relates to the task
    - key data structures, function signatures, and patterns used
-5. Look for similar existing features that could serve as a reference implementation.
-6. Check api.tl if the task involves Telegram API.
-7. Check .style files if the task involves UI.
-8. Check lang.strings if the task involves user-visible text.
+6. Look for similar existing features that could serve as a reference implementation.
+7. Check api.tl if the task involves Telegram API.
+8. Check .style files if the task involves UI.
+9. Check lang.strings if the task involves user-visible text.
 
-Write two files.
-
-File 1: .ai/<PROJECT>/about.md
-
-This file is not used by any agent in the current task. It exists solely as a starting point for a future follow-up task's context gatherer. No planning, implementation, or review phase should rely on it during the current task.
-
-Write it as if the project is already fully implemented and working. It should contain:
+Write `<WORK_DIR>/project.proposed.md` only when `<PROJECT_FILE>` is not
+`none`. It is not used by the current task. Describe the project as if this
+task is approved and fully working, so the performer can promote it only after
+approval. Include:
 - Project: What this project does (feature description, goals, scope)
 - Architecture: High-level architectural decisions, which modules are involved, how they interact
 - Key Design Decisions: Important choices made about the approach
@@ -141,7 +130,7 @@ Write it as if the project is already fully implemented and working. It should c
 
 Do not include temporal state like "Current State", "Pending Changes", "Not yet implemented", or "TODO". Describe the project as a complete, coherent whole.
 
-File 2: .ai/<PROJECT>/<LETTER>/context.md
+Always write `<WORK_DIR>/context.md`.
 
 This is the primary task-specific implementation context. All downstream phases should be able to work from this file plus the referenced source files. It must be self-contained. Include:
 - Task Description: The full task restated clearly
@@ -159,7 +148,7 @@ Be extremely thorough. Another agent with no prior context will rely on this fil
 Do not implement code in this phase.
 ```
 
-## Phase 1F: Context (Follow-up Task, letter = `b`, `c`, ...)
+## Phase 1F: Context for an existing project
 
 ```text
 You are a context-gathering agent for a follow-up task on an existing project in a large C++ codebase (Telegram Desktop).
@@ -170,20 +159,22 @@ YOUR JOB: Read the existing project state, gather any additional context needed,
 
 Steps:
 1. Read AGENTS.md for project conventions and build instructions.
-2. Read .ai/<PROJECT>/about.md. This is the project-level blueprint describing everything done so far.
-3. Read .ai/<PROJECT>/<PREV_LETTER>/context.md. This is the previous task's gathered context.
-4. Understand what has already been implemented by reading the actual source files referenced in about.md and the previous context.
+2. Read <PROJECT_FILE>. This is the project-level blueprint describing everything done so far.
+3. Read <PREVIOUS_CONTEXT>. This is the previous task's gathered context.
+4. Understand what has already been implemented by reading the actual source files referenced in the project file and previous context.
 5. Based on the new task description, search the codebase for any additional files, classes, functions, and patterns that are relevant to the new task but not already covered.
 6. Read all newly relevant files thoroughly.
 
 Write two files.
 
-File 1: .ai/<PROJECT>/about.md (rewrite)
+File 1: `<WORK_DIR>/project.proposed.md`
 
-Rewrite this file instead of appending to it. The new about.md must be a single coherent document that describes the project as if everything, including this new task's changes, is already fully implemented and working.
+Write a single coherent proposed project document that describes everything,
+including this task's changes, as fully implemented and working. Do not modify
+`<PROJECT_FILE>` during this phase.
 
 It should incorporate:
-- everything from the old about.md that is still accurate and relevant
+- everything from the existing project document that is still accurate and relevant
 - the new task's functionality described as part of the project, not as a pending change
 - any changed design decisions or architectural updates from the new task requirements
 
@@ -194,10 +185,10 @@ It should not contain:
 - task-by-task changelog or timeline
 - information that contradicts the new task requirements
 
-File 2: .ai/<PROJECT>/<LETTER>/context.md
+File 2: `<WORK_DIR>/context.md`
 
 This is the primary document for the new task. It must be self-contained and should include:
-- Task Description: The new task restated clearly, with enough project background that an implementation agent can understand it without reading any other .ai files
+- Task Description: The new task restated clearly, with enough project background that an implementation agent can understand it without reading other AI task files
 - Relevant Files: Every file path with line ranges relevant to this task
 - Key Code Patterns: How similar things are done in the codebase
 - Data Structures: Relevant types, structs, classes
@@ -218,10 +209,10 @@ Do not implement code in this phase.
 You are a planning agent. You must create a detailed implementation plan.
 
 Read these files:
-- .ai/<PROJECT>/<LETTER>/context.md
+- <WORK_DIR>/context.md
 - Then read the specific source files referenced in context.md to understand the code deeply.
 
-Create a detailed plan in: .ai/<PROJECT>/<LETTER>/plan.md
+Create a detailed plan in: <WORK_DIR>/plan.md
 
 The plan.md should contain:
 
@@ -273,8 +264,8 @@ Do not implement code in this phase.
 You are a plan assessment agent. Review and refine an implementation plan.
 
 Read these files:
-- .ai/<PROJECT>/<LETTER>/context.md
-- .ai/<PROJECT>/<LETTER>/plan.md
+- <WORK_DIR>/context.md
+- <WORK_DIR>/plan.md
 - Then read the actual source files referenced to verify the plan makes sense.
 
 Assess the plan:
@@ -308,8 +299,8 @@ For each phase in the plan that is not yet marked as done, use this prompt:
 You are an implementation agent working on phase <N> of an implementation plan.
 
 Read these files first:
-- .ai/<PROJECT>/<LETTER>/context.md
-- .ai/<PROJECT>/<LETTER>/plan.md
+- <WORK_DIR>/context.md
+- <WORK_DIR>/plan.md
 
 Then read the source files you will be modifying.
 
@@ -323,7 +314,7 @@ Rules:
 - Follow the plan precisely.
 - Follow AGENTS.md coding conventions.
 - You are not alone in the codebase. Respect existing changes and do not revert unrelated work.
-- Do not modify .ai/ files except the Status section in plan.md and the matching
+- Do not modify AI task files except the Status section in plan.md and the matching
   `logs/phase-<phase-name>.progress.md` heartbeat required by this prompt.
 - When done, update plan.md Status section: change `- [ ] Phase <N>: ...` to `- [x] Phase <N>: ...`
 - Do not work on other phases.
@@ -347,8 +338,8 @@ Prefer running the build in the main session because it is critical-path work. I
 You are a build verification agent.
 
 Read these files:
-- .ai/<PROJECT>/<LETTER>/context.md
-- .ai/<PROJECT>/<LETTER>/plan.md
+- <WORK_DIR>/context.md
+- <WORK_DIR>/plan.md
 
 The implementation is complete. Your job is to build the project and fix any build errors that block the planned work.
 
@@ -376,15 +367,37 @@ When finished, report the build result and which files, if any, you changed.
 
 After build verification passes, run up to 3 review-fix iterations. Set iteration counter `R = 1`.
 
+Each iteration runs four independent review lenses over the same diff, then one
+synthesis pass that produces the single `review<R>.md` the fix phase consumes. The
+lenses never read each other's reports: independence is what makes their agreement
+evidence rather than an echo. Their write sets are disjoint (one report file each),
+so they may run in parallel; when delegation is unavailable, run them as sequential
+checklists in the current session and keep the same four reports.
+
+The lenses are:
+
+| Lens | Report file | Angle |
+| --- | --- | --- |
+| `correctness` | `review<R>-correctness.md` | Does it do the specified thing, on every path it touches |
+| `lifetime` | `review<R>-lifetime.md` | Ownership, object lifetime, re-entrancy, threading |
+| `reuse` | `review<R>-reuse.md` | Duplication of what the repository already has |
+| `structure` | `review<R>-structure.md` | Placement, minimality, dead code, conventions |
+
 Review loop:
 
 ```text
 LOOP:
-  1. Run review phase 6a with iteration R.
-  2. Read review<R>.md verdict:
+  1. Run the scheduled Phase 6a lenses for iteration R.
+     R = 1     -> all four lenses.
+     R > 1     -> every lens whose finding survived synthesis in iteration R-1,
+                  plus `lifetime` unconditionally. A fix pass is the most likely
+                  moment for a new ownership or lifetime error to be introduced,
+                  so that lens never goes unrun over changed code.
+  2. Run synthesis phase 6s with iteration R. It writes review<R>.md.
+  3. Read review<R>.md verdict:
      - "APPROVED" -> go to FINISH
      - "NEEDS_CHANGES" -> run fix phase 6b
-  3. After fix work completes and build passes:
+  4. After fix work completes and build passes:
      R = R + 1
      If R > 3 -> go to FINISH
      Otherwise -> go to step 1
@@ -394,45 +407,192 @@ FINISH:
   - Proceed to Phase 7 on native, non-WSL Windows; otherwise proceed to Completion
 ```
 
-### Step 6a: Code Review
+### Step 6a: Review lenses
+
+Every lens prompt is the shared preamble below, then its own Angle section, then the
+shared report contract. Replace `<LENS>` with the lens name and `<R>` with the
+iteration.
+
+#### Shared lens preamble
 
 ```text
-You are a code review agent for Telegram Desktop (C++ / Qt).
+You are one of four independent code-review lenses for Telegram Desktop (C++ / Qt).
+Your lens is <LENS>, iteration <R>.
+
+Other lenses cover the other angles. Do not review outside your assigned angle, and
+never soften or skip a finding because another lens might also catch it — you cannot
+see their reports and they cannot see yours.
 
 Read these files:
-- .ai/<PROJECT>/<LETTER>/context.md
-- .ai/<PROJECT>/<LETTER>/plan.md
+- <WORK_DIR>/context.md
+- <WORK_DIR>/plan.md
+- AGENTS.md
 - REVIEW.md
-- If R > 1, also read .ai/<PROJECT>/<LETTER>/review<R-1>.md
+- If R > 1, also read <WORK_DIR>/review<R-1>.md for what the previous iteration
+  already required, so you do not re-file a fix that has since been applied.
 
-Then run `git diff` to see the current uncommitted changes for this task.
+Then run `git diff` to see the current uncommitted changes for this task, and read
+every modified source file IN FULL. The diff hides the context a change lands in,
+and most real defects are visible only in that context.
 
-Read the modified source files in full to understand the changes in context.
+Review only what this task changed. A pre-existing problem outside this task's diff
+is not a finding, however tempting.
 
-Perform a focused code review using these criteria, in order:
+Default to NOT CLEAN. A clean verdict is a positive claim that you looked at each
+surface and found nothing — not the absence of an objection. You must report what
+you checked, and a report whose Checked section does not account for the diff is
+incomplete work, not a fast approval.
 
-1. Correctness and safety: Obvious logic errors, missing null checks at API boundaries, potential crashes, use-after-free, dangling references, race conditions.
-2. Dead code: Added or left-behind code that is never used within the scope of the changes.
-3. Redundant changes: Diff hunks that have no functional effect.
-4. Code duplication: Repeated logic that should be shared.
-5. Wrong placement: Code added to a module where it does not logically belong.
-6. Function decomposition: Whether an extracted helper would clearly improve readability.
-7. Module structure: Only in exceptional cases where a large new chunk of code clearly belongs elsewhere.
-8. Style compliance: REVIEW.md rules and AGENTS.md conventions.
+A finding is admissible only if you can state the concrete failure it produces: the
+specific input, state, or call sequence that yields a crash, a wrong result, or a
+maintenance cost a future reader pays. "Could be cleaner", "consider extracting",
+and "might be a problem" are not findings. If you cannot name the failure, drop it.
+Do not suggest comments or docstrings.
+```
 
-Important guidelines:
-- Review only the changes made, not pre-existing code outside the scope of the task.
-- Be pragmatic. Each suggestion should have a clear, concrete benefit.
-- Do not suggest comments, docstrings, or over-engineering.
+#### Angle: `correctness`
 
-Write your review to: .ai/<PROJECT>/<LETTER>/review<R>.md
+```text
+ANGLE — behavior and correctness. Does the change produce the behavior the task and
+plan specify, on every path it touches?
 
-The review document should contain:
+- Logic errors: inverted conditions, wrong operator, off-by-one, wrong variable.
+- Missing branches: early return, empty or absent data, a failed or cancelled
+  network reply, the not-found case, the zero and one-element cases.
+- State left inconsistent when an operation fails partway through.
+- Behavior in adjacent code paths the diff touches but the task did not intend to
+  change.
+- Values crossing an API boundary — network, settings, a peer or session lookup —
+  used without checking what the boundary can actually return.
+- Obviously pathological work in a hot path: per-frame paint, resize, scroll, or a
+  loop over every message or dialog.
+```
+
+#### Angle: `lifetime`
+
+```text
+ANGLE — lifetime, ownership and safety. Will this crash, and who owns what?
+
+- Use-after-free and dangling references: a reference or pointer to a temporary, or
+  into a container that can reallocate or rehash before the next use.
+- Ownership: for every object the change introduces or stores, name the owner and
+  confirm the owner outlives every user. Watch widget parent/child ownership, raw
+  pointers escaping the scope that owns them, and `not_null` invariants that the
+  change can now violate.
+- Reactive and callback lifetimes: every subscription bound to a lifetime that dies
+  with everything its handler dereferences; captures that can be destroyed before
+  the callback runs; guarded-callback and weak-pointer use where the target can go
+  away.
+- Re-entrancy and destruction order: can this run while something it dereferences is
+  being destroyed; can a handler destroy the object that invoked it.
+- Thread assumptions: main-thread-only APIs reached from another thread; data shared
+  across threads without synchronization.
+- Iterator or reference invalidation across a mutation of the container.
+```
+
+#### Angle: `reuse`
+
+```text
+ANGLE — duplication and reuse. Does the repository already have this?
+
+This lens is not satisfied by reading the diff. Reuse lives OUTSIDE the diff, which
+is exactly why a single generalist reviewer misses it. Search the repository before
+you judge anything.
+
+- For each helper, widget, algorithm, constant, string, or style value the change
+  introduces: search for an existing equivalent, then either use it or state in your
+  report why the existing one does not fit. Report the search you ran.
+- Logic repeated within the change itself that should be shared.
+- A reimplementation of an established repository pattern instead of following it —
+  the strongest finding this lens produces, and the one that compounds worst if it
+  ships.
+- New style values that duplicate an existing token; new localization strings that
+  duplicate an existing key.
+```
+
+#### Angle: `structure`
+
+```text
+ANGLE — structure, simplicity and conventions. Does it read like the rest of the
+codebase, and is it no bigger than it needs to be?
+
+- Placement: each piece lives in the module it logically belongs to. Flag module
+  structure only when a large new chunk clearly belongs elsewhere.
+- Decomposition: an extracted helper that would CLEARLY improve readability. Do not
+  file marginal splits.
+- Minimality: diff hunks with no functional effect; changes broader than the task
+  requires; abstraction, indirection, validation, or error handling for cases that
+  cannot happen; a compatibility shim or flag where the code can simply change.
+- Dead code: anything added or left behind that nothing reaches.
+- Conventions: REVIEW.md mechanical rules and AGENTS.md coding conventions.
+- Local idiom: comment density, naming, and construction match the surrounding code.
+```
+
+#### Shared lens report contract
+
+```text
+Write your report to <WORK_DIR>/review<R>-<LENS>.md. Do not write review<R>.md —
+the synthesis phase owns that file.
+
+## Lens: <LENS> — iteration <R>
+
+## Checked
+<One line per surface you examined and cleared: the file and function, and what you
+verified about it under THIS angle. This section is the evidence behind a clean
+verdict, and it is required even when you do have findings — list everything you
+cleared alongside them. For the reuse lens, include the searches you ran.>
+
+## Findings
+<Omit the section entirely when you have none.>
+
+### <short title>
+- File(s): <paths, with line references>
+- Failure: <the concrete input, state, or sequence -> the crash, wrong result, or
+  maintenance cost it produces>
+- Fix: <the specific change to make>
+- Confidence: <high | medium | low>
+
+## Verdict: <CLEAN or FINDINGS>
+
+Reply in the compact block. Do not restate the diff or the report body in chat.
+```
+
+### Step 6s: Review synthesis
+
+```text
+You are the review synthesizer for iteration <R>. Four independent lenses reviewed
+the same task diff. Produce the single review<R>.md that the fix phase implements.
+
+Read every <WORK_DIR>/review<R>-*.md that exists for this iteration, plus
+<WORK_DIR>/context.md, <WORK_DIR>/plan.md, REVIEW.md, and the task diff itself.
+
+You are the last filter before work is created, and you are adversarial toward the
+findings, not toward the code. Apply in order:
+
+1. Merge duplicates. Several lenses may describe one underlying defect from
+   different angles. Keep one entry, with the clearest failure statement, and pick
+   the category that matches the actual defect.
+2. Confirm each finding against the code yourself. Do not take a lens at its word.
+   A finding whose failure statement you cannot reproduce by reading the diff and
+   the surrounding file is DROPPED, whatever confidence the lens claimed.
+3. Drop findings that fall outside this task's diff.
+4. Order what survives by impact: crashes and wrong behavior first, then duplication
+   and placement, then minimality and conventions.
+
+Verdict rule: NEEDS_CHANGES if any finding survives, otherwise APPROVED. An APPROVED
+verdict must carry the merged Checked coverage from every lens that ran — that
+coverage is the evidence for approval, and an APPROVED review without it is
+incomplete work.
+
+Write <WORK_DIR>/review<R>.md:
 
 ## Code Review - Iteration <R>
 
 ## Summary
 <1-2 sentence overall assessment>
+
+## Coverage
+<Merged Checked lines from every lens that ran this iteration, grouped by lens.>
 
 ## Verdict: <APPROVED or NEEDS_CHANGES>
 
@@ -441,12 +601,14 @@ If the verdict is NEEDS_CHANGES, continue with:
 ## Changes Required
 
 ### <Issue 1 title>
-- Category: <dead code | duplication | wrong placement | function decomposition | module structure | style | correctness>
+- Category: <correctness | lifetime | duplication | wrong placement | function decomposition | module structure | dead code | minimality | style>
 - File(s): <file paths>
-- Problem: <clear description>
+- Problem: <clear description, including the concrete failure>
 - Fix: <specific description of what to change>
 
-Keep the list focused. Prioritize the most impactful issues.
+## Dropped
+<Each finding you dropped and why, or `none`. This is how the next iteration knows
+not to re-file it.>
 
 When finished, report your verdict clearly as: APPROVED or NEEDS_CHANGES.
 ```
@@ -457,9 +619,9 @@ When finished, report your verdict clearly as: APPROVED or NEEDS_CHANGES.
 You are a review fix agent. You implement improvements identified during code review.
 
 Read these files:
-- .ai/<PROJECT>/<LETTER>/context.md
-- .ai/<PROJECT>/<LETTER>/plan.md
-- .ai/<PROJECT>/<LETTER>/review<R>.md
+- <WORK_DIR>/context.md
+- <WORK_DIR>/plan.md
+- <WORK_DIR>/review<R>.md
 
 Then read the source files mentioned in the review.
 
@@ -469,7 +631,7 @@ Rules:
 - Implement exactly the review changes, nothing more.
 - Follow AGENTS.md coding conventions.
 - You are not alone in the codebase. Respect existing changes and do not revert unrelated work.
-- Do not modify .ai/ files except where the review process explicitly requires it.
+- Do not modify AI task files except where the review process explicitly requires it.
 
 After all changes are made:
 1. Run the resolved Debug build command from context.md (`<BUILD>`) at the repository root.
@@ -487,18 +649,18 @@ finished. Keep WSL/Linux text LF/no-BOM.
 Use the current task's result logs as the source of truth for what Codex touched. Do not sweep the whole repo and do not rewrite unrelated files from a dirty worktree.
 
 ```text
-You are performing the final native-Windows-only text normalization phase for task-think.
+You are performing the final native-Windows-only text normalization phase for perform-task.
 
 Read these files:
-- .ai/<PROJECT>/<LETTER>/plan.md
-- .ai/<PROJECT>/<LETTER>/logs/phase-4*.result.md
-- .ai/<PROJECT>/<LETTER>/logs/phase-5*.result.md
-- .ai/<PROJECT>/<LETTER>/logs/phase-6*.result.md
+- <WORK_DIR>/plan.md
+- <WORK_DIR>/logs/phase-4*.result.md
+- <WORK_DIR>/logs/phase-5*.result.md
+- <WORK_DIR>/logs/phase-6*.result.md
 
 Your job:
 - Collect the union of repo file paths listed in the exact `TOUCHED:` fields in those result logs.
 - Keep only files inside the repository that currently exist and are textual project files: source, headers, build/config files, localization files, style files, and similar text assets.
-- Exclude `.ai/`, `out/`, binary files, and unrelated user files that were not touched by Codex in this task.
+- Exclude `out/`, binary files, and unrelated user files that were not touched by Codex in this task.
 - Rewrite each kept file so all line endings are CRLF.
 - If a kept file is UTF-8 or ASCII text, write it back as UTF-8 without BOM. Never add a UTF-8 BOM to source/config/project text files.
 - Preserve file content otherwise. Preserve whether the file ended with a trailing newline.
@@ -511,7 +673,7 @@ Rules:
 - If a file cannot be normalized safely, record it as a failure instead of silently skipping it.
 
 When finished:
-1. Write `.ai/<PROJECT>/<LETTER>/logs/phase-7-line-endings.result.md`
+1. Write `<WORK_DIR>/logs/phase-7-line-endings.result.md`
 2. Include:
    - whether the phase completed
    - which files were normalized
@@ -523,13 +685,14 @@ When finished:
 ## Completion
 
 When all phases, including build verification, code review, and Windows line ending normalization when applicable, are done:
-1. Read the final `plan.md` and report the summary to the user.
+1. Read the final `plan.md` and prepare the compact performer result.
 2. Show which files were modified or created.
 3. Note any issues encountered during implementation.
 4. Summarize the code review iterations: how many rounds, what was found and fixed, or whether it was approved on the first pass.
 5. On native, non-WSL Windows, mention the text-normalization result briefly: which project files were normalized, whether any BOMs were removed, or whether nothing needed changes.
 6. Calculate and display the total elapsed time since `$START_TIME` (format as `Xh Ym Zs`, omitting zero components).
-7. Remind the user of the project name so they can request follow-up tasks within the same project.
+7. Include the full task id and project slug, when any, so later follow-ups can
+   be routed without relying on session memory.
 
 ## Error Handling
 
@@ -541,15 +704,20 @@ When all phases, including build verification, code review, and Windows line end
 ## Prompt Delivery And Logs
 
 For each phase:
-1. Write the full prompt to `.ai/<PROJECT>/<LETTER>/logs/phase-<phase-name>.prompt.md`
+1. Write the full prompt to `<WORK_DIR>/logs/phase-<phase-name>.prompt.md`
 2. Delegate by sending that prompt text to a fresh subagent, or use it as a same-session checklist only for the designated main-session phases or when delegation was unavailable from the start
-3. For delegated phases, expect a matching `.ai/<PROJECT>/<LETTER>/logs/phase-<phase-name>.progress.md` heartbeat while work is in flight
-4. Save `.ai/<PROJECT>/<LETTER>/logs/phase-<phase-name>.result.md` with `STATUS:`, `ARTIFACTS:`,
+3. For delegated phases, expect a matching `<WORK_DIR>/logs/phase-<phase-name>.progress.md` heartbeat while work is in flight
+4. Save `<WORK_DIR>/logs/phase-<phase-name>.result.md` with `STATUS:`, `ARTIFACTS:`,
    `TOUCHED:`, `BLOCKER:`, and `NOTES:` fields.
 
-For review iterations, include the iteration in the file name, for example:
-- `phase-6a-review-1.prompt.md`
-- `phase-6a-review-1.result.md`
+For review iterations, include the iteration and the lens in the file name, for example:
+- `phase-6a-review-1-correctness.prompt.md`
+- `phase-6a-review-1-correctness.result.md`
+- `phase-6a-review-1-lifetime.prompt.md`
+- `phase-6a-review-1-reuse.prompt.md`
+- `phase-6a-review-1-structure.prompt.md`
+- `phase-6s-synthesis-1.prompt.md`
+- `phase-6s-synthesis-1.result.md`
 - `phase-6b-fix-1.prompt.md`
 - `phase-6b-fix-1.result.md`
 

@@ -4049,7 +4049,7 @@ std::optional<::Data::Draft> ArticleSession::prepareRichDraftForAutosave() const
 		_session,
 		*richMessage,
 		SerializeInputRichMessageMode::Draft);
-	if (serialized.status == SerializeInputRichMessageStatus::Failed) {
+	if (serialized.status != SerializeInputRichMessageStatus::Success) {
 		return std::nullopt;
 	}
 	draft.richMessage = std::move(richMessage);
@@ -4538,7 +4538,7 @@ void ShowEditBox(
 	}
 	const auto weak = base::make_weak(controller);
 	const auto itemId = item->fullId();
-	Core::App().iv().resolveRichMessage(controller, item, [=](
+	Core::App().iv().resolveRichMessage(&controller->session(), item, [=](
 			std::shared_ptr<const RichPage> page) {
 		const auto strong = weak.get();
 		const auto current = strong
