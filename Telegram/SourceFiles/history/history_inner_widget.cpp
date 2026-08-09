@@ -90,6 +90,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_session.h"
 #include "main/main_session_settings.h"
 #include "mainwidget.h"
+#include "iv/iv_rich_message_html_export.h"
 #include "menu/menu_item_download_files.h"
 #include "menu/menu_item_rate_transcribe.h"
 #include "menu/menu_item_rate_transcribe_session.h"
@@ -695,7 +696,9 @@ void HistoryInner::setupSwipeReplyAndBack() {
 				int itembottom) {
 			if ((position.y() < itemtop)
 				|| (position.y() > itembottom)
-				|| !view->data()->isRegular()
+				|| (!view->data()->isRegular()
+					&& (!view->data()->isEphemeral()
+						|| view->data()->out()))
 				|| view->data()->isService()) {
 				return true;
 			}
@@ -747,7 +750,9 @@ void HistoryInner::setupSwipeReplyAndBack() {
 				int itembottom) {
 			if ((data.cursorPosition.y() < itemtop)
 				|| (data.cursorPosition.y() > itembottom)
-				|| !view->data()->isRegular()
+				|| (!view->data()->isRegular()
+					&& (!view->data()->isEphemeral()
+						|| view->data()->out()))
 				|| view->data()->showSimilarChannels()
 				|| view->data()->isService()) {
 				return true;
@@ -3405,6 +3410,11 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 					controller,
 					selectedItemsForExport(),
 					this);
+				Iv::AddSaveRichMessageHtmlAction(
+					_menu,
+					controller,
+					selectedItemsForExport(),
+					this);
 			}
 			_menu->addAction(tr::lng_context_clear_selection(tr::now), [=] {
 				_widget->clearSelected();
@@ -3703,6 +3713,11 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 			}
 			if (selectedState.count > 0 && !hasCopyRestrictionForSelected()) {
 				Menu::AddDownloadFilesAction(
+					_menu,
+					controller,
+					selectedItemsForExport(),
+					this);
+				Iv::AddSaveRichMessageHtmlAction(
 					_menu,
 					controller,
 					selectedItemsForExport(),
@@ -4059,25 +4074,28 @@ TextForMimeData HistoryInner::getSelectedText() const {
 	}
 
 	const auto richContext = (selected.size() > 1);
-	struct Part {
-		not_null<HistoryItem*> item;
-		const Data::Group *group = nullptr;
-	};
-
 	auto groups = base::flat_set<not_null<const Data::Group*>>();
-	auto texts = base::flat_map<Data::MessagePosition, Part>();
+	auto texts = base::flat_map<
+		Data::MessagePosition,
+		HistorySelectedTextEntry>();
 
 	const auto addItem = [&](not_null<HistoryItem*> item) {
-		texts.emplace(item->position(), Part{ .item = item });
+		texts.emplace(
+			item->position(),
+			HistorySelectedTextEntry{
+				.item = item,
+			});
 	};
 	const auto addGroup = [&](not_null<const Data::Group*> group) {
 		Expects(!group->items.empty());
 
 		const auto item = group->items.back();
-		texts.emplace(item->position(), Part{
-			.item = item,
-			.group = group.get(),
-		});
+		texts.emplace(
+			item->position(),
+			HistorySelectedTextEntry{
+				.item = item,
+				.group = group.get(),
+			});
 	};
 
 	for (const auto &item : selected) {
@@ -4102,31 +4120,12 @@ TextForMimeData HistoryInner::getSelectedText() const {
 		}
 		return HistoryItemText(part.item);
 	}
-	auto result = TextForMimeData();
-	const auto sep = u"\n"_q;
-	for (auto i = texts.begin(), e = texts.end(); i != e;) {
-		const auto &part = i->second;
-		auto body = TextForMimeData();
-		if (part.group) {
-			const auto group = not_null<const Data::Group*>{ part.group };
-			body = richContext
-				? HistoryGroupTextForSelectedCopy(group)
-				: HistoryGroupText(group);
-		} else {
-			body = richContext
-				? HistoryItemTextForSelectedCopy(part.item)
-				: HistoryItemText(part.item);
-		}
-		auto wrapped = HistorySelectedItemWrappedText(
-			part.item,
-			std::move(body),
-			richContext);
-		result.append(std::move(wrapped));
-		if (++i != e) {
-			result.append(sep);
-		}
+	auto entries = std::vector<HistorySelectedTextEntry>();
+	entries.reserve(texts.size());
+	for (const auto &entry : texts) {
+		entries.push_back(entry.second);
 	}
-	return result;
+	return HistorySelectedItemsText(entries, richContext);
 }
 
 void HistoryInner::keyPressEvent(QKeyEvent *e) {

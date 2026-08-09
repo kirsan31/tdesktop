@@ -28,6 +28,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/history_drag_area.h"
 #include "history/history_item_components.h"
 #include "history/history_item_helpers.h" // GetErrorForSending.
+#include "history/history_view_pull_to_next_channel.h"
 #include "iv/iv_rich_message_serializer.h"
 #include "iv/iv_rich_page.h"
 #include "ui/chat/pinned_bar.h"
@@ -283,6 +284,15 @@ ChatWidget::ChatWidget(
 , _scroll(std::make_unique<Ui::ElasticScroll>(
 	this,
 	controller->chatStyle()->value(lifetime(), st::historyScroll)))
+, _pullToNext(std::make_unique<PullToNextChannel>(
+	this,
+	_scroll.get(),
+	controller,
+	[=] {
+		return _inner
+			&& _inner->loadedAtBottomKnown()
+			&& _inner->loadedAtBottom();
+	}))
 , _cornerButtons(
 		_scroll.get(),
 		controller->chatStyle(),
@@ -363,6 +373,7 @@ ChatWidget::ChatWidget(
 	}, [=] {
 		return _inner->loadedAtBottomKnown() && _inner->loadedAtBottom();
 	});
+	_pullToNext->setTopic(_topic);
 	_scroll->scrolls(
 	) | rpl::on_next([=] {
 		onScroll();
@@ -720,6 +731,7 @@ void ChatWidget::setTopic(Data::ForumTopic *topic) {
 	}
 	_topicLifetime.destroy();
 	_topic = topic;
+	_pullToNext->setTopic(topic);
 	refreshReplies();
 	refreshTopBarActiveChat();
 	validateSubsectionTabs();
@@ -1078,7 +1090,9 @@ void ChatWidget::setupSwipeReplyAndBack() {
 		}
 		const auto view = _inner->lookupItemByY(data.cursorPosition.y());
 		if (!view
-			|| !view->data()->isRegular()
+			|| (!view->data()->isRegular()
+				&& (!view->data()->isEphemeral()
+					|| view->data()->out()))
 			|| view->data()->isService()) {
 			return result;
 		}
@@ -1856,12 +1870,14 @@ void ChatWidget::validateSubsectionTabs() {
 			? ElementChatMode::Narrow
 			: std::optional<ElementChatMode>());
 		updateControlsGeometry();
+		updateSubsectionTabsGeometry();
 		orderWidgets();
 	}, _subsectionTabsLifetime);
 	_inner->overrideChatMode((_subsectionTabs->leftSkip() > 0)
 		? ElementChatMode::Narrow
 		: std::optional<ElementChatMode>());
 	updateControlsGeometry();
+	updateSubsectionTabsGeometry();
 	orderWidgets();
 }
 
@@ -2677,14 +2693,21 @@ bool ChatWidget::preventsClose(Fn<void()> &&continueCallback) const {
 
 QPixmap ChatWidget::grabForShowAnimation(const Window::SectionSlideParams &params) {
 	_topBar->updateControlsVisibility();
-	if (params.withTopBarShadow) _topBarShadow->hide();
+	const auto hideTopBarShadow = params.withTopBarShadow
+		&& !params.fromBottom;
+	if (hideTopBarShadow) {
+		_topBarShadow->hide();
+	}
 	if (_joinGroup) {
 		_composeControls->hide();
 	} else {
 		_composeControls->showForGrab();
 	}
+	if (params.fromBottom && _subsectionTabs) {
+		_subsectionTabs->hide();
+	}
 	auto result = Ui::GrabWidget(this);
-	if (params.withTopBarShadow) {
+	if (hideTopBarShadow) {
 		_topBarShadow->show();
 	}
 	_topBars->hide();
@@ -3101,16 +3124,25 @@ void ChatWidget::updateControlsGeometry() {
 	_composeControls->move(0, composeTop);
 	_composeControls->setAutocompleteBoundingRect(_scroll->geometry());
 
-	if (_subsectionTabs) {
-		const auto scrollBottom = _scroll->y() + scrollHeight;
-		const auto areaHeight = scrollBottom
-			+ tabsBottomSkip
-			- subsectionTabsTop;
-		_subsectionTabs->setBoundingRect(
-			{ 0, subsectionTabsTop, width(), areaHeight });
+	if (!animatingShow()) {
+		updateSubsectionTabsGeometry();
 	}
 
 	_cornerButtons.updatePositions();
+	_pullToNext->updateGeometry();
+}
+
+void ChatWidget::updateSubsectionTabsGeometry() {
+	if (!_subsectionTabs) {
+		return;
+	}
+	const auto subsectionTabsTop = _topBar->bottomNoMargins();
+	const auto scrollBottom = _scroll->y() + _scroll->height();
+	const auto areaHeight = scrollBottom
+		+ _subsectionTabs->bottomSkip()
+		- subsectionTabsTop;
+	_subsectionTabs->setBoundingRect(
+		{ 0, subsectionTabsTop, width(), areaHeight });
 }
 
 void ChatWidget::paintEvent(QPaintEvent *e) {
@@ -3214,8 +3246,12 @@ void ChatWidget::setPinnedVisibility(bool shown) {
 void ChatWidget::showAnimatedHook(
 		const Window::SectionSlideParams &params) {
 	_topBar->setAnimatingMode(true);
-	if (params.withTopBarShadow) {
+	if (params.withTopBarShadow && !params.fromBottom) {
 		_topBarShadow->show();
+	}
+	if (params.fromBottom && _subsectionTabs) {
+		_subsectionTabs->show();
+		orderWidgets();
 	}
 	_composeControls->showStarted();
 }
@@ -3231,6 +3267,7 @@ void ChatWidget::showFinishedHook() {
 		_composeControls->showFinished();
 	}
 	_inner->showFinished();
+	updateSubsectionTabsGeometry();
 	_topBars->show();
 	if (_subsectionTabs) {
 		_subsectionTabs->show();

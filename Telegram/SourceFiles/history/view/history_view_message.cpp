@@ -2168,6 +2168,10 @@ void Message::draw(Painter &p, const PaintContext &context) const {
 	}
 	if (hasGesture) {
 		p.translate(-context.gestureHorizontal.translation, 0);
+		if (context.reactionInfo && context.reactionInfo->effectPaint) {
+			const auto shift = context.gestureHorizontal.translation;
+			context.reactionInfo->effectOffset += QPoint(shift, 0);
+		}
 
 		constexpr auto kShiftRatio = 1.5;
 		constexpr auto kBouncePart = 0.25;
@@ -4624,15 +4628,16 @@ bool Message::getStateText(
 
 // Forward to media.
 void Message::updatePressed(QPoint point) {
-	if (const auto rich = richpage()
-		; rich
-		&& rich->handlerHorizontalScrollActive
-		&& (ClickHandler::getPressed()
-			== rich->handlerHorizontalScrollPressed)) {
+	if (const auto rich = richpage()) {
 		auto trect = QRect();
 		if (prepareRichPageTextRect(trect)) {
-			(void)rich->article.updateHorizontalScroll(
-				prepareRichPageStateRect(point, trect));
+			const auto local = prepareRichPageStateRect(point, trect);
+			rich->article.updatePressed(local);
+			if (rich->handlerHorizontalScrollActive
+				&& (ClickHandler::getPressed()
+					== rich->handlerHorizontalScrollPressed)) {
+				(void)rich->article.updateHorizontalScroll(local);
+			}
 		}
 	}
 	const auto item = data();
