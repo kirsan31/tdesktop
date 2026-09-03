@@ -581,6 +581,7 @@ void TopBarWidget::paintTopBar(Painter &p) {
 			&& _activeChat.section != Section::SavedSublist)
 		|| (_activeChat.section == Section::Scheduled)
 		|| (_activeChat.section == Section::Pinned)
+		|| (_activeChat.section == Section::WelcomeMessages)
 		|| communityChatsListBar()) {
 		auto text = (_activeChat.section == Section::Scheduled)
 			? ((peer && peer->isSelf())
@@ -588,6 +589,8 @@ void TopBarWidget::paintTopBar(Painter &p) {
 				: tr::lng_scheduled_messages(tr::now))
 			: (_activeChat.section == Section::Pinned)
 			? _customTitleText
+			: (_activeChat.section == Section::WelcomeMessages)
+			? tr::lng_welcome_messages_title(tr::now)
 			: folder
 			? folder->chatListName()
 			: peer->isSelf()
@@ -813,7 +816,7 @@ void TopBarWidget::mousePressEvent(QMouseEvent *e) {
 		if ((_animatingMode && _back->rect().contains(e->pos()))
 			|| archiveTop) {
 			if (!rootChatsListBar()) {
-				backClicked();
+				InvokeQueued(this, [=] { backClicked(); });
 			}
 		} else {
 			infoClicked();
@@ -830,9 +833,7 @@ void TopBarWidget::infoClicked() {
 	} else if (const auto sublist = key.sublist()) {
 		_controller->showSection(std::make_shared<Info::Memento>(sublist));
 	} else if (key.peer()->savedSublistsInfo()) {
-		_controller->showSection(std::make_shared<Info::Memento>(
-			key.peer(),
-			Info::Section::Type::SavedSublists));
+		_controller->showSection(Info::Memento::Default(key.peer()));
 	} else if (key.peer()->sharedMediaInfo()) {
 		_controller->showSection(std::make_shared<Info::Memento>(
 			key.peer(),
@@ -1280,6 +1281,8 @@ void TopBarWidget::setAnimatingMode(bool enabled) {
 		_animatingMode = enabled;
 		setAttribute(Qt::WA_OpaquePaintEvent, !_animatingMode);
 		finishAnimating();
+	} else if (!enabled) {
+		finishAnimating();
 	}
 }
 
@@ -1337,6 +1340,8 @@ void TopBarWidget::updateControlsVisibility() {
 		? !_activeChat.key.folder()
 		: (section == Section::Scheduled)
 		? (hasPollsMenu || hasTodoListsMenu)
+		: (section == Section::WelcomeMessages)
+		? true
 		: (section == Section::Replies)
 		? (hasPollsMenu || hasTodoListsMenu || hasTopicMenu)
 		: (section == Section::ChatsList)
