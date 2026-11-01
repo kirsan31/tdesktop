@@ -117,7 +117,6 @@ public:
 	[[nodiscard]] Window::SeparateId windowId() const;
 	[[nodiscard]] bool isPrimary() const;
 	[[nodiscard]] bool isMainSectionShown() const;
-	[[nodiscard]] bool isThirdSectionShown() const;
 
 	[[nodiscard]] Dialogs::RowDescriptor resolveChatNext(
 		Dialogs::RowDescriptor from) const;
@@ -129,7 +128,7 @@ public:
 	void showAnimated(QPixmap oldContentCache, bool back = false);
 
 	void activate();
-	void handleStartFiles(QStringList interprets, QStringList paths);
+	void handleStartFiles(QStringList paths);
 
 	void windowShown();
 
@@ -173,6 +172,9 @@ public:
 		not_null<Data::Thread*> thread,
 		not_null<const QMimeData*> data,
 		bool forumResolved = false);
+	void textDrop(
+		not_null<Data::Thread*> thread,
+		not_null<const QMimeData*> data);
 
 	void sendBotCommand(Bot::SendCommandRequest request);
 	void hideSingleUseKeyboard(FullMsgId replyToId);
@@ -283,7 +285,6 @@ private:
 		Window::SectionWidget *section,
 		bool fromBottom);
 	Window::SectionSlideParams prepareHistoryAnimation(PeerId historyPeerId);
-	Window::SectionSlideParams prepareDialogsAnimation();
 
 	bool saveSectionInStack(
 		const SectionShow &params,

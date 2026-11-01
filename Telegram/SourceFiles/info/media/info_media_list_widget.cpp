@@ -38,6 +38,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/history.h"
 #include "history/history_item.h"
 #include "history/history_item_helpers.h"
+#include "history/view/history_view_context_menu.h"
 #include "media/stories/media_stories_controller.h" // ...TogglePinnedToast.
 #include "media/stories/media_stories_share.h" // PrepareShareBox.
 #include "media/stories/media_stories_stealth.h"
@@ -383,11 +384,6 @@ std::optional<int> ListWidget::fullCount() const {
 
 rpl::producer<std::optional<int>> ListWidget::fullCountValue() const {
 	return _fullCountUpdates.events_starting_with(fullCount());
-}
-
-auto ListWidget::globalMediaSliceView() const
--> const std::optional<GlobalMediaSliceView> & {
-	return _globalMediaSliceView;
 }
 
 auto ListWidget::globalMediaSliceViewValue() const
@@ -1484,11 +1480,12 @@ void ListWidget::showContextMenu(
 	if (item->isHistoryEntry()) {
 		_contextMenu->addAction(
 			tr::lng_context_to_msg(tr::now),
-			[=] {
+			crl::guard(this, [=] {
 				if (const auto item = MessageByGlobalId(globalId)) {
+					_controller->notifyJumpToMessage();
 					JumpToMessageClickHandler(item)->onClick({});
 				}
-			},
+			}),
 			&st::menuIconShowInChat);
 	}
 
@@ -1640,6 +1637,11 @@ void ListWidget::showContextMenu(
 						(unpin ? &st::menuIconUnpin : &st::menuIconPin));
 				}
 			}
+			HistoryView::AddPostLinkAction(
+				_contextMenu.get(),
+				_controller->parentController(),
+				item,
+				HistoryView::Context::History);
 			if (selectionData.canForward) {
 				_contextMenu->addAction(
 					tr::lng_context_forward_msg(tr::now),
@@ -2137,7 +2139,7 @@ void ListWidget::leaveEventHook(QEvent *e) {
 
 QPoint ListWidget::clampMousePosition(QPoint position) const {
 	return {
-		std::clamp(position.x(), 0, qMax(0, width() - 1)),
+		std::clamp(position.x(), 0, std::max(0, width() - 1)),
 		std::clamp(position.y(), _visibleTop, _visibleBottom - 1)
 	};
 }
@@ -2241,8 +2243,8 @@ void ListWidget::mouseActionUpdate(const QPoint &globalPosition) {
 				++second;
 			}
 			auto selState = TextSelection {
-				qMin(second, _mouseTextSymbol),
-				qMax(second, _mouseTextSymbol)
+				std::min(second, _mouseTextSymbol),
+				std::max(second, _mouseTextSymbol)
 			};
 			if (_mouseSelectType != TextSelectType::Letters) {
 				selState = _overLayout->adjustSelection(selState, _mouseSelectType);
@@ -2492,6 +2494,13 @@ void ListWidget::performDrag() {
 		pressedHandler->property(
 			kDocumentLinkMediaProperty).toULongLong());
 	if (document) {
+		const auto peer = (_controller->isDownloads() && _pressState.item)
+			? _pressState.item->history()->peer.get()
+			: _controller->key().peer();
+		if ((peer && !peer->allowsForwarding())
+			|| (_pressState.item && _pressState.item->forbidsForward())) {
+			return;
+		}
 		const auto filepath = document->filepath(true);
 		if (filepath.isEmpty()) {
 			return;

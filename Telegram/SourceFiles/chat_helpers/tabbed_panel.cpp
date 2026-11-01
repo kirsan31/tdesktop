@@ -80,13 +80,11 @@ TabbedPanel::TabbedPanel(
 		if (_regularWindow) {
 			_regularWindow->enableGifPauseReason(_selector->level());
 		}
-		_pauseAnimations.fire(true);
 	});
 	_selector->setBeforeHidingCallback([=](SelectorTab tab) {
 		if (_regularWindow) {
 			_regularWindow->disableGifPauseReason(_selector->level());
 		}
-		_pauseAnimations.fire(false);
 	});
 	_selector->showRequests(
 	) | rpl::on_next([=] {
@@ -151,14 +149,6 @@ not_null<TabbedSelector*> TabbedPanel::selector() const {
 	return _selector;
 }
 
-rpl::producer<bool> TabbedPanel::pauseAnimations() const {
-	return _pauseAnimations.events();
-}
-
-bool TabbedPanel::isSelectorStolen() const {
-	return (_selector->parent() != this);
-}
-
 void TabbedPanel::moveBottomRight(int bottom, int right) {
 	const auto isNew = (_bottom != bottom || _right != right);
 	_bottom = bottom;
@@ -208,8 +198,8 @@ void TabbedPanel::updateContentHeight() {
 	auto availableHeight = _dropDown
 		? (parentWidget()->height() - _top - marginsHeight)
 		: (_bottom - marginsHeight);
-	auto wantedContentHeight = qRound(_heightRatio * availableHeight)
-		- addedHeight;
+	const auto wanted = int(base::SafeRound(_heightRatio * availableHeight));
+	auto wantedContentHeight = wanted - addedHeight;
 	auto contentHeight = marginsHeight + std::clamp(
 		wantedContentHeight,
 		_minContentHeight,

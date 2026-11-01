@@ -71,6 +71,8 @@ private:
 
 };
 
+[[nodiscard]] bool ServiceAllowsSwipeReply(not_null<const HistoryItem*> item);
+
 class ServiceMessagePainter {
 public:
 	static void PaintDate(

@@ -220,7 +220,7 @@ SelectedQuote Media::selectedQuote(TextSelection selection) const {
 }
 
 QSize Media::countCurrentSize(int newWidth) {
-	return QSize(qMin(newWidth, maxWidth()), minHeight());
+	return QSize(std::min(newWidth, maxWidth()), minHeight());
 }
 
 bool Media::hasPurchasedTag() const {
@@ -653,9 +653,7 @@ HistoryItem *Media::itemForText() const {
 }
 
 bool Media::isRoundedInBubbleBottom() const {
-	return isBubbleBottom()
-		&& !_parent->data()->repliesAreComments()
-		&& !_parent->data()->externalReply();
+	return isBubbleBottom() && !_parent->hasCommentsButton();
 }
 
 Images::CornersMaskRef MediaRoundingMask(
