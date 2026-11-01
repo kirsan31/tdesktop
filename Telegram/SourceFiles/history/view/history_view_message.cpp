@@ -1537,9 +1537,7 @@ QSize Message::performCountOptimalSize() {
 			const auto reactionsMaxWidth = st::msgPadding.left()
 				+ _reactions->maxWidth()
 				+ st::msgPadding.right();
-			const auto reactionsLimited = std::min(
-				st::msgMaxWidth,
-				reactionsMaxWidth);
+			const auto reactionsLimited = reactionsMaxWidth;
 			accumulate_max(maxWidth, reactionsLimited);
 			accumulate_max(nonTextMax, reactionsLimited);
 			if (mediaDisplayed
@@ -6560,7 +6558,6 @@ QRect Message::countGeometry() const {
 	//} else if (!Adaptive::Wide() && !out() && !fromChannel() && st::msgPhotoSkip - (hmaxwidth - hwidth) > 0) {
 	//	contentLeft += st::msgPhotoSkip - (hmaxwidth - hwidth);
 	}
-	accumulate_min(contentWidth, maxWidth());
 	if (mediaWidth < contentWidth) {
 		const auto textualWidth = bubbleTextualWidth();
 		if (mediaWidth < textualWidth
@@ -6699,7 +6696,6 @@ int Message::resizeContentGetHeight(int newWidth) {
 			contentWidth -= size->width() + (st::msgPhotoSkip - st::historyFastShareSize);
 		}
 	}
-	accumulate_min(contentWidth, maxWidth());
 	const auto textualWidth = bubbleTextualWidth();
 	if (mediaDisplayed) {
 		media->resizeGetHeight(contentWidth);

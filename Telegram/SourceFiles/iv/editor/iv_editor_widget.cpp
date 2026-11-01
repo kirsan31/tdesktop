@@ -11702,13 +11702,9 @@ QPoint Widget::articleTopLeft() const {
 
 int Widget::articleWidth(int outerWidth) const {
 	const auto padding = EditorBodyPadding();
-	const auto available = std::max(
+	return std::max(
 		outerWidth - padding.left() - padding.right(),
 		1);
-	const auto maxWidth = (_contentMaxWidth > 0)
-		? _contentMaxWidth
-		: (_article ? _article->maxWidth() : available);
-	return std::min(available, maxWidth);
 }
 
 Widget::ArticleColumn Widget::articleColumnForWidth(int outerWidth) const {
